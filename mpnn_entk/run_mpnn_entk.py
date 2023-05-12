@@ -111,16 +111,16 @@ while passes <= 4:
 	status=df['Calculated Status']
 	pgcn=df['PGCN']
 
-	# Extract sequence recovery, scores, and bound status, put in list
-	for files in os.listdir(output_path_mpnn+'job_'+str(passes)+'/seqs/'):
-		for keys, values in my_dict.items():
-			if keys==files.split('.')[0]:
-				for x, y, z in zip(names, status, pgcn):
-					if x==files.split('.')[0]:
-						temp_status=y
-						temp_pgcn=z
-				my_dict[keys].append(str(temp_status)+"_"+str(temp_pgcn))
-				break
+    # Extract sequence recovery, scores, and bound status, put in list
+    for files in os.listdir(output_path_mpnn+'job_'+str(passes)+'/seqs/'):
+    	for keys, values in my_dict.items():
+    		if keys==files.split('.')[0]:
+    			for x, y, z in zip(names, status, pgcn):
+    				if x==files.split('.')[0]:
+    					temp_status=y
+    					temp_pgcn=z
+    			my_dict[keys].append(str(temp_status)+"_"+str(temp_pgcn))
+    			break
 
     # Create a Stage object
     s5 = Stage()
