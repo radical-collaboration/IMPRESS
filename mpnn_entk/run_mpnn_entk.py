@@ -182,6 +182,27 @@ s8.add_tasks(t8)
 
 mpnn_pipeline.add_stages([s7, s8])
 
+# Create Application Manager
+appman = AppManager()
+
+# Assign the workflow as a set or list of Pipelines to the Application Manager
+appman.workflow = set([mpnn_pipeline])
+
+# Create a dictionary describe four mandatory keys:
+# resource, walltime, cpus and project
+# resource is 'local.localhost' to execute locally
+res_dict = {'resource': 'rutgers.amarel',
+            'access_schema': 'interactive',
+            'walltime': 60,
+            'cpus': 24,
+            'gpus': 0
+	   }
+# Assign resource request description to the Application Manager
+appman.resource_desc = res_dict
+
+# Run the Application Manager
+appman.run()
+
 df=pd.read_csv('PDZ_bind_check_af.csv')
 names=df['ID']
 status=df['Calculated Status']
