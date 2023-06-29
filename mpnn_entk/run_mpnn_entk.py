@@ -33,6 +33,7 @@ for i in range(1,6):
     if os.path.exists(output_path_mpnn+"job_"+str(i))==False:
         os.mkdir(output_path_mpnn+"job_"+str(i))
 
+fasta_list=[]
 # Initial scores
 for files in os.listdir("benchmark_struct/"): 
     pose=pose_from_pdb("benchmark_struct/"+files)
@@ -42,6 +43,8 @@ for files in os.listdir("benchmark_struct/"):
     sfxn=get_fa_scorefxn()
     energy=total_energy(pose, sfxn, interface)
     my_dict[files.split('.')[0]]=[str(energy)]
+    fasta_list.append(files.split('.')[0]+'.pdb')
+
 
 
 # Create a Pipeline object
@@ -82,7 +85,6 @@ s2.add_tasks(t2)
 mpnn_pipeline.add_stages([s1, s2])
 
 file_list=[]
-
 while PASSES <= 5:
     # Create a Stage object
     
@@ -90,9 +92,9 @@ while PASSES <= 5:
 
     s3 = Stage()
     s3.name = 'Stage.3.af2.multi.{0}'.format(PASSES)
-    for fastas in os.listdir("af_pipeline_outputs/af/fasta"):
+    for fastas in fasta_list:
         t3 = Task()
-        t3.name = 'T3.af2.passes.'+fastas.split('.')[-2]+'{0}'.format(PASSES)
+        t3.name = 'T3.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(PASSES)
         t3.executable = '/bin/bash'
         t3.arguments = ['af2_multimer_reduced.sh','af_pipeline_outputs/af/fasta/'+fastas,'af_pipeline_outputs/af/prediction/dimer_models/']
         t3.post_exec = ['cp af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
@@ -189,7 +191,7 @@ res_dict = {'resource': 'rutgers.amarel',
             'walltime': 60,
             'cpus': 24,
             'gpus': 1,
-            'partition':'gpu'
+            'queue':'gpu'
 	   }
 # Assign resource request description to the Application Manager
 appman.resource_desc = res_dict
