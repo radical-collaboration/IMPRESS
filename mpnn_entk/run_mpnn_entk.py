@@ -43,7 +43,7 @@ for files in os.listdir("benchmark_struct/"):
     sfxn=get_fa_scorefxn()
     energy=total_energy(pose, sfxn, interface)
     my_dict[files.split('.')[0]]=[str(energy)]
-    fasta_list.append(files.split('.')[0]+'.pdb')
+    fasta_list.append(files.split('.')[0]+'.fa')
 
 
 
