@@ -19,13 +19,14 @@ from radical.entk import Pipeline, Stage, Task, AppManager
 # Set default verbosity
 if os.environ.get('RADICAL_ENTK_VERBOSE') is None:
     os.environ['RADICAL_ENTK_REPORT'] = 'True'
+full_path='/home/ja961/Khare/pipeline/'
 
 
 PASSES=1
 
-input_path='benchmark_pipeline_input/'
-output_path_mpnn='af_pipeline_outputs/mpnn/'
-output_path_af='af_pipeline_outputs/af/prediction/best_models/'
+input_path=full_path+'benchmark_pipeline_input/'
+output_path_mpnn=full_path+'af_pipeline_outputs/mpnn/'
+output_path_af=full_path+'af_pipeline_outputs/af/prediction/best_models/'
 my_dict={}
 
 # Set up mpnn directories if needed
@@ -49,7 +50,6 @@ for files in os.listdir("benchmark_struct/"):
 
 # Create a Pipeline object
 mpnn_pipeline = Pipeline()
-
 # Create a Stage object
 s1 = Stage()
 s1.name = 'Stage.1.mpnn.wrapper'
@@ -59,10 +59,10 @@ t1 = Task()
 t1.name = 'T1.initial.mpnn.run'
 t1.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh','conda activate pyr']
 t1.executable = 'python' 
-t1.arguments = ['mpnn_wrapper.py',
+t1.arguments = [full_path+'mpnn_wrapper.py',
                 '-pdb='+input_path,
                 '-out='+output_path_mpnn+'job_1/',
-                '-mpnn=../../ProteinMPNN/', '-seqs=1',
+                '-mpnn='+full_path+'../../ProteinMPNN/', '-seqs=1',
                 '-is_monomer=0', '-chains=A']
 
 s1.add_tasks(t1)
@@ -76,13 +76,13 @@ t2 = Task()
 t2.name = 'T2.make.fasta'
 t2.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
 t2.executable = 'python' 
-t2.arguments = ['af_check.py',
+t2.arguments = [full_path+'/af_check.py',
                 '-pdb='+input_path,
                 '-out='+output_path_mpnn+'job_1/seqs/']
 
 s2.add_tasks(t2)
 
-mpnn_pipeline.add_stages([s1, s2])
+#mpnn_pipeline.add_stages([s1, s2])
 
 file_list=[]
 while PASSES <= 5:
@@ -96,8 +96,8 @@ while PASSES <= 5:
         t3 = Task()
         t3.name = 'T3.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(PASSES)
         t3.executable = '/bin/bash'
-        t3.arguments = ['af2_multimer_reduced.sh','af_pipeline_outputs/af/fasta/'+fastas,'af_pipeline_outputs/af/prediction/dimer_models/']
-        t3.post_exec = ['cp af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
+        t3.arguments = [full_path+'af2_multimer_reduced.sh',full_path+'af_pipeline_outputs/af/fasta/'+fastas,full_path+'af_pipeline_outputs/af/prediction/dimer_models/']
+        t3.post_exec = ['cp ' +full_path+ 'af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb '+full_path+'af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
         t3.cpu_reqs = {'cpu_processes':1}
         t3.gpu_reqs = {'gpu_processes':1}
         s3.add_tasks(t3)
@@ -111,7 +111,7 @@ while PASSES <= 5:
     t4.name = 'T4.peptides.passes.{0}'.format(PASSES)
     t4.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
     t4.executable = 'python'
-    t4.arguments = ['find_binders_af.py']
+    t4.arguments = [full_path+'find_binders_af.py']
     t4.download_output_data = ['PDZ_bind_check_af.csv > PDZ_bind_check_af_'+str(PASSES)+'.csv']
 
     s4.add_tasks(t4)
@@ -127,10 +127,10 @@ while PASSES <= 5:
     t5.name = 'T5.run.mpnn.passes.{0}'.format(PASSES)
     t5.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
     t5.executable = 'python'
-    t5.arguments = ['mpnn_wrapper.py',
+    t5.arguments = [full_path+'mpnn_wrapper.py',
                     '-pdb='+output_path_af,
                     '-out='+output_path_mpnn+'job_'+str(PASSES)+'/',
-                    '-mpnn=../../ProteinMPNN/', '-seqs=1', '-is_monomer=0', '-chains=A']
+                    '-mpnn='+full_path+'../../ProteinMPNN/', '-seqs=1', '-is_monomer=0', '-chains=A']
     s5.add_tasks(t5)
 
     # Create a Stage object
@@ -141,27 +141,30 @@ while PASSES <= 5:
     t6.name = 'T6.run.mpnn.passes.{0}'.format(PASSES)
     t6.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
     t6.executable = 'python'
-    t6.arguments = ['af_check.py',
+    t6.arguments = [full_path+'af_check.py',
                     '-pdb='+input_path,
                     '-out='+output_path_mpnn+'job_'+str(PASSES)+'/seqs/']
 
     s6.add_tasks(t6)
 
     # Add Stage to the Pipeline
-    mpnn_pipeline.add_stages([s3, s4, s5, s6])
+    #mpnn_pipeline.add_stages([s3, s4, s5, s6])
     PASSES+=1
 
 # Create a Stage object
 s7 = Stage()
 s7.name = 'Stage.7.jon.job'
 
-t7 = Task()
-t7.name = 'T7.jon.job'
-t7.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
-t7.executable = '/bin/bash'
-t7.arguments = ['$HOME/jon_job.sh']
 
-s7.add_tasks(t7)
+for fastas in fasta_list:
+    t7 = Task()
+    t7.name = 'T7.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(PASSES)
+    t7.executable = '/bin/bash'
+    t7.arguments = [full_path+'af2_multimer_reduced.sh',full_path+'af_pipeline_outputs/af/fasta/'+fastas,full_path+'af_pipeline_outputs/af/prediction/dimer_models/']
+    t7.post_exec = ['cp ' +full_path+ 'af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb '+full_path+'af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
+    t7.cpu_reqs = {'cpu_processes':1}
+    t7.gpu_reqs = {'gpu_processes':1}
+    s7.add_tasks(t7)
 
 # Create a Stage object
 s8 = Stage()
@@ -171,11 +174,11 @@ t8 = Task()
 t8.name = 'T8.find.binders'
 t8.pre_exec = ['source $HOME/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
 t8.executable = 'python'
-t8.arguments = ['find_binders_af.py']
+t8.arguments = [full_path+'find_binders_af.py']
 
 s8.add_tasks(t8)
 
-mpnn_pipeline.add_stages([s7, s8])
+mpnn_pipeline.add_stages([s1, s2, s3, s4, s5, s6, s7, s8])
 
 # Create Application Manager
 appman = AppManager()
@@ -187,11 +190,10 @@ appman.workflow = set([mpnn_pipeline])
 # resource, walltime, cpus and project
 # resource is 'local.localhost' to execute locally
 res_dict = {'resource': 'rutgers.amarel',
-            'access_schema': 'local',
+            'access_schema': 'interactive',
             'walltime': 60,
-            'cpus': 24,
+            'cpus': 1,
             'gpus': 1,
-            'queue':'gpu'
 	   }
 # Assign resource request description to the Application Manager
 appman.resource_desc = res_dict
