@@ -14,15 +14,12 @@ from joey_utils import make_task_factory
 from joey_utils import intergroup_selector
 
 from radical.entk import Pipeline, Stage, Task, AppManager
-
+import sys
 # ------------------------------------------------------------------------------
 # Set default verbosity
 if os.environ.get('RADICAL_ENTK_VERBOSE') is None:
     os.environ['RADICAL_ENTK_REPORT'] = 'True'
-full_path='//home/ja961/Khare/pipeline/'
-
-
-PASSES=1
+full_path='/home/ja961/Khare/pipeline/'
 
 input_path=full_path+'test_pipeline_input/'
 output_path_mpnn=full_path+'af_pipeline_outputs/mpnn/'
@@ -82,84 +79,87 @@ t2.arguments = [full_path+'/af_check.py',
 
 s2.add_tasks(t2)
 
-#mpnn_pipeline.add_stages([s1, s2])
+mpnn_pipeline.add_stages([s1, s2])
+passes=2
 
 file_list=[]
-while PASSES <= 2:
-    # Create a Stage object
-    
-#python slurmit_BAY.py --job $jobname --partition gpu --tasks 8 --cpus 1 --mem 32G --time 4:00:00 --begin now --requeue True --outfiles $od/prediction/logs/${jobname}_%a --command "$com"
+#for i in range(passes_max):
+while passes <= 4:
+	# Create a Stage object
+	#passes=i+2
+	#python slurmit_BAY.py --job $jobname --partition gpu --tasks 8 --cpus 1 --mem 32G --time 4:00:00 --begin now --requeue True --outfiles $od/prediction/logs/${jobname}_%a --command "$com"
+	print(passes)
+	s3 = Stage()
+	s3.name = 'Stage.3.af2.multi.{0}'.format(passes)
+	os.environ['passes']=str(passes)
+	for fastas in fasta_list:
+		t3 = Task()
+		t3.name = 'T3.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(passes)
+		t3.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','echo $passes >> debug.txt']
+		t3.executable = '/bin/bash'
+		t3.arguments = [full_path+'af2_multimer_reduced.sh',full_path+'af_pipeline_outputs/af/fasta/'+fastas,full_path+'af_pipeline_outputs/af/prediction/dimer_models/']
+		t3.post_exec = ['cp ' +full_path+ 'af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb '+full_path+'af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
+		t3.cpu_reqs = {'cpu_processes':1}
+		t3.gpu_reqs = {'gpu_processes':1}
+		# t3.executable = 'python'
+		# t3.arguments = [full_path+'dummy_job.py','-passes='+str(passes)]
+		s3.add_tasks(t3)
+	#sys.exit(0)
 
-    s3 = Stage()
-    s3.name = 'Stage.3.af2.multi.{0}'.format(PASSES)
-    for fastas in fasta_list:
-        t3 = Task()
-        t3.name = 'T3.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(PASSES)
-        t3.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile']
-        t3.executable = '/bin/bash'
-        t3.arguments = [full_path+'af2_multimer_reduced.sh',full_path+'af_pipeline_outputs/af/fasta/'+fastas,full_path+'af_pipeline_outputs/af/prediction/dimer_models/']
-        t3.post_exec = ['cp ' +full_path+ 'af_pipeline_outputs/af/prediction/dimer_models/'+fastas.split('.')[-2]+'/*ranked_0*.pdb '+full_path+'af_pipeline_outputs/af/prediction/best_models/'+fastas.split('.')[-2]+'.pdb']
-        t3.cpu_reqs = {'cpu_processes':1}
-        t3.gpu_reqs = {'gpu_processes':1}
-        s3.add_tasks(t3)
-    
+	# Create a Stage object
+	s4 = Stage()
+	s4.name = 'Stage.4.peptides.{0}'.format(passes)
 
-    # Create a Stage object
-    s4 = Stage()
-    s4.name = 'Stage.4.peptides.{0}'.format(PASSES)
+	t4 = Task()
+	t4.name = 'T4.peptides.passes.{0}'.format(passes)
+	t4.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
+	t4.executable = 'python'
+	t4.arguments = [full_path+'find_binders_af.py','-iter='+str(passes)]
+	t4.download_output_data = ['PDZ_bind_check_af_'+str(passes)+'.csv']
 
-    t4 = Task()
-    t4.name = 'T4.peptides.passes.{0}'.format(PASSES)
-    t4.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
-    t4.executable = 'python'
-    t4.arguments = [full_path+'find_binders_af.py']
-    t4.download_output_data = ['PDZ_bind_check_af.csv > PDZ_bind_check_af_'+str(PASSES)+'.csv']
+	s4.add_tasks(t4)
+	file_list.append('PDZ_bind_check_af_'+str(passes)+'.csv')
+	# Download the output of the current task to the current location
 
-    s4.add_tasks(t4)
-    file_list.append('PDZ_bind_check_af_'+str(PASSES)+'.csv')   
-    # Download the output of the current task to the current location
-    
 
-    # Create a Stage object
-    s5 = Stage()
-    s5.name = 'Stage.5.af2structure.{0}'.format(PASSES)
+	# Create a Stage object
+	s5 = Stage()
+	s5.name = 'Stage.5.af2structure.{0}'.format(passes)
 
-    t5 = Task()
-    t5.name = 'T5.run.mpnn.passes.{0}'.format(PASSES)
-    t5.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
-    t5.executable = 'python'
-    t5.arguments = [full_path+'mpnn_wrapper.py',
-                    '-pdb='+output_path_af,
-                    '-out='+output_path_mpnn+'job_'+str(PASSES)+'/',
-                    '-mpnn='+full_path+'../../ProteinMPNN/', '-seqs=1', '-is_monomer=0', '-chains=A']
-    s5.add_tasks(t5)
+	t5 = Task()
+	t5.name = 'T5.run.mpnn.passes.{0}'.format(passes)
+	t5.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
+	t5.executable = 'python'
+	t5.arguments = [full_path+'mpnn_wrapper.py',
+	                '-pdb='+output_path_af,
+	                '-out='+output_path_mpnn+'job_'+str(passes)+'/',
+	                '-mpnn='+full_path+'../../ProteinMPNN/', '-seqs=1', '-is_monomer=0', '-chains=B']
+	s5.add_tasks(t5)
 
-    # Create a Stage object
-    s6 = Stage()
-    s6.name = 'Stage.6.af2structure.{0}'.format(PASSES)
+	# Create a Stage object
+	s6 = Stage()
+	s6.name = 'Stage.6.af2structure.{0}'.format(passes)
 
-    t6 = Task()
-    t6.name = 'T6.run.mpnn.passes.{0}'.format(PASSES)
-    t6.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
-    t6.executable = 'python'
-    t6.arguments = [full_path+'af_check.py',
-                    '-pdb='+input_path,
-                    '-out='+output_path_mpnn+'job_'+str(PASSES)+'/seqs/']
+	t6 = Task()
+	t6.name = 'T6.run.mpnn.passes.{0}'.format(passes)
+	t6.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
+	t6.executable = 'python'
+	t6.arguments = [full_path+'af_check.py',
+	                '-pdb='+input_path,
+	                '-out='+output_path_mpnn+'job_'+str(passes)+'/seqs/']
 
-    s6.add_tasks(t6)
-
+	s6.add_tasks(t6)
     # Add Stage to the Pipeline
-    #mpnn_pipeline.add_stages([s3, s4, s5, s6])
-    PASSES+=1
-
+	mpnn_pipeline.add_stages([s3, s4, s5, s6])
+	passes+=1
 # Create a Stage object
 s7 = Stage()
 s7.name = 'Stage.7.jon.job'
-
+print(file_list)
 
 for fastas in fasta_list:
     t7 = Task()
-    t7.name = 'T7.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(PASSES)
+    t7.name = 'T7.af2.passes.'+fastas.split('.')[0].replace('_','')+'{0}'.format(passes)
     t7.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile']
     t7.executable = '/bin/bash'
     t7.arguments = [full_path+'af2_multimer_reduced.sh',full_path+'af_pipeline_outputs/af/fasta/'+fastas,full_path+'af_pipeline_outputs/af/prediction/dimer_models/']
@@ -167,7 +167,6 @@ for fastas in fasta_list:
     t7.cpu_reqs = {'cpu_processes':1}
     t7.gpu_reqs = {'gpu_processes':1}
     s7.add_tasks(t7)
-
 # Create a Stage object
 s8 = Stage()
 s8.name = 'Stage.8.find.binders'
@@ -176,11 +175,12 @@ t8 = Task()
 t8.name = 'T8.find.binders'
 t8.pre_exec = ['. /opt/sw/admin/lmod/lmod/init/profile','source /home/ja961/anaconda3/etc/profile.d/conda.sh', 'conda activate pyr']
 t8.executable = 'python'
-t8.arguments = [full_path+'find_binders_af.py']
-
+t8.arguments = [full_path+'find_binders_af.py','-iter='+str(passes)]
+t8.download_output_data = ['PDZ_bind_check_af_'+str(passes)+'.csv']
+file_list.append('PDZ_bind_check_af_'+str(passes)+'.csv')
 s8.add_tasks(t8)
 
-mpnn_pipeline.add_stages([s1, s2, s3, s4, s5, s6, s7, s8])
+mpnn_pipeline.add_stages([s7, s8])
 
 # Create Application Manager
 appman = AppManager()
@@ -193,9 +193,9 @@ appman.workflow = set([mpnn_pipeline])
 # resource is 'local.localhost' to execute locally
 res_dict = {'resource': 'rutgers.amarel',
             'access_schema': 'interactive',
-            'walltime': 60,
-            'cpus': 12,
-            'gpus': 1,
+            'walltime': 4320,
+            'cpus': 8,
+            'gpus': 8,
 	   }
 # Assign resource request description to the Application Manager
 appman.resource_desc = res_dict
@@ -205,20 +205,25 @@ appman.run()
 
 
 for a in file_list:
-    df = pd.read_csv(a)
-    names=df['ID']
-    status=df['Calculated Status']
-    pgcn=df['PGCN']
-    # Extract sequence recovery, scores, and bound status, put in list
-    for files in os.listdir(output_path_mpnn+'job_'+str(PASSES)+'/seqs/'):
-        for keys, values in my_dict.items():
-            if keys==files.split('.')[0]:
-                for x, y, z in zip(names, status, pgcn):
-                    if x==files.split('.')[0]:
-                        temp_status=y
-                        temp_pgcn=z
-                        my_dict[keys].append(str(temp_status)+"_"+str(temp_pgcn))
-                        break
+	df = pd.read_csv(a)
+	names=df['ID']
+	status=df['Calculated Status']
+	pgcn=df['PGCN']
+	cur_round=df['Round']
+	# Extract sequence recovery, scores, and bound status, put in list
+	for files in fasta_list:
+		print('FILE: '+files)
+		for keys, values in my_dict.items():
+			if keys==files.split('.')[0]:
+				print('KEY: '+keys)
+				for x, y, z, w in zip(names, status, pgcn, cur_round):
+					if x.split('.')[0]==files.split('.')[0]:
+						print('APPEND')
+						temp_status=y
+						temp_pgcn=z
+						temp_round=w
+						my_dict[keys].append('plddt: '+str(temp_status)+" peptide contacts: "+str(temp_pgcn)+ ' round: '+str(w))
+						break
 
 print(my_dict)
 
