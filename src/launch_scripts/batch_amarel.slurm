@@ -11,13 +11,14 @@
 #SBATCH --export    NONE
 #SBATCH --exclusive
 
-## env
+## venv activation
+conda activate pyr
+module load cuda/11.7.1
+
+## RCT env
 export RADICAL_PROFILE="TRUE"
 export RADICAL_REPORT="TRUE"
 export RADICAL_LOG_LVL="DEBUG"
-
-## virtual environment
-conda activate pyr
 
 python run_mpnn_entk.py
 
