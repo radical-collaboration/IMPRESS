@@ -149,7 +149,7 @@ class Pipeline:
                 'name': f'T2.make.fasta.{fastas_0}',
                 'executable': 'python',
                 'arguments': [f'{self.base_path}/make_af_fasta.py',
-                              f'--name={fastas.split(".")[0]}',
+                              f'--name={fastas_0}',
                               f'--out={self.name}',
                               f'--seq={seq_id}'],
                 'pre_exec': TASK_PRE_EXEC
@@ -240,7 +240,7 @@ class Pipeline:
                 'name': f'T6.run.mpnn.passes.{fastas_0}{self.passes}',
                 'executable': 'python',
                 'arguments': [f'{self.base_path}/make_af_fasta.py',
-                              f'--name={fastas.split(".")[0]}',
+                              f'--name={fastas_0}',
                               f'--out={self.name}',
                               f'--seq='],  # TODO: determine a sequence ID
                 'pre_exec': TASK_PRE_EXEC
