@@ -120,7 +120,7 @@ class Pipeline:
 
     def submit_s1(self):
         print(f'{self.name}: Stage.1.mpnn.wrapper')
-        tasks = self.tmgr.submit_tasks(rp.TaskDescription({
+        self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.1.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             'name': 'T1.initial.mpnn.run',
@@ -134,7 +134,7 @@ class Pipeline:
                           '-chains=A'],
             'pre_exec': TASK_PRE_EXEC
         }))
-        return len(tasks)
+        return 1
 
     def submit_s2(self):
         print(f'{self.name}: Stage.2.af.check')
@@ -154,7 +154,7 @@ class Pipeline:
                               f'--seq={seq_id}'],
                 'pre_exec': TASK_PRE_EXEC
             }))
-        tasks = self.tmgr.submit_tasks(tds)
+        tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
     def submit_s3(self):
@@ -187,14 +187,14 @@ class Pipeline:
                               + f'best_ptm/{fastas_2}.json'],
                 'gpus_per_rank': 1
             }))
-        tasks = self.tmgr.submit_tasks(tds)
+        tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
     def submit_s4(self):
         print(f'{self.name}: Stage.4.peptides.{self.passes}')
         staged_file = f'af_stats_{self.name}_pass_{self.passes}.csv'
         self.file_list.append(staged_file)
-        tasks = self.tmgr.submit_tasks(rp.TaskDescription({
+        self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.4.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             'name': f'T4.peptides.passes.{self.passes}',
@@ -208,11 +208,11 @@ class Pipeline:
             'output_staging': [{'source': f'task:///{staged_file}',
                                 'target': f'client:///{staged_file}'}]
         }))
-        return len(tasks)
+        return 1
 
     def submit_s5(self):
         print(f'{self.name}: Stage.5.af2structure.{self.passes}')
-        tasks = self.tmgr.submit_tasks(rp.TaskDescription({
+        self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.5.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             'name': f'T5.run.mpnn.passes.{self.passes}',
@@ -226,7 +226,7 @@ class Pipeline:
                           '-chains=B'],
             'pre_exec': TASK_PRE_EXEC
         }))
-        return len(tasks)
+        return 1
 
     def submit_s6(self):
         print(f'{self.name}: Stage.6.af2structure.{self.passes}')
@@ -245,7 +245,7 @@ class Pipeline:
                               f'--seq='],  # TODO: determine a sequence ID
                 'pre_exec': TASK_PRE_EXEC
             }))
-        tasks = self.tmgr.submit_tasks(tds)
+        tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
     def submit_s7(self):
@@ -271,14 +271,14 @@ class Pipeline:
                               + f'best_models/{fastas_2}.pdb'],
                 'gpus_per_rank': 1
             }))
-        tasks = self.tmgr.submit_tasks(tds)
+        tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
     def submit_s8(self):
         print(f'{self.name}: Stage.8.find.binders')
         staged_file = f'af_stats_{self.name}_pass_{self.passes}.csv'
         self.file_list.append(staged_file)
-        tasks = self.tmgr.submit_tasks(rp.TaskDescription({
+        self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.8.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             'name': 'T8.find.binders',
@@ -291,7 +291,7 @@ class Pipeline:
             'output_staging': [{'source': f'task:///{staged_file}',
                                 'target': f'client:///{staged_file}'}]
         }))
-        return len(tasks)
+        return 1
 
 
 def task_state_cb(task, state):
