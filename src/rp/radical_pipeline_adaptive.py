@@ -280,7 +280,7 @@ class Pipeline:
             print(self.name)
             print(seq_id)
             tds.append(rp.TaskDescription({
-                'uid': ru.generate_id(f'{self.name}.2.%(item_counter)06d',
+                'uid': ru.generate_id(f'{self.name}.6.%(item_counter)06d',
                                       ru.ID_CUSTOM, ns=self.tmgr.session.uid),
                 'name': f'T2.make.fasta.{fastas_0}',
                 'executable': 'python',
