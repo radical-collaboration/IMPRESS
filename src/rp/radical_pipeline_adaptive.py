@@ -65,13 +65,16 @@ class Pipeline:
         job_seqs_dir = f'{self.output_path_mpnn}/job_{self.passes}/seqs'
         for file_name in os.listdir(f'{job_seqs_dir}/'):
             temp = []
+            line_ctr=1
             with open(f'{job_seqs_dir}/{file_name}') as fd:
                 for x in fd:
-                    if '>' in x:
-                        cur_score = float(
-                            x.strip().split(',')[1].replace(' score=', ''))
-                    else:
-                        temp.append([x.strip(), cur_score])
+                    if line_ctr > 2:
+                        if '>' in x:
+                            cur_score = float(
+                                x.strip().split(',')[2].replace(' score=', ''))
+                        else:
+                            temp.append([x.strip(), cur_score])
+                    line_ctr+=1
             temp.sort(key=lambda x: x[1])
             self.iter_seqs[file_name.split('.')[0]] = temp
         print(self.iter_seqs)
@@ -79,7 +82,7 @@ class Pipeline:
     def submit_next(self):
         next_stage_id = self.stage_id + 1
 
-        if next_stage_id == 2:
+        if next_stage_id == 2 and not self.is_continued:
             self.rank_seqs_by_mpnn_score()
 
         elif next_stage_id == 3 and not self.is_continued:
@@ -108,18 +111,24 @@ class Pipeline:
                 # remove all bad proteins from current pipeline, intialize new pipeline with bad proteins
                 # Steps: remove protein from fasta_list_2, remove protein from iter_seqs, store remove iter_seqs subdict separately, pass subdict to new pipeline, set up new dirs for new pipeline, give new pipeline current pass, initialize pipeline with seq_rank +=1
                 subdict={}
-                new_fasta_list=[]
+                #new_fasta_list=[]
                 new_name='p'+str(len(PIPELINE_NAMES)+1)
+                PIPELINE_NAMES.append(new_name)
                 set_up_new_pipeline_dirs(new_name)
                 for a in proteins_to_remove:
-                    self.fasta_list_2.remove(a)
+                    print(a)
+                    print(self.curr_scores)
+                    print(self.prev_scores)
+                    self.fasta_list_2.remove(a+'.pdb')
                     subdict[a]=self.iter_seqs[a]
                     del self.iter_seqs[a]
-                    new_fasta_list.append(a)
-                    shutil.copyfile(self.output_path_af+'/'+a+'.pdb',self.base_path+'/'+new_name+'_in/')
-                    shutil.move(self.output_path_af+'/'+a+'.pdb',self.base_path+'/af_pipeline_outputs_multi/'+new_name+'/af/prediction/best_models/')
-                new_pipelines_queue.put({'name':new_name, 'passes':self.passes, 'iter_seqs':subdict, 'seq_rank':self.seq_rank+1, 'stage_id':1})
-
+                    #new_fasta_list.append(a)
+                    shutil.copyfile(self.output_path_af+'/'+a+'.pdb',self.base_path+'/'+new_name+'_in/'+a+'.pdb')
+                    shutil.move(self.output_path_af+'/'+a+'.pdb',self.base_path+'/af_pipeline_outputs_multi/'+new_name+'/af/prediction/best_models/'+a+'.pdb')
+                new_pipelines_queue.put({'name':new_name, 'passes':self.passes, 'iter_seqs':subdict, 'seq_rank':self.seq_rank+1, 'stage_id':3})
+        
+        elif next_stage_id == 6:
+            self.rank_seqs_by_mpnn_score()
             # if we need to create a new Pipeline, then we need to push
             # corresponding inputs into a pipelines queue
             #   new_pipelines_queue.put({'name': .., 'stage_id': ..})
@@ -174,7 +183,7 @@ class Pipeline:
                 'arguments': [f'{self.base_path}/make_af_fasta.py',
                               f'--name={fastas_0}',
                               f'--out={self.name}',
-                              f'--seq={seq_id}'],
+                              f'--seq={seq_id[0]}'],
                 'pre_exec': TASK_PRE_EXEC
             }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
@@ -210,6 +219,16 @@ class Pipeline:
                               + f'best_ptm/{fastas_2}.json'],
                 'gpus_per_rank': 1
             }))
+            # tds.append(rp.TaskDescription({
+            #     'uid': ru.generate_id(f'{self.name}.3.%(item_counter)06d',
+            #                           ru.ID_CUSTOM, ns=self.tmgr.session.uid),
+            #     'name': f'T3.af2.passes.{fastas_0}{self.passes}',
+            #     'executable': 'python',
+            #     'arguments': [f'{self.base_path}/dummy_job.py',
+            #                   f'--passes={str(self.passes)}'],
+            #     'pre_exec': ['. /opt/sw/admin/lmod/lmod/init/profile',
+            #                  'echo $passes >> debug.txt'],
+            # }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
@@ -256,16 +275,19 @@ class Pipeline:
         tds = []
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
-
+            seq_id   = self.iter_seqs[fastas_0][self.seq_rank]
+            print(fastas_0)
+            print(self.name)
+            print(seq_id)
             tds.append(rp.TaskDescription({
-                'uid': ru.generate_id(f'{self.name}.6.%(item_counter)06d',
+                'uid': ru.generate_id(f'{self.name}.2.%(item_counter)06d',
                                       ru.ID_CUSTOM, ns=self.tmgr.session.uid),
-                'name': f'T6.run.mpnn.passes.{fastas_0}{self.passes}',
+                'name': f'T2.make.fasta.{fastas_0}',
                 'executable': 'python',
                 'arguments': [f'{self.base_path}/make_af_fasta.py',
                               f'--name={fastas_0}',
                               f'--out={self.name}',
-                              f'--seq='],  # TODO: determine a sequence ID
+                              f'--seq={seq_id[0]}'],
                 'pre_exec': TASK_PRE_EXEC
             }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
@@ -317,22 +339,22 @@ class Pipeline:
         return 1
 
 def set_up_new_pipeline_dirs(pipe_name):
-    if not os.path.isdir('af_pipeline_outputs_multi/'+pipe_name):
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name)
-        os.mkdir(pipe_name+'_in/')
+    if not os.path.isdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name):
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name)
+        os.mkdir(BASE_PATH+'/'+pipe_name+'_in/')
         #af
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/fasta/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/best_models/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/best_ptm/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/dimer_models/')
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/logs/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/fasta/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/best_models/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/best_ptm/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/dimer_models/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/af/prediction/logs/')
         #mpnn
-        os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/mpnn/')
+        os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/mpnn/')
         for i in range(1,6): 
             #if os.path.exists(output_path_mpnn+"job_"+str(i))==False:
-            os.mkdir('af_pipeline_outputs_multi/'+pipe_name+'/mpnn/job_'+str(i))
+            os.mkdir(BASE_PATH+'/af_pipeline_outputs_multi/'+pipe_name+'/mpnn/job_'+str(i))
 
 
 def task_state_cb(task, state):
@@ -352,6 +374,7 @@ def main():
     pilot = pmgr.submit_pilots(rp.PilotDescription({
         'resource': 'rutgers.amarel',
         'runtime' : 4320,
+        #'runtime': 60,
         'cores'   : 4,
         'gpus'    : 4
     }))
