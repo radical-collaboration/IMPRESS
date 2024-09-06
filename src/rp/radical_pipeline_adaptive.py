@@ -280,7 +280,7 @@ class Pipeline:
         self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.5.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
-            'name': f'T5.run.mpnn.passes.{self.passes}',
+            'name': f'T5.mpnn.passes.{self.passes}',
             'executable': 'python',
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
                           f'-pdb={self.output_path_af}/',
