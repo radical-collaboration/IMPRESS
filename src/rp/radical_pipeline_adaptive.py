@@ -196,7 +196,7 @@ class Pipeline:
         tds = []
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
-            seq_id   = self.iter_seqs[fastas_0][0]
+            seq_id   = self.iter_seqs[fastas_0][self.seq_rank]
             print(fastas_0)
             print(self.name)
             print(seq_id)
@@ -300,7 +300,8 @@ class Pipeline:
         tds = []
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
-            seq_id   = self.iter_seqs[fastas_0][self.seq_rank]
+            # always use 0 for rank_seq in this stage
+            seq_id   = self.iter_seqs[fastas_0][0]
             print(fastas_0)
             print(self.name)
             print(seq_id)
