@@ -20,8 +20,14 @@ TASK_PRE_EXEC  = ['. /opt/sw/admin/lmod/lmod/init/profile',
 
 tasks_finished_queue = queue.Queue()
 new_pipelines_queue  = queue.Queue()
-# change set up dirs to read from config file for all paths, also requested resources + pilot description
+
+MAX_SUB_PIPELINES    = 5  # max number of new pipelines per structure
+
+# change set up dirs to read from config file for all paths,
+# also requested resources + pilot description
 # do this first: adjust end of script for reading output files
+
+
 class Pipeline:
 
     def __init__(self, name, tmgr, **kwargs):
@@ -38,6 +44,10 @@ class Pipeline:
         self.iter_seqs   = kwargs.get('iter_seqs', {})
         self.prev_scores = kwargs.get('prev_scores', {})
         self.curr_scores = {}
+
+        # order id of a pipeline within the chain of sub-pipelines per structure
+        # "parent"-pipeline's order equals to "0"
+        self.sub_order   = kwargs.get('sub_order', 0)
 
         # pipeline space/sandboxes
         self.base_path        = kwargs.get('base_path', BASE_PATH)
@@ -108,29 +118,39 @@ class Pipeline:
                 for proteins, scores in self.curr_scores.items():
                     if scores > self.prev_scores[proteins]:
                         proteins_to_remove.append(proteins)
-                # remove all bad proteins from current pipeline, intialize new pipeline with bad proteins
-                # Steps: remove protein from fasta_list_2, remove protein from iter_seqs, store remove iter_seqs subdict separately, pass subdict to new pipeline, set up new dirs for new pipeline, give new pipeline current pass, initialize pipeline with seq_rank +=1
-                subdict={}
-                #new_fasta_list=[]
-                new_name='p'+str(len(PIPELINE_NAMES)+1)
-                PIPELINE_NAMES.append(new_name)
+                # remove all bad proteins from current pipeline,
+                # initialize new pipeline with bad proteins
+                # Steps: - remove protein from fasta_list_2;
+                #        - remove protein from iter_seqs;
+                #        - store remove iter_seqs subdict separately;
+                #        - pass subdict to new pipeline;
+                #        - set up new dirs for new pipeline;
+                #        - give new pipeline current pass;
+                #        - initialize pipeline with seq_rank +=1.
+                subdict = {}
+                new_name = f'p{len(PIPELINE_NAMES) + 1}'
                 set_up_new_pipeline_dirs(new_name)
                 for a in proteins_to_remove:
                     print(a)
                     print(self.curr_scores)
                     print(self.prev_scores)
-                    self.fasta_list_2.remove(a+'.pdb')
-                    subdict[a]=self.iter_seqs[a]
+                    fasta_file = f'{a}.pdb'
+                    self.fasta_list_2.remove(fasta_file)
+                    subdict[a] = self.iter_seqs[a]
                     del self.iter_seqs[a]
-                    #new_fasta_list.append(a)
-                    shutil.copyfile(self.output_path_af+'/'+a+'.pdb',self.base_path+'/'+new_name+'_in/'+a+'.pdb')
-                    shutil.move(self.output_path_af+'/'+a+'.pdb',self.base_path+'/af_pipeline_outputs_multi/'+new_name+'/af/prediction/best_models/'+a+'.pdb')
-                new_pipelines_queue.put({'name'       : new_name,
-                                         'passes'     : self.passes,
-                                         'iter_seqs'  : subdict,
-                                         'seq_rank'   : self.seq_rank + 1,
-                                         'prev_scores': self.curr_scores,
-                                         'stage_id'   : 1})
+                    # shutil.copyfile(f'{self.output_path_af}/{fasta_file}',
+                    #                 f'{self.base_path}/{new_name}_in/{fasta_file}')
+                    os.unlink(f'{self.output_path_af}/{fasta_file}')
+
+                if self.sub_order < MAX_SUB_PIPELINES:
+                    PIPELINE_NAMES.append(new_name)
+                    new_pipelines_queue.put({'name'       : new_name,
+                                             'sub_order'  : self.sub_order + 1,
+                                             'passes'     : self.passes,
+                                             'iter_seqs'  : subdict,
+                                             'seq_rank'   : self.seq_rank + 1,
+                                             'prev_scores': self.curr_scores,
+                                             'stage_id'   : 1})
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
