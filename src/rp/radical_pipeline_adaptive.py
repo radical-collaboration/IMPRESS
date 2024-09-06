@@ -65,9 +65,9 @@ class Pipeline:
 
         self.file_list    = []
         self.fasta_list_2 = []
-        #might have to do outside of initialization so new pipelines do not run this
-        #can be declared directly as argument
-        for file_name in os.listdir(f'{self.name}_in'):
+        # might have to do outside of initialization, so new pipelines
+        # do not run this can be declared directly as argument
+        for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
     def rank_seqs_by_mpnn_score(self):
@@ -113,50 +113,48 @@ class Pipeline:
             if not self.prev_scores:
                 self.prev_scores = dict(self.curr_scores)
             else:
-                proteins_to_remove=[]
-                # comparison of curr and prev
-                for proteins, scores in self.curr_scores.items():
-                    if scores > self.prev_scores[proteins]:
-                        proteins_to_remove.append(proteins)
                 # remove all bad proteins from current pipeline,
                 # initialize new pipeline with bad proteins
                 # Steps: - remove protein from fasta_list_2;
                 #        - remove protein from iter_seqs;
-                #        - store remove iter_seqs subdict separately;
-                #        - pass subdict to new pipeline;
+                #        - store removed iter_seqs (sub_iter_seqs) separately;
+                #        - pass sub_iter_seqs to new pipeline;
                 #        - set up new dirs for new pipeline;
                 #        - give new pipeline current pass;
-                #        - initialize pipeline with seq_rank +=1.
-                subdict = {}
-                new_name = f'p{len(PIPELINE_NAMES) + 1}'
-                set_up_new_pipeline_dirs(new_name)
-                for a in proteins_to_remove:
-                    print(a)
-                    print(self.curr_scores)
-                    print(self.prev_scores)
-                    fasta_file = f'{a}.pdb'
-                    self.fasta_list_2.remove(fasta_file)
-                    subdict[a] = self.iter_seqs[a]
-                    del self.iter_seqs[a]
-                    # shutil.copyfile(f'{self.output_path_af}/{fasta_file}',
-                    #                 f'{self.base_path}/{new_name}_in/{fasta_file}')
-                    os.unlink(f'{self.output_path_af}/{fasta_file}')
+                #        - initialize pipeline with seq_rank +1.
 
+                sub_iter_seqs = {}
+                # comparison of curr and prev
+                for proteins, scores in self.curr_scores.items():
+                    if scores > self.prev_scores[proteins]:
+                        # proteins to be removed from the current pipeline
+                        sub_iter_seqs[proteins] = self.iter_seqs.pop(proteins)
+
+                # create new pipeline (if applicable)
                 if self.sub_order < MAX_SUB_PIPELINES:
-                    PIPELINE_NAMES.append(new_name)
-                    new_pipelines_queue.put({'name'       : new_name,
+                    p_name = f'p{len(PIPELINE_NAMES) + 1}'
+                    PIPELINE_NAMES.append(p_name)
+
+                    set_up_new_pipeline_dirs(p_name)
+                    for a in sub_iter_seqs:
+                        shutil.copyfile(f'{self.output_path_af}/{a}.pdb',
+                                        f'{self.base_path}/{p_name}_in/{a}.pdb')
+
+                    new_pipelines_queue.put({'name'       : p_name,
                                              'sub_order'  : self.sub_order + 1,
                                              'passes'     : self.passes,
-                                             'iter_seqs'  : subdict,
+                                             'iter_seqs'  : sub_iter_seqs,
                                              'seq_rank'   : self.seq_rank + 1,
                                              'prev_scores': self.curr_scores,
                                              'stage_id'   : 1})
+
+                # finalize the "cleanup" of the current pipeline
+                for a in sub_iter_seqs:
+                    self.fasta_list_2.remove(f'{a}.pdb')
+                    os.unlink(f'{self.output_path_af}/{a}.pdb')
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
-            # if we need to create a new Pipeline, then we need to push
-            # corresponding inputs into a pipelines queue
-            #   new_pipelines_queue.put({'name': .., 'stage_id': ..})
 
         elif next_stage_id == 7:
             self.passes += 1
