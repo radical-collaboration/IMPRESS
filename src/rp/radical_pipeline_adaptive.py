@@ -36,7 +36,7 @@ class Pipeline:
         self.is_continued = bool(self.stage_id)
         
         self.iter_seqs   = kwargs.get('iter_seqs', {})
-        self.prev_scores = {}
+        self.prev_scores = kwargs.get('prev_scores', {})
         self.curr_scores = {}
 
         # pipeline space/sandboxes
@@ -125,7 +125,12 @@ class Pipeline:
                     #new_fasta_list.append(a)
                     shutil.copyfile(self.output_path_af+'/'+a+'.pdb',self.base_path+'/'+new_name+'_in/'+a+'.pdb')
                     shutil.move(self.output_path_af+'/'+a+'.pdb',self.base_path+'/af_pipeline_outputs_multi/'+new_name+'/af/prediction/best_models/'+a+'.pdb')
-                new_pipelines_queue.put({'name':new_name, 'passes':self.passes, 'iter_seqs':subdict, 'seq_rank':self.seq_rank+1, 'stage_id':3})
+                new_pipelines_queue.put({'name'       : new_name,
+                                         'passes'     : self.passes,
+                                         'iter_seqs'  : subdict,
+                                         'seq_rank'   : self.seq_rank + 1,
+                                         'prev_scores': self.curr_scores,
+                                         'stage_id'   : 1})
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
