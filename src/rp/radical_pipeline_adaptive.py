@@ -20,8 +20,14 @@ TASK_PRE_EXEC  = ['. /opt/sw/admin/lmod/lmod/init/profile',
 
 tasks_finished_queue = queue.Queue()
 new_pipelines_queue  = queue.Queue()
-# change set up dirs to read from config file for all paths, also requested resources + pilot description
+
+MAX_SUB_PIPELINES    = 5  # max number of new pipelines per structure
+
+# change set up dirs to read from config file for all paths,
+# also requested resources + pilot description
 # do this first: adjust end of script for reading output files
+
+
 class Pipeline:
 
     def __init__(self, name, tmgr, **kwargs):
@@ -36,8 +42,12 @@ class Pipeline:
         self.is_continued = bool(self.stage_id)
         
         self.iter_seqs   = kwargs.get('iter_seqs', {})
-        self.prev_scores = {}
+        self.prev_scores = kwargs.get('prev_scores', {})
         self.curr_scores = {}
+
+        # order id of a pipeline within the chain of sub-pipelines per structure
+        # "parent"-pipeline's order equals to "0"
+        self.sub_order   = kwargs.get('sub_order', 0)
 
         # pipeline space/sandboxes
         self.base_path        = kwargs.get('base_path', BASE_PATH)
@@ -55,9 +65,9 @@ class Pipeline:
 
         self.file_list    = []
         self.fasta_list_2 = []
-        #might have to do outside of initialization so new pipelines do not run this
-        #can be declared directly as argument
-        for file_name in os.listdir(f'{self.name}_in'):
+        # might have to do outside of initialization, so new pipelines
+        # do not run this can be declared directly as argument
+        for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
     def rank_seqs_by_mpnn_score(self):
@@ -103,35 +113,48 @@ class Pipeline:
             if not self.prev_scores:
                 self.prev_scores = dict(self.curr_scores)
             else:
-                proteins_to_remove=[]
+                # remove all bad proteins from current pipeline,
+                # initialize new pipeline with bad proteins
+                # Steps: - remove protein from fasta_list_2;
+                #        - remove protein from iter_seqs;
+                #        - store removed iter_seqs (sub_iter_seqs) separately;
+                #        - pass sub_iter_seqs to new pipeline;
+                #        - set up new dirs for new pipeline;
+                #        - give new pipeline current pass;
+                #        - initialize pipeline with seq_rank +1.
+
+                sub_iter_seqs = {}
                 # comparison of curr and prev
                 for proteins, scores in self.curr_scores.items():
                     if scores > self.prev_scores[proteins]:
-                        proteins_to_remove.append(proteins)
-                # remove all bad proteins from current pipeline, intialize new pipeline with bad proteins
-                # Steps: remove protein from fasta_list_2, remove protein from iter_seqs, store remove iter_seqs subdict separately, pass subdict to new pipeline, set up new dirs for new pipeline, give new pipeline current pass, initialize pipeline with seq_rank +=1
-                subdict={}
-                #new_fasta_list=[]
-                new_name='p'+str(len(PIPELINE_NAMES)+1)
-                PIPELINE_NAMES.append(new_name)
-                set_up_new_pipeline_dirs(new_name)
-                for a in proteins_to_remove:
-                    print(a)
-                    print(self.curr_scores)
-                    print(self.prev_scores)
-                    self.fasta_list_2.remove(a+'.pdb')
-                    subdict[a]=self.iter_seqs[a]
-                    del self.iter_seqs[a]
-                    #new_fasta_list.append(a)
-                    shutil.copyfile(self.output_path_af+'/'+a+'.pdb',self.base_path+'/'+new_name+'_in/'+a+'.pdb')
-                    shutil.move(self.output_path_af+'/'+a+'.pdb',self.base_path+'/af_pipeline_outputs_multi/'+new_name+'/af/prediction/best_models/'+a+'.pdb')
-                new_pipelines_queue.put({'name':new_name, 'passes':self.passes, 'iter_seqs':subdict, 'seq_rank':self.seq_rank+1, 'stage_id':3})
+                        # proteins to be removed from the current pipeline
+                        sub_iter_seqs[proteins] = self.iter_seqs.pop(proteins)
+
+                # create new pipeline (if applicable)
+                if self.sub_order < MAX_SUB_PIPELINES:
+                    p_name = f'p{len(PIPELINE_NAMES) + 1}'
+                    PIPELINE_NAMES.append(p_name)
+
+                    set_up_new_pipeline_dirs(p_name)
+                    for a in sub_iter_seqs:
+                        shutil.copyfile(f'{self.output_path_af}/{a}.pdb',
+                                        f'{self.base_path}/{p_name}_in/{a}.pdb')
+
+                    new_pipelines_queue.put({'name'       : p_name,
+                                             'sub_order'  : self.sub_order + 1,
+                                             'passes'     : self.passes,
+                                             'iter_seqs'  : sub_iter_seqs,
+                                             'seq_rank'   : self.seq_rank + 1,
+                                             'prev_scores': self.curr_scores,
+                                             'stage_id'   : 1})
+
+                # finalize the "cleanup" of the current pipeline
+                for a in sub_iter_seqs:
+                    self.fasta_list_2.remove(f'{a}.pdb')
+                    os.unlink(f'{self.output_path_af}/{a}.pdb')
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
-            # if we need to create a new Pipeline, then we need to push
-            # corresponding inputs into a pipelines queue
-            #   new_pipelines_queue.put({'name': .., 'stage_id': ..})
 
         elif next_stage_id == 7:
             self.passes += 1
@@ -171,7 +194,7 @@ class Pipeline:
         tds = []
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
-            seq_id   = self.iter_seqs[fastas_0][0]
+            seq_id   = self.iter_seqs[fastas_0][self.seq_rank]
             print(fastas_0)
             print(self.name)
             print(seq_id)
@@ -257,7 +280,7 @@ class Pipeline:
         self.tmgr.submit_tasks(rp.TaskDescription({
             'uid': ru.generate_id(f'{self.name}.5.%(item_counter)06d',
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
-            'name': f'T5.run.mpnn.passes.{self.passes}',
+            'name': f'T5.mpnn.passes.{self.passes}',
             'executable': 'python',
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
                           f'-pdb={self.output_path_af}/',
@@ -275,7 +298,8 @@ class Pipeline:
         tds = []
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
-            seq_id   = self.iter_seqs[fastas_0][self.seq_rank]
+            # always use 0 for rank_seq in this stage
+            seq_id   = self.iter_seqs[fastas_0][0]
             print(fastas_0)
             print(self.name)
             print(seq_id)
