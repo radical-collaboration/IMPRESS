@@ -145,7 +145,7 @@ class Pipeline:
                                              'passes'     : self.passes,
                                              'iter_seqs'  : sub_iter_seqs,
                                              'seq_rank'   : self.seq_rank + 1,
-                                             'prev_scores': self.curr_scores,
+                                             'prev_scores': self.prev_scores,
                                              'stage_id'   : 1})
 
                 # finalize the "cleanup" of the current pipeline
@@ -239,7 +239,12 @@ class Pipeline:
                               + f'{self.output_path}/af/prediction/'
                               + f'dimer_models/{fastas_2}/*ranking_debug*.json '
                               + f'{self.output_path}/af/prediction/'
-                              + f'best_ptm/{fastas_2}.json'],
+                              + f'best_ptm/{fastas_2}.json',
+                              'cp '
+                              + f'{self.output_path}/af/prediction/'
+                              + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
+                              + f'{self.output_path}/mpnn/job_{self.passes-1}/'
+                              + f'{fastas_2}.pdb'],
                 'gpus_per_rank': 1
             }))
             # tds.append(rp.TaskDescription({
@@ -337,7 +342,17 @@ class Pipeline:
                               + f'{self.output_path}/af/prediction/'
                               + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
                               + f'{self.output_path}/af/prediction/'
-                              + f'best_models/{fastas_2}.pdb'],
+                              + f'best_models/{fastas_2}.pdb',
+                              'cp '
+                              + f'{self.output_path}/af/prediction/'
+                              + f'dimer_models/{fastas_2}/*ranking_debug*.json '
+                              + f'{self.output_path}/af/prediction/'
+                              + f'best_ptm/{fastas_2}.json',
+                              'cp '
+                              + f'{self.output_path}/af/prediction/'
+                              + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
+                              + f'{self.output_path}/mpnn/job_{self.passes-1}/'
+                              + f'{fastas_2}.pdb'],
                 'gpus_per_rank': 1
             }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
