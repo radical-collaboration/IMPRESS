@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import copy
 import os
 import pandas as pd
 import queue
@@ -108,10 +108,13 @@ class Pipeline:
                     if not line:
                         continue
                     v = line.split(',')
+                    print(self.name)
+                    print(self.curr_scores)
                     self.curr_scores[v[0].split('.')[0]] = float(v[-1])
 
             if not self.prev_scores:
-                self.prev_scores = dict(self.curr_scores)
+                #self.prev_scores = dict(self.curr_scores)
+                self.prev_scores = copy.deepcopy(self.curr_scores)
             else:
                 # remove all bad proteins from current pipeline,
                 # initialize new pipeline with bad proteins
@@ -124,6 +127,8 @@ class Pipeline:
                 #        - initialize pipeline with seq_rank +1.
 
                 sub_iter_seqs = {}
+                print(self.name)
+                print(self.curr_scores)
                 # comparison of curr and prev
                 for proteins, scores in self.curr_scores.items():
                     if scores > self.prev_scores[proteins]:
@@ -152,6 +157,7 @@ class Pipeline:
                 for a in sub_iter_seqs:
                     self.fasta_list_2.remove(f'{a}.pdb')
                     os.unlink(f'{self.output_path_af}/{a}.pdb')
+                    os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
