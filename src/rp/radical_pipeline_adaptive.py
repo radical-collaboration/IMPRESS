@@ -125,18 +125,27 @@ class Pipeline:
                 #        - set up new dirs for new pipeline;
                 #        - give new pipeline current pass;
                 #        - initialize pipeline with seq_rank +1.
-
                 sub_iter_seqs = {}
                 print(self.name)
                 print(self.curr_scores)
                 # comparison of curr and prev
                 for proteins, scores in self.curr_scores.items():
                     if scores > self.prev_scores[proteins]:
-                        # proteins to be removed from the current pipeline
-                        sub_iter_seqs[proteins] = self.iter_seqs.pop(proteins)
+                        # check if the protein key exist in the dict otherwise skip
+                        if self.iter_seqs.get(proteins):
+                           # proteins to be removed from the current pipeline
+                           sub_iter_seqs[proteins] = self.iter_seqs.pop(proteins)
+                # sub_iter_seqs = {}
+                # print(self.name)
+                # print(self.curr_scores)
+                # # comparison of curr and prev
+                # for proteins, scores in self.curr_scores.items():
+                #     if scores > self.prev_scores[proteins]:
+                #         # proteins to be removed from the current pipeline
+                #         sub_iter_seqs[proteins] = self.iter_seqs.pop(proteins)
 
                 # create new pipeline (if applicable)
-                if self.sub_order < MAX_SUB_PIPELINES:
+                if sub_iter_seqs and self.sub_order < MAX_SUB_PIPELINES:
                     p_name = f'p{len(PIPELINE_NAMES) + 1}'
                     PIPELINE_NAMES.append(p_name)
 
@@ -150,7 +159,7 @@ class Pipeline:
                                              'passes'     : self.passes,
                                              'iter_seqs'  : sub_iter_seqs,
                                              'seq_rank'   : self.seq_rank + 1,
-                                             'prev_scores': self.prev_scores,
+                                             'prev_scores': copy.deepcopy(self.prev_scores),
                                              'stage_id'   : 1})
 
                 # finalize the "cleanup" of the current pipeline
@@ -158,6 +167,7 @@ class Pipeline:
                     self.fasta_list_2.remove(f'{a}.pdb')
                     os.unlink(f'{self.output_path_af}/{a}.pdb')
                     os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
+                self.prev_scores = copy.deepcopy(self.curr_scores)
         
         elif next_stage_id == 6:
             self.rank_seqs_by_mpnn_score()
