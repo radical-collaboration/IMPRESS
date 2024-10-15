@@ -20,5 +20,5 @@ export RADICAL_PROFILE="TRUE"
 export RADICAL_REPORT="TRUE"
 export RADICAL_LOG_LVL="DEBUG"
 
-python run_mpnn_entk.py
+python radical_pipeline_adaptive.py
 

@@ -164,6 +164,7 @@ class Pipeline:
 
                 # finalize the "cleanup" of the current pipeline
                 for a in sub_iter_seqs:
+                    del self.curr_scores[a]
                     self.fasta_list_2.remove(f'{a}.pdb')
                     os.unlink(f'{self.output_path_af}/{a}.pdb')
                     os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
