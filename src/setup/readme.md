@@ -17,15 +17,13 @@ eval "$(conda shell.posix hook)"
 conda activate $WORK_DIR/ve.impress
 ```
 
-RADICAL-Pilot (from RADICAL-Cybertools)
 ```shell
+# RADICAL-Pilot (from RADICAL-Cybertools)
 conda install -y -c conda-forge radical.pilot
-```
-
-PyRosetta
-```shell
-conda config --add channels https://conda.rosettacommons.org
-conda install -y pyrosetta  # size: 1.4GB
+# PyRosetta
+conda install -y -c https://conda.rosettacommons.org pyrosetta  # size: 1.4GB
+# Torch
+conda install -y -c pytorch pytorch torchvision  # size: 1.46GB
 ```
 
 ### AlphaFold2
