@@ -19,22 +19,20 @@ conda activate $WORK_DIR/ve.impress
 
 ```shell
 # RADICAL-Pilot (from RADICAL-Cybertools)
-conda install -y -c conda-forge radical.pilot
+conda install -y radical.pilot -c conda-forge
 # PyRosetta
-conda install -y -c https://conda.rosettacommons.org pyrosetta  # size: 1.4GB
-# Torch
-conda install -y -c pytorch pytorch torchvision  # size: 1.46GB
+conda install -y pyrosetta -c https://conda.rosettacommons.org  # size: 1.4GB
+# Torch (for ProteinMPNN)
+conda install -y pytorch torchaudio torchvision cudatoolkit=11.3 -c pytorch
 ```
 
-### AlphaFold2
-
-AlphaFold2 (AF) is not installed system-wise on Delta, but it is available 
+- AlphaFold2 (AF) is not installed system-wise on Delta, but it is available 
 through the corresponding container and its databases are uploaded into a 
-shared space.
-
-Delta adapted Dockerfile:
+shared space.  GitHub repo for the Delta adapted Dockerfile:
 https://github.com/rhaas80/alphafold
 (original: https://github.com/google-deepmind/alphafold/blob/main/docker/Dockerfile)
+
+- ProteinMPNN GitHub repo: https://github.com/dauparas/ProteinMPNN
 
 ### Test individual packages
 
@@ -53,11 +51,11 @@ export AF_ETC=$BASE_DIR/alphafold/etc
 # for test purposes local container was used
 #   git clone https://github.com/rhaas80/alphafold
 #   cd alphafold
-#   docker build --no-cache -f docker/Dockerfile -t alphafold_delta .
+#   docker build --no-cache -f docker/Dockerfile -t mtitov/alphafold_delta .
 #   docker buildx create --use --name alphafold_builder
 #   docker buildx build --output=type=registry --platform linux/amd64 \
 #                       -t mtitov/alphafold_delta -f docker/Dockerfile .
-# locate at: /scratch/bblj/matitov/alphafold/alphafold_delta.sif
+# located at: /scratch/bblj/matitov/alphafold/alphafold_delta.sif
 
 singularity run -B $AF_INPUTS:/inputs -B $AF_OUTPUTS:/outputs -B $AF_ETC:/etc \
                 -B $AF_DB:/data --pwd /app/alphafold --nv $AF_CONTAINER \
@@ -94,5 +92,41 @@ singularity run -B $AF_INPUTS:/inputs -B $AF_OUTPUTS:/outputs -B $AF_ETC:/etc \
     --uniref30_database_path=/data/uniref30/UniRef30_2021_03 \
     --max_template_date=2020-12-01 \
     --use_gpu_relax=True
+```
+
+#### PyRosetta
+
+```shell
+# virtual environment should be already activated
+#   module load anaconda3_gpu
+#   eval "$(conda shell.posix hook)"
+#   conda activate $WORK_DIR/ve.impress
+
+cd $WORK_DIR
+mkdir -p joey_utils
+```
+
+```python
+from pyrosetta import *
+init()
+from joey_utils import fast_relax_mover
+pose=pose_from_pdb('FILEPATH')
+fr=fast_relax_mover()
+fr.apply(pose)
+pose.dump_pdb('OUTPATH')
+```
+
+#### ProteinMPNN
+
+```shell
+# virtual environment should be already activated
+#   module load anaconda3_gpu
+#   eval "$(conda shell.posix hook)"
+#   conda activate $WORK_DIR/ve.impress
+
+cd $WORK_DIR
+git clone https://github.com/dauparas/ProteinMPNN.git
+cd ProteinMPNN/examples
+./submit_example_1.sh  # simple monomer example
 ```
 

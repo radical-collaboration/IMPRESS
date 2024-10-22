@@ -7,7 +7,9 @@ channels:
 dependencies:
   - python=3.9
   - radical.pilot
-  - pyrosetta
+  - cudatoolkit=11.3
   - pandas
+  - pyrosetta
   - pytorch
+  - torchaudio
   - torchvision
