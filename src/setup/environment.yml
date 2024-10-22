@@ -1,0 +1,15 @@
+name: ve.impress
+channels:
+  - pytorch
+  - conda-forge
+  - https://conda.rosettacommons.org
+  - defaults
+dependencies:
+  - python=3.9
+  - radical.pilot
+  - cudatoolkit=11.3
+  - pandas
+  - pyrosetta
+  - pytorch
+  - torchaudio
+  - torchvision
