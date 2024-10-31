@@ -39,3 +39,6 @@ EnTK-based designed pipeline provides the integrated ability to efficiently
 and effectively train sophisticated models. That requires advances in HPC 
 workflow methodology that brings together the ability to “evaluate as you go”.
 
+## Resources
+
+To learn more, please visit the project website at https://radical-project.github.io/impress/
