@@ -1,0 +1,28 @@
+{
+    "run_description": {
+        "resource": "ncsa.delta_gpu_a100_4way",
+        "project": "bblj-delta-gpu",
+        "queue": null,
+        "nodes": 1,
+        "runtime": 2880
+    },
+    "env": {
+        "RADICAL_LOG_LVL": "DEBUG",
+        "RADICAL_PROFILE": "TRUE",
+        "RADICAL_REPORT": "TRUE",
+        "RADICAL_REPORT_ANIME": "FALSE"
+    },
+    "main": {
+        "pipeline_names": ["p1", "p2"],
+        "base_path": "/u/ja961/IMPRESS"
+    },
+    "pipeline_config": {
+        "max_sub_pipelines": 5,
+        "task_pre_exec": {
+            "base": ["module load anaconda3_gpu",
+                     "eval \"$(conda shell.posix hook)\"",
+                     "conda activate /u/ja961/ve.impress/"],
+            "af": ["module load cuda/12.3.0"]
+        }
+    }
+}
