@@ -77,56 +77,61 @@ eval "$(conda shell.posix hook)"
 conda activate $WORK_DIR/ve.impress
 ```
 
-### AlphaFold2
+### AlphaFold2 (apptainer-overlay.sh)
 
 ```shell
 export AF_INPUTS=$BASE_DIR/alphafold/inputs
 export AF_OUTPUTS=$BASE_DIR/alphafold/outputs
 export AF_ETC=$BASE_DIR/alphafold/etc
 
+export XLA_PYTHON_CLIENT_PREALLOCATE="false"
+export XLA_PYTHON_CLIENT_MEM_FRACTION=".75"
+export XLA_PYTHON_CLIENT_ALLOCATOR="platform"
+
 mkdir -p $BASE_DIR/alphafold/inputs $BASE_DIR/alphafold/outputs
-cat > $BASE_DIR/alphafold/inputs/test.fasta <<EOF
->3SFJ_1|Chains A, C|Tax1-binding protein 3|Homo sapiens (9606)
-VTAVVQRVEIHKLRQGENLILGFSIGGGIDQDPSQNPFSEDKTDKGIYVTRVSEGGPAEIAGLQIGDKIMQVNGWDMTMVTHDQARKRLTKRSEEVVRLLVTRQ
->3SFJ_2|Chains B, D|decameric peptide iCAL36|
-ANSRWPTSII
-EOF
 
-singularity run -B $AF_INPUTS:/inputs -B $AF_OUTPUTS:/outputs -B $AF_ETC:/etc \
-                -B $AF_DB:/data --pwd /app/alphafold --nv $AF_CONTAINER \
-    --data_dir=/data \
-    --uniref90_database_path=/data/uniref90/uniref90.fasta \
-    --mgnify_database_path=/data/mgnify/mgy_clusters_2022_05.fa \
-    --template_mmcif_dir=/data/pdb_mmcif/mmcif_files/ \
-    --obsolete_pdbs_path=/data/pdb_mmcif/obsolete.dat \
-    --fasta_paths=/inputs/test.fasta \
-    --output_dir=/outputs \
-    --model_preset=multimer \
-    --db_preset=reduced_dbs \
-    --small_bfd_database_path=/data/small_bfd/bfd-first_non_consensus_sequences.fasta \
-    --pdb_seqres_database_path=/data/pdb_seqres/pdb_seqres.txt \
-    --uniprot_database_path=/data/uniprot/uniprot.fasta \
-    --max_template_date=2020-12-01 \
-    --use_gpu_relax=True
+INPUT_FASTA_FILE_DIR=$1
+INPUT_FASTA_FILE_NAME=$2
+OUTPUT_DATA_DIR=$3
 
-singularity run -B $AF_INPUTS:/inputs -B $AF_OUTPUTS:/outputs -B $AF_ETC:/etc \
-                -B $AF_DB:/data --pwd /app/alphafold --nv $AF_CONTAINER \
-    --data_dir=/data \
-    --uniref90_database_path=/data/uniref90/uniref90.fasta \
-    --mgnify_database_path=/data/mgnify/mgy_clusters_2022_05.fa \
-    --template_mmcif_dir=/data/pdb_mmcif/mmcif_files/ \
-    --obsolete_pdbs_path=/data/pdb_mmcif/obsolete.dat \
-    --fasta_paths=/inputs/test.fasta \
-    --output_dir=/outputs \
-    --model_preset=multimer \
-    --db_preset=full_dbs \
-    --bfd_database_path=/data/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt \
-    --pdb_seqres_database_path=/data/pdb_seqres/pdb_seqres.txt \
-    --uniprot_database_path=/data/uniprot/uniprot.fasta \
-    --uniref30_database_path=/data/uniref30/UniRef30_2021_03 \
-    --max_template_date=2020-12-01 \
-    --use_gpu_relax=True
+apptainer run --nv \
+  --bind $INPUT_FASTA_FILE_DIR:/fasta \
+  --bind $OUTPUT_DATA_DIR:/dimer_models \
+  --bind /scratch/rhaas/SUP-5301/database:/database \
+  /scratch/rhaas/SUP-5301/alphafold.sif \
+  --data_dir=/database \
+  --uniref90_database_path=/database/uniref90/uniref90.fasta \
+  --mgnify_database_path=/database/mgnify/mgy_clusters_2022_05.fa \
+  --template_mmcif_dir=/database/pdb_mmcif/mmcif_files/ \
+  --obsolete_pdbs_path=/database/pdb_mmcif/obsolete.dat \
+  --fasta_paths=/fasta/$INPUT_FASTA_FILE_NAME \
+  --output_dir=/dimer_models \
+  --model_preset=multimer \
+  --db_preset=reduced_dbs \
+  --small_bfd_database_path=/database/small_bfd/bfd-first_non_consensus_sequences.fasta \
+  --uniprot_database_path=/database/uniprot/uniprot.fasta \
+  --pdb_seqres_database_path=/database/pdb_seqres/pdb_seqres.txt \
+  --max_template_date=2020-12-01 \
+  --use_gpu_relax=True
 ```
+
+---
+**NOTE**
+
+To use the `Apptainer` or `Singularity` AlphaFold2 container with `RADICAL-Pilot`, you need to create an environment at the pilot level and pass it to the container task as follows:
+
+```python
+pilot.prepare_env('bs0', {'type' : 'shell'})
+# create a new task description, and fill it.
+td = rp.TaskDescription()
+td.pre_exec = ['module load cuda/12.3.0']
+td.executable = '/bin/bash'
+td.arguments = ['/scratch/bblj/alsaadi1/AF-SUP-5301/apptainer-overlay.sh']
+td.named_env = 'bs0'
+```
+Failure to specify `td.named_env = 'bs0'` will result in a container internal error due to a mismatch in Python libraries.
+
+---
 
 ### PyRosetta
 
