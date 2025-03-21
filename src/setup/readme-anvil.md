@@ -42,7 +42,7 @@ module load  alphafold/2.3.1
 ### Alphafold V2
 
 ```shell
-# run_alphafold.sh is avialble in the $PATH once you load the modules above
+# run_alphafold.sh is available in the $PATH once you load the modules above
 run_alphafold.sh \
 --db_preset=full_dbs \
 --fasta_paths=$WORK_DIR//inputs \
