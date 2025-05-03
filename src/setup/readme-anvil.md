@@ -9,6 +9,9 @@ mkdir $BASE_DIR/impress
 export WORK_DIR=$BASE_DIR/impress
 mkdir $WORK_DIR/inputs
 mkdir $WORK_DIR/outputs
+cd $WORK_DIR
+git clone git@github.com:radical-collaboration/IMPRESS.git
+git checkout fix/anvil_netface
 ```
 
 # Environment Setup
@@ -42,6 +45,9 @@ module load  alphafold/2.3.1
 ### Alphafold V2
 
 ```shell
+# Copy the input file before running AlphaFold for testing.
+cp $WORK_DIR/IMPRESS/src/setup/test.fasta $WORK_DIR/inputs
+
 # run_alphafold.sh is available in the $PATH once you load the modules above
 /usr/bin/singularity exec --nv /apps/biocontainers/images/tacc_alphafold:2.3.1.sif run_alphafold.sh \
 --db_preset=full_dbs \
@@ -93,4 +99,56 @@ chmod +x submit_example_1.sh
 # remove SLURM related lines in the test script:
 #    sed -i 2,8d submit_example_1.sh
 ./submit_example_1.sh  # simple monomer example
+```
+
+### Running jobs on Anvil
+
+For full documentation, visit the
+https://www.rcac.purdue.edu/knowledge/anvil/run
+
+Running an Interactive Job on Anvil
+
+```shell
+# Log in to Anvil
+ssh -l my-x-anvil-username anvil.rcac.purdue.edu
+
+# Start an Interactive Session
+# Check your allocation name on the Anvil dashboard, then run:
+sinteractive -p wholenode -N <number of nodes> -n <number of cores> -A oneofyourallocations
+
+# Load Required Modules and Activate Environment
+module load biocontainers/default
+module load alphafold/2.3.1
+module load anaconda
+conda activate $WORK_DIR/ve.impress
+
+# Run the script
+python <script name>
+```
+
+Running a Batch Job with sbatch
+```shell
+# Log in to Anvil
+ssh -l my-x-anvil-username anvil.rcac.purdue.edu
+
+# Create an sbatch Script
+# Here's an example job.sbatch file:
+#!/bin/sh -l
+#SBATCH -A <your_allocation>
+#SBATCH -p debug
+#SBATCH --nodes=<number_of_nodes>
+#SBATCH --ntasks=<number_of_cores>
+#SBATCH --time=00:30:00
+#SBATCH --job-name=impress
+
+module --force purge
+module load biocontainers/default
+module load alphafold/2.3.1
+module load anaconda
+conda activate $WORK_DIR/ve.impress
+
+python <path_to_your_script>
+
+# Submit the Job
+sbatch job.sbatch
 ```

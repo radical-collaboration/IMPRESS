@@ -7,16 +7,24 @@ import shutil
 from collections import defaultdict
 
 from pyrosetta import *
-init()
+#init()
 
 import radical.pilot as rp
 import radical.utils as ru
 
-BASE_PATH = '/home/ja961/Khare/pipeline'
+BASE_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/IMPRESS/src/rp"
+ProteinMPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
 PIPELINE_NAMES = ['p1', 'p2']
-TASK_PRE_EXEC  = ['. /opt/sw/admin/lmod/lmod/init/profile',
-                  'source /home/ja961/anaconda3/etc/profile.d/conda.sh',
-                  'conda activate pyr']
+#Use this to set up the environment for an Interactive Job on Anvil
+TASK_PRE_EXEC  = ['module load anaconda',
+                'module load biocontainers/default',
+                'module load alphafold/2.3.1']
+
+#Use this to set up the environment for a Batch Job with sbatch
+# TASK_PRE_EXEC  = ['module load anaconda',
+#                 f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress",
+#                 'module load biocontainers/default',
+#                 'module load alphafold/2.3.1']
 
 tasks_finished_queue = queue.Queue()
 new_pipelines_queue  = queue.Queue()
@@ -51,6 +59,7 @@ class Pipeline:
 
         # pipeline space/sandboxes
         self.base_path        = kwargs.get('base_path', BASE_PATH)
+        self.protein_path        = kwargs.get('protein_path', ProteinMPNN_PATH)
         self.input_path       = f'{self.base_path}/{self.name}_in'
         self.output_path      = (f'{self.base_path}/'
                                  f'af_pipeline_outputs_multi/{self.name}')
@@ -61,18 +70,22 @@ class Pipeline:
         for pass_idx in range(1, 6):
             job_dir = f'{self.output_path_mpnn}/job_{pass_idx}'
             if not os.path.exists(job_dir):
-                os.mkdir(job_dir)
+                os.makedirs(job_dir, exist_ok=True)
 
         self.file_list    = []
         self.fasta_list_2 = []
         # might have to do outside of initialization, so new pipelines
         # do not run this can be declared directly as argument
+        if not os.path.exists(self.input_path):
+            os.makedirs(self.input_path, exist_ok=True)
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
     def rank_seqs_by_mpnn_score(self):
         # collect and sort seqs
         job_seqs_dir = f'{self.output_path_mpnn}/job_{self.passes}/seqs'
+        if not os.path.exists(job_seqs_dir):
+            os.makedirs(job_seqs_dir, exist_ok=True) 
         for file_name in os.listdir(f'{job_seqs_dir}/'):
             temp = []
             line_ctr=1
@@ -198,7 +211,7 @@ class Pipeline:
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
                           f'-pdb={self.input_path}/',
                           f'-out={self.output_path_mpnn}/job_{self.passes}/',
-                          f'-mpnn={self.base_path}/../../ProteinMPNN/',
+                          f'-mpnn={self.protein_path}/',
                           f'-seqs={self.num_seqs}',
                           '-is_monomer=0',
                           '-chains=A'],
@@ -307,7 +320,7 @@ class Pipeline:
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
                           f'-pdb={self.output_path_af}/',
                           f'-out={self.output_path_mpnn}/job_{self.passes}/',
-                          f'-mpnn={self.base_path}/../../ProteinMPNN/',
+                          f'-mpnn={self.protein_path}/',
                           f'-seqs={self.num_seqs}',
                           '-is_monomer=0',
                           '-chains=B'],
@@ -428,11 +441,11 @@ def main():
     tmgr = rp.TaskManager(session)
     tmgr.register_callback(task_state_cb)
     pilot = pmgr.submit_pilots(rp.PilotDescription({
-        'resource': 'rutgers.amarel',
-        'runtime' : 4320,
+        'resource': 'purdue.anvil',
+        'runtime' : 320,
         #'runtime': 60,
         'cores'   : 4,
-        'gpus'    : 4
+        'gpus'    : 0
     }))
 
     tmgr.add_pilots(pilot)
@@ -443,7 +456,7 @@ def main():
 
     my_dict = {}
     for pipe_name in pipes:
-        for file_name in os.listdir(f'{pipe_name}_in/'):
+        for file_name in os.listdir(f'{BASE_PATH}/{pipe_name}_in/'):
             my_dict[file_name.split('.')[0]] = []
     fasta_list = []
     for f in my_dict.keys():
