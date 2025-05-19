@@ -10,7 +10,7 @@ args = parser.parse_args()
 
 pep_seq='EGYQDYEPEA'
 
-full_path='/home/ja961/Khare/pipeline/'
+full_path= f"/anvil/scratch/{os.environ['USER']}/impress/IMPRESS/src/rp"
 
 with open(full_path+'/af_pipeline_outputs_multi/'+args.out+'/af/fasta/'+args.name+'.fa','w') as f:
 	f.write('>pdz\n')

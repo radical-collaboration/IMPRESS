@@ -23,12 +23,18 @@ conda activate $WORK_DIR/ve.impress
 ```
 
 ```shell
+# Required for pandas.read_pickle
+conda install jax=0.3.25
+# biopandas are required for plddt_extract_pipeline.py 
+conda install -y biopandas -c conda-forge
 # RADICAL-Pilot (from RADICAL-Cybertools)
 conda install -y radical.pilot -c conda-forge
+# cudatoolkit for GPU support
+conda install cudatoolkit=11.3 -c conda-forge
 # PyRosetta
 conda install -y pyrosetta -c https://conda.rosettacommons.org  # size: 1.4GB
 # Torch (for ProteinMPNN)
-conda install -y pytorch torchaudio torchvision cudatoolkit=11.3 -c pytorch
+conda install -y pytorch torchaudio torchvision cudatoolkit=11.3 -c pytorch 
 
 # OR use a corresponding file with the dependencies:
 #   conda env update -p $WORK_DIR/ve.impress --file environment.yml
@@ -106,11 +112,15 @@ chmod +x submit_example_1.sh
 For full documentation, visit the
 https://www.rcac.purdue.edu/knowledge/anvil/run
 
+```shell
+
+# Log in to Anvil
+ssh -l my-x-anvil-username anvil.rcac.purdue.edu
+```
+
 Running an Interactive Job on Anvil
 
 ```shell
-# Log in to Anvil
-ssh -l my-x-anvil-username anvil.rcac.purdue.edu
 
 # Start an Interactive Session
 # Check your allocation name on the Anvil dashboard, then run:
@@ -127,28 +137,14 @@ python <script name>
 ```
 
 Running a Batch Job with sbatch
+
 ```shell
-# Log in to Anvil
-ssh -l my-x-anvil-username anvil.rcac.purdue.edu
 
-# Create an sbatch Script
-# Here's an example job.sbatch file:
-#!/bin/sh -l
-#SBATCH -A <your_allocation>
-#SBATCH -p debug
-#SBATCH --nodes=<number_of_nodes>
-#SBATCH --ntasks=<number_of_cores>
-#SBATCH --time=00:30:00
-#SBATCH --job-name=impress
+# Customize one of example of Slurm job submission file as needed 
+https://github.com/radical-collaboration/IMPRESS/blob/feature/anvil_af2/src/rp/anvil/gpu_run.sbatch 
+https://github.com/radical-collaboration/IMPRESS/blob/feature/anvil_af2/src/rp/anvil/cpu_run.sbatch 
 
-module --force purge
-module load biocontainers/default
-module load alphafold/2.3.1
-module load anaconda
-conda activate $WORK_DIR/ve.impress
+# Submit the job using the following command
+sbatch <script name> 
 
-python <path_to_your_script>
-
-# Submit the Job
-sbatch job.sbatch
 ```

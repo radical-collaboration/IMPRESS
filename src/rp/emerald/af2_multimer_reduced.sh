@@ -48,7 +48,8 @@ python /projects/community/ai-fold/2021/bd387/envs/af2.2/alphafold/run_alphafold
     --uniprot_database_path=$DB_DIR/uniprot/uniprot.fasta \
     --max_template_date=2020-12-01 \
     --use_gpu_relax=TRUE \
-    --num_multimer_predictions_per_model=2 
+    --num_multimer_predictions_per_model=2 \
+
     
     
     
