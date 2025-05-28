@@ -7,11 +7,12 @@ import shutil
 from collections import defaultdict
 
 from pyrosetta import *
-init()
+#init()
 
 import radical.pilot as rp
 import radical.utils as ru
 
+USE_GPU = True
 BASE_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/IMPRESS/src/rp"
 ProteinMPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
 # File to store all required flags to run AlphaFold
@@ -19,21 +20,25 @@ FLAGFILE = f'{BASE_PATH}/anvil/reduced_db.ff'
 PIPELINE_NAMES = ['p1', 'p2']
 TASK_PRE_EXEC  = ['module load anaconda',
                 f"source activate base",
-                f"conda activate /anvil/scratch/{os.environ['USER']}/impress/test.impress"]
+                f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
 
-try:
-    output = subprocess.check_output(['nvidia-smi'], stderr=subprocess.STDOUT)
-    print("GPU is available:\n", output.decode())
-    #gpu_list = output.decode("utf-8").strip().split("\n")
+if USE_GPU:
+    RES_FILE = 'purdue.anvil_gpu'
     NUM_GPU = 1
+    GPUS_PER_PILOT = 2
     TASK_PRE_EXEC_AF  = ['module --force purge',
-                        'ml biocontainers alphafold/2.3.1',
-                        'module load modtree/gpu']
-except:
-    print("nvidia-smi not found or no GPU available")
+                        'ml modtree/gpu',
+                        'module load anaconda',
+                        f"source activate base",
+                        f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
+                       # 'ml biocontainers alphafold/2.3.1']
+else:
+    RES_FILE = 'purdue.anvil'
+    GPUS_PER_PILOT = 0
     NUM_GPU = 0
-    TASK_PRE_EXEC_AF  = ['module --force purge',
-                        'ml biocontainers alphafold/2.3.1']
+    TASK_PRE_EXEC_AF  = []
+    # TASK_PRE_EXEC_AF  = ['module --force purge',
+    #                     'ml biocontainers alphafold/2.3.1']
 
 tasks_finished_queue = queue.Queue()
 new_pipelines_queue  = queue.Queue()
@@ -68,12 +73,18 @@ class Pipeline:
 
         # pipeline space/sandboxes
         self.base_path        = kwargs.get('base_path', BASE_PATH)
-        self.protein_path        = kwargs.get('protein_path', ProteinMPNN_PATH)
+        # Path to the input for stage S1, S5
+        self.protein_path     = kwargs.get('protein_path', ProteinMPNN_PATH)
+        # Path to the input *.pbd files
         self.input_path       = f'{self.base_path}/{self.name}_in'
-        self.output_path      = (f'{self.base_path}/'
-                                 f'af_pipeline_outputs_multi/{self.name}')
+        # Path to  AlphaFold inputs/outputs for each pipeline
+        self.output_path      = (f'{self.base_path}/af_pipeline_outputs_multi/{self.name}')
+        # Path to the output from stage S1, S5
         self.output_path_mpnn = f'{self.output_path}/mpnn'
-        self.output_path_af   = f'{self.output_path}/af/prediction/best_models'
+        # Path to  AlphaFold inputs
+        self.fast_dir         = f'{self.output_path}/af/fasta'
+        # Path to  AlphaFold prediction results
+        self.prediction_path  = f'{self.output_path}/af/prediction/'
 
         # set up mpnn directories if needed
         for pass_idx in range(1, 6):
@@ -171,7 +182,7 @@ class Pipeline:
 
                     set_up_new_pipeline_dirs(p_name)
                     for a in sub_iter_seqs:
-                        shutil.copyfile(f'{self.output_path_af}/{a}.pdb',
+                        shutil.copyfile(f'{self.prediction_path}/best_model/{a}.pdb',
                                         f'{self.base_path}/{p_name}_in/{a}.pdb')
 
                     new_pipelines_queue.put({'name'       : p_name,
@@ -186,8 +197,8 @@ class Pipeline:
                 for a in sub_iter_seqs:
                     del self.curr_scores[a]
                     self.fasta_list_2.remove(f'{a}.pdb')
-                    os.unlink(f'{self.output_path_af}/{a}.pdb')
-                    os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
+                    os.unlink(f'{self.prediction_path}/best_model/{a}.pdb')
+                    os.unlink(f'{self.fast_dir}/{a}.fa')
                 self.prev_scores = copy.deepcopy(self.curr_scores)
         
         elif next_stage_id == 6:
@@ -215,6 +226,7 @@ class Pipeline:
                                   ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             'name': 'T1.initial.mpnn.run',
             'executable': 'python',
+            'ranks': 1,
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
                           f'-pdb={self.input_path}/',
                           f'-out={self.output_path_mpnn}/job_{self.passes}/',
@@ -256,15 +268,16 @@ class Pipeline:
         for fastas in self.fasta_list_2:
             fastas_0 = fastas.split('.')[0]
             fastas_2 = fastas.split('.')[-2]
-
             tds.append(rp.TaskDescription({
                 'uid': ru.generate_id(f'{self.name}.3.%(item_counter)06d',
                                       ru.ID_CUSTOM, ns=self.tmgr.session.uid),
                 'name': f'T3.af2.passes.{fastas_0}{self.passes}',
-                'executable': 'run_alphafold.sh',
-                'arguments': [f'--flagfile={FLAGFILE}', 
-                            f'--fasta_paths={self.output_path}/af/fasta/{fastas_0}.fa',
-                            f'--output_dir={self.output_path}/af/fasta/'],
+                'executable': '/bin/bash',
+                'named_env': 'bs0',
+                'arguments': [f'{self.base_path}/anvil/af2_multimer_reduced.sh',
+                              f'{self.output_path}/af/fasta/',
+                              f'{fastas_0}.fa',
+                              f'{self.output_path}/af/prediction/dimer_models/'],
                 'pre_exec': TASK_PRE_EXEC_AF,
                 'post_exec': ['cp '
                               + f'{self.output_path}/af/prediction/'
@@ -281,18 +294,39 @@ class Pipeline:
                               + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
                               + f'{self.output_path}/mpnn/job_{self.passes-1}/'
                               + f'{fastas_2}.pdb'],
-                'gpus_per_rank': NUM_GPU
+                'gpus_per_rank': 1
             }))
             # tds.append(rp.TaskDescription({
             #     'uid': ru.generate_id(f'{self.name}.3.%(item_counter)06d',
             #                           ru.ID_CUSTOM, ns=self.tmgr.session.uid),
             #     'name': f'T3.af2.passes.{fastas_0}{self.passes}',
-            #     'executable': 'python',
-            #     'arguments': [f'{self.base_path}/dummy_job.py',
-            #                   f'--passes={str(self.passes)}'],
-            #     'pre_exec': ['. /opt/sw/admin/lmod/lmod/init/profile',
-            #                  'echo $passes >> debug.txt'],
+            #     'executable': 'run_alphafold.sh',
+            #     'gpus_per_rank': 1,
+            #     'arguments': [f'--flagfile={FLAGFILE}', 
+            #                 f'--fasta_paths={self.fast_dir}/{fastas_0}.fa',
+            #                 f'--output_dir={self.prediction_path}/dimer_models'],
+            #     'pre_exec': TASK_PRE_EXEC_AF,
+            #     'post_exec': ['cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
+            #                   + f'{self.prediction_path}/best_models/{fastas_2}.pdb',
+            #                   'cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranking_debug*.json '
+            #                   + f'{self.prediction_path}/best_ptm/{fastas_2}.json',
+            #                   'cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
+            #                   + f'{self.output_path_mpnn}/job_{self.passes-1}/{fastas_2}.pdb'],
+            #     'gpus_per_rank': NUM_GPU
             # }))
+            # # tds.append(rp.TaskDescription({
+            # #     'uid': ru.generate_id(f'{self.name}.3.%(item_counter)06d',
+            # #                           ru.ID_CUSTOM, ns=self.tmgr.session.uid),
+            # #     'name': f'T3.af2.passes.{fastas_0}{self.passes}',
+            # #     'executable': 'python',
+            # #     'arguments': [f'{self.base_path}/dummy_job.py',
+            # #                   f'--passes={str(self.passes)}'],
+            # #     'pre_exec': ['. /opt/sw/admin/lmod/lmod/init/profile',
+            # #                  'echo $passes >> debug.txt'],
+            # # }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
@@ -324,7 +358,7 @@ class Pipeline:
             'name': f'T5.mpnn.passes.{self.passes}',
             'executable': 'python',
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
-                          f'-pdb={self.output_path_af}/',
+                          f'-pdb={self.prediction_path}/best_model',
                           f'-out={self.output_path_mpnn}/job_{self.passes}/',
                           f'-mpnn={self.protein_path}/',
                           f'-seqs={self.num_seqs}',
@@ -369,11 +403,12 @@ class Pipeline:
                 'uid': ru.generate_id(f'{self.name}.7.%(item_counter)06d',
                                       ru.ID_CUSTOM, ns=self.tmgr.session.uid),
                 'name': f'T7.af2.passes.{fastas_0}{self.passes}',
-                'executable': 'run_alphafold.sh',
+                'executable': '/bin/bash',
                 'named_env': 'bs0',
-                'arguments': [f'--flagfile={FLAGFILE}', 
-                            f'--fasta_paths={self.output_path}/af/fasta/{fastas_0}.fa',
-                            f'--output_dir={self.output_path}/af/fasta/'],
+                'arguments': [f'{self.base_path}/anvil/af2_multimer_reduced.sh',
+                              f'{self.output_path}/af/fasta/',
+                              f'{fastas_0}.fa',
+                              f'{self.output_path}/af/prediction/dimer_models/'],
                 'pre_exec': TASK_PRE_EXEC_AF,
                 'post_exec': ['cp '
                               + f'{self.output_path}/af/prediction/'
@@ -390,8 +425,29 @@ class Pipeline:
                               + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
                               + f'{self.output_path}/mpnn/job_{self.passes-1}/'
                               + f'{fastas_2}.pdb'],
-                'gpus_per_rank': NUM_GPU
+                'gpus_per_rank': 1
             }))
+            # tds.append(rp.TaskDescription({
+            #     'uid': ru.generate_id(f'{self.name}.7.%(item_counter)06d',
+            #                           ru.ID_CUSTOM, ns=self.tmgr.session.uid),
+            #     'name': f'T7.af2.passes.{fastas_0}{self.passes}',
+            #     'executable': 'run_alphafold.sh',
+            #     'named_env': 'bs0',
+            #     'arguments': [f'--flagfile={FLAGFILE}', 
+            #                 f'--fasta_paths={self.fast_dir}/{fastas_0}.fa',
+            #                 f'--output_dir={self.prediction_path}/dimer_models'],
+            #     'pre_exec': TASK_PRE_EXEC_AF,
+            #     'post_exec': ['cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
+            #                   + f'{self.prediction_path}/best_models/{fastas_2}.pdb',
+            #                   'cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranking_debug*.json '
+            #                   + f'{self.prediction_path}/best_ptm/{fastas_2}.json',
+            #                   'cp '
+            #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
+            #                   + f'{self.output_path_mpnn}/job_{self.passes-1}/{fastas_2}.pdb'],
+            #     'gpus_per_rank': NUM_GPU
+            # }))
         tasks = ru.as_list(self.tmgr.submit_tasks(tds))
         return len(tasks)
 
@@ -465,10 +521,10 @@ def main():
     tmgr = rp.TaskManager(session)
     tmgr.register_callback(task_state_cb)
     pilot = pmgr.submit_pilots(rp.PilotDescription({
-        'resource': 'purdue.anvil',
+        'resource': RES_FILE,
         'runtime' : 2880,
         'cores'   : 128,
-        'gpus'    : 0
+        'gpus'    : GPUS_PER_PILOT
     }))
     pilot.prepare_env('bs0',{'type':'shell'})
     tmgr.add_pilots(pilot)

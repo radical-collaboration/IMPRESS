@@ -34,7 +34,7 @@ conda install cudatoolkit=11.3 -c conda-forge
 # PyRosetta
 conda install -y pyrosetta -c https://conda.rosettacommons.org  # size: 1.4GB
 # Torch (for ProteinMPNN)
-conda install -y pytorch torchaudio torchvision cudatoolkit=11.3 -c pytorch 
+conda install -y pytorch torchaudio torchvision cudatoolkit -c pytorch 
 
 # OR use a corresponding file with the dependencies:
 #   conda env update -p $WORK_DIR/ve.impress --file environment.yml
