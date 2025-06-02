@@ -4,24 +4,27 @@ from radical.flow import WorkflowEngine
 from .impress_pipeline import BasePipeline
 
 class ImpressManager:
-    def __init__(self, execution_backend: RadicalExecutionBackend) -> None:
+    def __init__(self, execution_backend) -> None:
         self.active_pipelines = []
         self.asyncflow = WorkflowEngine(backend = execution_backend)
 
-    def start(self, pipeline: BasePipeline, config: dict):
-        self.active_pipelines.append(pipeline)
-        return pipeline
+    async def start(self, pipeline_setups: list):
 
-    def submit_new_pipeline(self, pipeline: BasePipeline, config: dict):
-        new_pipeline = pipeline.__class__(config)
-        self.active_pipes.append(new_pipeline)
-        return new_pipeline
+        # we will start the async loop somtime
+        submitted_pipelines = self.submit_new_pipeline(pipeline_setups)
+        futures = self.run_concurrent_pipelines()
 
-    async def run_pipeline(self, pipeline):
-        pass
+        return futures
 
-    async def run_concurrent_pipelines(self, count=2):
+    def submit_new_pipeline(self, pipeline_setups):
+        new_pipelines = []
+        for p in pipeline_setups:
+            new_pipelines.append(p['type'](name=p['name'], config=p['config'], flow=self.asyncflow))
+        
+        self.active_pipelines.extend(new_pipelines)
+
+        return new_pipelines
+
+    async def run_concurrent_pipelines(self):
         """Run multiple pipelines concurrently"""
-        pipelines = [self.create_pipeline(name) for name in self.pipeline_names[:count]]
-        results = await asyncio.gather(*[self.run_pipeline(pipe) for pipe in pipelines])
-
+        results = await asyncio.gather(*[pipe.run() for pipe in self.active_pipelines])
