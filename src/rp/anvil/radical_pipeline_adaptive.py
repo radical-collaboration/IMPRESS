@@ -13,10 +13,11 @@ import radical.pilot as rp
 import radical.utils as ru
 
 USE_GPU = True
+MACHINE = 'anvil'
 BASE_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/IMPRESS/src/rp"
 ProteinMPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
 # File to store all required flags to run AlphaFold
-FLAGFILE = f'{BASE_PATH}/anvil/reduced_db.ff'
+#FLAGFILE = f'{BASE_PATH}/anvil/reduced_db.ff'
 PIPELINE_NAMES = ['p1', 'p2']
 TASK_PRE_EXEC  = ['module load anaconda',
                 f"source activate base",
@@ -26,19 +27,12 @@ if USE_GPU:
     RES_FILE = 'purdue.anvil_gpu'
     NUM_GPU = 1
     GPUS_PER_PILOT = 2
-    TASK_PRE_EXEC_AF  = ['module --force purge',
-                        'ml modtree/gpu',
-                        'module load anaconda',
-                        f"source activate base",
-                        f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
-                       # 'ml biocontainers alphafold/2.3.1']
+
 else:
     RES_FILE = 'purdue.anvil'
     GPUS_PER_PILOT = 0
     NUM_GPU = 0
-    TASK_PRE_EXEC_AF  = []
-    # TASK_PRE_EXEC_AF  = ['module --force purge',
-    #                     'ml biocontainers alphafold/2.3.1']
+
 
 tasks_finished_queue = queue.Queue()
 new_pipelines_queue  = queue.Queue()
@@ -84,7 +78,7 @@ class Pipeline:
         # Path to  AlphaFold inputs
         self.fast_dir         = f'{self.output_path}/af/fasta'
         # Path to  AlphaFold prediction results
-        self.prediction_path  = f'{self.output_path}/af/prediction/'
+        self.prediction_path  = f'{self.output_path}/af/prediction'
 
         # set up mpnn directories if needed
         for pass_idx in range(1, 6):
@@ -133,7 +127,7 @@ class Pipeline:
             # decision-making process regarding the structure and the sequence
             # (read csv and update self.seq_rank and self.passes accordingly)
             file_name = f'af_stats_{self.name}_pass_{self.passes}.csv'
-            with open(BASE_PATH + '/' + file_name) as fd:
+            with open(BASE_PATH + '/' + MACHINE + '/' + file_name) as fd:
                 for line in fd.readlines()[1:]:
                     line = line.strip()
                     if not line:
@@ -182,7 +176,7 @@ class Pipeline:
 
                     set_up_new_pipeline_dirs(p_name)
                     for a in sub_iter_seqs:
-                        shutil.copyfile(f'{self.prediction_path}/best_model/{a}.pdb',
+                        shutil.copyfile(f'{self.prediction_path}/best_models/{a}.pdb',
                                         f'{self.base_path}/{p_name}_in/{a}.pdb')
 
                     new_pipelines_queue.put({'name'       : p_name,
@@ -197,7 +191,7 @@ class Pipeline:
                 for a in sub_iter_seqs:
                     del self.curr_scores[a]
                     self.fasta_list_2.remove(f'{a}.pdb')
-                    os.unlink(f'{self.prediction_path}/best_model/{a}.pdb')
+                    os.unlink(f'{self.prediction_path}/best_models/{a}.pdb')
                     os.unlink(f'{self.fast_dir}/{a}.fa')
                 self.prev_scores = copy.deepcopy(self.curr_scores)
         
@@ -274,11 +268,11 @@ class Pipeline:
                 'name': f'T3.af2.passes.{fastas_0}{self.passes}',
                 'executable': '/bin/bash',
                 'named_env': 'bs0',
-                'arguments': [f'{self.base_path}/anvil/af2_multimer_reduced.sh',
+                'arguments': [f'{self.base_path}/{MACHINE}/af2_multimer_reduced.sh',
                               f'{self.output_path}/af/fasta/',
                               f'{fastas_0}.fa',
                               f'{self.output_path}/af/prediction/dimer_models/'],
-                'pre_exec': TASK_PRE_EXEC_AF,
+            #    'pre_exec': TASK_PRE_EXEC,
                 'post_exec': ['cp '
                               + f'{self.output_path}/af/prediction/'
                               + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
@@ -305,7 +299,7 @@ class Pipeline:
             #     'arguments': [f'--flagfile={FLAGFILE}', 
             #                 f'--fasta_paths={self.fast_dir}/{fastas_0}.fa',
             #                 f'--output_dir={self.prediction_path}/dimer_models'],
-            #     'pre_exec': TASK_PRE_EXEC_AF,
+            #     'pre_exec': TASK_PRE_EXEC,
             #     'post_exec': ['cp '
             #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
             #                   + f'{self.prediction_path}/best_models/{fastas_2}.pdb',
@@ -358,7 +352,7 @@ class Pipeline:
             'name': f'T5.mpnn.passes.{self.passes}',
             'executable': 'python',
             'arguments': [f'{self.base_path}/mpnn_wrapper.py',
-                          f'-pdb={self.prediction_path}/best_model',
+                          f'-pdb={self.prediction_path}/best_models',
                           f'-out={self.output_path_mpnn}/job_{self.passes}/',
                           f'-mpnn={self.protein_path}/',
                           f'-seqs={self.num_seqs}',
@@ -405,11 +399,11 @@ class Pipeline:
                 'name': f'T7.af2.passes.{fastas_0}{self.passes}',
                 'executable': '/bin/bash',
                 'named_env': 'bs0',
-                'arguments': [f'{self.base_path}/anvil/af2_multimer_reduced.sh',
+                'arguments': [f'{self.base_path}/{MACHINE}/af2_multimer_reduced.sh',
                               f'{self.output_path}/af/fasta/',
                               f'{fastas_0}.fa',
                               f'{self.output_path}/af/prediction/dimer_models/'],
-                'pre_exec': TASK_PRE_EXEC_AF,
+            #    'pre_exec': TASK_PRE_EXEC,
                 'post_exec': ['cp '
                               + f'{self.output_path}/af/prediction/'
                               + f'dimer_models/{fastas_2}/*ranked_0*.pdb '
@@ -436,7 +430,7 @@ class Pipeline:
             #     'arguments': [f'--flagfile={FLAGFILE}', 
             #                 f'--fasta_paths={self.fast_dir}/{fastas_0}.fa',
             #                 f'--output_dir={self.prediction_path}/dimer_models'],
-            #     'pre_exec': TASK_PRE_EXEC_AF,
+            #     'pre_exec': TASK_PRE_EXEC,
             #     'post_exec': ['cp '
             #                   + f'{self.prediction_path}/dimer_models/{fastas_2}/*ranked_0*.pdb '
             #                   + f'{self.prediction_path}/best_models/{fastas_2}.pdb',
@@ -472,14 +466,13 @@ class Pipeline:
 
 def set_up_new_pipeline_dirs(pipe_name):
     
+    path = f"{BASE_PATH}/{pipe_name}_in"
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+        
     path = f"{BASE_PATH}/af_pipeline_outputs_multi/{pipe_name}/af/fasta/"
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
-        print(f"ERROR: {path} did not exist. ")
-        print(f"It was just created, but it is empty.")
-        print(f"Script execution is now aborting.")
-        print(f"Please copy the input files and try again.")
-        exit(1)
 
     path = f"{BASE_PATH}/af_pipeline_outputs_multi/{pipe_name}/af/prediction/best_models/"
     if not os.path.exists(path):
