@@ -4,6 +4,7 @@ from impress import ImpressBasePipeline
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, step_id=None, configs={}, **kwargs):
 
+        self.name = name
         self.flow = flow
         self.configs = configs
         self.current_scores = {}
@@ -44,22 +45,22 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         print(f'Next Step ID: {next_step}')
 
         if next_step == 1:
-            print('Executing S1')
+            print(f'Executing S1 of {self.name}')
             s1_result = await self.s1()
             print(s1_result)
         elif next_step == 2:
-            print('Executing S2')
+            print(f'Executing S2 of {self.name}')
             s2_result = await self.s2()
             print(s2_result)
         elif next_step == 3:
             if self.iterations < 3:
-                print('Executing S1')
+                print(f'Executing S1 of {self.name}')
                 s1_result = await self.s1()
                 print(s1_result)
             else:
-                print('Executing S3')
+                print(f'Executing S3 of {self.name}')
                 s3_result = await self.s3()
                 print(s3_result)
         else:
-            print('Finalizing')
+            print(f'Finalizing pipeline {self.name}')
             self.finalize()

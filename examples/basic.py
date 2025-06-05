@@ -1,7 +1,16 @@
+import asyncio
 
-from radical.flow import RadicalExecutionBackend
-from src.pipelines.protein_binding import ProteinBindingPipeline
+from radical.flow import WorkflowEngine
+from radical.flow import ThreadExecutionBackend
 
-manager = ImpressManager(backend=RadicalExecutionBackend({}))
+from impress.impress_manager import ImpressManager
+from impress.pipelines.protein_binding import ProteinBindingPipeline
 
-futures = manager.start(pipeline_setup=[{'type': ProteinBindingPipeline, 'config': {}}])
+async def impress_protein_bind():
+
+    manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
+
+    futures = await manager.start(pipeline_setups=[{'type': ProteinBindingPipeline, 'config': {}, 'name': 'p1'},
+                                                   {'type': ProteinBindingPipeline, 'config': {}, 'name': 'p2'}])
+
+asyncio.run(impress_protein_bind())

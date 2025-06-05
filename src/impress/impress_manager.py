@@ -1,3 +1,4 @@
+import asyncio
 import typeguard
 
 from radical.flow import WorkflowEngine
@@ -6,14 +7,13 @@ from radical.flow import WorkflowEngine
 class ImpressManager:
     def __init__(self, execution_backend) -> None:
         self.active_pipelines = []
-        self.asyncflow = WorkflowEngine(backend = execution_backend)
+        self.flow = WorkflowEngine(backend = execution_backend)
 
     async def start(self, pipeline_setups: list):
 
         # we will start the async loop sometime
         submitted_pipelines = self.submit_new_pipeline(pipeline_setups)
-        futures = self.run_concurrent_pipelines()
-
+        futures = await self.run_concurrent_pipelines()
         return futures
 
     def submit_new_pipeline(self, pipeline_setups):
@@ -21,7 +21,7 @@ class ImpressManager:
         for p in pipeline_setups:
             new_pipelines.append(p['type'](name=p['name'],
                                            config=p['config'],
-                                           flow=self.asyncflow))
+                                           flow=self.flow))
 
         self.active_pipelines.extend(new_pipelines)
 
