@@ -1,14 +1,16 @@
-class ImpressBasePipeline:
+from abc import ABC, abstractmethod
+
+class ImpressBasePipeline(ABC):
     def __init__(self, config: dict):
         self.state = {}
         self.config = config
 
     @abstractmethod
-    def decide(self):
+    def run(self):
         """Optional: override in subclass"""
         pass
 
     @abstractmethod
-    def submit_next(self):
+    def register_pipeline_tasks(self):
         """Optional: override in subclass"""
         pass
