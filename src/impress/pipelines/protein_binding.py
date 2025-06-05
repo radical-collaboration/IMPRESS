@@ -14,6 +14,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         super().__init__(name, **configs)
 
         self.register_pipeline_tasks()
+    
+    def should_continue(self, result):
+        return True
+
+    def get_current_config_for_next_pipeline(self):
+        # Return a dict like those passed to `submit_new_pipelines`
+        return {"name": "adaptively_generate_pipeline",
+                "type": ProteinBindingPipeline}
 
     def register_pipeline_tasks(self):
 
