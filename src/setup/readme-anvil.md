@@ -11,7 +11,7 @@ mkdir $WORK_DIR/inputs
 mkdir $WORK_DIR/outputs
 cd $WORK_DIR
 git clone git@github.com:radical-collaboration/IMPRESS.git
-git checkout fix/anvil_netface
+git checkout feature/anvil_af2
 ```
 
 # Environment Setup
