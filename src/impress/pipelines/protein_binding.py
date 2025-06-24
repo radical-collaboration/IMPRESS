@@ -9,6 +9,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.configs = configs
         self.current_scores = {}
         self.step_id = kwargs.get('step_id', 1)
+        self.sub_order = kwargs.get('sub_order', 0)
+        self.iter_seqs = kwargs.get('iter_seqs', {})
         self.previous_scores = kwargs.get('previous_score', {})
 
         super().__init__(name, **configs)
@@ -27,20 +29,20 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.flow.executable_task
         async def s1(*args, **kwargs):
-            return "/bin/echo I am S1"
+            return "/bin/echo I am S1 executed at && /bin/date"
         self.s1 = s1
 
         @self.flow.executable_task
         async def s2(*args, **kwargs):
-            return "/bin/echo I am S2"
+            return "/bin/echo I am S2 executed at && /bin/date"
         self.s2 = s2
 
         @self.flow.executable_task
         async def s3(*args, **kwargs):
-            return "/bin/echo I am S3"
+            return "/bin/echo I am S3 executed at && /bin/date"
         self.s3 = s3
 
-    async def get_scores(self):
+    async def get_scores_map(self):
         return {'c_scores': self.current_scores,
                 'p_scores': self.previous_scores}
 
@@ -49,26 +51,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     async def run(self):
         next_step = self.step_id + 1
+        s1_res = await self.s1()
+        s2_res = await self.s2()
+        s3_res = await self.s3()
 
-        print(f'Next Step ID: {next_step}')
+        print(f'From pipeline: {self.name}: I am {s1_res}')
+        print(f'From pipeline: {self.name}: I am {s2_res}')
+        print(f'From pipeline: {self.name}: I am {s3_res}')
 
-        if next_step == 1:
-            print(f'Executing S1 of {self.name}')
-            s1_result = await self.s1()
-            print(s1_result)
-        elif next_step == 2:
-            print(f'Executing S2 of {self.name}')
-            s2_result = await self.s2()
-            print(s2_result)
-        elif next_step == 3:
-            if self.iterations < 3:
-                print(f'Executing S1 of {self.name}')
-                s1_result = await self.s1()
-                print(s1_result)
-            else:
-                print(f'Executing S3 of {self.name}')
-                s3_result = await self.s3()
-                print(s3_result)
-        else:
-            print(f'Finalizing pipeline {self.name}')
-            self.finalize()
+        self.current_scores = {f"protein_{i}": i * 10 + self.step_id for i in range(1, 4)}
+        self.previous_scores = {f"protein_{i}": i * 10 + self.sub_order for i in range(1, 4)}
+        self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}

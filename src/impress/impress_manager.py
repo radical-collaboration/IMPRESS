@@ -1,5 +1,5 @@
 import asyncio
-from radical.flow import WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 
 class ImpressManager:
     def __init__(self, execution_backend) -> None:
@@ -11,47 +11,41 @@ class ImpressManager:
         new_pipelines = []
         for p in pipeline_setups:
             pipeline = p['type'](name=p['name'], flow=self.flow, **p.get('config', {}))
+            adaptive_fn = p.get('adaptive_fn')
+            pipeline._adaptive_fn = adaptive_fn  # Store it in pipeline for later use
             self.active_pipelines.append(pipeline)
             new_pipelines.append(pipeline)
         return new_pipelines
 
     async def run_pipeline(self, pipeline):
         """Run a single pipeline and return its result and reference."""
-        result = await pipeline.run()
-        return (pipeline, result)
+        await pipeline.run()
+        return pipeline
 
     async def start(self, pipeline_setups: list):
-        """Main loop: run pipelines, collect results, and spawn more."""
-        # Submit initial pipelines
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
-            # Wait for all current pipelines to finish
             if not self.active_pipelines:
                 print("No active pipelines. Sleeping...")
                 await asyncio.sleep(1)
                 continue
 
-            # Run all current pipelines concurrently
             futures = [self.run_pipeline(p) for p in self.active_pipelines]
             finished = await asyncio.gather(*futures)
-
-            # Clear completed pipelines
             self.active_pipelines = []
 
-            # Evaluate results and conditionally add more pipelines
             new_pipelines = []
-            for pipeline, result in finished:
-                # FIXME: this should be provided by user, i.e,
-                # a logic that should if to continue or not.
-                if pipeline.should_continue(result):
-                    new_pipeline = pipeline.get_current_config_for_next_pipeline()
-                    new_pipelines.append(new_pipeline)
+            for pipeline in finished:
+                adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
+                if adaptive_fn:
+                    new_pipe_config = await adaptive_fn(pipeline)
+                    if new_pipe_config:
+                        print(f"Submitting new pipeline: {new_pipe_config['name']} originating from {pipeline.name}")
+                        new_pipelines.append(new_pipe_config)
 
-            # If no new work is added, break or wait
             if not new_pipelines:
                 print("No new pipelines to submit. Exiting.")
                 break
 
-            # Submit new pipelines
             self.submit_new_pipelines(new_pipelines)
