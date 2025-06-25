@@ -1,51 +1,64 @@
 import asyncio
 from radical.asyncflow import WorkflowEngine
+from .pipelines.impress_pipeline import ImpressBasePipeline
 
 class ImpressManager:
-    def __init__(self, execution_backend) -> None:
+    def __init__(self, execution_backend):
         self.flow = WorkflowEngine(backend=execution_backend)
-        self.active_pipelines = []
+        self.pipeline_tasks = {}  # {pipeline: task}
+        self.new_pipeline_buffer = []
 
     def submit_new_pipelines(self, pipeline_setups):
-        """Submit new pipelines and add to active list."""
-        new_pipelines = []
-        for p in pipeline_setups:
-            pipeline = p['type'](name=p['name'], flow=self.flow, **p.get('config', {}))
-            adaptive_fn = p.get('adaptive_fn')
-            pipeline._adaptive_fn = adaptive_fn  # Store it in pipeline for later use
-            self.active_pipelines.append(pipeline)
-            new_pipelines.append(pipeline)
-        return new_pipelines
+        for setup in pipeline_setups:
 
-    async def run_pipeline(self, pipeline):
-        """Run a single pipeline and return its result and reference."""
-        await pipeline.run()
-        return pipeline
+            if not isinstance(setup['type'], type) or not issubclass(setup['type'], ImpressBasePipeline):
+                raise ValueError(f"Expected an ImpressBasePipeline subclass, got {type(setup['type'])}")
+
+            pipeline = setup['type'](name=setup['name'],
+                                     flow=self.flow,
+                                     **setup.get('config', {}))
+
+            pipeline._adaptive_fn = setup.get('adaptive_fn')
+
+            # invoke the pipeline execution but do not wait/block for it
+            task = asyncio.create_task(pipeline.run())
+            self.pipeline_tasks[pipeline] = task
 
     async def start(self, pipeline_setups: list):
+        
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
-            if not self.active_pipelines:
-                print("No active pipelines. Sleeping...")
-                await asyncio.sleep(1)
-                continue
+            any_activity = False
 
-            futures = [self.run_pipeline(p) for p in self.active_pipelines]
-            finished = await asyncio.gather(*futures)
-            self.active_pipelines = []
+            for pipeline, task in list(self.pipeline_tasks.items()):
+                if getattr(pipeline, 'invoke_adaptive_step', False):
+                    adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
+                    if adaptive_fn:
+                        print(f"Checking adaptive function for {pipeline.name}")
+                        config = await adaptive_fn(pipeline)
 
-            new_pipelines = []
-            for pipeline in finished:
-                adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
-                if adaptive_fn:
-                    new_pipe_config = await adaptive_fn(pipeline)
-                    if new_pipe_config:
-                        print(f"Submitting new pipeline: {new_pipe_config['name']} originating from {pipeline.name}")
-                        new_pipelines.append(new_pipe_config)
+                        pipeline.invoke_adaptive_step = False
+                        pipeline._adaptive_barrier.set()  # unblock pipeline execution
 
-            if not new_pipelines:
-                print("No new pipelines to submit. Exiting.")
+                        if config:
+                            config['adaptive_fn'] = adaptive_fn
+                            print(f"Submitting new pipeline: {config['name']} from {pipeline.name}")
+                            self.new_pipeline_buffer.append(config)
+                            any_activity = True
+
+                # If the task is done, remove it
+                if task.done():
+                    self.pipeline_tasks.pop(pipeline)
+
+            if self.new_pipeline_buffer:
+                self.submit_new_pipelines(self.new_pipeline_buffer)
+                self.new_pipeline_buffer.clear()
+                any_activity = True
+
+            if not self.pipeline_tasks and not self.new_pipeline_buffer:
+                print("All pipelines finished. Exiting.")
                 break
 
-            self.submit_new_pipelines(new_pipelines)
+            if not any_activity:
+                await asyncio.sleep(0.5)

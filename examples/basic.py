@@ -1,7 +1,6 @@
 import copy
 import asyncio
 
-from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import ThreadExecutionBackend
 
 from impress.impress_manager import ImpressManager
@@ -13,7 +12,6 @@ async def adaptive_criteria(current_score, previous_score):
 	if current_score > previous_score:
 		return True
 	return False
-
 
 async def alphafold_adaptive_fn1(pipeline):
     MAX_SUB_PIPELINES = 3
@@ -30,6 +28,7 @@ async def alphafold_adaptive_fn1(pipeline):
                     # Got worse, must move to new pipeline
                     sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
 
+    print(sub_iter_seqs, pipeline.sub_order)
     if sub_iter_seqs and pipeline.sub_order < MAX_SUB_PIPELINES:
         new_name = f"{pipeline.name}_sub{pipeline.sub_order + 1}"
 
@@ -41,7 +40,7 @@ async def alphafold_adaptive_fn1(pipeline):
                        'sub_order': pipeline.sub_order + 1,
                        'previous_score': copy.deepcopy(current_scores['c_scores']),},
             'adaptive_fn': alphafold_adaptive_fn1}
-        
+
         return new_pipe_config
 
     return None
@@ -51,9 +50,11 @@ async def impress_protein_bind():
 
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
-    futures = await manager.start(pipeline_setups=[{'type': ProteinBindingPipeline,
-                                                    'config': {}, 'name': 'p1', 'adaptive_fn': alphafold_adaptive_fn1},
-                                                   {'type': ProteinBindingPipeline,
-                                                    'config': {}, 'name': 'p2', 'adaptive_fn': alphafold_adaptive_fn1}])
+    await manager.start(pipeline_setups=[{'name': 'p1', 'config': {}, 
+                                          'type': ProteinBindingPipeline,
+                                          'adaptive_fn': alphafold_adaptive_fn1},
+                                         {'name': 'p2', 'config': {}, 
+                                          'type': ProteinBindingPipeline,
+                                          'adaptive_fn': alphafold_adaptive_fn1}])
 
 asyncio.run(impress_protein_bind())
