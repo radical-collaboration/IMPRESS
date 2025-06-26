@@ -46,6 +46,10 @@ class ImpressManager:
                             print(f"Submitting new pipeline: {config['name']} from {pipeline.name}")
                             self.new_pipeline_buffer.append(config)
                             any_activity = True
+                        
+                        if pipeline.kill_parent:
+                            print(f'Killing {pipeline.name} pipeline')
+                            task.cancel()
 
                 # If the task is done, remove it
                 if task.done():

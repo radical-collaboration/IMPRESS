@@ -6,6 +6,7 @@ class ImpressBasePipeline(ABC):
     def __init__(self, config: dict):
         self.state = {}
         self.config = config
+        self.kill_parent = False
         self.invoke_adaptive_step = False
         self._adaptive_barrier = asyncio.Event()
 

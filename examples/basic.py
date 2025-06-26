@@ -1,5 +1,6 @@
 import copy
 import asyncio
+import random
 
 from radical.asyncflow import ThreadExecutionBackend
 
@@ -28,7 +29,6 @@ async def alphafold_adaptive_fn1(pipeline):
                     # Got worse, must move to new pipeline
                     sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
 
-    print(sub_iter_seqs, pipeline.sub_order)
     if sub_iter_seqs and pipeline.sub_order < MAX_SUB_PIPELINES:
         new_name = f"{pipeline.name}_sub{pipeline.sub_order + 1}"
 
@@ -40,6 +40,14 @@ async def alphafold_adaptive_fn1(pipeline):
                        'sub_order': pipeline.sub_order + 1,
                        'previous_score': copy.deepcopy(current_scores['c_scores']),},
             'adaptive_fn': alphafold_adaptive_fn1}
+
+        # Dummy randomized version to simulate that if not fasta files
+        # left, then kill the parent pipeline
+        if random.choice([True, False]):
+            print("[DUMMY] Simulating: pipeline.fasta_list_2 is empty")
+            pipeline.kill_parent = True
+        else:
+            print("[DUMMY] Simulating: pipeline.fasta_list_2 is not empty")
 
         return new_pipe_config
 

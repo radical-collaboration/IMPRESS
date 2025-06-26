@@ -9,6 +9,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.name = name
         self.flow = flow
         self.configs = configs
+        self.kill_parent = False
         self.current_scores = {}
 
         self.step_id = kwargs.get('step_id', 1)
@@ -27,6 +28,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     async def await_adaptive_unlock(self) -> any:
         """Pause until manager completes adaptive step and returns result."""
+
         print(f"[{self.name}] Waiting on adaptive barrier...")
         await self._adaptive_barrier.wait()
         print(f"[{self.name}] Resumed after adaptive step.")
@@ -90,7 +92,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         s3_res = await self.s3()
         s4_res = await self.s4()
         s5_res = await self.s5()
-
 
         print(f'From pipeline: {self.name}: {s3_res}')
         print(f'From pipeline: {self.name}: {s4_res}')
