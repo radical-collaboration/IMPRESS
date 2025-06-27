@@ -26,12 +26,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         if value:
             self._adaptive_barrier.clear()
 
+    async def trigger_and_wait_adaptive(self):
+        self.set_adaptive_flag(True)
+        await self.await_adaptive_unlock()
+
     async def await_adaptive_unlock(self) -> any:
         """Pause until manager completes adaptive step and returns result."""
 
-        print(f"[{self.name}] Waiting on adaptive barrier...")
+        print(f"[{self.name}] Starting adaptive task")
         await self._adaptive_barrier.wait()
-        print(f"[{self.name}] Resumed after adaptive step.")
+        print(f"[{self.name}] Exiting adaptive step.")
 
     def get_current_config_for_next_pipeline(self):
 
@@ -74,7 +78,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         return
 
     async def run(self):
-        next_step = self.step_id + 1
+
         s1_res = await self.s1()
         s2_res = await self.s2()
 
@@ -85,9 +89,10 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}
             self.current_scores = {f"protein_{i}": i * 10 + self.step_id for i in range(1, 4)}
             self.previous_scores = {f"protein_{i}": i * 10 + self.sub_order for i in range(1, 4)}
-            
-            self.set_adaptive_flag(True)
-            await self.await_adaptive_unlock()
+
+            # this will ask the manager to invoke the adaptive
+            # while respecting execution flow of the pipeline stages
+            await self.trigger_and_wait_adaptive()
 
         s3_res = await self.s3()
         s4_res = await self.s4()

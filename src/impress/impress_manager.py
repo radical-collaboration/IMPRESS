@@ -49,6 +49,7 @@ class ImpressManager:
                         if pipeline.kill_parent:
                             print(f'Decision-Step: Killing {pipeline.name} pipeline')
                             task.cancel()
+                            self.pipeline_tasks.pop(pipeline)
 
                 # If the task is done, remove it
                 if task.done():

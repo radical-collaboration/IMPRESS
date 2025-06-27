@@ -66,6 +66,6 @@ async def impress_protein_bind():
                                           'adaptive_fn': alphafold_adaptive_fn1},
                                          {'name': 'p3', 'config': {},
                                           'type': ProteinBindingPipeline,
-                                          'adaptive_fn': alphafold_adaptive_fn1},                                          ])
+                                          'adaptive_fn': alphafold_adaptive_fn1}])
 
 asyncio.run(impress_protein_bind())
