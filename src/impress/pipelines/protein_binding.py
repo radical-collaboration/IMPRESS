@@ -78,8 +78,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         s1_res = await self.s1()
         s2_res = await self.s2()
 
-        print(f'From pipeline: {self.name}: {s1_res}')
-        print(f'From pipeline: {self.name}: {s2_res}')
+        print(f'[{self.name}] {s1_res}')
+        print(f'[{self.name}] {s2_res}')
 
         if s2_res:
             self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}
@@ -93,6 +93,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         s4_res = await self.s4()
         s5_res = await self.s5()
 
-        print(f'From pipeline: {self.name}: {s3_res}')
-        print(f'From pipeline: {self.name}: {s4_res}')
-        print(f'From pipeline: {self.name}: {s5_res}')
+        print(f'[{self.name}] {s3_res}')
+        print(f'[{self.name}] {s4_res}')
+        print(f'[{self.name}] {s5_res}')

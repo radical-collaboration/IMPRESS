@@ -35,7 +35,6 @@ class ImpressManager:
                 if getattr(pipeline, 'invoke_adaptive_step', False):
                     adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
                     if adaptive_fn:
-                        print(f"Checking adaptive function for {pipeline.name}")
                         config = await adaptive_fn(pipeline)
 
                         pipeline.invoke_adaptive_step = False
@@ -43,12 +42,12 @@ class ImpressManager:
 
                         if config:
                             config['adaptive_fn'] = adaptive_fn
-                            print(f"Submitting new pipeline: {config['name']} from {pipeline.name}")
+                            print(f"Decision-Step: Submitting new pipeline: {config['name']} from {pipeline.name}")
                             self.new_pipeline_buffer.append(config)
                             any_activity = True
                         
                         if pipeline.kill_parent:
-                            print(f'Killing {pipeline.name} pipeline')
+                            print(f'Decision-Step: Killing {pipeline.name} pipeline')
                             task.cancel()
 
                 # If the task is done, remove it
