@@ -47,7 +47,7 @@ class ImpressManager:
                         try:
                             config = await adaptive_fn(pipeline)
                         except Exception as e:
-                            print(f'Adaptive stage failed with: {e}')
+                            print(f'IMPRESS-Manager: Adaptive stage failed with: {e}')
                             task.cancel()
                             completed_pipelines.append(pipeline)
                         finally:
@@ -56,12 +56,12 @@ class ImpressManager:
 
                         if config and pipeline not in completed_pipelines:
                             config['adaptive_fn'] = adaptive_fn
-                            print(f"Decision-Step: Submitting new pipeline: {config['name']} from {pipeline.name}")
+                            print(f"IMPRESS-Manager: Submitting new pipeline: {config['name']} from {pipeline.name}")
                             self.new_pipeline_buffer.append(config)
                             any_activity = True
 
                         if getattr(pipeline, 'kill_parent', False):
-                            print(f'Decision-Step: Killing {pipeline.name} pipeline')
+                            print(f'IMPRESS-Manager: Killing {pipeline.name} pipeline')
                             task.cancel()
                             completed_pipelines.append(pipeline)
 
@@ -75,7 +75,7 @@ class ImpressManager:
                 any_activity = True
 
             if not self.pipeline_tasks and not self.new_pipeline_buffer:
-                print("All pipelines finished. Exiting.")
+                print("IMPRESS-Manager: All pipelines finished. Exiting.")
                 break
 
             if not any_activity:
