@@ -24,20 +24,17 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
     def register_pipeline_tasks(self):
 
-        @self.flow.executable_task
+        @self.auto_register_task()
         async def s1(*args, **kwargs):
             return "/bin/echo I am S1 executed at && /bin/date"
-        self.s1 = s1
 
-        @self.flow.executable_task
+        @self.auto_register_task()
         async def s2(*args, **kwargs):
             return "/bin/echo I am S2 executed at && /bin/date"
-        self.s2 = s2
 
-        @self.flow.executable_task
+        @self.auto_register_task()
         async def s3(*args, **kwargs):
             return "/bin/echo I am S3 executed at && /bin/date"
-        self.s3 = s3
 
     async def run(self):
 
