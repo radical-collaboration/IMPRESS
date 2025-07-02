@@ -30,30 +30,44 @@ class ImpressManager:
 
         while True:
             any_activity = False
+            completed_pipelines = []
 
             for pipeline, task in list(self.pipeline_tasks.items()):
+                # Check if task is done first to avoid unnecessary work
+                if task.done():
+                    completed_pipelines.append(pipeline)
+                    continue
+
                 if getattr(pipeline, 'invoke_adaptive_step', False):
+                    
                     adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
+                    
                     if adaptive_fn:
-                        config = await adaptive_fn(pipeline)
+                        config = None
+                        try:
+                            config = await adaptive_fn(pipeline)
+                        except Exception as e:
+                            print(f'Adaptive stage failed with: {e}')
+                            task.cancel()
+                            completed_pipelines.append(pipeline)
+                        finally:
+                            pipeline.invoke_adaptive_step = False
+                            pipeline._adaptive_barrier.set()
 
-                        pipeline.invoke_adaptive_step = False
-                        pipeline._adaptive_barrier.set()  # unblock pipeline execution
-
-                        if config:
+                        if config and pipeline not in completed_pipelines:
                             config['adaptive_fn'] = adaptive_fn
                             print(f"Decision-Step: Submitting new pipeline: {config['name']} from {pipeline.name}")
                             self.new_pipeline_buffer.append(config)
                             any_activity = True
-                        
-                        if pipeline.kill_parent:
+
+                        if getattr(pipeline, 'kill_parent', False):
                             print(f'Decision-Step: Killing {pipeline.name} pipeline')
                             task.cancel()
-                            self.pipeline_tasks.pop(pipeline)
+                            completed_pipelines.append(pipeline)
 
-                # If the task is done, remove it
-                if task.done():
-                    self.pipeline_tasks.pop(pipeline)
+            # Clean up completed pipelines
+            for pipeline in completed_pipelines:
+                self.pipeline_tasks.pop(pipeline, None)
 
             if self.new_pipeline_buffer:
                 self.submit_new_pipelines(self.new_pipeline_buffer)
