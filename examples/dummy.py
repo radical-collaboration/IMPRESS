@@ -11,11 +11,8 @@ from impress.impress_manager import ImpressManager
 class DummyProteinPipeline(ImpressBasePipeline):
 
     def __init__(self, name, flow, configs={}, **kwargs):
-        self.flow = flow
-        self.iter_seqs = None
-        self.current_scores = None
-        self.previous_scores = None
 
+        self.iter_seqs = None
         self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}
         self.current_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
         self.previous_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
@@ -43,9 +40,6 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
         print(f'[{self.name}] {s1_res}')
         print(f'[{self.name}] {s2_res}')
-
-        # this will ask the manager to invoke the adaptive
-        # while respecting execution flow of the pipeline stages
 
         s3_res = await self.s3()
 

@@ -11,7 +11,6 @@ from radical.asyncflow import ThreadExecutionBackend
 class DummyProteinPipeline(ImpressBasePipeline):
 
     def __init__(self, name, flow, configs={}, **kwargs):
-        self.flow = flow
         self.iter_seqs = 'MKFLVLACGT'
         self.generation = configs.get('generation', 1)
         self.parent_name = configs.get('parent_name', 'root')
@@ -45,6 +44,8 @@ class DummyProteinPipeline(ImpressBasePipeline):
         print(f'[{self.name}] {fitness_res}')
         
         # Decision point: Should we create new pipelines?
+        # This will ask the manager to invoke the adaptive if so,
+        # while respecting execution flow of the pipeline stages
         await self.trigger_and_wait_adaptive()
         
         # Step 3: Final optimization
@@ -82,7 +83,7 @@ async def run_dummy_pipelines():
                 },
                 'adaptive_fn': adaptive_optimization_strategy
             }
-            
+
             print(f"🚀 [{pipeline.name}] Creating new pipeline: {new_name}")
             return new_pipe_config
         else:
@@ -91,7 +92,7 @@ async def run_dummy_pipelines():
 
 
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
-    
+
     await manager.start(pipeline_setups=[{'name': 'p1', 'config': {}, 
                                           'type': DummyProteinPipeline,
                                           'adaptive_fn': adaptive_optimization_strategy}])
