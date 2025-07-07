@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 from .impress_pipeline import ImpressBasePipeline
 
