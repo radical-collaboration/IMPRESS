@@ -35,7 +35,7 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
     async def run(self):
         print(f"\n🧬 [{self.name}] Starting Generation {self.generation} (Parent: {self.parent_name})")
-        
+
         # Step 1: Sequence Analysis
         analysis_res = await self.sequence_analysis()
         print(f'[{self.name}] {analysis_res}')
@@ -45,9 +45,11 @@ class DummyProteinPipeline(ImpressBasePipeline):
         print(f'[{self.name}] {fitness_res}')
         
         # Decision point: Should we create new pipelines?
-        # This will ask the manager to invoke the adaptive function
-        # The adaptive function will update self.submit_child_pipeline_request if a new pipeline should be created
-        await self.trigger_and_wait_adaptive()
+        # This will ask the manager to invoke the adaptive
+        # function. The adaptive function will update
+        # self.submit_child_pipeline_request if a new pipeline
+        # should be created
+        await self.run_adaptive_step(wait=True)
 
         # Step 3: Final optimization
         opt_res = await self.optimization_step()
@@ -56,9 +58,7 @@ class DummyProteinPipeline(ImpressBasePipeline):
         print(f"✅ [{self.name}] Pipeline completed")
 
 
-async def run_dummy_pipelines():
-
-    async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
+async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
         """
         A dummy 50% chance strategy with generation limit
         Now updates pipeline.submit_child_pipeline_request instead of returning a value
@@ -95,6 +95,8 @@ async def run_dummy_pipelines():
             # Don't set submit_child_pipeline_request, so no new pipeline will be created
 
 
+async def run():
+
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
     await manager.start(pipeline_setups=[{'name': 'p1', 'config': {}, 
@@ -102,4 +104,4 @@ async def run_dummy_pipelines():
                                           'adaptive_fn': adaptive_optimization_strategy}])
 
 if __name__ == "__main__":
-    asyncio.run(run_dummy_pipelines())
+    asyncio.run(run())

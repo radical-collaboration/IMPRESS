@@ -41,19 +41,14 @@ class ImpressManager:
             pipeline._adaptive_barrier.set()
 
     async def start(self, pipeline_setups: list):
-        
+
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
             any_activity = False
             completed_pipelines = []
 
-            for pipeline, task in list(self.pipeline_tasks.items()):
-                # Check if task is done first to avoid unnecessary work
-                if task.done():
-                    completed_pipelines.append(pipeline)
-                    continue
-
+            for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
                 if (getattr(pipeline, 'invoke_adaptive_step', False) and 
                     pipeline not in self.adaptive_tasks):
@@ -74,17 +69,41 @@ class ImpressManager:
                 # Check if parent should be killed
                 if getattr(pipeline, 'kill_parent', False):
                     print(f'IMPRESS-Manager: Killing {pipeline.name} pipeline')
-                    task.cancel()
+                    pipeline_future.cancel()
+                    completed_pipelines.append(pipeline)
+                    continue
+
+                # Check if pipeline is done - but only mark as completed if adaptive task is also done
+                if pipeline_future.done():
+                    # If there's an adaptive task running, don't mark as completed yet
+                    if pipeline in self.adaptive_tasks:
+                        adaptive_task = self.adaptive_tasks[pipeline]
+                        if not adaptive_task.done():
+                            # Pipeline is done but adaptive task is still running
+                            # Don't mark as completed yet, just continue to next iteration
+                            continue
+
+                    # Pipeline is done and either no adaptive task or adaptive task is also done
                     completed_pipelines.append(pipeline)
 
-            # Clean up completed pipelines and their adaptive tasks
+            # Clean up completed pipelines - but only if their adaptive tasks are also done
+            actually_completed = []
             for pipeline in completed_pipelines:
-                self.pipeline_tasks.pop(pipeline, None)
-                # Cancel and remove any running adaptive task
+                # Double-check: only clean up if adaptive task is done or doesn't exist
                 if pipeline in self.adaptive_tasks:
-                    adaptive_task = self.adaptive_tasks.pop(pipeline)
+                    adaptive_task = self.adaptive_tasks[pipeline]
                     if not adaptive_task.done():
-                        adaptive_task.cancel()
+                        # Adaptive task still running, don't clean up yet
+                        continue
+                    # Adaptive task is done, clean it up
+                    self.adaptive_tasks.pop(pipeline)
+                
+                # Safe to clean up pipeline now
+                self.pipeline_tasks.pop(pipeline, None)
+                actually_completed.append(pipeline)
+            
+            # Update completed_pipelines to only include actually completed ones
+            completed_pipelines = actually_completed
 
             # Clean up completed adaptive tasks
             completed_adaptive = []

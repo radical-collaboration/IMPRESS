@@ -60,18 +60,23 @@ class ImpressBasePipeline(ABC):
 
         return decorator
 
-    def set_adaptive_flag(self, value: bool = True):
+    async def run_adaptive_step(self, wait: bool = True):
+        """Trigger adaptive step and optionally wait for completion.
+
+        Args:
+            wait: If True, waits for adaptive step completion. If False, triggers and returns immediately.
+        """
+        self._set_adaptive_flag(True)
+        if wait:
+            await self._await_adaptive_unlock()
+
+    def _set_adaptive_flag(self, value: bool = True):
         """Set the adaptive flag and manage the barrier state"""
         self.invoke_adaptive_step = value
         if value:
             self._adaptive_barrier.clear()
 
-    async def trigger_and_wait_adaptive(self):
-        """Trigger adaptive step and wait for completion"""
-        self.set_adaptive_flag(True)
-        await self.await_adaptive_unlock()
-
-    async def await_adaptive_unlock(self) -> any:
+    async def _await_adaptive_unlock(self) -> any:
         """Pause until manager completes adaptive step and returns result."""
         print(f"[{self.name}] Starting adaptive task")
         await self._adaptive_barrier.wait()
