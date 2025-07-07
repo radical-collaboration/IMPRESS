@@ -34,15 +34,13 @@ class DummyProteinPipeline(ImpressBasePipeline):
             return f"/bin/echo '[{self.name}] Gen-{self.generation}: Running optimization algorithms' && /bin/date"
 
     async def run(self):
-        print(f"\n🧬 [{self.name}] Starting Generation {self.generation} (Parent: {self.parent_name})")
 
         # Step 1: Sequence Analysis
         analysis_res = await self.sequence_analysis()
-        print(f'[{self.name}] {analysis_res}')
+        
         
         # Step 2: Fitness Evaluation
         fitness_res = await self.fitness_evaluation()
-        print(f'[{self.name}] {fitness_res}')
         
         # Decision point: Should we create new pipelines?
         # This will ask the manager to invoke the adaptive
@@ -53,9 +51,7 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
         # Step 3: Final optimization
         opt_res = await self.optimization_step()
-        print(f'[{self.name}] {opt_res}')
         
-        print(f"✅ [{self.name}] Pipeline completed")
 
 
 async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
@@ -64,11 +60,8 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
         Now updates pipeline.submit_child_pipeline_request instead of returning a value
         """
 
-        print(f"📊 [{pipeline.name}] Gen-{pipeline.generation} deciding...")
-
         # Don't exceed generation limit
         if pipeline.generation >= pipeline.max_generations:
-            print(f"🛑 [{pipeline.name}] Max generations reached")
             return  # Don't set submit_child_pipeline_request, so no new pipeline will be created
 
         # Simple 50% chance to create new pipeline
@@ -86,12 +79,10 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
                 'adaptive_fn': adaptive_optimization_strategy
             }
 
-            print(f"🚀 [{pipeline.name}] Creating new pipeline: {new_name}")
 
             # Update pipeline's submit_child_pipeline_request property
             pipeline.submit_child_pipeline_request(new_pipe_config)
-        else:
-            print(f"⏸️  [{pipeline.name}] Skipping pipeline creation")
+        
             # Don't set submit_child_pipeline_request, so no new pipeline will be created
 
 
@@ -100,6 +91,12 @@ async def run():
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
     await manager.start(pipeline_setups=[{'name': 'p1', 'config': {}, 
+                                          'type': DummyProteinPipeline,
+                                          'adaptive_fn': adaptive_optimization_strategy},
+                                          {'name': 'p2', 'config': {}, 
+                                          'type': DummyProteinPipeline,
+                                          'adaptive_fn': adaptive_optimization_strategy},
+                                          {'name': 'p3', 'config': {}, 
                                           'type': DummyProteinPipeline,
                                           'adaptive_fn': adaptive_optimization_strategy}])
 

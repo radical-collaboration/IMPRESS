@@ -78,9 +78,7 @@ class ImpressBasePipeline(ABC):
 
     async def _await_adaptive_unlock(self) -> any:
         """Pause until manager completes adaptive step and returns result."""
-        print(f"[{self.name}] Starting adaptive task")
         await self._adaptive_barrier.wait()
-        print(f"[{self.name}] Exiting adaptive step.")
 
     @abstractmethod
     async def run(self):

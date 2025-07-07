@@ -1,17 +1,18 @@
 import asyncio
+from .utils.logger import ImpressLogger
 from radical.asyncflow import WorkflowEngine
 from .pipelines.impress_pipeline import ImpressBasePipeline
 
 class ImpressManager:
-    def __init__(self, execution_backend):
+    def __init__(self, execution_backend, use_colors=True):
         self.flow = WorkflowEngine(backend=execution_backend)
         self.pipeline_tasks = {}  # {pipeline: task}
         self.adaptive_tasks = {}  # {pipeline: adaptive_task}
         self.new_pipeline_buffer = []
+        self.logger = ImpressLogger(use_colors=use_colors)
 
     def submit_new_pipelines(self, pipeline_setups):
         for setup in pipeline_setups:
-
             if not isinstance(setup['type'], type) or not issubclass(setup['type'], ImpressBasePipeline):
                 raise ValueError(f"Expected an ImpressBasePipeline subclass, got {type(setup['type'])}")
 
@@ -20,6 +21,9 @@ class ImpressManager:
                                      **setup.get('config', {}))
 
             pipeline._adaptive_fn = setup.get('adaptive_fn')
+            
+            # Log pipeline creation
+            self.logger.pipeline_started(pipeline.name)
 
             # invoke the pipeline execution but do not wait/block for it
             task = asyncio.create_task(pipeline.run())
@@ -28,12 +32,13 @@ class ImpressManager:
     async def _run_adaptive_fn(self, pipeline):
         """Run adaptive function in background - pipeline will update its own submit_child_pipeline_request property"""
         try:
+            self.logger.adaptive_started(pipeline.name)
             adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
             if adaptive_fn:
                 await adaptive_fn(pipeline)  # Adaptive function handles setting pipeline.submit_child_pipeline_request
-                print(f"IMPRESS-Manager: Adaptive function completed for {pipeline.name}")
+                self.logger.adaptive_completed(pipeline.name)
         except Exception as e:
-            print(f'IMPRESS-Manager: Adaptive stage failed for {pipeline.name} with: {e}')
+            self.logger.adaptive_failed(pipeline.name, str(e))
             # Let the pipeline handle the error, don't interfere with submit_child_pipeline_request
         finally:
             # Always clear the invoke flag and set the barrier
@@ -41,7 +46,9 @@ class ImpressManager:
             pipeline._adaptive_barrier.set()
 
     async def start(self, pipeline_setups: list):
-
+        self.logger.separator("IMPRESS MANAGER STARTING")
+        self.logger.manager_starting(len(pipeline_setups))
+        
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
@@ -62,13 +69,13 @@ class ImpressManager:
                 config = pipeline.get_child_pipeline_request()
 
                 if config:
-                    print(f"IMPRESS-Manager: Submitting new pipeline: {config['name']} from {pipeline.name}")
+                    self.logger.child_pipeline_submitted(config['name'], pipeline.name)
                     self.new_pipeline_buffer.append(config)
                     any_activity = True
 
                 # Check if parent should be killed
                 if getattr(pipeline, 'kill_parent', False):
-                    print(f'IMPRESS-Manager: Killing {pipeline.name} pipeline')
+                    self.logger.pipeline_killed(pipeline.name)
                     pipeline_future.cancel()
                     completed_pipelines.append(pipeline)
                     continue
@@ -100,8 +107,9 @@ class ImpressManager:
                 
                 # Safe to clean up pipeline now
                 self.pipeline_tasks.pop(pipeline, None)
+                self.logger.pipeline_completed(pipeline.name)
                 actually_completed.append(pipeline)
-            
+
             # Update completed_pipelines to only include actually completed ones
             completed_pipelines = actually_completed
 
@@ -120,9 +128,18 @@ class ImpressManager:
                 self.new_pipeline_buffer.clear()
                 any_activity = True
 
+            # Log activity summary periodically
+            if any_activity:
+                self.logger.activity_summary(
+                    len(self.pipeline_tasks), 
+                    len(self.adaptive_tasks), 
+                    len(self.new_pipeline_buffer)
+                )
+
             # Exit condition
             if not self.pipeline_tasks and not self.new_pipeline_buffer and not self.adaptive_tasks:
-                print("IMPRESS-Manager: All pipelines finished. Exiting.")
+                self.logger.manager_exiting()
+                self.logger.separator("IMPRESS MANAGER FINISHED")
                 break
 
             if not any_activity:
