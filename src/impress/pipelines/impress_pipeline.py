@@ -10,20 +10,54 @@ class ImpressBasePipeline(ABC):
         self.config = config
         self.kill_parent = False
         self.invoke_adaptive_step = False
+        self.incoming_child_pipeline_request = {}
         self._adaptive_barrier = asyncio.Event()
 
         # Call the registration method - subclasses must implement this
         self.register_pipeline_tasks()
 
-    def auto_register_task(self):
+    def submit_child_pipeline_request(self, pipeline_config):
+        """
+        Submit a request to spawn a child pipeline.
+        
+        Args:
+            pipeline_config (dict): Configuration for the new pipeline including
+                                  'name', 'type', 'config', and 'adaptive_fn'
+        """
+        self.incoming_child_pipeline_request = pipeline_config
+
+    def get_child_pipeline_request(self):
+        """
+        Get and clear any pending spawn request for child pipelines.
+        
+        Returns:
+            dict or None: The spawn request configuration if one exists, None otherwise.
+                         After calling this method, the spawn request is cleared.
+        """
+        if self.incoming_child_pipeline_request:
+            request = self.incoming_child_pipeline_request
+
+            # reset the value to avoid submission request duplication
+            self.incoming_child_pipeline_request = None
+            return request
+
+        return None
+
+    def auto_register_task(self, local_task=False):
         """Decorator to automatically register tasks with the flow"""
+
         if not self.flow:
             raise ValueError("Flow must be provided to use auto_register_task")
 
         def decorator(func):
-            task = self.flow.executable_task(func)
+            if not local_task:
+                task = self.flow.executable_task(func)
+            else:
+                task = func
+
             setattr(self, func.__name__, task)
             return task
+
         return decorator
 
     def set_adaptive_flag(self, value: bool = True):
