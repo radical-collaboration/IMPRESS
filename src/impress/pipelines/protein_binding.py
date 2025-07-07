@@ -7,34 +7,34 @@ TASK_PRE_EXEC = []
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, step_id=None, configs={}, **kwargs):
         # Execution metadata
-        self.step_id     = kwargs.get('step_id', 1)
-        self.sub_order   = kwargs.get('sub_order', 0)
-        self.passes      = kwargs.get('passes', 1)
-        self.num_seqs    = kwargs.get('num_seqs', 10)
-        self.seq_rank    = kwargs.get('seq_rank', 0)
-
+        self.passes = kwargs.get('passes', 1)
+        self.step_id = kwargs.get('step_id', 1)
+        self.seq_rank = kwargs.get('seq_rank', 0)
+        self.num_seqs = kwargs.get('num_seqs', 10)
+        self.sub_order = kwargs.get('sub_order', 0)
+ 
         # Sequence and score state
-        self.iter_seqs       = kwargs.get('iter_seqs', {})
         self.current_scores  = {}
+        self.iter_seqs = kwargs.get('iter_seqs', {})
         self.previous_scores = kwargs.get('previous_score', {})
+    
+        super().__init__(name, flow, **configs, **kwargs)
 
         # Input-related
         self.fasta_list_2 = kwargs.get('fasta_list_2', [])
-        self.base_path    = kwargs.get('base_path', '/home/x-aymen/IMPRESS-Framework/examples')
-        self.input_path   = f'{self.base_path}/{self.name}_in'
+        self.base_path = kwargs.get('base_path', '/home/x-aymen/IMPRESS-Framework/examples')
+        self.input_path = f'{self.base_path}/{self.name}_in'
 
         # Output paths
-        self.output_path        = f'{self.base_path}/af_pipeline_outputs_multi/{self.name}'
-        self.output_path_mpnn   = f'{self.output_path}/mpnn'
-        self.output_path_af     = f'{self.output_path}/af/prediction/best_models'
-    
+        self.output_path = f'{self.base_path}/af_pipeline_outputs_multi/{self.name}'
+        self.output_path_mpnn = f'{self.output_path}/mpnn'
+        self.output_path_af = f'{self.output_path}/af/prediction/best_models'
+
         # might have to do outside of initialization, so new pipelines
         # do not run this can be declared directly as argument
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
-
-        super().__init__(name, flow, **configs, **kwargs)
 
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
@@ -54,6 +54,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 "-chains=A"
             )
 
+        @self.auto_register_task(local_task=True)
         async def s2():
             job_seqs_dir = f'{self.output_path_mpnn}/job_{self.passes}/seqs'
 
@@ -72,7 +73,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
                 seqs.sort(key=lambda x: x[1])  # Sort by score
                 self.iter_seqs[file_name.split('.')[0]] = seqs
+        
         # fasta - don't use helper script - cannot run x tasks for x structures
+        @self.auto_register_task(local_task=True)
         async def s3():
             output_dir = os.path.join(self.output_path, 'af', 'fasta')
 
@@ -86,17 +89,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 fasta_path = os.path.join(output_dir, f'{base_name}.fa')
                 with open(fasta_path, 'w') as f:
                     f.write(f'>pdz\n{design_seq}\n>pep\n{pep_seq}\n')
-            
-            print(fasta_file_to_return)
+
             return fasta_file_to_return
 
         @self.auto_register_task() #alphafold, must be run separately for each structure one at a time!
         async def s4(target_fasta, task_description={}):
             cmd =  (
                 f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
-                f'{self.output_path}/af/fasta/{target_fasta}.fa '
-                f'{self.output_path}/af/prediction/dimer_models/ ')
-            print(cmd)
+                f"{self.output_path}/af/fasta/ "
+                f"{target_fasta}.fa "
+                f"{self.output_path}/af/prediction/dimer_models/ ")
+
             return cmd
 
         @self.auto_register_task() #plddt_extract
@@ -119,15 +122,22 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     async def run(self):
         """Main execution logic"""
+
+        print('Executing MPNN task')
         s1_res = await self.s1()
-        print(s2_res)
+        print('MPNN task finished')
+
+        print('Executing Sequence ranking task')
         s2_res = await self.s2()
+        print('Sequence ranking task finished')
 
+        print('Executing Scoring task')
         fasta_files = await self.s3()
-
+        print('Scoring task finished')
 
         target_fasta = fasta_files[0]
         models_path  = f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+
         s4_description = {
             'pre_exec': [
                 '. /opt/sw/admin/lmod/lmod/init/profile', TASK_PRE_EXEC
@@ -139,5 +149,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             ]
         }
 
+        print('Executing Alphafold task')
         s4_res = await self.s4(target_fasta=target_fasta)#, task_description=s4_description)
+        print('Alphafold task finished')
+
         #s5_res = await self.s5()
