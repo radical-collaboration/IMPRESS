@@ -153,6 +153,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             alphafold_tasks.append(self.s4(target_fasta=target_fasta, task_description=s4_description))
 
         print('Executing Alphafold tasks for all fasta files asynchronously')
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
 
         s5_res = await self.s5()
