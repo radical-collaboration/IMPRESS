@@ -1,0 +1,98 @@
+site_name: IMPRESS
+site_description: Intelligent Multi-Pipeline Protein Engineering System for HPC
+site_author: IMPRESS Team
+site_url: https://impress-framework.readthedocs.io/
+
+repo_name: impress-framework/impress
+repo_url: https://github.com/radical-collaboration/IMPRESS
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quick-start.md
+    - Basic Concepts: getting-started/concepts.md
+  - User Guide:
+    - Creating Pipelines: user-guide/creating-pipelines.md
+    - Adaptive Functions: user-guide/adaptive-functions.md
+    - Task Management: user-guide/task-management.md
+    - HPC Deployment: user-guide/hpc-deployment.md
+  - Prebuilt Pipelines:
+    - Overview: pipelines/overview.md
+  - API Reference:
+    - Pipeline Base Class: api/pipeline-base.md
+    - Manager: api/manager.md
+    - Utilities: api/utilities.md
+  - Examples:
+    - Basic Pipeline: examples/basic-pipeline.md
+    - Adaptive Workflows: examples/adaptive-workflows.md
+    - HPC Examples: examples/hpc-examples.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: false
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/radical-collaboration/IMPRESS
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/impress-framework/
+  version:
+    provider: mike
+
