@@ -1,72 +1,117 @@
 import asyncio
+from typing import Dict, List, Any, Optional, Type, Callable, Awaitable
 from .utils.logger import ImpressLogger
 from radical.asyncflow import WorkflowEngine
 from .pipelines.impress_pipeline import ImpressBasePipeline
 
-class ImpressManager:
-    def __init__(self, execution_backend, use_colors=True):
-        self.flow = WorkflowEngine(backend=execution_backend)
-        self.pipeline_tasks = {}  # {pipeline: task}
-        self.adaptive_tasks = {}  # {pipeline: adaptive_task}
-        self.new_pipeline_buffer = []
-        self.logger = ImpressLogger(use_colors=use_colors)
 
-    def submit_new_pipelines(self, pipeline_setups):
+class ImpressManager:
+    """
+    Manages the execution of multiple pipelines with adaptive optimization.
+    
+    Coordinates pipeline lifecycle, adaptive function execution, and child pipeline
+    creation in an asynchronous environment.
+    """
+    
+    def __init__(self, execution_backend: Any, use_colors: bool = True) -> None:
+        """
+        Initialize the ImpressManager.
+        
+        Args:
+            execution_backend: Backend for workflow execution
+            use_colors: Whether to use colors in logging output
+        """
+        self.flow: WorkflowEngine = WorkflowEngine(backend=execution_backend)
+        self.pipeline_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
+        self.adaptive_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
+        self.new_pipeline_buffer: List[Dict[str, Any]] = []
+        self.logger: ImpressLogger = ImpressLogger(use_colors=use_colors)
+
+    def submit_new_pipelines(self, pipeline_setups: List[Dict[str, Any]]) -> None:
+        """
+        Submit new pipelines for execution.
+        
+        Args:
+            pipeline_setups: List of pipeline configuration dictionaries
+            
+        Raises:
+            ValueError: If pipeline type is not a subclass of ImpressBasePipeline
+        """
         for setup in pipeline_setups:
             if not isinstance(setup['type'], type) or not issubclass(setup['type'], ImpressBasePipeline):
                 raise ValueError(f"Expected an ImpressBasePipeline subclass, got {type(setup['type'])}")
 
-            pipeline = setup['type'](name=setup['name'],
-                                     flow=self.flow,
-                                     **setup.get('config', {}))
+            pipeline: ImpressBasePipeline = setup['type'](
+                name=setup['name'],
+                flow=self.flow,
+                **setup.get('config', {})
+            )
 
             pipeline._adaptive_fn = setup.get('adaptive_fn')
             
-            # Log pipeline creation
             self.logger.pipeline_started(pipeline.name)
 
-            # invoke the pipeline execution but do not wait/block for it
-            task = asyncio.create_task(pipeline.run())
+            task: asyncio.Task = asyncio.create_task(pipeline.run())
             self.pipeline_tasks[pipeline] = task
 
-    async def _run_adaptive_fn(self, pipeline):
-        """Run adaptive function in background - pipeline will update its own submit_child_pipeline_request property"""
+    async def _run_adaptive_fn(self, pipeline: ImpressBasePipeline) -> None:
+        """
+        Run adaptive function for a pipeline in the background.
+        
+        The adaptive function updates the pipeline's submit_child_pipeline_request property.
+        
+        Args:
+            pipeline: Pipeline to run adaptive function for
+        """
         try:
             self.logger.adaptive_started(pipeline.name)
-            adaptive_fn = getattr(pipeline, '_adaptive_fn', None)
+            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Awaitable[None]]] = getattr(
+                pipeline, '_adaptive_fn', None
+            )
             if adaptive_fn:
-                await adaptive_fn(pipeline)  # Adaptive function handles setting pipeline.submit_child_pipeline_request
+                await adaptive_fn(pipeline)
                 self.logger.adaptive_completed(pipeline.name)
         except Exception as e:
             self.logger.adaptive_failed(pipeline.name, str(e))
-            # Let the pipeline handle the error, don't interfere with submit_child_pipeline_request
         finally:
-            # Always clear the invoke flag and set the barrier
             pipeline.invoke_adaptive_step = False
             pipeline._adaptive_barrier.set()
 
-    async def start(self, pipeline_setups: list):
+    async def start(self, pipeline_setups: List[Dict[str, Any]]) -> None:
+        """
+        Start the pipeline manager and execute all pipelines.
+        
+        Manages the complete lifecycle of pipelines including:
+        - Initial pipeline submission
+        - Adaptive function execution
+        - Child pipeline creation
+        - Pipeline completion and cleanup
+        
+        Args:
+            pipeline_setups: List of initial pipeline configurations
+        """
         self.logger.separator("IMPRESS MANAGER STARTING")
         self.logger.manager_starting(len(pipeline_setups))
         
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
-            any_activity = False
-            completed_pipelines = []
+            any_activity: bool = False
+            completed_pipelines: List[ImpressBasePipeline] = []
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
                 if (getattr(pipeline, 'invoke_adaptive_step', False) and 
                     pipeline not in self.adaptive_tasks):
                     
-                    # Start adaptive function in background
-                    adaptive_task = asyncio.create_task(self._run_adaptive_fn(pipeline))
+                    adaptive_task: asyncio.Task = asyncio.create_task(
+                        self._run_adaptive_fn(pipeline)
+                    )
                     self.adaptive_tasks[pipeline] = adaptive_task
                     any_activity = True
 
                 # Check if pipeline has new config ready
-                config = pipeline.get_child_pipeline_request()
+                config: Optional[Dict[str, Any]] = pipeline.get_child_pipeline_request()
 
                 if config:
                     self.logger.child_pipeline_submitted(config['name'], pipeline.name)
@@ -86,35 +131,28 @@ class ImpressManager:
                     if pipeline in self.adaptive_tasks:
                         adaptive_task = self.adaptive_tasks[pipeline]
                         if not adaptive_task.done():
-                            # Pipeline is done but adaptive task is still running
-                            # Don't mark as completed yet, just continue to next iteration
                             continue
 
-                    # Pipeline is done and either no adaptive task or adaptive task is also done
                     completed_pipelines.append(pipeline)
 
             # Clean up completed pipelines - but only if their adaptive tasks are also done
-            actually_completed = []
+            actually_completed: List[ImpressBasePipeline] = []
             for pipeline in completed_pipelines:
                 # Double-check: only clean up if adaptive task is done or doesn't exist
                 if pipeline in self.adaptive_tasks:
                     adaptive_task = self.adaptive_tasks[pipeline]
                     if not adaptive_task.done():
-                        # Adaptive task still running, don't clean up yet
                         continue
-                    # Adaptive task is done, clean it up
                     self.adaptive_tasks.pop(pipeline)
                 
-                # Safe to clean up pipeline now
                 self.pipeline_tasks.pop(pipeline, None)
                 self.logger.pipeline_completed(pipeline.name)
                 actually_completed.append(pipeline)
 
-            # Update completed_pipelines to only include actually completed ones
             completed_pipelines = actually_completed
 
             # Clean up completed adaptive tasks
-            completed_adaptive = []
+            completed_adaptive: List[ImpressBasePipeline] = []
             for pipeline, adaptive_task in list(self.adaptive_tasks.items()):
                 if adaptive_task.done():
                     completed_adaptive.append(pipeline)

@@ -1,8 +1,6 @@
-# Initialize manager
-import copy
 import asyncio
 import random
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from impress import ImpressBasePipeline
 from impress.impress_manager import ImpressManager
@@ -10,95 +8,66 @@ from radical.asyncflow import ThreadExecutionBackend
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
-
-    def __init__(self, name, flow, configs={}, **kwargs):
-        self.iter_seqs = 'MKFLVLACGT'
-        self.generation = configs.get('generation', 1)
-        self.parent_name = configs.get('parent_name', 'root')
-        self.max_generations = configs.get('max_generations', 3)
-
+    def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
+        self.iter_seqs: str = 'MKFLVLACGT'
+        self.generation: int = configs.get('generation', 1)
+        self.parent_name: str = configs.get('parent_name', 'root')
+        self.max_generations: int = configs.get('max_generations', 3)
         super().__init__(name, flow, **configs, **kwargs)
 
-    def register_pipeline_tasks(self):
+    def register_pipeline_tasks(self) -> None:
+        @self.auto_register_task()
+        async def sequence_analysis(*args, **kwargs) -> str:
+            return f"/bin/echo 'Analyzing' && /bin/date"
 
         @self.auto_register_task()
-        async def sequence_analysis(*args, **kwargs):
-            return f"/bin/echo '[{self.name}] Gen-{self.generation}: Analyzing {len(self.iter_seqs)} protein sequences' && /bin/date"
+        async def fitness_evaluation(*args, **kwargs) -> str:
+            return f"/bin/echo 'Evaluating' && /bin/date"
 
         @self.auto_register_task()
-        async def fitness_evaluation(*args, **kwargs):
-            return f"/bin/echo '[{self.name}] Gen-{self.generation}: Evaluating fitness scores' && /bin/date"
+        async def optimization_step(*args, **kwargs) -> str:
+            return f"/bin/echo 'Optimizing' && /bin/date"
 
-        @self.auto_register_task()
-        async def optimization_step(*args, **kwargs):
-            return f"/bin/echo '[{self.name}] Gen-{self.generation}: Running optimization algorithms' && /bin/date"
-
-    async def run(self):
-
-        # Step 1: Sequence Analysis
-        analysis_res = await self.sequence_analysis()
-        
-        
-        # Step 2: Fitness Evaluation
-        fitness_res = await self.fitness_evaluation()
-        
-        # Decision point: Should we create new pipelines?
-        # This will ask the manager to invoke the adaptive
-        # function. The adaptive function will update
-        # self.submit_child_pipeline_request if a new pipeline
-        # should be created
+    async def run(self) -> None:
+        await self.sequence_analysis()
+        await self.fitness_evaluation()
         await self.run_adaptive_step(wait=True)
-
-        # Step 3: Final optimization
-        opt_res = await self.optimization_step()
-        
+        await self.optimization_step()
 
 
-async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
-        """
-        A dummy 50% chance strategy with generation limit
-        Now updates pipeline.submit_child_pipeline_request instead of returning a value
-        """
+async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None:
+    if pipeline.generation >= pipeline.max_generations or random.random() >= 0.5:
+        return
 
-        # Don't exceed generation limit
-        if pipeline.generation >= pipeline.max_generations:
-            return  # Don't set submit_child_pipeline_request, so no new pipeline will be created
-
-        # Simple 50% chance to create new pipeline
-        if random.random() < 0.5:
-            new_name = f"{pipeline.name}_g{pipeline.generation + 1}"
-
-            new_pipe_config = {
-                'name': new_name,
-                'type': type(pipeline),
-                'config': {
-                    'generation': pipeline.generation + 1,
-                    'parent_name': pipeline.name,
-                    'max_generations': pipeline.max_generations,
-                },
-                'adaptive_fn': adaptive_optimization_strategy
-            }
+    new_name = f"{pipeline.name}_g{pipeline.generation + 1}"
+    new_config = {
+        'name': new_name,
+        'type': type(pipeline),
+        'config': {
+            'generation': pipeline.generation + 1,
+            'parent_name': pipeline.name,
+            'max_generations': pipeline.max_generations,
+        },
+        'adaptive_fn': adaptive_optimization_strategy
+    }
+    pipeline.submit_child_pipeline_request(new_config)
 
 
-            # Update pipeline's submit_child_pipeline_request property
-            pipeline.submit_child_pipeline_request(new_pipe_config)
-        
-            # Don't set submit_child_pipeline_request, so no new pipeline will be created
-
-
-async def run():
-
+async def run() -> None:
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
-    await manager.start(pipeline_setups=[{'name': 'p1', 'config': {}, 
-                                          'type': DummyProteinPipeline,
-                                          'adaptive_fn': adaptive_optimization_strategy},
-                                          {'name': 'p2', 'config': {}, 
-                                          'type': DummyProteinPipeline,
-                                          'adaptive_fn': adaptive_optimization_strategy},
-                                          {'name': 'p3', 'config': {}, 
-                                          'type': DummyProteinPipeline,
-                                          'adaptive_fn': adaptive_optimization_strategy}])
+    pipeline_setups = [
+        {
+            'name': f'p{i}',
+            'config': {},
+            'type': DummyProteinPipeline,
+            'adaptive_fn': adaptive_optimization_strategy
+        }
+        for i in range(1, 4)
+    ]
+
+    await manager.start(pipeline_setups=pipeline_setups)
+
 
 if __name__ == "__main__":
     asyncio.run(run())
