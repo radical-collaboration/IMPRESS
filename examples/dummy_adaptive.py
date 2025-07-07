@@ -1,4 +1,5 @@
-# Initialize managerimport copy
+# Initialize manager
+import copy
 import asyncio
 import random
 from typing import Dict, Any, Optional
@@ -15,7 +16,7 @@ class DummyProteinPipeline(ImpressBasePipeline):
         self.generation = configs.get('generation', 1)
         self.parent_name = configs.get('parent_name', 'root')
         self.max_generations = configs.get('max_generations', 3)
-        
+
         super().__init__(name, flow, **configs, **kwargs)
 
     def register_pipeline_tasks(self):
@@ -44,10 +45,10 @@ class DummyProteinPipeline(ImpressBasePipeline):
         print(f'[{self.name}] {fitness_res}')
         
         # Decision point: Should we create new pipelines?
-        # This will ask the manager to invoke the adaptive if so,
-        # while respecting execution flow of the pipeline stages
+        # This will ask the manager to invoke the adaptive function
+        # The adaptive function will update self.submit_child_pipeline_request if a new pipeline should be created
         await self.trigger_and_wait_adaptive()
-        
+
         # Step 3: Final optimization
         opt_res = await self.optimization_step()
         print(f'[{self.name}] {opt_res}')
@@ -57,22 +58,23 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
 async def run_dummy_pipelines():
 
-    async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> Optional[Dict[str, Any]]:
+    async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline):
         """
         A dummy 50% chance strategy with generation limit
+        Now updates pipeline.submit_child_pipeline_request instead of returning a value
         """
 
         print(f"📊 [{pipeline.name}] Gen-{pipeline.generation} deciding...")
-        
+
         # Don't exceed generation limit
         if pipeline.generation >= pipeline.max_generations:
             print(f"🛑 [{pipeline.name}] Max generations reached")
-            return None
+            return  # Don't set submit_child_pipeline_request, so no new pipeline will be created
 
         # Simple 50% chance to create new pipeline
         if random.random() < 0.5:
             new_name = f"{pipeline.name}_g{pipeline.generation + 1}"
-            
+
             new_pipe_config = {
                 'name': new_name,
                 'type': type(pipeline),
@@ -85,10 +87,12 @@ async def run_dummy_pipelines():
             }
 
             print(f"🚀 [{pipeline.name}] Creating new pipeline: {new_name}")
-            return new_pipe_config
+
+            # Update pipeline's submit_child_pipeline_request property
+            pipeline.submit_child_pipeline_request(new_pipe_config)
         else:
             print(f"⏸️  [{pipeline.name}] Skipping pipeline creation")
-            return None
+            # Don't set submit_child_pipeline_request, so no new pipeline will be created
 
 
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
