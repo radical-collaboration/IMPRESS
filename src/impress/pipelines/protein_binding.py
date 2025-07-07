@@ -135,22 +135,24 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         fasta_files = await self.s3()
         print('Scoring task finished')
 
-        target_fasta = fasta_files[0]
-        models_path  = f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+        alphafold_tasks = []
 
-        s4_description = {
-            'pre_exec': [
-                '. /opt/sw/admin/lmod/lmod/init/profile', TASK_PRE_EXEC
-            ],
-            'post_exec': [
-                f"cp {models_path}/*ranked_0*.pdb {self.output_path}/af/prediction/best_models/{target_fasta}.pdb",
-                f"cp {models_path}/*ranking_debug*.json {self.output_path}/af/prediction/best_ptm/{target_fasta}.json",
-                f"cp {models_path}/*ranked_0*.pdb {self.output_path}/mpnn/job_{self.passes - 1}/{target_fasta}.pdb",
-            ]
-        }
+        for target_fasta in fasta_files:
+            models_path = f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 
-        print('Executing Alphafold task')
-        s4_res = await self.s4(target_fasta=target_fasta)#, task_description=s4_description)
-        print('Alphafold task finished')
+            s4_description = {
+                'pre_exec': ['. /opt/sw/admin/lmod/lmod/init/profile', TASK_PRE_EXEC],
+                'post_exec': [
+                    f"cp {models_path}/*ranked_0*.pdb {self.output_path}/af/prediction/best_models/{target_fasta}.pdb",
+                    f"cp {models_path}/*ranking_debug*.json {self.output_path}/af/prediction/best_ptm/{target_fasta}.json",
+                    f"cp {models_path}/*ranked_0*.pdb {self.output_path}/mpnn/job_{self.passes - 1}/{target_fasta}.pdb",
+                ]
+            }
 
-        #s5_res = await self.s5()
+            # launch coroutine without awaiting yet
+            alphafold_tasks.append(self.s4(target_fasta=target_fasta, task_description=s4_description))
+
+        print('Executing Alphafold tasks for all fasta files asynchronously')
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        s5_res = await self.s5()
