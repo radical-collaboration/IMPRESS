@@ -5,7 +5,8 @@ from typing import Dict, Any, Optional, List
 
 from radical.asyncflow import ThreadExecutionBackend
 
-from impress.impress_manager import ImpressManager
+from impress import PipelineSetup
+from impress import ImpressManager
 from impress.pipelines.protein_binding import ProteinBindingPipeline
 
 
@@ -93,25 +94,22 @@ async def impress_protein_bind() -> None:
     """
     manager: ImpressManager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
-    pipeline_setups: List[Dict[str, Any]] = [
-        {
-            'name': 'p1',
-            'config': {},
-            'type': ProteinBindingPipeline,
-            'adaptive_fn': alphafold_adaptive_fn1
-        },
-        {
-            'name': 'p2',
-            'config': {},
-            'type': ProteinBindingPipeline,
-            'adaptive_fn': alphafold_adaptive_fn1
-        },
-        {
-            'name': 'p3',
-            'config': {},
-            'type': ProteinBindingPipeline,
-            'adaptive_fn': alphafold_adaptive_fn1
-        }
+    pipeline_setups: List[PipelineSetup] = [
+        PipelineSetup(
+            name='p1',
+            type=ProteinBindingPipeline,
+            adaptive_fn=alphafold_adaptive_fn1
+        ),
+        PipelineSetup(
+            name='p2',
+            type=ProteinBindingPipeline,
+            adaptive_fn=alphafold_adaptive_fn1
+        ),
+        PipelineSetup(
+            name='p3',
+            type=ProteinBindingPipeline,
+            adaptive_fn=alphafold_adaptive_fn1
+        )
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)

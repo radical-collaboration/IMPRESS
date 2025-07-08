@@ -2,6 +2,7 @@ import asyncio
 import random
 from typing import Dict, Any
 
+from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress.impress_manager import ImpressManager
 from radical.asyncflow import ThreadExecutionBackend
@@ -56,15 +57,9 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
 async def run() -> None:
     manager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
-    pipeline_setups = [
-        {
-            'name': f'p{i}',
-            'config': {},
-            'type': DummyProteinPipeline,
-            'adaptive_fn': adaptive_optimization_strategy
-        }
-        for i in range(1, 4)
-    ]
+    pipeline_setups = [PipelineSetup(name=f'p{i}',
+                                     type=DummyProteinPipeline,
+                                     adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
 
     await manager.start(pipeline_setups=pipeline_setups)
 

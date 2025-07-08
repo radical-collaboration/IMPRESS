@@ -7,6 +7,6 @@ setup(
     author='Aymen Alsaadi',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
-    install_requires=['radical.asyncflow'],
+    install_requires=['radical.asyncflow', 'pydantic'],
     python_requires='>=3.8',
 )

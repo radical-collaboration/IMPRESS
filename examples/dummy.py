@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List
 
 from radical.asyncflow import ThreadExecutionBackend
 
+from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress.impress_manager import ImpressManager
 
@@ -83,11 +84,9 @@ async def run_dummy_pipelines() -> None:
     """
     manager: ImpressManager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
 
-    pipeline_setups: List[Dict[str, Any]] = [
-        {'name': 'p1', 'config': {}, 'type': DummyProteinPipeline},
-        {'name': 'p2', 'config': {}, 'type': DummyProteinPipeline},
-        {'name': 'p3', 'config': {}, 'type': DummyProteinPipeline}
-    ]
+    pipeline_setups: List[PipelineSetup] = [PipelineSetup(name='p1', type=DummyProteinPipeline),
+                                            PipelineSetup(name='p2', type=DummyProteinPipeline),
+                                            PipelineSetup(name='p3', type=DummyProteinPipeline)]
 
     await manager.start(pipeline_setups=pipeline_setups)
 

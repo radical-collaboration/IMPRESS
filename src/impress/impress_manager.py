@@ -1,7 +1,8 @@
 import asyncio
-from typing import Dict, List, Any, Optional, Type, Callable, Awaitable
+from typing import Dict, List, Any, Optional, Type, Callable, Awaitable, Union
 from .utils.logger import ImpressLogger
 from radical.asyncflow import WorkflowEngine
+from .pipelines.setup import PipelineSetup
 from .pipelines.impress_pipeline import ImpressBasePipeline
 
 
@@ -24,31 +25,50 @@ class ImpressManager:
         self.flow: WorkflowEngine = WorkflowEngine(backend=execution_backend)
         self.pipeline_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
         self.adaptive_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
-        self.new_pipeline_buffer: List[Dict[str, Any]] = []
+        self.new_pipeline_buffer: List[PipelineSetup] = []
         self.logger: ImpressLogger = ImpressLogger(use_colors=use_colors)
 
-    def submit_new_pipelines(self, pipeline_setups: List[Dict[str, Any]]) -> None:
+    def _normalize_pipeline_setup(self, setup: Union[Dict[str, Any], PipelineSetup]) -> PipelineSetup:
+        """
+        Normalize pipeline setup to PipelineSetup object.
+        
+        Args:
+            setup: Either a dictionary or PipelineSetup object
+            
+        Returns:
+            PipelineSetup object
+        """
+        if isinstance(setup, dict):
+            return PipelineSetup.from_dict(setup)
+        elif isinstance(setup, PipelineSetup):
+            return setup
+        else:
+            raise ValueError(f"Expected dict or PipelineSetup, got {type(setup)}")
+
+    def submit_new_pipelines(self, pipeline_setups: List[Union[Dict[str, Any], PipelineSetup]]) -> None:
         """
         Submit new pipelines for execution.
         
         Args:
-            pipeline_setups: List of pipeline configuration dictionaries
+            pipeline_setups: List of pipeline configuration dictionaries or PipelineSetup objects
             
         Raises:
             ValueError: If pipeline type is not a subclass of ImpressBasePipeline
         """
-        for setup in pipeline_setups:
-            if not isinstance(setup['type'], type) or not issubclass(setup['type'], ImpressBasePipeline):
-                raise ValueError(f"Expected an ImpressBasePipeline subclass, got {type(setup['type'])}")
-
-            pipeline: ImpressBasePipeline = setup['type'](
-                name=setup['name'],
+        for setup_input in pipeline_setups:
+            # Normalize to PipelineSetup object
+            setup = self._normalize_pipeline_setup(setup_input)
+            
+            # Create pipeline instance with config and kwargs merged
+            pipeline_kwargs = {**setup.config, **setup.kwargs}
+            pipeline: ImpressBasePipeline = setup.type(
+                name=setup.name,
                 flow=self.flow,
-                **setup.get('config', {})
+                **pipeline_kwargs
             )
 
-            pipeline._adaptive_fn = setup.get('adaptive_fn')
-            
+            pipeline._adaptive_fn = setup.adaptive_fn
+
             self.logger.pipeline_started(pipeline.name)
 
             task: asyncio.Task = asyncio.create_task(pipeline.run())
@@ -77,22 +97,22 @@ class ImpressManager:
             pipeline.invoke_adaptive_step = False
             pipeline._adaptive_barrier.set()
 
-    async def start(self, pipeline_setups: List[Dict[str, Any]]) -> None:
+    async def start(self, pipeline_setups: List[Union[Dict[str, Any], PipelineSetup]]) -> None:
         """
         Start the pipeline manager and execute all pipelines.
-        
+
         Manages the complete lifecycle of pipelines including:
         - Initial pipeline submission
         - Adaptive function execution
         - Child pipeline creation
         - Pipeline completion and cleanup
-        
+
         Args:
-            pipeline_setups: List of initial pipeline configurations
+            pipeline_setups: List of initial pipeline configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
         self.logger.manager_starting(len(pipeline_setups))
-        
+
         self.submit_new_pipelines(pipeline_setups)
 
         while True:
@@ -115,7 +135,9 @@ class ImpressManager:
 
                 if config:
                     self.logger.child_pipeline_submitted(config['name'], pipeline.name)
-                    self.new_pipeline_buffer.append(config)
+                    # Convert dict to PipelineSetup for consistency
+                    child_setup = PipelineSetup.from_dict(config)
+                    self.new_pipeline_buffer.append(child_setup)
                     any_activity = True
 
                 # Check if parent should be killed
@@ -144,7 +166,7 @@ class ImpressManager:
                     if not adaptive_task.done():
                         continue
                     self.adaptive_tasks.pop(pipeline)
-                
+
                 self.pipeline_tasks.pop(pipeline, None)
                 self.logger.pipeline_completed(pipeline.name)
                 actually_completed.append(pipeline)
@@ -156,7 +178,7 @@ class ImpressManager:
             for pipeline, adaptive_task in list(self.adaptive_tasks.items()):
                 if adaptive_task.done():
                     completed_adaptive.append(pipeline)
-            
+
             for pipeline in completed_adaptive:
                 self.adaptive_tasks.pop(pipeline, None)
 
