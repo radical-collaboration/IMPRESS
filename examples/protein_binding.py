@@ -54,20 +54,20 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
             name, *_, score_str = line.split(',')
             protein = name.split('.')[0]
-            pipeline.curr_scores[protein] = float(score_str)
+            pipeline.current_scores[protein] = float(score_str)
 
     # First pass — just save current scores as previous
-    if not pipeline.prev_scores:
-        pipeline.prev_scores = copy.deepcopy(pipeline.curr_scores)
+    if not pipeline.previous_scores:
+        pipeline.previous_scores = copy.deepcopy(pipeline.current_scores)
         return
 
     # Identify proteins that got worse
     sub_iter_seqs = {}
-    for protein, curr_score in pipeline.curr_scores.items():
+    for protein, curr_score in pipeline.current_scores.items():
         if protein not in pipeline.iter_seqs:
             continue
 
-        decision = await adaptive_criteria(curr_score, pipeline.prev_scores[protein])
+        decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein])
 
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
@@ -94,7 +94,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
                 'passes': pipeline.passes,
                 'iter_seqs': sub_iter_seqs,
                 'seq_rank': pipeline.seq_rank + 1,
-                'prev_scores': copy.deepcopy(pipeline.prev_scores),
+                'previous_scores': copy.deepcopy(pipeline.previous_scores),
                 'stage_id': 1
             } 
         }
