@@ -132,3 +132,6 @@ dmypy.json
 *.ff
 *.pkl
 *.fa
+
+# asyncflow related
+asyncflow.session.*

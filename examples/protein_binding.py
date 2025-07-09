@@ -3,7 +3,7 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager
@@ -112,22 +112,22 @@ async def impress_protein_bind() -> None:
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    manager: ImpressManager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
+    manager: ImpressManager = ImpressManager(execution_backend=RadicalExecutionBackend({'gpus':1,
+                                                                                        'cores': 128,
+                                                                                        'runtime' : 200,
+                                                                                        'resource': 'purdue.anvil_gpu'}))
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name='p1',
             type=ProteinBindingPipeline,
             adaptive_fn=adaptive_decision
-        ),
-        PipelineSetup(
-            name='p2',
-            type=ProteinBindingPipeline,
-            adaptive_fn=adaptive_decision
         )
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    await manager.flow.shutdown()
 
 
 if __name__ == "__main__":

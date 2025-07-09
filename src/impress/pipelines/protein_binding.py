@@ -4,7 +4,9 @@ import asyncio
 
 from .impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = []
+TASK_PRE_EXEC = ['module load anaconda',
+                 f"source activate base",
+                 f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs={}, **kwargs):
@@ -25,18 +27,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # Input-related
         self.fasta_list_2 = kwargs.get('fasta_list_2', [])
         self.base_path = kwargs.get('base_path', os.getcwd())
-        self.input_path = f'{self.base_path}/{self.name}_in'
+        self.input_path = os.path.join(self.base_path, f'{self.name}_in')
 
         # Output paths
-        self.output_path = f'{self.base_path}/af_pipeline_outputs_multi/{self.name}'
-        self.output_path_mpnn = f'{self.output_path}/mpnn'
-        self.output_path_af = f'{self.output_path}/af/prediction/best_models'
+        self.output_path = os.path.join(self.base_path, 'af_pipeline_outputs_multi', self.name)
+        self.output_path_mpnn = os.path.join(self.output_path, 'mpnn')
+        self.output_path_af = os.path.join(self.output_path, '/af/prediction/best_models')
 
         # might have to do outside of initialization, so new pipelines
         # do not run this can be declared directly as argument
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
-
 
     def set_up_new_pipeline_dirs(self):
 
@@ -67,7 +68,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
         @self.auto_register_task()  # MPNN
-        async def s1():
+        async def s1(task_description={'ranks':1}):
             mpnn_script = f"{self.base_path}/mpnn_wrapper.py"
             output_dir = f"{self.output_path_mpnn}/job_{self.passes}/"
             mpnn_model = f"{self.base_path}/../../ProteinMPNN/"
@@ -121,7 +122,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             return fasta_file_to_return
 
         @self.auto_register_task() #alphafold, must be run separately for each structure one at a time!
-        async def s4(target_fasta, task_description={}):
+        async def s4(target_fasta, task_description={'gpus_per_rank': 1}):
             cmd =  (
                 f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
                 f"{self.output_path}/af/fasta/ "
@@ -131,7 +132,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             return cmd
 
         @self.auto_register_task() #plddt_extract
-        async def s5():
+        async def s5(task_description={}):
                 return (
                     f"python3 {self.base_path}/plddt_extract_pipeline.py "
                     f"--path={self.base_path} "
@@ -157,7 +158,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Main execution logic"""
 
         print('Executing MPNN task')
-        s1_res = await self.s1()
+        s1_res = await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
         print('MPNN task finished')
 
         print('Executing Sequence ranking task')
@@ -188,4 +189,4 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         print('Executing Alphafold tasks for all fasta files asynchronously')
         results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
 
-        s5_res = await self.s5()
+        s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
