@@ -8,6 +8,8 @@ TASK_PRE_EXEC = ['module load anaconda',
                  f"source activate base",
                  f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
 
+MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
+
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs={}, **kwargs):
         # Execution metadata
@@ -16,6 +18,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get('seq_rank', 0)
         self.num_seqs = kwargs.get('num_seqs', 10)
         self.sub_order = kwargs.get('sub_order', 0)
+        self.mpnn_path = kwargs.get('mpnn_path', MPNN_PATH)
  
         # Sequence and score state
         self.current_scores  = {}
@@ -69,15 +72,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Register all pipeline tasks"""
         @self.auto_register_task()  # MPNN
         async def s1(task_description={'ranks':1}):
-            mpnn_script = f"{self.base_path}/mpnn_wrapper.py"
-            output_dir = f"{self.output_path_mpnn}/job_{self.passes}/"
-            mpnn_model = f"{self.base_path}/../../ProteinMPNN/"
+            mpnn_script = os.path.join(self.base_path, 'mpnn_wrapper.py')
+            output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
             return (
                 f"python3 {mpnn_script} "
                 f"-pdb={self.input_path} "
                 f"-out={output_dir} "
-                f"-mpnn={mpnn_model} "
+                f"-mpnn={self.mpnn_path} "
                 f"-seqs={self.num_seqs} "
                 "-is_monomer=0 "
                 "-chains=A"
@@ -199,7 +201,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             alphafold_tasks.append(
                 self.s4(target_fasta=target_fasta, task_description=s4_description)
             )
-
 
             print('Executing Alphafold tasks for all fasta files asynchronously')
             results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
