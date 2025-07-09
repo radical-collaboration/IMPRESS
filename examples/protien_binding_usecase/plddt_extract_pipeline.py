@@ -69,7 +69,8 @@ for files in os.listdir(best_models_path):
 		for jsons in os.listdir(full_path_ptm):
 			hit = jsons.split('.')
 			if query[0]==hit[0]:
-				data = json.load(open(full_path_ptm+jsons))
+				data_path = os.path.join(full_path_ptm, jsons)
+				data = json.load(open(data_path))
 				for keys, values in data.items():
 					if keys == 'iptm+ptm':
 						for keys2, values2 in values.items():
@@ -84,7 +85,7 @@ for files in os.listdir(best_models_path):
 				#order=df_json['order']
 				#ptm=df_json['iptm+ptm']
 				break
-		
+
 		dimer_models_path = os.path.join(af_path, 'dimer_models')
 		for folders in os.listdir(dimer_models_path):
 			folder_name = files.split('.')[0]
