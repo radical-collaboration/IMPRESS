@@ -183,7 +183,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
             )
             mpnn_pdb = os.path.join(
-                self.output_path, 'mpnn', f"job_{self.passes - 1}", f"{target_fasta}.pdb"
+                self.output_path, 'mpnn', f"job_{self.passes}", f"{target_fasta}.pdb"
             )
 
             s4_description = {
@@ -205,3 +205,5 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
 
             s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
+
+            self.passes += 1
