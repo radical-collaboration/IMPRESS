@@ -152,7 +152,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.fasta_list_2.remove(f'{a}.pdb')
             os.unlink(f'{self.output_path_af}/{a}.pdb')
             os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
-        self.prev_scores = copy.deepcopy(self.curr_scores)
+        self.previous_scores = copy.deepcopy(self.current_scores)
 
     async def run(self):
         """Main execution logic"""
