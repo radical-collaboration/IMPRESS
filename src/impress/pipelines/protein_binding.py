@@ -1,4 +1,5 @@
 import os
+import copy
 import asyncio
 
 from .impress_pipeline import ImpressBasePipeline
@@ -6,7 +7,7 @@ from .impress_pipeline import ImpressBasePipeline
 TASK_PRE_EXEC = []
 
 class ProteinBindingPipeline(ImpressBasePipeline):
-    def __init__(self, name, flow, step_id=None, configs={}, **kwargs):
+    def __init__(self, name, flow, configs={}, **kwargs):
         # Execution metadata
         self.passes = kwargs.get('passes', 1)
         self.step_id = kwargs.get('step_id', 1)
@@ -23,7 +24,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         # Input-related
         self.fasta_list_2 = kwargs.get('fasta_list_2', [])
-        self.base_path = kwargs.get('base_path', '/home/x-aymen/IMPRESS-Framework/examples')
+        self.base_path = kwargs.get('base_path', os.getcwd())
         self.input_path = f'{self.base_path}/{self.name}_in'
 
         # Output paths
@@ -36,6 +37,32 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
+
+    def set_up_new_pipeline_dirs(self):
+
+        base_output = os.path.join(self.base_path, 'af_pipeline_outputs_multi', self.name)
+        input_dir = os.path.join(self.base_path, f"{self.name}_in")
+
+        if os.path.isdir(base_output):
+            return  # already exists, nothing to do
+
+        # all directories to create
+        subdirs = [
+            'af/fasta',
+            'af/prediction/best_models',
+            'af/prediction/best_ptm',
+            'af/prediction/dimer_models',
+            'af/prediction/logs',
+            'mpnn',
+            *[f'mpnn/job_{i}' for i in range(1, 6)]
+        ]
+
+        paths_to_create = [input_dir, base_output] + [
+            os.path.join(base_output, subdir) for subdir in subdirs
+        ]
+
+        for path in paths_to_create:
+            os.makedirs(path, exist_ok=True)
 
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
@@ -74,7 +101,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
                 seqs.sort(key=lambda x: x[1])  # Sort by score
                 self.iter_seqs[file_name.split('.')[0]] = seqs
-        
+
         # fasta - don't use helper script - cannot run x tasks for x structures
         @self.auto_register_task(local_task=True)
         async def s3():
@@ -118,8 +145,13 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             'p_scores': self.previous_scores
         }
 
-    async def finalize(self):
-        return
+    def finalize(self, sub_iter_seqs):
+        # finalize the "cleanup" of the current pipeline
+        for a in sub_iter_seqs:
+            self.fasta_list_2.remove(f'{a}.pdb')
+            os.unlink(f'{self.output_path_af}/{a}.pdb')
+            os.unlink(f'{self.output_path}/af/fasta/{a}.fa')
+        self.prev_scores = copy.deepcopy(self.curr_scores)
 
     async def run(self):
         """Main execution logic"""

@@ -1,6 +1,6 @@
 import copy
+import shutil
 import asyncio
-import random
 from typing import Dict, Any, Optional, List
 
 from radical.asyncflow import ThreadExecutionBackend
@@ -26,15 +26,14 @@ async def adaptive_criteria(current_score: float, previous_score: float) -> bool
     """
     return current_score > previous_score
 
-
-async def alphafold_adaptive_fn1(pipeline: ProteinBindingPipeline) -> Optional[Dict[str, Any]]:
+async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[str, Any]]:
     """
     Adaptive function for AlphaFold protein structure optimization.
-    
+
     Evaluates protein scores and creates child pipelines for proteins with
     degraded quality. Implements adaptive optimization strategy by moving
     underperforming proteins to new pipeline instances.
-    
+
     Args:
         pipeline: The protein binding pipeline to evaluate
         
@@ -43,45 +42,66 @@ async def alphafold_adaptive_fn1(pipeline: ProteinBindingPipeline) -> Optional[D
         None otherwise
     """
     MAX_SUB_PIPELINES: int = 3
-    current_scores: Dict[str, Dict[str, float]] = await pipeline.get_scores_map()
     sub_iter_seqs: Dict[str, str] = {}
 
-    # Compare each protein's score
-    for protein, score in current_scores['c_scores'].items():
-        prev: Optional[float] = current_scores['p_scores'].get(protein)
-        if prev is not None and score > prev:
-            if pipeline.iter_seqs.get(protein):
-                bad_condition: bool = await adaptive_criteria(score, pipeline.previous_scores[protein])
-                if bad_condition:
-                    # Got worse, must move to new pipeline
-                    sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
+    # Read current scores from CSV
+    file_name = f'af_stats_{pipeline.name}_pass_{pipeline.passes}.csv'
+    with open(file_name) as fd:
+        for line in fd.readlines()[1:]:
+            line = line.strip()
+            if not line:
+                continue
 
+            name, *_, score_str = line.split(',')
+            protein = name.split('.')[0]
+            pipeline.curr_scores[protein] = float(score_str)
+
+    # First pass — just save current scores as previous
+    if not pipeline.prev_scores:
+        pipeline.prev_scores = copy.deepcopy(pipeline.curr_scores)
+        return
+
+    # Identify proteins that got worse
+    sub_iter_seqs = {}
+    for protein, curr_score in pipeline.curr_scores.items():
+        if protein not in pipeline.iter_seqs:
+            continue
+
+        decision = await adaptive_criteria(curr_score, pipeline.prev_scores[protein])
+
+        if decision:
+            sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
+
+    # Spawn a new pipeline for bad proteins
     if sub_iter_seqs and pipeline.sub_order < MAX_SUB_PIPELINES:
         new_name: str = f"{pipeline.name}_sub{pipeline.sub_order + 1}"
 
-        new_pipe_config: Dict[str, Any] = {
+        pipeline.set_up_new_pipeline_dirs(new_name)
+
+        # Copy PDB files for bad proteins
+        for protein in sub_iter_seqs:
+            src = f'{pipeline.output_path_af}/{protein}.pdb'
+            dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
+            shutil.copyfile(src, dst)
+
+        # Queue new pipeline
+        new_config = {
             'name': new_name,
             'type': type(pipeline),
+            'adaptive_fn': adaptive_decision,
             'config': {
-                'iter_seqs': sub_iter_seqs,
-                'step_id': pipeline.step_id + 1,
                 'sub_order': pipeline.sub_order + 1,
-                'previous_score': copy.deepcopy(current_scores['c_scores']),
-            },
-            'adaptive_fn': alphafold_adaptive_fn1
+                'passes': pipeline.passes,
+                'iter_seqs': sub_iter_seqs,
+                'seq_rank': pipeline.seq_rank + 1,
+                'prev_scores': copy.deepcopy(pipeline.prev_scores),
+                'stage_id': 1
+            } 
         }
 
-        # Dummy randomized version to simulate that if not fasta files
-        # left, then kill the parent pipeline
-        if random.choice([True, False]):
-            print("[DUMMY] Simulating: pipeline.fasta_list_2 is empty")
-            pipeline.kill_parent = True
-        else:
-            print("[DUMMY] Simulating: pipeline.fasta_list_2 is not empty")
+        pipeline.submit_child_pipeline_request(new_config)
 
-        return new_pipe_config
-
-    return None
+        pipeline.finalize()
 
 
 async def impress_protein_bind() -> None:
@@ -98,17 +118,12 @@ async def impress_protein_bind() -> None:
         PipelineSetup(
             name='p1',
             type=ProteinBindingPipeline,
-            adaptive_fn=alphafold_adaptive_fn1
+            adaptive_fn=adaptive_decision
         ),
         PipelineSetup(
             name='p2',
             type=ProteinBindingPipeline,
-            adaptive_fn=alphafold_adaptive_fn1
-        ),
-        PipelineSetup(
-            name='p3',
-            type=ProteinBindingPipeline,
-            adaptive_fn=alphafold_adaptive_fn1
+            adaptive_fn=adaptive_decision
         )
     ]
 
