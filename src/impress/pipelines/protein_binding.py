@@ -171,37 +171,37 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         alphafold_tasks = []
 
-    for target_fasta in fasta_files:
-        models_path = os.path.join(
-            self.output_path, 'af', 'prediction', 'dimer_models', target_fasta
-        )
+        for target_fasta in fasta_files:
+            models_path = os.path.join(
+                self.output_path, 'af', 'prediction', 'dimer_models', target_fasta
+            )
 
-        best_model_pdb = os.path.join(
-            self.output_path, 'af', 'prediction', 'best_models', f"{target_fasta}.pdb"
-        )
-        best_ptm_json = os.path.join(
-            self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
-        )
-        mpnn_pdb = os.path.join(
-            self.output_path, 'mpnn', f"job_{self.passes - 1}", f"{target_fasta}.pdb"
-        )
+            best_model_pdb = os.path.join(
+                self.output_path, 'af', 'prediction', 'best_models', f"{target_fasta}.pdb"
+            )
+            best_ptm_json = os.path.join(
+                self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
+            )
+            mpnn_pdb = os.path.join(
+                self.output_path, 'mpnn', f"job_{self.passes - 1}", f"{target_fasta}.pdb"
+            )
 
-        s4_description = {
-            'pre_exec': TASK_PRE_EXEC,
-            'post_exec': [
-                f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
-                f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
-                f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
-            ]
-        }
+            s4_description = {
+                'pre_exec': TASK_PRE_EXEC,
+                'post_exec': [
+                    f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
+                    f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
+                    f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
+                ]
+            }
 
-        # launch coroutine without awaiting yet
-        alphafold_tasks.append(
-            self.s4(target_fasta=target_fasta, task_description=s4_description)
-        )
+            # launch coroutine without awaiting yet
+            alphafold_tasks.append(
+                self.s4(target_fasta=target_fasta, task_description=s4_description)
+            )
 
 
-        print('Executing Alphafold tasks for all fasta files asynchronously')
-        results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            print('Executing Alphafold tasks for all fasta files asynchronously')
+            results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
 
-        s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
+            s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
