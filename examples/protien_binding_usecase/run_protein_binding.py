@@ -58,6 +58,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
     # First pass — just save current scores as previous
     if not pipeline.previous_scores:
+        pipeline.logger.pipeline_log('Saving current scores as previous and returning')
         pipeline.previous_scores = copy.deepcopy(pipeline.current_scores)
         return
 
@@ -84,21 +85,21 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
             shutil.copyfile(src, dst)
 
-        # Queue new pipeline
+        # Build a request for a new pipeline
         new_config = {
             'name': new_name,
             'type': type(pipeline),
             'adaptive_fn': adaptive_decision,
             'config': {
-                'sub_order': pipeline.sub_order + 1,
                 'passes': pipeline.passes,
                 'iter_seqs': sub_iter_seqs,
                 'seq_rank': pipeline.seq_rank + 1,
+                'sub_order': pipeline.sub_order + 1,
                 'previous_scores': copy.deepcopy(pipeline.previous_scores),
-                'stage_id': 1
             } 
         }
 
+        # Submit the request
         pipeline.submit_child_pipeline_request(new_config)
 
         pipeline.finalize()

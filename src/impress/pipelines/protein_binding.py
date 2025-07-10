@@ -18,6 +18,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get('seq_rank', 0)
         self.num_seqs = kwargs.get('num_seqs', 10)
         self.sub_order = kwargs.get('sub_order', 0)
+        self.max_passes = kwargs.get('sub_order', 5)
         self.mpnn_path = kwargs.get('mpnn_path', MPNN_PATH)
  
         # Sequence and score state
@@ -75,14 +76,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             mpnn_script = os.path.join(self.base_path, 'mpnn_wrapper.py')
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
+            chain = 'A' if self.passes == 1 else 'B'
+            input_path = self.input_path if self.passes == 1 else self.output_path_af
+
             return (
                 f"python3 {mpnn_script} "
-                f"-pdb={self.input_path} "
+                f"-pdb={input_path} "
                 f"-out={output_dir} "
                 f"-mpnn={self.mpnn_path} "
                 f"-seqs={self.num_seqs} "
                 "-is_monomer=0 "
-                "-chains=A"
+                f"-chains={chain}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -159,60 +163,61 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     async def run(self):
         """Main execution logic"""
 
-        self.logger.pipeline_log('Submitting MPNN task')
-        s1_res = await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
-        self.logger.pipeline_log('MPNN task finished')
+        while self.max_passes != self.passes:
 
-        self.logger.pipeline_log('Submitting sequence ranking task')
-        s2_res = await self.s2()
-        self.logger.pipeline_log('Sequence ranking task finished')
+            self.logger.pipeline_log(f'Starting pass {self.passes}')
 
-        self.logger.pipeline_log('Submitting scoring task')
-        fasta_files = await self.s3()
-        self.logger.pipeline_log('Scoring task finished')
+            self.logger.pipeline_log('Submitting MPNN task')
+            s1_res = await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
+            self.logger.pipeline_log('MPNN task finished')
 
-        alphafold_tasks = []
+            self.logger.pipeline_log('Submitting sequence ranking task')
+            s2_res = await self.s2()
+            self.logger.pipeline_log('Sequence ranking task finished')
 
-        for target_fasta in fasta_files:
-            models_path = os.path.join(
-                self.output_path, 'af', 'prediction', 'dimer_models', target_fasta
-            )
+            self.logger.pipeline_log('Submitting scoring task')
+            fasta_files = await self.s3()
+            self.logger.pipeline_log('Scoring task finished')
 
-            best_model_pdb = os.path.join(
-                self.output_path, 'af', 'prediction', 'best_models', f"{target_fasta}.pdb"
-            )
-            best_ptm_json = os.path.join(
-                self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
-            )
-            mpnn_pdb = os.path.join(
-                self.output_path, 'mpnn', f"job_{self.passes}", f"{target_fasta}.pdb"
-            )
+            alphafold_tasks = []
 
-            s4_description = {
-                'pre_exec': TASK_PRE_EXEC,
-                'post_exec': [
-                    f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
-                    f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
-                    f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
-                ]
-            }
+            for target_fasta in fasta_files:
+                models_path = os.path.join(
+                    self.output_path, 'af', 'prediction', 'dimer_models', target_fasta
+                )
 
-            # launch coroutine without awaiting yet
-            alphafold_tasks.append(
-                self.s4(target_fasta=target_fasta, task_description=s4_description)
-            )
+                best_model_pdb = os.path.join(
+                    self.output_path, 'af', 'prediction', 'best_models', f"{target_fasta}.pdb"
+                )
+                best_ptm_json = os.path.join(
+                    self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
+                )
+                mpnn_pdb = os.path.join(
+                    self.output_path, 'mpnn', f"job_{self.passes}", f"{target_fasta}.pdb"
+                )
 
-        self.logger.pipeline_log(f'Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously')
+                s4_description = {
+                    'pre_exec': TASK_PRE_EXEC,
+                    'post_exec': [
+                        f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
+                        f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
+                        f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
+                    ]
+                }
 
-        results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+                # launch coroutine without awaiting yet
+                alphafold_tasks.append(
+                    self.s4(target_fasta=target_fasta, task_description=s4_description)
+                )
 
-        self.logger.pipeline_log(f'{len(alphafold_tasks)} Alphafold tasks finished')
+            self.logger.pipeline_log(f'Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously')
+            results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            self.logger.pipeline_log(f'{len(alphafold_tasks)} Alphafold tasks finished')
 
-        
-        self.logger.pipeline_log('Submitting plddt extract')
-        s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
-        self.logger.pipeline_log('Plddt extract finished')
+            self.logger.pipeline_log('Submitting plddt extract')
+            s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
+            self.logger.pipeline_log('Plddt extract finished')
 
-        await self.run_adaptive_step(wait=True)
+            await self.run_adaptive_step(wait=True)
 
-        self.passes += 1
+            self.passes += 1
