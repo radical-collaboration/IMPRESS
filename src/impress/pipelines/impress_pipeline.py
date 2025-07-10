@@ -1,6 +1,8 @@
 import asyncio
 from abc import ABC, abstractmethod
 
+from ..utils.logger import ImpressLogger
+
 
 class ImpressBasePipeline(ABC):
     def __init__(self, name: str, flow=None, **config):
@@ -15,6 +17,8 @@ class ImpressBasePipeline(ABC):
 
         # Call the registration method - subclasses must implement this
         self.register_pipeline_tasks()
+
+        self.logger = ImpressLogger(self.name)
 
     def submit_child_pipeline_request(self, pipeline_config):
         """

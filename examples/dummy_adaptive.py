@@ -30,10 +30,20 @@ class DummyProteinPipeline(ImpressBasePipeline):
             return f"/bin/echo 'Optimizing' && /bin/date"
 
     async def run(self) -> None:
+
+        self.logger.pipeline_log('Seq started')
         await self.sequence_analysis()
+        self.logger.pipeline_log('Seq finished')
+
+        self.logger.pipeline_log('Fit started')
         await self.fitness_evaluation()
+        self.logger.pipeline_log('Fit finished')
+        
         await self.run_adaptive_step(wait=True)
+        
+        self.logger.pipeline_log('Optimization started')
         await self.optimization_step()
+        self.logger.pipeline_log('Optimization finished')
 
 
 async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None:
