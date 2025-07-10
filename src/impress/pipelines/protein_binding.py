@@ -159,17 +159,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     async def run(self):
         """Main execution logic"""
 
-        print('Executing MPNN task')
+        self.logger.pipeline_log('Submitting MPNN task')
         s1_res = await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
-        print('MPNN task finished')
+        self.logger.pipeline_log('MPNN task finished')
 
-        print('Executing Sequence ranking task')
+        self.logger.pipeline_log('Submitting sequence ranking task')
         s2_res = await self.s2()
-        print('Sequence ranking task finished')
+        self.logger.pipeline_log('Sequence ranking task finished')
 
-        print('Executing Scoring task')
+        self.logger.pipeline_log('Submitting scoring task')
         fasta_files = await self.s3()
-        print('Scoring task finished')
+        self.logger.pipeline_log('Scoring task finished')
 
         alphafold_tasks = []
 
@@ -202,10 +202,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 self.s4(target_fasta=target_fasta, task_description=s4_description)
             )
 
-        print('Executing Alphafold tasks for all fasta files asynchronously')
+        self.logger.pipeline_log(f'Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously')
+
         results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
 
+        self.logger.pipeline_log(f'{len(alphafold_tasks)} Alphafold tasks finished')
+
+        
+        self.logger.pipeline_log('Submitting plddt extract')
         s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
+        self.logger.pipeline_log('Plddt extract finished')
 
         await self.run_adaptive_step(wait=True)
 
