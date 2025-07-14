@@ -104,6 +104,9 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
         pipeline.finalize()
 
+        if not pipeline.fasta_list_2:
+            pipeline.kill_parent = True
+
 
 async def impress_protein_bind() -> None:
     """

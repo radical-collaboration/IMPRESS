@@ -18,7 +18,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get('seq_rank', 0)
         self.num_seqs = kwargs.get('num_seqs', 10)
         self.sub_order = kwargs.get('sub_order', 0)
-        self.max_passes = kwargs.get('sub_order', 5)
+        self.max_passes = kwargs.get('max_passes', 2)
         self.mpnn_path = kwargs.get('mpnn_path', MPNN_PATH)
  
         # Sequence and score state
@@ -163,7 +163,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     async def run(self):
         """Main execution logic"""
 
-        while self.max_passes != self.passes:
+        self.logger.pipeline_log(f'Running for a maximum of {self.max_passes} passes')
+
+        while self.passes <= self.max_passes:
 
             self.logger.pipeline_log(f'Starting pass {self.passes}')
 
