@@ -217,7 +217,12 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.logger.pipeline_log(f'{len(alphafold_tasks)} Alphafold tasks finished')
 
             self.logger.pipeline_log('Submitting plddt extract')
-            s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC})
+
+            staged_file = f'af_stats_{self.name}_pass_{self.passes}.csv'
+
+            s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC,
+                                                     'output_staging': [{'source': f'task:///{staged_file}',
+                                                                         'target': f'client:///{staged_file}'}]})
             self.logger.pipeline_log('Plddt extract finished')
 
             await self.run_adaptive_step(wait=True)
