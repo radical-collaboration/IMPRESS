@@ -18,7 +18,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get('seq_rank', 0)
         self.num_seqs = kwargs.get('num_seqs', 10)
         self.sub_order = kwargs.get('sub_order', 0)
-        self.max_passes = kwargs.get('max_passes', 2)
+        self.max_passes = kwargs.get('max_passes', 4)
         self.mpnn_path = kwargs.get('mpnn_path', MPNN_PATH)
  
         # Sequence and score state
@@ -43,10 +43,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
-    def set_up_new_pipeline_dirs(self):
+    def set_up_new_pipeline_dirs(self, new_pipeline_name):
 
-        base_output = os.path.join(self.base_path, 'af_pipeline_outputs_multi', self.name)
-        input_dir = os.path.join(self.base_path, f"{self.name}_in")
+        base_output = os.path.join(self.base_path,
+                                   'af_pipeline_outputs_multi', new_pipeline_name)
+        input_dir = os.path.join(self.base_path, f"{new_pipeline_name}_in")
 
         if os.path.isdir(base_output):
             return  # already exists, nothing to do
