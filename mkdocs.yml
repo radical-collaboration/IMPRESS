@@ -37,25 +37,10 @@ nav:
   - Home: index.md
   - Getting Started:
     - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quick-start.md
-    - Basic Concepts: getting-started/concepts.md
-  - User Guide:
-    - Creating Pipelines: user-guide/creating-pipelines.md
-    - Adaptive Functions: user-guide/adaptive-functions.md
-    - Task Management: user-guide/task-management.md
-    - HPC Deployment: user-guide/hpc-deployment.md
+    - Build A Protein Pipeline: getting-started/quick-start.md
+    - Adaptive Protein Pipelines: user-guide/adaptive-functions.md
   - Prebuilt Pipelines:
     - Overview: pipelines/overview.md
-  - API Reference:
-    - Pipeline Base Class: api/pipeline-base.md
-    - Manager: api/manager.md
-    - Utilities: api/utilities.md
-  - Examples:
-    - Basic Pipeline: examples/basic-pipeline.md
-    - Adaptive Workflows: examples/adaptive-workflows.md
-    - HPC Examples: examples/hpc-examples.md
-  - Contributing: contributing.md
-  - Changelog: changelog.md
 
 plugins:
   - search
