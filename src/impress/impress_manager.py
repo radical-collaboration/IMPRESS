@@ -1,7 +1,9 @@
 import asyncio
-from typing import Dict, List, Any, Optional, Type, Callable, Awaitable, Union
-from .utils.logger import ImpressLogger
+
 from radical.asyncflow import WorkflowEngine
+
+from typing import Dict, List, Any, Optional, Callable, Awaitable, Union
+from .utils.logger import ImpressLogger
 from .pipelines.setup import PipelineSetup
 from .pipelines.impress_pipeline import ImpressBasePipeline
 
@@ -22,7 +24,7 @@ class ImpressManager:
             execution_backend: Backend for workflow execution
             use_colors: Whether to use colors in logging output
         """
-        self.flow: WorkflowEngine = WorkflowEngine(backend=execution_backend)
+        self.execution_backend: Any = execution_backend
         self.pipeline_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
         self.adaptive_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
         self.new_pipeline_buffer: List[PipelineSetup] = []
@@ -111,6 +113,9 @@ class ImpressManager:
             pipeline_setups: List of initial pipeline configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
+
+        self.flow: WorkflowEngine = await WorkflowEngine.create(backend=self.execution_backend)
+
         self.logger.manager_starting(len(pipeline_setups))
 
         self.submit_new_pipelines(pipeline_setups)

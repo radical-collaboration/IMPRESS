@@ -3,7 +3,8 @@ import asyncio
 import random
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import ThreadExecutionBackend
+from concurrent.futures import ThreadPoolExecutor
+from radical.asyncflow import ConcurrentExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
@@ -82,7 +83,8 @@ async def run_dummy_pipelines() -> None:
     Creates and starts three DummyProteinPipeline instances (p1, p2, p3)
     using the ImpressManager for coordinated execution.
     """
-    manager: ImpressManager = ImpressManager(execution_backend=ThreadExecutionBackend({}))
+    execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    manager: ImpressManager = ImpressManager(execution_backend)
 
     pipeline_setups: List[PipelineSetup] = [PipelineSetup(name='p1', type=DummyProteinPipeline),
                                             PipelineSetup(name='p2', type=DummyProteinPipeline),
