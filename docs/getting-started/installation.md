@@ -49,7 +49,7 @@ Impress uses **Radical AsyncFlow** as its workflow backend.
 If not installed automatically, you can install it explicitly:
 
 ```bash
-pip install radical-asyncflow
+pip install radical.asyncflow
 ```
 
 ---
@@ -73,7 +73,6 @@ Impress is installed!
 ## 🧬 Step 4: Run a Sample Pipeline
 
 Now you’re ready to write and run your own pipelines!  
-You can follow the [Tutorial: Submit N Pipelines Asynchronously](tutorials/async_protein_pipelines.md) to get started.
 
 ---
 
@@ -91,7 +90,6 @@ Next time you want to work with Impress, just activate the environment again.
 
 ## 📚 Next Steps
 
-✅ [Tutorial: Submit N Pipelines Asynchronously](tutorials/async_protein_pipelines.md)  
 ✅ Explore the API reference  
 ✅ Build your own workflows!
 
