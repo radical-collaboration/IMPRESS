@@ -9,6 +9,10 @@ from impress.impress_manager import ImpressManager
 from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import ConcurrentExecutionBackend
 from agnostic_agent import LLMAgent
+from .agent import llm_agent, provide_llm_context, PipelineContext 
+
+NUMBER_OF_TIME_REJECTED = 0
+NUMBER_OF_TIME_ACCEPTED = 0
 
 class DummyProteinPipeline(ImpressBasePipeline):
     def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
@@ -48,17 +52,25 @@ class DummyProteinPipeline(ImpressBasePipeline):
         self.logger.pipeline_log('Optimization finished')
 
 
-async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None:
-    """
-    
-    CONTEXT OF THE PIPELINE:
-        - 
-    
-    """
-    if pipeline.generation >= pipeline.max_generations or random.random() >= 0.5:
+
+async def adaptive_decision(pipeline: DummyProteinPipeline) -> None:
+    global NUMBER_OF_TIME_REJECTED, NUMBER_OF_TIME_ACCEPTED
+    if pipeline.generation >= pipeline.max_generations:
+        NUMBER_OF_TIME_REJECTED += 1
         return
+
+    previous_score = random.random()
+    current_score = random.random()
+
+    llm_context = provide_llm_context(pipeline_context=PipelineContext(previous_score=previous_score,
+                                                                   current_score=current_score,
+                                                                   generation=pipeline.generation))
     
-    # ADD AI HERE
+    llm_response = await llm_agent.prompt(message=llm_context)
+    if not llm_response.parsed_response.spawn_new_pipeline:
+        NUMBER_OF_TIME_REJECTED += 1
+        return 
+    NUMBER_OF_TIME_ACCEPTED += 1
 
     new_name = f"{pipeline.name}_g{pipeline.generation + 1}"
     new_config = {
@@ -69,7 +81,7 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
             'parent_name': pipeline.name,
             'max_generations': pipeline.max_generations,
         },
-        'adaptive_fn': adaptive_optimization_strategy
+        'adaptive_fn': adaptive_decision
     }
     pipeline.submit_child_pipeline_request(new_config)
 
@@ -80,9 +92,11 @@ async def run() -> None:
 
     pipeline_setups = [PipelineSetup(name=f'p{i}',
                                      type=DummyProteinPipeline,
-                                     adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
+                                     adaptive_fn=adaptive_decision)  for i in range(1, 4)]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    print(f"Number of times rejected: {NUMBER_OF_TIME_REJECTED} vs Number of times accepteed: {NUMBER_OF_TIME_ACCEPTED}")
 
 
 if __name__ == "__main__":
