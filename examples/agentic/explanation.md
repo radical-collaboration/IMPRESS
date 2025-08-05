@@ -4,5 +4,7 @@
 ### 1st Prototype (Quick & Dirty)
 - Currently: Randomly stop 
 - Proposed approach: provide the model with following context, the make a decision:
-   - Context: 
-      - A
+   - Context (some basic attributes from the `Pipeline`object): 
+      - Prior score
+      - Current score
+      - Geneartion number
