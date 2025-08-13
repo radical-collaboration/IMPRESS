@@ -22,8 +22,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/radical-cybertools/radical.asyncflow"
-Issues = "https://github.com/radical-cybertools/radical.asyncflow/issues"
+Homepage = "https://github.com/radical-collaboration/IMPRESS/tree/main"
+Issues = "https://github.com/radical-collaboration/IMPRESS/issues"
 
 [project.optional-dependencies]
 radicalpilot = ["radical.pilot"]
