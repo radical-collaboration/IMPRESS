@@ -106,4 +106,3 @@ class ImpressBasePipeline(ABC):
     def get_current_config_for_next_pipeline(self):
         """Optional: Return config for next pipeline"""
         return {"name": "default_pipeline", "type": self.__class__}
-    

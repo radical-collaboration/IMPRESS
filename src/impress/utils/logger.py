@@ -1,6 +1,7 @@
+import sys
 from datetime import datetime
 from enum import Enum
-import sys
+
 
 class Colors:
     BLACK = '\033[30m'
@@ -35,7 +36,7 @@ class ImpressLogger:
         self.name = name
         self.use_colors = use_colors
         self.output_stream = output_stream or sys.stdout
-        
+
         self.level_colors = {
             LogLevel.DEBUG: Colors.BRIGHT_BLACK,
             LogLevel.INFO: Colors.BRIGHT_CYAN,
@@ -43,7 +44,7 @@ class ImpressLogger:
             LogLevel.ERROR: Colors.BRIGHT_RED,
             LogLevel.CRITICAL: Colors.RED + Colors.BOLD
         }
-        
+
         self.component_colors = {
             'pipeline': Colors.BRIGHT_GREEN,
             'adaptive': Colors.BRIGHT_MAGENTA,
@@ -67,19 +68,19 @@ class ImpressLogger:
     def _format_message(self, level, component, message, pipeline_name=None):
         timestamp = self._colorize(datetime.now().strftime("%H:%M:%S.%f")[:-3], Colors.DIM)
         colored_level = self._colorize(f"[{level.value}]", self.level_colors.get(level, Colors.WHITE))
-        
+
         # Handle pipeline-specific components
         if component.lower().startswith('pipeline-'):
             component_color = Colors.BRIGHT_GREEN
         else:
             component_color = self.component_colors.get(component.lower(), Colors.WHITE)
-        
+
         colored_component = self._colorize(f"[{component.upper()}]", component_color)
-        
+
         pipeline_part = ""
         if pipeline_name:
             pipeline_part = f" {self._colorize(f'[{pipeline_name}]', Colors.BRIGHT_WHITE)}"
-        
+
         return f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
 
     def _write_log(self, message, to_stderr=False):

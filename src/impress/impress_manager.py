@@ -1,11 +1,12 @@
 import asyncio
+from collections.abc import Awaitable
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
 
-from typing import Dict, List, Any, Optional, Callable, Awaitable, Union
-from .utils.logger import ImpressLogger
-from .pipelines.setup import PipelineSetup
 from .pipelines.impress_pipeline import ImpressBasePipeline
+from .pipelines.setup import PipelineSetup
+from .utils.logger import ImpressLogger
 
 
 class ImpressManager:
@@ -15,7 +16,7 @@ class ImpressManager:
     Coordinates pipeline lifecycle, adaptive function execution, and child pipeline
     creation in an asynchronous environment.
     """
-    
+
     def __init__(self, execution_backend: Any, use_colors: bool = True) -> None:
         """
         Initialize the ImpressManager.
@@ -60,7 +61,7 @@ class ImpressManager:
         for setup_input in pipeline_setups:
             # Normalize to PipelineSetup object
             setup = self._normalize_pipeline_setup(setup_input)
-            
+
             # Create pipeline instance with config and kwargs merged
             pipeline_kwargs = {**setup.config, **setup.kwargs}
             pipeline: ImpressBasePipeline = setup.type(
@@ -126,9 +127,9 @@ class ImpressManager:
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
-                if (getattr(pipeline, 'invoke_adaptive_step', False) and 
+                if (getattr(pipeline, 'invoke_adaptive_step', False) and
                     pipeline not in self.adaptive_tasks):
-                    
+
                     adaptive_task: asyncio.Task = asyncio.create_task(
                         self._run_adaptive_fn(pipeline)
                     )
@@ -196,8 +197,8 @@ class ImpressManager:
             # Log activity summary periodically
             if any_activity:
                 self.logger.activity_summary(
-                    len(self.pipeline_tasks), 
-                    len(self.adaptive_tasks), 
+                    len(self.pipeline_tasks),
+                    len(self.adaptive_tasks),
                     len(self.new_pipeline_buffer)
                 )
 

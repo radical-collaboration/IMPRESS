@@ -1,11 +1,11 @@
-import os
-import copy
 import asyncio
+import copy
+import os
 
 from .impress_pipeline import ImpressBasePipeline
 
 TASK_PRE_EXEC = ['module load anaconda',
-                 f"source activate base",
+                 "source activate base",
                  f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
 
 MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
@@ -20,12 +20,12 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.sub_order = kwargs.get('sub_order', 0)
         self.max_passes = kwargs.get('max_passes', 4)
         self.mpnn_path = kwargs.get('mpnn_path', MPNN_PATH)
- 
+
         # Sequence and score state
         self.current_scores  = {}
         self.iter_seqs = kwargs.get('iter_seqs', {})
         self.previous_scores = kwargs.get('previous_score', {})
-    
+
         super().__init__(name, flow, **configs, **kwargs)
 
         # Input-related
