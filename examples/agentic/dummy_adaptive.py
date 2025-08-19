@@ -5,14 +5,20 @@ from typing import Dict, Any
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress.impress_manager import ImpressManager
+from impress import llm_agent, provide_llm_context 
 
 from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import ConcurrentExecutionBackend
-from agnostic_agent import LLMAgent
-from .agent import llm_agent, provide_llm_context, PipelineContext 
+
+from pydantic import BaseModel
 
 NUMBER_OF_TIME_REJECTED = 0
 NUMBER_OF_TIME_ACCEPTED = 0
+
+class PipelineContextDummy(BaseModel):
+    previous_score: float
+    current_score: float
+    generation: int
 
 class DummyProteinPipeline(ImpressBasePipeline):
     def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
@@ -52,6 +58,46 @@ class DummyProteinPipeline(ImpressBasePipeline):
         self.logger.pipeline_log('Optimization finished')
 
 
+async def adaptive_criteria(current_score: float, previous_score: float, pipeline: DummyProteinPipeline) -> bool:
+    """
+    Determine if protein quality has degraded requiring pipeline migration.
+    
+    Uses AI agent for decision-making.
+    
+    Args:
+        current_score: Current protein structure quality score
+        previous_score: Previous protein structure quality score
+        pipeline: Complete pipeline object 
+        
+    Returns:
+        True if quality has degraded, False otherwise
+    """
+    score_change = current_score - previous_score
+    percent_change = (score_change / previous_score * 100) if previous_score != 0 else 0
+    
+    if percent_change > 2:
+        trend = "improving"
+    elif percent_change < -2:
+        trend = "degrading"
+    else:
+        trend = "stable"
+    
+    context = PipelineContextDummy(
+        previous_score=previous_score,
+        current_score=current_score,
+        generation=pipeline.generation,
+    )
+    
+    llm_context = provide_llm_context(pipeline_context=context)
+    llm_response = await llm_agent.prompt(message=llm_context)
+    
+    pipeline.logger.pipeline_log(
+        f"LLM Decision - Spawn: {llm_response.parsed_response.spawn_new_pipeline}, "
+        f"Confidence: {llm_response.parsed_response.confidence}, "
+        f"Reasoning: {llm_response.parsed_response.reasoning}"
+    )
+    
+    return llm_response.parsed_response.spawn_new_pipeline
 
 async def adaptive_decision(pipeline: DummyProteinPipeline) -> None:
     global NUMBER_OF_TIME_REJECTED, NUMBER_OF_TIME_ACCEPTED
@@ -59,14 +105,10 @@ async def adaptive_decision(pipeline: DummyProteinPipeline) -> None:
         NUMBER_OF_TIME_REJECTED += 1
         return
 
-    previous_score = random.random()
     current_score = random.random()
+    previous_score = random.random()
 
-    llm_context = provide_llm_context(pipeline_context=PipelineContext(previous_score=previous_score,
-                                                                   current_score=current_score,
-                                                                   generation=pipeline.generation))
-    
-    llm_response = await llm_agent.prompt(message=llm_context)
+    llm_response = await adaptive_criteria(current_score, previous_score, pipeline)
     if not llm_response.parsed_response.spawn_new_pipeline:
         NUMBER_OF_TIME_REJECTED += 1
         return 
