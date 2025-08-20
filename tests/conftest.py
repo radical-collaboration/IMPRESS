@@ -4,17 +4,20 @@ import shutil
 from pathlib import Path
 
 from unittest.mock import Mock
-from impress.impress_manager import ImpressManager 
+from impress.impress_manager import ImpressManager
+
 
 def pytest_sessionfinish(session, exitstatus):
     root = Path(__file__).parent
-    for pycache_dir in root.rglob('__pycache__'):
+    for pycache_dir in root.rglob("__pycache__"):
         shutil.rmtree(pycache_dir)
+
 
 @pytest.fixture
 def mock_execution_backend():
     """Mock execution backend"""
     return Mock()
+
 
 @pytest.fixture
 def impress_manager(mock_execution_backend):

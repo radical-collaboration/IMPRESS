@@ -47,6 +47,9 @@ class DummyProteinPipeline(ImpressBasePipeline):
         await self.optimization_step()
         self.logger.pipeline_log('Optimization finished')
 
+    async def finalize(self) -> None:
+        pass
+
 
 async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None:
     if pipeline.generation >= pipeline.max_generations or random.random() >= 0.5:

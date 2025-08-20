@@ -4,25 +4,25 @@ from enum import Enum
 
 
 class Colors:
-    BLACK = '\033[30m'
-    RED = '\033[31m'
-    GREEN = '\033[32m'
-    YELLOW = '\033[33m'
-    BLUE = '\033[34m'
-    MAGENTA = '\033[35m'
-    CYAN = '\033[36m'
-    WHITE = '\033[37m'
-    BRIGHT_BLACK = '\033[90m'
-    BRIGHT_RED = '\033[91m'
-    BRIGHT_GREEN = '\033[92m'
-    BRIGHT_YELLOW = '\033[93m'
-    BRIGHT_BLUE = '\033[94m'
-    BRIGHT_MAGENTA = '\033[95m'
-    BRIGHT_CYAN = '\033[96m'
-    BRIGHT_WHITE = '\033[97m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
+    BLACK = "\033[30m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    BRIGHT_BLACK = "\033[90m"
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
+    BRIGHT_WHITE = "\033[97m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
 
 
 class LogLevel(Enum):
@@ -44,24 +44,24 @@ class ImpressLogger:
             LogLevel.INFO: Colors.BRIGHT_CYAN,
             LogLevel.WARNING: Colors.BRIGHT_YELLOW,
             LogLevel.ERROR: Colors.BRIGHT_RED,
-            LogLevel.CRITICAL: Colors.RED + Colors.BOLD
+            LogLevel.CRITICAL: Colors.RED + Colors.BOLD,
         }
 
         self.component_colors = {
-            'pipeline': Colors.BRIGHT_GREEN,
-            'adaptive': Colors.BRIGHT_MAGENTA,
-            'manager': Colors.BRIGHT_BLUE,
-            'workflow': Colors.CYAN,
-            'task': Colors.YELLOW,
-            'error': Colors.RED,
-            'success': Colors.GREEN,
-            'stage': Colors.BRIGHT_CYAN,
-            'step': Colors.CYAN,
-            'resource': Colors.MAGENTA,
-            'data': Colors.BRIGHT_YELLOW,
-            'validation': Colors.BRIGHT_MAGENTA,
-            'checkpoint': Colors.BRIGHT_GREEN,
-            'metric': Colors.BRIGHT_WHITE
+            "pipeline": Colors.BRIGHT_GREEN,
+            "adaptive": Colors.BRIGHT_MAGENTA,
+            "manager": Colors.BRIGHT_BLUE,
+            "workflow": Colors.CYAN,
+            "task": Colors.YELLOW,
+            "error": Colors.RED,
+            "success": Colors.GREEN,
+            "stage": Colors.BRIGHT_CYAN,
+            "step": Colors.CYAN,
+            "resource": Colors.MAGENTA,
+            "data": Colors.BRIGHT_YELLOW,
+            "validation": Colors.BRIGHT_MAGENTA,
+            "checkpoint": Colors.BRIGHT_GREEN,
+            "metric": Colors.BRIGHT_WHITE,
         }
 
     def _colorize(self, text, color):
@@ -75,7 +75,7 @@ class ImpressLogger:
         colored_level = self._colorize(f"[{level.value}]", level_color)
 
         # Handle pipeline-specific components
-        if component.lower().startswith('pipeline-'):
+        if component.lower().startswith("pipeline-"):
             component_color = Colors.BRIGHT_GREEN
         else:
             component_color = self.component_colors.get(component.lower(), Colors.WHITE)
@@ -84,45 +84,46 @@ class ImpressLogger:
 
         pipeline_part = ""
         if pipeline_name:
-            pipeline_colored = self._colorize(f'[{pipeline_name}]', Colors.BRIGHT_WHITE)
+            pipeline_colored = self._colorize(f"[{pipeline_name}]", Colors.BRIGHT_WHITE)
             pipeline_part = f" {pipeline_colored}"
 
         return (
-            f"{timestamp} "
-            f"{colored_level} "
-            f"{colored_component}"
-            f"{pipeline_part} "f"{message}"
-            )
-
+            f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
+        )
 
     def _write_log(self, message, to_stderr=False):
         stream = sys.stderr if to_stderr else self.output_stream
-        stream.write(message + '\n')
+        stream.write(message + "\n")
         stream.flush()
 
     def debug(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.DEBUG, component, message,
-                                        pipeline_name)
+        formatted = self._format_message(
+            LogLevel.DEBUG, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def info(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.INFO, component, message,
-                                        pipeline_name)
+        formatted = self._format_message(
+            LogLevel.INFO, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def warning(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.WARNING, component, message,
-                                        pipeline_name)
+        formatted = self._format_message(
+            LogLevel.WARNING, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def error(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.ERROR, component, message,
-                                        pipeline_name)
+        formatted = self._format_message(
+            LogLevel.ERROR, component, message, pipeline_name
+        )
         self._write_log(formatted, to_stderr=True)
 
     def critical(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.CRITICAL, component, message,
-                                        pipeline_name)
+        formatted = self._format_message(
+            LogLevel.CRITICAL, component, message, pipeline_name
+        )
         self._write_log(formatted, to_stderr=True)
 
     def pipeline_started(self, pipeline_name):
@@ -173,9 +174,11 @@ class ImpressLogger:
         colored_pipelines = self._colorize(str(active_pipelines), Colors.BRIGHT_GREEN)
         colored_adaptive = self._colorize(str(active_adaptive), Colors.BRIGHT_MAGENTA)
         colored_buffered = self._colorize(str(buffered_pipelines), Colors.BRIGHT_YELLOW)
-        summary = (f"Active: {colored_pipelines} pipelines, "
-                  f"{colored_adaptive} adaptive tasks, "
-                  f"{colored_buffered} buffered")
+        summary = (
+            f"Active: {colored_pipelines} pipelines, "
+            f"{colored_adaptive} adaptive tasks, "
+            f"{colored_buffered} buffered"
+        )
         self.debug(summary, "manager")
 
     def pipeline_log(self, message, level=LogLevel.INFO):
@@ -186,8 +189,8 @@ class ImpressLogger:
 
     def separator(self, title=None):
         if title:
-            separator = f"{'='*20} {title} {'='*20}"
+            separator = f"{'=' * 20} {title} {'=' * 20}"
         else:
-            separator = "="*50
+            separator = "=" * 50
         colored_sep = self._colorize(separator, Colors.BRIGHT_BLUE)
         self._write_log(colored_sep)

@@ -32,9 +32,8 @@ class ImpressManager:
         self.logger: ImpressLogger = ImpressLogger(use_colors=use_colors)
 
     def _normalize_pipeline_setup(
-        self, setup: Union[dict[str, Any],
-        PipelineSetup]
-        ) -> PipelineSetup:
+        self, setup: Union[dict[str, Any], PipelineSetup]
+    ) -> PipelineSetup:
         """
         Normalize pipeline setup to PipelineSetup object.
 
@@ -49,12 +48,11 @@ class ImpressManager:
         elif isinstance(setup, PipelineSetup):
             return setup
         else:
-            raise ValueError(f"Expected dict or PipelineSetup, "
-            f"got {type(setup)}")
+            raise ValueError(f"Expected dict or PipelineSetup, got {type(setup)}")
 
     def submit_new_pipelines(
-        self, pipeline_setups: list[Union[dict[str, Any],
-        PipelineSetup]]) -> None:
+        self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]
+    ) -> None:
         """
         Submit new pipelines for execution.
 
@@ -73,9 +71,7 @@ class ImpressManager:
             # Create pipeline instance with config and kwargs merged
             pipeline_kwargs = {**setup.config, **setup.kwargs}
             pipeline: ImpressBasePipeline = setup.type(
-                name=setup.name,
-                flow=self.flow,
-                **pipeline_kwargs
+                name=setup.name, flow=self.flow, **pipeline_kwargs
             )
 
             pipeline._adaptive_fn = setup.adaptive_fn
@@ -97,9 +93,8 @@ class ImpressManager:
         """
         try:
             self.logger.adaptive_started(pipeline.name)
-            adaptive_fn: Optional[Callable[[ImpressBasePipeline],
-            Awaitable[None]]] = getattr(
-                pipeline, '_adaptive_fn', None
+            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Awaitable[None]]] = (
+                getattr(pipeline, "_adaptive_fn", None)
             )
             if adaptive_fn:
                 await adaptive_fn(pipeline)
@@ -111,8 +106,8 @@ class ImpressManager:
             pipeline._adaptive_barrier.set()
 
     async def start(
-        self, pipeline_setups: list[Union[dict[str, Any],
-        PipelineSetup]]) -> None:
+        self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]
+    ) -> None:
         """
         Start the pipeline manager and execute all pipelines.
 
@@ -130,7 +125,7 @@ class ImpressManager:
 
         self.flow: WorkflowEngine = await WorkflowEngine.create(
             backend=self.execution_backend
-            )
+        )
 
         self.logger.manager_starting(len(pipeline_setups))
 
@@ -142,9 +137,10 @@ class ImpressManager:
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
-                if (getattr(pipeline, 'invoke_adaptive_step', False) and
-                    pipeline not in self.adaptive_tasks):
-
+                if (
+                    getattr(pipeline, "invoke_adaptive_step", False)
+                    and pipeline not in self.adaptive_tasks
+                ):
                     adaptive_task: asyncio.Task = asyncio.create_task(
                         self._run_adaptive_fn(pipeline)
                     )
@@ -152,18 +148,17 @@ class ImpressManager:
                     any_activity = True
 
                 # Check if pipeline has new config ready
-                config: Optional[dict[str, Any]] = \
-                    pipeline.get_child_pipeline_request()
+                config: Optional[dict[str, Any]] = pipeline.get_child_pipeline_request()
 
                 if config:
-                    self.logger.child_pipeline_submitted(config['name'], pipeline.name)
+                    self.logger.child_pipeline_submitted(config["name"], pipeline.name)
                     # Convert dict to PipelineSetup for consistency
                     child_setup = PipelineSetup.from_dict(config)
                     self.new_pipeline_buffer.append(child_setup)
                     any_activity = True
 
                 # Check if parent should be killed
-                if getattr(pipeline, 'kill_parent', False):
+                if getattr(pipeline, "kill_parent", False):
                     self.logger.pipeline_killed(pipeline.name)
                     pipeline_future.cancel()
                     completed_pipelines.append(pipeline)
@@ -218,13 +213,15 @@ class ImpressManager:
                 self.logger.activity_summary(
                     len(self.pipeline_tasks),
                     len(self.adaptive_tasks),
-                    len(self.new_pipeline_buffer)
+                    len(self.new_pipeline_buffer),
                 )
 
             # Exit condition
-            if not self.pipeline_tasks and \
-                not self.new_pipeline_buffer \
-                    and not self.adaptive_tasks:
+            if (
+                not self.pipeline_tasks
+                and not self.new_pipeline_buffer
+                and not self.adaptive_tasks
+            ):
                 self.logger.manager_exiting()
                 self.logger.separator("IMPRESS MANAGER FINISHED")
                 break

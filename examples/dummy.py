@@ -75,6 +75,10 @@ class DummyProteinPipeline(ImpressBasePipeline):
 
         print(f'[{self.name}] {s3_res}')
 
+    async def finalize(self) -> None:
+        self.current_scores = {}
+        self.previous_scores = {}
+
 
 async def run_dummy_pipelines() -> None:
     """

@@ -10,8 +10,9 @@ class PipelineSetup(BaseModel):
     """Pydantic model for pipeline configuration."""
 
     name: str = Field(..., description="Name of the pipeline")
-    type: Annotated[type[ImpressBasePipeline],
-    Field(..., description="Pipeline class type")]
+    type: Annotated[
+        type[ImpressBasePipeline], Field(..., description="Pipeline class type")
+    ]
     config: dict[str, Any] = Field(
         default_factory=dict,
         description="Pipeline configuration",
@@ -32,9 +33,7 @@ class PipelineSetup(BaseModel):
     def validate_pipeline_type(cls, v: Any) -> type[ImpressBasePipeline]:
         """Validate that type is a subclass of ImpressBasePipeline."""
         if not isinstance(v, type) or not issubclass(v, ImpressBasePipeline):
-            raise ValueError(
-                f"Expected an ImpressBasePipeline subclass, got {type(v)}"
-            )
+            raise ValueError(f"Expected an ImpressBasePipeline subclass, got {type(v)}")
         return v
 
     def to_dict(self) -> dict[str, Any]:

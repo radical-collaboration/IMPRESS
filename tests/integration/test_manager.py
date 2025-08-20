@@ -31,7 +31,7 @@ class TestIntegration:
                 # Wait for adaptive barrier to be set
                 await self._adaptive_barrier.wait()
                 return "completed"
-            
+
             async def finalize(self):
                 return True
 
