@@ -1,0 +1,16 @@
+--db_preset=reduced_dbs 
+--small_bfd_database_path=/anvil/datasets/alphafold/db_20230311/small_bfd/bfd-first_non_consensus_sequences.fasta 
+--fasta_paths=$INPUT_FASTA_FILE_DIR/$INPUT_FASTA_FILE_NAME 
+--output_dir=$OUTPUT_DATA_DIR 
+--data_dir=/anvil/datasets/alphafold/db_20230311 
+--uniref90_database_path=/anvil/datasets/alphafold/db_20230311/uniref90/uniref90.fasta 
+--mgnify_database_path=/anvil/datasets/alphafold/db_20230311/mgnify/mgy_clusters_2022_05.fa 
+--pdb_seqres_database_path=/anvil/datasets/alphafold/db_20230311/pdb_seqres/pdb_seqres.txt 
+--uniprot_database_path=/anvil/datasets/alphafold/db_20230311/uniprot/uniprot.fasta 
+--template_mmcif_dir=/anvil/datasets/alphafold/db_20230311/pdb_mmcif/mmcif_files 
+--obsolete_pdbs_path=/anvil/datasets/alphafold/db_20230311/pdb_mmcif/obsolete.dat 
+--max_template_date=2022-02-01 
+--use_gpu_relax=False 
+--model_preset=multimer 
+--num_multimer_predictions_per_model=1 
+--run_relax=False
