@@ -24,12 +24,14 @@ class Colors:
     BOLD = '\033[1m'
     DIM = '\033[2m'
 
+
 class LogLevel(Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
 
 class ImpressLogger:
     def __init__(self, name="ImpressManager", use_colors=True, output_stream=None):
@@ -66,8 +68,11 @@ class ImpressLogger:
         return f"{color}{text}{Colors.RESET}" if self.use_colors else text
 
     def _format_message(self, level, component, message, pipeline_name=None):
-        timestamp = self._colorize(datetime.now().strftime("%H:%M:%S.%f")[:-3], Colors.DIM)
-        colored_level = self._colorize(f"[{level.value}]", self.level_colors.get(level, Colors.WHITE))
+        timestamp = self._colorize(
+            datetime.now().strftime("%H:%M:%S.%f")[:-3], Colors.DIM
+        )
+        level_color = self.level_colors.get(level, Colors.WHITE)
+        colored_level = self._colorize(f"[{level.value}]", level_color)
 
         # Handle pipeline-specific components
         if component.lower().startswith('pipeline-'):
@@ -79,9 +84,16 @@ class ImpressLogger:
 
         pipeline_part = ""
         if pipeline_name:
-            pipeline_part = f" {self._colorize(f'[{pipeline_name}]', Colors.BRIGHT_WHITE)}"
+            pipeline_colored = self._colorize(f'[{pipeline_name}]', Colors.BRIGHT_WHITE)
+            pipeline_part = f" {pipeline_colored}"
 
-        return f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
+        return (
+            f"{timestamp} "
+            f"{colored_level} "
+            f"{colored_component}"
+            f"{pipeline_part} "f"{message}"
+            )
+
 
     def _write_log(self, message, to_stderr=False):
         stream = sys.stderr if to_stderr else self.output_stream
@@ -89,74 +101,93 @@ class ImpressLogger:
         stream.flush()
 
     def debug(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.DEBUG, component, message, pipeline_name)
+        formatted = self._format_message(LogLevel.DEBUG, component, message,
+                                        pipeline_name)
         self._write_log(formatted)
 
     def info(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.INFO, component, message, pipeline_name)
+        formatted = self._format_message(LogLevel.INFO, component, message,
+                                        pipeline_name)
         self._write_log(formatted)
 
     def warning(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.WARNING, component, message, pipeline_name)
+        formatted = self._format_message(LogLevel.WARNING, component, message,
+                                        pipeline_name)
         self._write_log(formatted)
 
     def error(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.ERROR, component, message, pipeline_name)
+        formatted = self._format_message(LogLevel.ERROR, component, message,
+                                        pipeline_name)
         self._write_log(formatted, to_stderr=True)
 
     def critical(self, message, component="manager", pipeline_name=None):
-        formatted = self._format_message(LogLevel.CRITICAL, component, message, pipeline_name)
+        formatted = self._format_message(LogLevel.CRITICAL, component, message,
+                                        pipeline_name)
         self._write_log(formatted, to_stderr=True)
 
     def pipeline_started(self, pipeline_name):
-        message = f"Pipeline started: {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Pipeline started: {colored_name}"
         self.info(message, "manager")
 
     def pipeline_completed(self, pipeline_name):
-        message = f"Pipeline completed: {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Pipeline completed: {colored_name}"
         self.info(message, "manager")
 
     def pipeline_killed(self, pipeline_name):
-        message = f"Pipeline killed: {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Pipeline killed: {colored_name}"
         self.warning(message, "pipeline")
 
     def adaptive_started(self, pipeline_name):
-        message = f"Adaptive function started for: {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Adaptive function started for: {colored_name}"
         self.info(message, "adaptive")
 
     def adaptive_completed(self, pipeline_name):
-        message = f"Adaptive function completed for: {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Adaptive function completed for: {colored_name}"
         self.info(message, "adaptive")
 
     def adaptive_failed(self, pipeline_name, error):
-        message = f"Adaptive function failed for {self._colorize(pipeline_name, Colors.BRIGHT_WHITE)}: {error}"
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Adaptive function failed for {colored_name}: {error}"
         self.error(message, "adaptive")
 
     def child_pipeline_submitted(self, child_name, parent_name):
-        message = f"Submitting child pipeline: {self._colorize(child_name, Colors.BRIGHT_WHITE)} from {self._colorize(parent_name, Colors.BRIGHT_WHITE)}"
+        colored_child = self._colorize(child_name, Colors.BRIGHT_WHITE)
+        colored_parent = self._colorize(parent_name, Colors.BRIGHT_WHITE)
+        message = f"Submitting child pipeline: {colored_child} from {colored_parent}"
         self.info(message, "manager")
 
     def manager_starting(self, pipeline_count):
-        message = f"Starting with {self._colorize(str(pipeline_count), Colors.BRIGHT_WHITE)} initial pipelines"
+        colored_count = self._colorize(str(pipeline_count), Colors.BRIGHT_WHITE)
+        message = f"Starting with {colored_count} initial pipelines"
         self.info(message, "manager")
 
     def manager_exiting(self):
         self.info("All pipelines finished. Exiting.", "manager")
 
     def activity_summary(self, active_pipelines, active_adaptive, buffered_pipelines):
-        summary = (f"Active: {self._colorize(str(active_pipelines), Colors.BRIGHT_GREEN)} pipelines, "
-                  f"{self._colorize(str(active_adaptive), Colors.BRIGHT_MAGENTA)} adaptive tasks, "
-                  f"{self._colorize(str(buffered_pipelines), Colors.BRIGHT_YELLOW)} buffered")
+        colored_pipelines = self._colorize(str(active_pipelines), Colors.BRIGHT_GREEN)
+        colored_adaptive = self._colorize(str(active_adaptive), Colors.BRIGHT_MAGENTA)
+        colored_buffered = self._colorize(str(buffered_pipelines), Colors.BRIGHT_YELLOW)
+        summary = (f"Active: {colored_pipelines} pipelines, "
+                  f"{colored_adaptive} adaptive tasks, "
+                  f"{colored_buffered} buffered")
         self.debug(summary, "manager")
 
     def pipeline_log(self, message, level=LogLevel.INFO):
         pipeline_component = f"PIPELINE-{self.name.upper()}"
         formatted = self._format_message(level, pipeline_component, message)
-        self._write_log(formatted, to_stderr=level in [LogLevel.ERROR, LogLevel.CRITICAL])
+        stderr_levels = [LogLevel.ERROR, LogLevel.CRITICAL]
+        self._write_log(formatted, to_stderr=level in stderr_levels)
 
     def separator(self, title=None):
         if title:
             separator = f"{'='*20} {title} {'='*20}"
         else:
             separator = "="*50
-        self._write_log(self._colorize(separator, Colors.BRIGHT_BLUE))
+        colored_sep = self._colorize(separator, Colors.BRIGHT_BLUE)
+        self._write_log(colored_sep)

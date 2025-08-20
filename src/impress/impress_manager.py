@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Awaitable
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
 
@@ -12,7 +12,7 @@ from .utils.logger import ImpressLogger
 class ImpressManager:
     """
     Manages the execution of multiple pipelines with adaptive optimization.
-    
+
     Coordinates pipeline lifecycle, adaptive function execution, and child pipeline
     creation in an asynchronous environment.
     """
@@ -20,24 +20,27 @@ class ImpressManager:
     def __init__(self, execution_backend: Any, use_colors: bool = True) -> None:
         """
         Initialize the ImpressManager.
-        
+
         Args:
             execution_backend: Backend for workflow execution
             use_colors: Whether to use colors in logging output
         """
         self.execution_backend: Any = execution_backend
-        self.pipeline_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
-        self.adaptive_tasks: Dict[ImpressBasePipeline, asyncio.Task] = {}
-        self.new_pipeline_buffer: List[PipelineSetup] = []
+        self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
+        self.adaptive_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
+        self.new_pipeline_buffer: list[PipelineSetup] = []
         self.logger: ImpressLogger = ImpressLogger(use_colors=use_colors)
 
-    def _normalize_pipeline_setup(self, setup: Union[Dict[str, Any], PipelineSetup]) -> PipelineSetup:
+    def _normalize_pipeline_setup(
+        self, setup: Union[dict[str, Any],
+        PipelineSetup]
+        ) -> PipelineSetup:
         """
         Normalize pipeline setup to PipelineSetup object.
-        
+
         Args:
             setup: Either a dictionary or PipelineSetup object
-            
+
         Returns:
             PipelineSetup object
         """
@@ -46,17 +49,22 @@ class ImpressManager:
         elif isinstance(setup, PipelineSetup):
             return setup
         else:
-            raise ValueError(f"Expected dict or PipelineSetup, got {type(setup)}")
+            raise ValueError(f"Expected dict or PipelineSetup, "
+            f"got {type(setup)}")
 
-    def submit_new_pipelines(self, pipeline_setups: List[Union[Dict[str, Any], PipelineSetup]]) -> None:
+    def submit_new_pipelines(
+        self, pipeline_setups: list[Union[dict[str, Any],
+        PipelineSetup]]) -> None:
         """
         Submit new pipelines for execution.
-        
+
         Args:
-            pipeline_setups: List of pipeline configuration dictionaries or PipelineSetup objects
-            
+            pipeline_setups: List of pipeline configuration
+            dictionaries or PipelineSetup objects
+
         Raises:
-            ValueError: If pipeline type is not a subclass of ImpressBasePipeline
+            ValueError: If pipeline type is not a subclass
+            of ImpressBasePipeline
         """
         for setup_input in pipeline_setups:
             # Normalize to PipelineSetup object
@@ -80,15 +88,17 @@ class ImpressManager:
     async def _run_adaptive_fn(self, pipeline: ImpressBasePipeline) -> None:
         """
         Run adaptive function for a pipeline in the background.
-        
-        The adaptive function updates the pipeline's submit_child_pipeline_request property.
-        
+
+        The adaptive function updates the pipeline's
+        submit_child_pipeline_request property.
+
         Args:
             pipeline: Pipeline to run adaptive function for
         """
         try:
             self.logger.adaptive_started(pipeline.name)
-            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Awaitable[None]]] = getattr(
+            adaptive_fn: Optional[Callable[[ImpressBasePipeline],
+            Awaitable[None]]] = getattr(
                 pipeline, '_adaptive_fn', None
             )
             if adaptive_fn:
@@ -100,7 +110,9 @@ class ImpressManager:
             pipeline.invoke_adaptive_step = False
             pipeline._adaptive_barrier.set()
 
-    async def start(self, pipeline_setups: List[Union[Dict[str, Any], PipelineSetup]]) -> None:
+    async def start(
+        self, pipeline_setups: list[Union[dict[str, Any],
+        PipelineSetup]]) -> None:
         """
         Start the pipeline manager and execute all pipelines.
 
@@ -111,11 +123,14 @@ class ImpressManager:
         - Pipeline completion and cleanup
 
         Args:
-            pipeline_setups: List of initial pipeline configurations (dicts or PipelineSetup objects)
+            pipeline_setups: List of initial pipeline
+            configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 
-        self.flow: WorkflowEngine = await WorkflowEngine.create(backend=self.execution_backend)
+        self.flow: WorkflowEngine = await WorkflowEngine.create(
+            backend=self.execution_backend
+            )
 
         self.logger.manager_starting(len(pipeline_setups))
 
@@ -123,7 +138,7 @@ class ImpressManager:
 
         while True:
             any_activity: bool = False
-            completed_pipelines: List[ImpressBasePipeline] = []
+            completed_pipelines: list[ImpressBasePipeline] = []
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
@@ -137,7 +152,8 @@ class ImpressManager:
                     any_activity = True
 
                 # Check if pipeline has new config ready
-                config: Optional[Dict[str, Any]] = pipeline.get_child_pipeline_request()
+                config: Optional[dict[str, Any]] = \
+                    pipeline.get_child_pipeline_request()
 
                 if config:
                     self.logger.child_pipeline_submitted(config['name'], pipeline.name)
@@ -153,7 +169,8 @@ class ImpressManager:
                     completed_pipelines.append(pipeline)
                     continue
 
-                # Check if pipeline is done - but only mark as completed if adaptive task is also done
+                # Check if pipeline is done - but only mark as completed
+                # if adaptive task is also done
                 if pipeline_future.done():
                     # If there's an adaptive task running, don't mark as completed yet
                     if pipeline in self.adaptive_tasks:
@@ -163,10 +180,12 @@ class ImpressManager:
 
                     completed_pipelines.append(pipeline)
 
-            # Clean up completed pipelines - but only if their adaptive tasks are also done
-            actually_completed: List[ImpressBasePipeline] = []
+            # Clean up completed pipelines - but only if their
+            # adaptive tasks are also done
+            actually_completed: list[ImpressBasePipeline] = []
             for pipeline in completed_pipelines:
-                # Double-check: only clean up if adaptive task is done or doesn't exist
+                # Double-check: only clean up if adaptive task is
+                # done or doesn't exist
                 if pipeline in self.adaptive_tasks:
                     adaptive_task = self.adaptive_tasks[pipeline]
                     if not adaptive_task.done():
@@ -180,7 +199,7 @@ class ImpressManager:
             completed_pipelines = actually_completed
 
             # Clean up completed adaptive tasks
-            completed_adaptive: List[ImpressBasePipeline] = []
+            completed_adaptive: list[ImpressBasePipeline] = []
             for pipeline, adaptive_task in list(self.adaptive_tasks.items()):
                 if adaptive_task.done():
                     completed_adaptive.append(pipeline)
@@ -203,7 +222,9 @@ class ImpressManager:
                 )
 
             # Exit condition
-            if not self.pipeline_tasks and not self.new_pipeline_buffer and not self.adaptive_tasks:
+            if not self.pipeline_tasks and \
+                not self.new_pipeline_buffer \
+                    and not self.adaptive_tasks:
                 self.logger.manager_exiting()
                 self.logger.separator("IMPRESS MANAGER FINISHED")
                 break

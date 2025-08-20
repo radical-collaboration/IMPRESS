@@ -4,15 +4,22 @@ import os
 
 from .impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = ['module load anaconda',
-                 "source activate base",
-                 f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"]
+TASK_PRE_EXEC = [
+    'module load anaconda',
+    'source activate base',
+    (
+        f"conda activate /anvil/scratch/"
+        f"{os.environ['USER']}/impress/ve.impress"
+    )
+]
 
 MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
 
 class ProteinBindingPipeline(ImpressBasePipeline):
-    def __init__(self, name, flow, configs={}, **kwargs):
+    def __init__(self, name, flow, configs=None, **kwargs):
         # Execution metadata
+        if configs is None:
+            configs = {}
         self.passes = kwargs.get('passes', 1)
         self.step_id = kwargs.get('step_id', 1)
         self.seq_rank = kwargs.get('seq_rank', 0)
@@ -34,9 +41,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.input_path = os.path.join(self.base_path, f'{self.name}_in')
 
         # Output paths
-        self.output_path = os.path.join(self.base_path, 'af_pipeline_outputs_multi', self.name)
+        self.output_path = os.path.join(
+            self.base_path, 'af_pipeline_outputs_multi', self.name)
         self.output_path_mpnn = os.path.join(self.output_path, 'mpnn')
-        self.output_path_af = os.path.join(self.output_path, '/af/prediction/best_models')
+        self.output_path_af = os.path.join(
+            self.output_path, '/af/prediction/best_models')
 
         # might have to do outside of initialization, so new pipelines
         # do not run this can be declared directly as argument
@@ -73,7 +82,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
         @self.auto_register_task()  # MPNN
-        async def s1(task_description={'ranks':1}):
+        async def s1(task_description=None):
+            if task_description is None:
+                task_description = {'ranks': 1}
             mpnn_script = os.path.join(self.base_path, 'mpnn_wrapper.py')
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
@@ -128,8 +139,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             return fasta_file_to_return
 
-        @self.auto_register_task() #alphafold, must be run separately for each structure one at a time!
-        async def s4(target_fasta, task_description={'gpus_per_rank': 1}):
+        #alphafold, must be run separately for each structure one at a time!
+        @self.auto_register_task()
+        async def s4(target_fasta, task_description=None):
+            if task_description is None:
+                task_description = {'gpus_per_rank': 1}
             cmd =  (
                 f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
                 f"{self.output_path}/af/fasta/ "
@@ -139,7 +153,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             return cmd
 
         @self.auto_register_task() #plddt_extract
-        async def s5(task_description={}):
+        async def s5(task_description=None):
+                if task_description is None:
+                    task_description = {}
                 return (
                     f"python3 {self.base_path}/plddt_extract_pipeline.py "
                     f"--path={self.base_path} "
@@ -171,11 +187,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.logger.pipeline_log(f'Starting pass {self.passes}')
 
             self.logger.pipeline_log('Submitting MPNN task')
-            s1_res = await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
+            await self.s1(task_description={'pre_exec': TASK_PRE_EXEC})
             self.logger.pipeline_log('MPNN task finished')
 
             self.logger.pipeline_log('Submitting sequence ranking task')
-            s2_res = await self.s2()
+            await self.s2()
             self.logger.pipeline_log('Sequence ranking task finished')
 
             self.logger.pipeline_log('Submitting scoring task')
@@ -186,17 +202,21 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             for target_fasta in fasta_files:
                 models_path = os.path.join(
-                    self.output_path, 'af', 'prediction', 'dimer_models', target_fasta
+                    self.output_path, 'af',
+                    'prediction', 'dimer_models', target_fasta
                 )
 
                 best_model_pdb = os.path.join(
-                    self.output_path, 'af', 'prediction', 'best_models', f"{target_fasta}.pdb"
+                    self.output_path, 'af',
+                    'prediction', 'best_models', f"{target_fasta}.pdb"
                 )
                 best_ptm_json = os.path.join(
-                    self.output_path, 'af', 'prediction', 'best_ptm', f"{target_fasta}.json"
+                    self.output_path, 'af',
+                    'prediction', 'best_ptm', f"{target_fasta}.json"
                 )
                 mpnn_pdb = os.path.join(
-                    self.output_path, 'mpnn', f"job_{self.passes}", f"{target_fasta}.pdb"
+                    self.output_path, 'mpnn',
+                    f"job_{self.passes}", f"{target_fasta}.pdb"
                 )
 
                 s4_description = {
@@ -213,17 +233,24 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     self.s4(target_fasta=target_fasta, task_description=s4_description)
                 )
 
-            self.logger.pipeline_log(f'Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously')
-            results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            self.logger.pipeline_log(
+                f'Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously')
+            await asyncio.gather(*alphafold_tasks, return_exceptions=True)
             self.logger.pipeline_log(f'{len(alphafold_tasks)} Alphafold tasks finished')
 
             self.logger.pipeline_log('Submitting plddt extract')
 
             staged_file = f'af_stats_{self.name}_pass_{self.passes}.csv'
 
-            s5_res = await self.s5(task_description={'pre_exec': TASK_PRE_EXEC,
-                                                     'output_staging': [{'source': f'task:///{staged_file}',
-                                                                         'target': f'client:///{staged_file}'}]})
+            await self.s5(task_description={
+                'pre_exec': TASK_PRE_EXEC,
+                'output_staging': [
+                    {
+                        'source': f'task:///{staged_file}',
+                        'target': f'client:///{staged_file}'}
+                        ]
+                    }
+                    )
             self.logger.pipeline_log('Plddt extract finished')
 
             await self.run_adaptive_step(wait=True)
