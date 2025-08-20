@@ -3,8 +3,7 @@ name: ci
 on:
   push:
     branches:
-      - main
-      - master
+      - try/impress_framework
 
 permissions:
   contents: write
