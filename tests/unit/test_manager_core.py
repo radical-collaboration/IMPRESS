@@ -27,6 +27,9 @@ class MockPipeline(ImpressBasePipeline):
         self._run_called = True
         return "completed"
 
+    async def finalize(self):
+        return True
+
     def get_child_pipeline_request(self):
         """Mock method to return child pipeline config"""
         if self._child_pipeline_request:

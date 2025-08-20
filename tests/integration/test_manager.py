@@ -31,6 +31,9 @@ class TestIntegration:
                 # Wait for adaptive barrier to be set
                 await self._adaptive_barrier.wait()
                 return "completed"
+            
+            async def finalize(self):
+                return True
 
         pipeline_setup = PipelineSetup(
             name="adaptive_pipeline",
@@ -78,6 +81,9 @@ class TestIntegration:
                 await asyncio.sleep(0.1)
                 await self._adaptive_barrier.wait()
                 return "completed"
+
+            async def finalize(self):
+                return True
 
         pipeline_setup = PipelineSetup(
             name="complex_parent",
