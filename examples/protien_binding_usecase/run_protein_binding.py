@@ -106,7 +106,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         if protein not in pipeline.iter_seqs:
             continue
 
-        decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein, pipeline])
+        decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein, pipeline], pipeline)
 
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
