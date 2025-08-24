@@ -10,10 +10,11 @@ from impress import llm_agent, provide_llm_context
 from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import ConcurrentExecutionBackend
 
+import logging
+
 from pydantic import BaseModel
 
-NUMBER_OF_TIME_REJECTED = 0
-NUMBER_OF_TIME_ACCEPTED = 0
+logger = logging.getLogger(__name__)
 
 class PipelineContextDummy(BaseModel):
     previous_score: float
@@ -90,29 +91,19 @@ async def adaptive_criteria(current_score: float, previous_score: float, pipelin
     
     llm_context = provide_llm_context(pipeline_context=context)
     llm_response = await llm_agent.prompt(message=llm_context)
-    
-    pipeline.logger.pipeline_log(
-        f"LLM Decision - Spawn: {llm_response.parsed_response.spawn_new_pipeline}, "
-        f"Confidence: {llm_response.parsed_response.confidence}, "
-        f"Reasoning: {llm_response.parsed_response.reasoning}"
-    )
-    
+
     return llm_response.parsed_response.spawn_new_pipeline
 
 async def adaptive_decision(pipeline: DummyProteinPipeline) -> None:
-    global NUMBER_OF_TIME_REJECTED, NUMBER_OF_TIME_ACCEPTED
     if pipeline.generation >= pipeline.max_generations:
-        NUMBER_OF_TIME_REJECTED += 1
         return
 
     current_score = random.random()
     previous_score = random.random()
 
-    llm_response = await adaptive_criteria(current_score, previous_score, pipeline)
-    if not llm_response.parsed_response.spawn_new_pipeline:
-        NUMBER_OF_TIME_REJECTED += 1
+    spawn_new_pipeline = await adaptive_criteria(current_score, previous_score, pipeline)
+    if not spawn_new_pipeline:
         return 
-    NUMBER_OF_TIME_ACCEPTED += 1
 
     new_name = f"{pipeline.name}_g{pipeline.generation + 1}"
     new_config = {
@@ -138,7 +129,10 @@ async def run() -> None:
 
     await manager.start(pipeline_setups=pipeline_setups)
 
-    print(f"Number of times rejected: {NUMBER_OF_TIME_REJECTED} vs Number of times accepteed: {NUMBER_OF_TIME_ACCEPTED}")
+    logger.debug(f"AGENTIC RESULTS: \
+        pipelines approved: {llm_agent.pipelines_aproved} \
+        pipelines rejected: {llm_agent.pipelines_rejected}")
+
 
 
 if __name__ == "__main__":

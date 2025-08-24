@@ -63,13 +63,28 @@ DECISION LOGIC:
 
 """
 
-llm_agent = LLMAgent(
-      llm_backend="openrouter",
-      agent_name="PipelineReviewer",
-      model_name="google/gemini-2.5-flash",
-      sys_instructions=SYSTEM_PROMPT,
-      response_schema=Schema
-)
+class AgentObserver():
+      pipelines_rejected = 0
+      pipelines_aproved = 0
+      def __init__(self) -> None:
+            self.agent_ : LLMAgent =  LLMAgent(
+                  llm_backend="openrouter",
+                  agent_name="PipelineReviewer",
+                  model_name="google/gemini-2.5-flash",
+                  sys_instructions=SYSTEM_PROMPT,
+                  response_schema=Schema
+            )
+      async def prompt(self, *args, **kwargs):
+            response = await self.agent_.prompt(*args, **kwargs)
+            spawn_new_piepline = response.parsed_response.spawn_new_pipeline
+            if spawn_new_piepline:
+                  self.pipelines_aproved += 1
+            else:
+                  self.pipelines_rejected += 1
+            return response
+
+llm_agent = AgentObserver()
+
 
 def provide_llm_context(pipeline_context: PipelineContext) -> dict:
       pipeline_field_values = pipeline_context.model_dump_json()

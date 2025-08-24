@@ -10,7 +10,9 @@ from impress import ImpressManager
 from impress.pipelines.protein_binding import ProteinBindingPipeline
 from impress import llm_agent, provide_llm_context, PipelineContext
 
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 async def adaptive_criteria(current_score: float, previous_score: float, pipeline: ProteinBindingPipeline) -> bool:
@@ -54,13 +56,7 @@ async def adaptive_criteria(current_score: float, previous_score: float, pipelin
     
     llm_context = provide_llm_context(pipeline_context=context)
     llm_response = await llm_agent.prompt(message=llm_context)
-    
-    pipeline.logger.pipeline_log(
-        f"LLM Decision - Spawn: {llm_response.parsed_response.spawn_new_pipeline}, "
-        f"Confidence: {llm_response.parsed_response.confidence}, "
-        f"Reasoning: {llm_response.parsed_response.reasoning}"
-    )
-    
+
     return llm_response.parsed_response.spawn_new_pipeline
 
 
@@ -106,7 +102,12 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         if protein not in pipeline.iter_seqs:
             continue
 
-        decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein, pipeline], pipeline)
+        try:
+            decision = await adaptive_criteria(curr_score, 
+                                            pipeline.previous_scores[protein], 
+                                            pipeline)
+        except Exception as e:
+            raise 
 
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
@@ -170,6 +171,10 @@ async def impress_protein_bind() -> None:
     await manager.start(pipeline_setups=pipeline_setups)
 
     await manager.flow.shutdown()
+
+    logger.debug(f"AGENTIC RESULTS: \
+        pipelines approved: {llm_agent.pipelines_aproved} \
+        pipelines rejected: {llm_agent.pipelines_rejected}")
 
 
 if __name__ == "__main__":
