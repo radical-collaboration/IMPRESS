@@ -107,7 +107,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
                                             pipeline.previous_scores[protein], 
                                             pipeline)
         except Exception as e:
-            raise 
+            logger.error(e) 
 
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
