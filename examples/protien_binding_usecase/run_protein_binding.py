@@ -42,7 +42,6 @@ async def adaptive_criteria(current_score: float, previous_score: float, pipelin
     context = PipelineContext(
         previous_score=previous_score,
         current_score=current_score,
-        generation=pipeline.generation,
         passes=pipeline.passes,
         max_passes=pipeline.max_passes,
         seq_rank=pipeline.seq_rank,

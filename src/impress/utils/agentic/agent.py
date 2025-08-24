@@ -12,7 +12,6 @@ class Schema(BaseModel):
 class PipelineContext(BaseModel):
     previous_score: float
     current_score: float
-    generation: int
     passes: int
     max_passes: int
     seq_rank: int
@@ -38,7 +37,6 @@ DECISION CRITERIA:
 CONTEXT UNDERSTANDING:
 - previous_score: Quality score from previous iteration (higher = better)
 - current_score: Current quality score (higher = better)  
-- generation: Current pipeline generation depth
 - passes: Number of optimization passes completed
 - max_passes: Maximum allowed passes
 - seq_rank: Sequence ranking level
