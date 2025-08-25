@@ -2,19 +2,19 @@
 
 **Integrated Machine-learning for PRotEin Structures at Scale**
 
-IMPRESS is an async framework for managing complex protein design pipelines with adaptive decision-making capabilities. Built for high-performance computing environments.
+IMPRESS is an asynchronous framework for managing complex protein design pipelines with adaptive decision-making capabilities. It is built for deploying heterogeneous scientific worflows (mixed CPU/GPU and data sharing) in high-performance computing environments. Using a building-block approach to workflow design, IMPRESS enables high-throughput campaigns based on foundation models like AlphaFold and ESM2 or with custom models requiring runtime training and optimization. Design considerations and a proof-of-concept workflow are described in [the IMPRESS paper](https://link/to/arxiv).
 
-IMPRESS is a high-performance computational framework that allows scientist to build and execute high performance asynchronous protein design pipelines effortlessly using Foundation Models such as AlphaFold and ESM2.
 
 ## Features
+|<!-- -->|<!-- -->|
+| ----------- | ----------- |
+|🧬|**Protein Design Pipelines**: Prebuilt and custom workflows|
+|🔄|**Adaptive Execution**: Dynamic pipeline spawning|
+|⚡|**HPC Optimized**: High-performance async execution|
+|🎯| **Flexible Architecture**: Standard and user-defined pipelines|
 
-- 🧬 **Protein Design Pipelines**: Prebuilt and custom workflows
-- 🔄 **Adaptive Execution**: Dynamic pipeline spawning
-- ⚡ **HPC Optimized**: High-performance async execution
-- 🎯 **Flexible Architecture**: Standard and user-defined pipelines
 
 ## Quick Example
-
 ```python
 from impress import ImpressBasePipeline, ImpressManager
 
@@ -41,7 +41,5 @@ async def run_dummy_pipelines():
 
 asyncio.run(run_dummy_pipelines())
 ```
-
-
 
 
