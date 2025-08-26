@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import ConcurrentExecutionBackend
@@ -73,9 +73,10 @@ async def run() -> None:
     execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
     manager: ImpressManager = ImpressManager(execution_backend)
 
-    pipeline_setups = [PipelineSetup(name=f'p{i}',
-                                     type=DummyProteinPipeline,
-                                     adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
+    pipeline_setups = [PipelineSetup(
+        name=f'p{i}',
+        type=DummyProteinPipeline,
+        adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
 
     await manager.start(pipeline_setups=pipeline_setups)
 
