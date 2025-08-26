@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 from unittest.mock import Mock
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 
 def pytest_sessionfinish(session, exitstatus):

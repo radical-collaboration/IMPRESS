@@ -4,7 +4,7 @@ import pytest
 
 # Import the classes we're testing
 from impress import ImpressBasePipeline, PipelineSetup
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 
 class MockPipeline(ImpressBasePipeline):

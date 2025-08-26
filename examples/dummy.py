@@ -8,7 +8,7 @@ from radical.asyncflow import ConcurrentExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 
 class DummyProteinPipeline(ImpressBasePipeline):

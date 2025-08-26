@@ -26,7 +26,7 @@ import asyncio
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 from radical.asyncflow import RadicalExecutionBackend
 ```
@@ -153,7 +153,7 @@ import asyncio
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 from radical.asyncflow import RadicalExecutionBackend
 
