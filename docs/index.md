@@ -2,7 +2,7 @@
 
 **Integrated Machine-learning for PRotEin Structures at Scale**
 
-IMPRESS is an asynchronous framework for managing complex protein design pipelines with adaptive decision-making capabilities. It is built for deploying heterogeneous scientific worflows (mixed CPU/GPU and data sharing) in high-performance computing environments. Using a building-block approach to workflow design, IMPRESS enables high-throughput campaigns based on foundation models like AlphaFold and ESM2 or with custom models requiring runtime training and optimization. Design considerations and a proof-of-concept workflow are described in [the IMPRESS paper](https://link/to/arxiv).
+IMPRESS is an asynchronous framework for managing complex protein design pipelines with adaptive decision-making capabilities. It is built for deploying heterogeneous scientific worflows (mixed CPU/GPU and data sharing) in high-performance computing environments. Using a building-block approach to workflow design, IMPRESS enables high-throughput campaigns based on foundation models like AlphaFold and ESM2 or with custom models requiring runtime training and optimization.
 
 
 ## Features
