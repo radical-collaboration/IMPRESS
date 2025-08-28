@@ -8,23 +8,56 @@ from radical.asyncflow import RadicalExecutionBackend
 from impress import PipelineSetup
 from impress import ImpressManager
 from impress.pipelines.protein_binding import ProteinBindingPipeline
+from impress import llm_agent, provide_llm_context, PipelineContext
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-async def adaptive_criteria(current_score: float, previous_score: float) -> bool:
+async def adaptive_criteria(current_score: float, previous_score: float, pipeline: ProteinBindingPipeline) -> bool:
     """
     Determine if protein quality has degraded requiring pipeline migration.
     
-    Compares current and previous protein scores to decide if a protein
-    should be moved to a new pipeline for optimization.
+    Uses AI agent for decision-making.
     
     Args:
         current_score: Current protein structure quality score
         previous_score: Previous protein structure quality score
+        pipeline: Complete pipeline object 
         
     Returns:
-        True if quality has degraded (score increased), False otherwise
+        True if quality has degraded, False otherwise
     """
-    return current_score > previous_score
+    score_change = current_score - previous_score
+    percent_change = (score_change / previous_score * 100) if previous_score != 0 else 0
+    
+    if percent_change > 2:
+        trend = "improving"
+    elif percent_change < -2:
+        trend = "degrading"
+    else:
+        trend = "stable"
+    
+    context = PipelineContext(
+        previous_score=previous_score,
+        current_score=current_score,
+        passes=pipeline.passes,
+        max_passes=pipeline.max_passes,
+        seq_rank=pipeline.seq_rank,
+        sub_order=pipeline.sub_order,
+        max_sub_pipelines=3,  # Hardcoded value
+        num_proteins_remaining=len(pipeline.iter_seqs),
+        score_trend=trend,
+        avg_score_change=percent_change,
+        pipeline_name=pipeline.name
+    )
+    
+    llm_context = provide_llm_context(pipeline_context=context)
+    llm_response = await llm_agent.prompt(message=llm_context)
+
+    return llm_response.parsed_response.spawn_new_pipeline
+
 
 async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[str, Any]]:
     """
@@ -68,7 +101,13 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         if protein not in pipeline.iter_seqs:
             continue
 
-        decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein])
+        try:
+            decision = await adaptive_criteria(curr_score, 
+                                            pipeline.previous_scores[protein], 
+                                            pipeline)
+        except Exception as e:
+            logger.error(e) 
+            continue
 
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
@@ -138,6 +177,10 @@ async def impress_protein_bind() -> None:
     await manager.start(pipeline_setups=pipeline_setups)
 
     await manager.flow.shutdown()
+
+    logger.debug(f"AGENTIC RESULTS: \
+        pipelines approved: {llm_agent.pipelines_aproved} \
+        pipelines rejected: {llm_agent.pipelines_rejected}")
 
 
 if __name__ == "__main__":

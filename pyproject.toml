@@ -9,6 +9,7 @@ description = "IMPRESS Protein Binding and Prediction Framework for HPC"
 
 authors = [
     {name = "Aymen Alsaadi", email = "aymen.alsaadi@rutgers.edu"},
+    {name = "Javier D. Segura", email = "jdominguez.ieu2023@student.ie.edu"},
     {name = "RADICAL Lab"},
 ]
 maintainers = [
@@ -19,7 +20,9 @@ requires-python = ">=3.9"
 
 dependencies = [
     "radical.pilot",
-    "radical-asyncflow"
+    "radical-asyncflow",
+    "pydantic",
+    "agnostic_agent @ git+https://github.com/stride-research/AgnosticAgent.git@main",
 ]
 
 [project.urls]
