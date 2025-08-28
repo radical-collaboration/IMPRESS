@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 class Schema(BaseModel):
       spawn_new_pipeline: bool 
       confidence: float
-      reasoning: str
 
 class PipelineContext(BaseModel):
     previous_score: float
@@ -68,7 +67,7 @@ class AgentObserver():
             self.agent_ : LLMAgent =  LLMAgent(
                   llm_backend="openrouter",
                   agent_name="PipelineReviewer",
-                  model_name="google/gemini-2.5-flash",
+                  model_name="google/gemini-2.5-pro",
                   sys_instructions=SYSTEM_PROMPT,
                   response_schema=Schema
             )
