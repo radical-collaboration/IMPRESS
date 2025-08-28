@@ -155,10 +155,16 @@ async def impress_protein_bind() -> None:
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    manager: ImpressManager = ImpressManager(execution_backend=RadicalExecutionBackend({'gpus':2,
-                                                                                        'cores': 32,
-                                                                                        'runtime' : 13 * 60,
-                                                                                        'resource': 'purdue.anvil_gpu'}))
+    backend = await RadicalExecutionBackend(
+            {
+                'gpus':1,
+                'cores': 32,
+                'runtime' : 23 * 60,
+                'resource': 'purdue.anvil_gpu'
+                }
+            )
+
+    manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(

@@ -8,7 +8,7 @@ from radical.asyncflow import ConcurrentExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
-from impress.impress_manager import ImpressManager
+from impress import ImpressManager
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
@@ -74,6 +74,10 @@ class DummyProteinPipeline(ImpressBasePipeline):
         s3_res: str = await self.s3()
 
         print(f'[{self.name}] {s3_res}')
+
+    async def finalize(self) -> None:
+        self.current_scores = {}
+        self.previous_scores = {}
 
 
 async def run_dummy_pipelines() -> None:

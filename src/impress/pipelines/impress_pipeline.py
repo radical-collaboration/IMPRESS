@@ -23,7 +23,7 @@ class ImpressBasePipeline(ABC):
     def submit_child_pipeline_request(self, pipeline_config):
         """
         Submit a request to spawn a child pipeline.
-        
+
         Args:
             pipeline_config (dict): Configuration for the new pipeline including
                                   'name', 'type', 'config', and 'adaptive_fn'
@@ -33,7 +33,7 @@ class ImpressBasePipeline(ABC):
     def get_child_pipeline_request(self):
         """
         Get and clear any pending spawn request for child pipelines.
-        
+
         Returns:
             dict or None: The spawn request configuration if one exists, None otherwise.
                          After calling this method, the spawn request is cleared.
@@ -68,7 +68,8 @@ class ImpressBasePipeline(ABC):
         """Trigger adaptive step and optionally wait for completion.
 
         Args:
-            wait: If True, waits for adaptive step completion. If False, triggers and returns immediately.
+            wait: If True, waits for adaptive step completion.
+            If False, triggers and returns immediately.
         """
         self._set_adaptive_flag(True)
         if wait:
@@ -99,6 +100,7 @@ class ImpressBasePipeline(ABC):
         """Optional: Return scores mapping"""
         return {}
 
+    @abstractmethod
     async def finalize(self):
         """Optional: Cleanup or finalization logic"""
         pass
@@ -106,4 +108,3 @@ class ImpressBasePipeline(ABC):
     def get_current_config_for_next_pipeline(self):
         """Optional: Return config for next pipeline"""
         return {"name": "default_pipeline", "type": self.__class__}
-    
