@@ -57,6 +57,9 @@ class DummyProteinPipeline(ImpressBasePipeline):
         self.logger.pipeline_log('Optimization started')
         await self.optimization_step()
         self.logger.pipeline_log('Optimization finished')
+    
+    def finalize():
+        pass
 
 
 async def adaptive_criteria(current_score: float, previous_score: float, pipeline: DummyProteinPipeline) -> bool:

@@ -19,15 +19,17 @@ readme = "README.md"
 requires-python = ">=3.9"
 
 dependencies = [
-    "radical.pilot",
-    "radical-asyncflow",
     "pydantic",
+    "radical.asyncflow @ git+https://github.com/radical-cybertools/radical.asyncflow.git@main",
     "agnostic_agent @ git+https://github.com/stride-research/AgnosticAgent.git@main",
 ]
 
 [project.urls]
 Homepage = "https://github.com/radical-collaboration/IMPRESS/tree/main"
 Issues = "https://github.com/radical-collaboration/IMPRESS/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"] 
 
 [project.optional-dependencies]
 
