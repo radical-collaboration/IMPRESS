@@ -1,64 +1,19 @@
 
+from pty import spawn
 from agnostic_agent import LLMAgent
+from .utils import SYSTEM_PROMPT, calculate_volatility, calculate_trend
 
 from pydantic import BaseModel, Field
+from typing import List, Dict
 
+import logging 
+
+logger = logging.getLogger(__name__)
 
 class Schema(BaseModel):
       spawn_new_pipeline: bool 
       confidence: float
-
-class PipelineContext(BaseModel):
-    previous_score: float
-    current_score: float
-    passes: int
-    max_passes: int
-    seq_rank: int
-    sub_order: int
-    max_sub_pipelines: int
-    num_proteins_remaining: int
-    score_trend: str
-    avg_score_change: float
-
-
-
-
-SYSTEM_PROMPT = """
-You are a specialized AI assistant for protein structure optimization pipeline management. 
-Your role is to make intelligent decisions about when to spawn new child pipelines based on protein quality degradation.
-
-DECISION CRITERIA:
-1. **Score Degradation**: Spawn new pipeline if current_score is significantly worse than previous_score
-2. **Generation Limits**: Do not spawn if already at maximum generation depth
-3. **Resource Efficiency**: Consider if further optimization attempts are likely to yield improvements
-4. **Pipeline Capacity**: Respect maximum sub-pipeline limits
-
-CONTEXT UNDERSTANDING:
-- previous_score: Quality score from previous iteration (higher = better)
-- current_score: Current quality score (higher = better)  
-- passes: Number of optimization passes completed
-- max_passes: Maximum allowed passes
-- seq_rank: Sequence ranking level
-- sub_order: Sub-pipeline order number
-- max_sub_pipelines: Maximum allowed sub-pipelines
-- num_proteins_remaining: Number of proteins left to optimize
-- score_trend: Overall trend across iterations
-- avg_score_change: Average change in scores
-
-DECISION LOGIC:
-- Spawn new pipeline (spawn_new_pipeline=true) if:
-  * Score has degraded significantly (>5% decrease)
-  * We haven't reached maximum sub-pipelines
-  * There are enough passes remaining to make optimization worthwhile
-  * The protein shows potential for improvement based on trend
-
-- Continue current pipeline (spawn_new_pipeline=false) if:
-  * Score improvement or minor degradation (<5%)
-  * Already at maximum sub-pipeline depth
-  * Few passes remaining
-  * Consistent poor performance indicating futility
-
-"""
+      reasoning: str
 
 class AgentObserver():
       pipelines_rejected = 0
@@ -73,21 +28,66 @@ class AgentObserver():
             )
       async def prompt(self, *args, **kwargs):
             response = await self.agent_.prompt(*args, **kwargs)
-            spawn_new_piepline = response.parsed_response.spawn_new_pipeline
-            if spawn_new_piepline:
+            spawn_new_pipeline = response.parsed_response.spawn_new_pipeline
+            if spawn_new_pipeline:
                   self.pipelines_aproved += 1
             else:
                   self.pipelines_rejected += 1
             return response
 
 llm_agent = AgentObserver()
+pipelines_decisions: Dict[str, Dict[str, str]] = {} 
+
+async def adaptive_criteria(protein_name:str, score_history: List[float], pipeline) -> bool:
+    """
+    Determine if protein quality has degraded, requiring pipeline migration.
+    
+    Uses an AI agent with historical analysis tools for decision-making.
+    
+    Args:
+        protein_name: The name of the protein being evaluated.
+        score_history: A list of all scores for this protein from previous passes.
+        pipeline: The complete parent pipeline object.
+        
+    Returns:
+        True if a new pipeline should be spawned, False otherwise.
+    """
+
+    trend = calculate_trend(score_history)
+    volatility = calculate_volatility(score_history)
 
 
-def provide_llm_context(pipeline_context: PipelineContext) -> dict:
-      pipeline_field_values = pipeline_context.model_dump_json()
+    context = {
+        "protein_name": protein_name,
+        "score_history": score_history,
+        "scores_trend": trend,
+        "scores_volatility": volatility,
+        "current_pass": pipeline.passes,
+        "max_passes": pipeline.max_passes,
+        "current_sub_pipeline_order": pipeline.sub_order,
+        "max_sub_pipelines": 3, # Hardcoded value
+        "current_sequence_rank": pipeline.seq_rank
+    }
+    
+    llm_message = f"Evaluate the performance of protein `{protein_name}`\
+                   . Here is the context: {context}\
+                    Should I spawn a new pipeline for it?"
 
-      llm_context = f"""
-      This is the context of the current pipeline: {pipeline_field_values}
-      """
-      return llm_context
+    llm_response = await llm_agent.prompt(message=llm_message) 
+    spawn_new_pipeline_decision = llm_response.parsed_response.spawn_new_pipeline
+    confidence = llm_response.parsed_response.confidence
+    if llm_response.reasoning:
+      reasoning = llm_response.reasoning
+    else:
+      reasoning = llm_response.parsed_response.reasoning
 
+    logger.info(f"Agent decision for {protein_name}: "
+                f"Spawn New = {spawn_new_pipeline_decision}. "
+                f"Confidence =  {confidence}"
+                f"Reasoning =  {reasoning}")
+
+    key_name = f"{protein_name}_pass_{pipeline.passes}"
+    pipelines_decisions[key_name] = {"approved_new_pipeline": spawn_new_pipeline_decision,
+                                         "reasoning": reasoning, 
+                                         "confidence": confidence}
+    return spawn_new_pipeline_decision

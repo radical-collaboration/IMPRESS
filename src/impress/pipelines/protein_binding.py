@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import os
+from typing import Dict, List
 
 from .impress_pipeline import ImpressBasePipeline
 
@@ -27,9 +28,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.mpnn_path = kwargs.get("mpnn_path", MPNN_PATH)
 
         # Sequence and score state
-        self.current_scores = {}
         self.iter_seqs = kwargs.get("iter_seqs", {})
-        self.previous_scores = kwargs.get("previous_score", {})
+        self.score_history: Dict[str, List[float]] = kwargs.get("score_history", {}) # pipeline: score_history
 
         super().__init__(name, flow, **configs, **kwargs)
 
