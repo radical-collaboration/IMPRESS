@@ -83,9 +83,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Register all pipeline tasks"""
 
         @self.auto_register_task()  # MPNN
-        async def s1(task_description=None):
-            if task_description is None:
-                task_description = {"ranks": 1}
+        async def s1(task_description={"ranks": 1}):  # noqa: B006
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
@@ -142,9 +140,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         # alphafold, must be run separately for each structure one at a time!
         @self.auto_register_task()
-        async def s4(target_fasta, task_description=None):
-            if task_description is None:
-                task_description = {"gpus_per_rank": 1}
+        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
             cmd = (
                 f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
                 f"{self.output_path}/af/fasta/ "
@@ -155,9 +151,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             return cmd
 
         @self.auto_register_task()  # plddt_extract
-        async def s5(task_description=None):
-            if task_description is None:
-                task_description = {}
+        async def s5(task_description={}):  # noqa: B006
             return (
                 f"python3 {self.base_path}/plddt_extract_pipeline.py "
                 f"--path={self.base_path} "
