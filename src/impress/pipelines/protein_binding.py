@@ -44,8 +44,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         )
         self.output_path_mpnn = os.path.join(self.output_path, "mpnn")
         self.output_path_af = os.path.join(
-            self.output_path, "/af/prediction/best_models"
-        )
+                self.output_path, "af/prediction/best_models")
 
         # might have to do outside of initialization, so new pipelines
         # do not run this can be declared directly as argument
@@ -64,6 +63,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # all directories to create
         subdirs = [
             "af/fasta",
+            "af/prediction"
             "af/prediction/best_models",
             "af/prediction/best_ptm",
             "af/prediction/dimer_models",
@@ -90,6 +90,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             chain = "A" if self.passes == 1 else "B"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
+            self.logger.pipeline_log(f'{input_path}, {output_dir}')
             return (
                 f"python3 {mpnn_script} "
                 f"-pdb={input_path} "
@@ -140,7 +141,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         # alphafold, must be run separately for each structure one at a time!
         @self.auto_register_task()
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+        async def s4(target_fasta, task_description={"ranks": 1}):  # noqa: B006
             cmd = (
                 f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
                 f"{self.output_path}/af/fasta/ "
@@ -148,16 +149,19 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.output_path}/af/prediction/dimer_models/ "
             )
 
+            cmd = "/bin/echo 'Hello Alphafold'"
+
             return cmd
 
         @self.auto_register_task()  # plddt_extract
         async def s5(task_description={}):  # noqa: B006
-            return (
-                f"python3 {self.base_path}/plddt_extract_pipeline.py "
-                f"--path={self.base_path} "
-                f"--iter={self.passes} "
-                f"--out={self.name}"
-            )
+            #return (
+            #    f"python3 {self.base_path}/plddt_extract_pipeline.py "
+            #    f"--path={self.base_path} "
+            #    f"--iter={self.passes} "
+            #    f"--out={self.name}"
+            #)
+            return "/bin/echo 'Hello PLDDT'"
 
     async def get_scores_map(self):
         """Return current and previous scores"""
@@ -256,6 +260,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             )
             self.logger.pipeline_log("Plddt extract finished")
 
-            await self.run_adaptive_step(wait=True)
+            result = await self.run_adaptive_step(wait=True)
+
+            if self.kill_parent:
+                break
+
+            self.logger.pipeline_log(result)
 
             self.passes += 1
