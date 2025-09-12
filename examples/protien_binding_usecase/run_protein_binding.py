@@ -102,12 +102,14 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             'type': type(pipeline),
             'adaptive_fn': adaptive_decision,
             'config': {
+                'is_child': True,
+                'start_pass': pipeline.passes,
                 'passes': pipeline.passes,
                 'iter_seqs': sub_iter_seqs,
                 'seq_rank': pipeline.seq_rank + 1,
                 'sub_order': pipeline.sub_order + 1,
                 'previous_scores': copy.deepcopy(pipeline.previous_scores),
-            } 
+            }
         }
 
         # Submit the request

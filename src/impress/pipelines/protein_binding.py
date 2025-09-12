@@ -18,7 +18,10 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # Execution metadata
         if configs is None:
             configs = {}
+        
+        self.is_child: bool = kwargs.get("is_child", False)
         self.passes = kwargs.get("passes", 1)
+        self.start_pass: int = kwargs.get("start_pass", 1)
         self.step_id = kwargs.get("step_id", 1)
         self.seq_rank = kwargs.get("seq_rank", 0)
         self.num_seqs = kwargs.get("num_seqs", 10)
@@ -183,13 +186,19 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         while self.passes <= self.max_passes:
             self.logger.pipeline_log(f"Starting pass {self.passes}")
 
-            self.logger.pipeline_log("Submitting MPNN task")
-            await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
-            self.logger.pipeline_log("MPNN task finished")
+            self.logger.pipeline_log(f'{self.is_child} {self.passes} {self.start_pass}')
+            if self.is_child and self.passes == self.start_pass:
+                self.logger.pipeline_log('Skipping s1 and s2: child pipeline')
+                pass
 
-            self.logger.pipeline_log("Submitting sequence ranking task")
-            await self.s2()
-            self.logger.pipeline_log("Sequence ranking task finished")
+            else:
+                self.logger.pipeline_log("Submitting MPNN task")
+                await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
+                self.logger.pipeline_log("MPNN task finished")
+
+                self.logger.pipeline_log("Submitting sequence ranking task")
+                await self.s2()
+                self.logger.pipeline_log("Sequence ranking task finished")
 
             self.logger.pipeline_log("Submitting scoring task")
             fasta_files = await self.s3()
