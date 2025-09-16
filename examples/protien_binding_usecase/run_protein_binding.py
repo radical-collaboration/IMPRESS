@@ -44,8 +44,6 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
     MAX_SUB_PIPELINES: int = 3
     sub_iter_seqs: Dict[str, str] = {}
 
-    pipeline.logger.pipeline_log(f'iITER SEQ {pipeline.iter_seqs}')
-
     # Read current scores from CSV
     file_name = f'af_stats_{pipeline.name}_pass_{pipeline.passes}.csv'
     with open(file_name) as fd:
@@ -72,19 +70,13 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             continue
 
         decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein])
-        
-        pipeline.logger.pipeline_log(f'Pipeline Scores {curr_score}, {pipeline.previous_scores[protein]}')
         pipeline.logger.pipeline_log(f'Adaptive descision: {decision}')
         
         if decision:
-            pipeline.logger.pipeline_log(f'Entered if decsison')
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
 
     # Spawn a new pipeline for bad proteins
-    pipeline.logger.pipeline_log(f'Before if MAX_SUB_PIPELINES {MAX_SUB_PIPELINES}: {sub_iter_seqs}, {pipeline.sub_order}')
     if sub_iter_seqs and pipeline.sub_order < MAX_SUB_PIPELINES:
-        pipeline.logger.pipeline_log(f'Entered pipeline.sub_order < MAX_SUB_PIPELINES')
-        pipeline.logger.pipeline_log(f'maybe submit new pipeline: {pipeline.sub_order}')
         new_name: str = f"{pipeline.name}_sub{pipeline.sub_order + 1}"
 
         pipeline.set_up_new_pipeline_dirs(new_name)
@@ -93,7 +85,6 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         for protein in sub_iter_seqs:
             src = f'{pipeline.output_path_af}/{protein}.pdb'
             dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
-            pipeline.logger.pipeline_log(f'{pipeline.output_path_af}, {pipeline.base_path}')
             shutil.copyfile(src, dst)
 
         # Build a request for a new pipeline
