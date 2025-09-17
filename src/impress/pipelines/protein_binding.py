@@ -185,7 +185,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             if self.is_child and self.passes == self.start_pass:
                 self.logger.pipeline_log(
-                    "Skipping MPNN and Ranking steps for this child pipeline in the current pass only."
+                    "Skipping MPNN and Ranking steps for this child pipeline "
+                    "in the current pass only."
                 )
 
                 pass
