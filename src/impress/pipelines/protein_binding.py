@@ -266,11 +266,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             )
             self.logger.pipeline_log("Plddt extract finished")
 
-            result = await self.run_adaptive_step(wait=True)
+            await self.run_adaptive_step(wait=True)
 
             if self.kill_parent:
                 break
-
-            self.logger.pipeline_log(result)
 
             self.passes += 1
