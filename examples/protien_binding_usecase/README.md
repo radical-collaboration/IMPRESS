@@ -21,13 +21,10 @@ Single Pipeline with Parallel Structures
 ```
 
 - One pipeline orchestrates all structures.  
-- Slurm options like `--gres=gpu:N --gpu-bind=single:N` ensure each task is pinned to a distinct GPU.  
-- More efficient for concurrent workloads, avoids repeated setup overhead.  
 
 ## 2. Separate Pipelines Design (Supported and can be enabled)
 
 Each structure is processed by its own pipeline.  
-This design works but adds overhead since each pipeline must be launched and managed separately.
 
 ```
 Separate Pipelines Design
