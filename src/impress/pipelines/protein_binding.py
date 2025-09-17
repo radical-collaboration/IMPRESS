@@ -18,7 +18,10 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # Execution metadata
         if configs is None:
             configs = {}
+
+        self.is_child: bool = kwargs.get("is_child", False)
         self.passes = kwargs.get("passes", 1)
+        self.start_pass: int = kwargs.get("start_pass", 1)
         self.step_id = kwargs.get("step_id", 1)
         self.seq_rank = kwargs.get("seq_rank", 0)
         self.num_seqs = kwargs.get("num_seqs", 10)
@@ -44,7 +47,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         )
         self.output_path_mpnn = os.path.join(self.output_path, "mpnn")
         self.output_path_af = os.path.join(
-            self.output_path, "/af/prediction/best_models"
+            self.output_path, "af/prediction/best_models"
         )
 
         # might have to do outside of initialization, so new pipelines
@@ -64,6 +67,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # all directories to create
         subdirs = [
             "af/fasta",
+            "af/prediction",
             "af/prediction/best_models",
             "af/prediction/best_ptm",
             "af/prediction/dimer_models",
@@ -83,7 +87,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Register all pipeline tasks"""
 
         @self.auto_register_task()  # MPNN
-        async def s1(task_description={"ranks": 1}):  # noqa: B006
+        async def s1(task_description={"gpus_per_rank": 1}):  # noqa: B006
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
@@ -150,7 +154,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             return cmd
 
-        @self.auto_register_task()  # plddt_extract
+        @self.auto_register_task()  # pLDTT_extract
         async def s5(task_description={}):  # noqa: B006
             return (
                 f"python3 {self.base_path}/plddt_extract_pipeline.py "
@@ -179,13 +183,22 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         while self.passes <= self.max_passes:
             self.logger.pipeline_log(f"Starting pass {self.passes}")
 
-            self.logger.pipeline_log("Submitting MPNN task")
-            await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
-            self.logger.pipeline_log("MPNN task finished")
+            if self.is_child and self.passes == self.start_pass:
+                self.logger.pipeline_log(
+                    "Skipping MPNN and Ranking steps for this child pipeline "
+                    "in the current pass only."
+                )
 
-            self.logger.pipeline_log("Submitting sequence ranking task")
-            await self.s2()
-            self.logger.pipeline_log("Sequence ranking task finished")
+                pass
+
+            else:
+                self.logger.pipeline_log("Submitting MPNN task")
+                await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
+                self.logger.pipeline_log("MPNN task finished")
+
+                self.logger.pipeline_log("Submitting sequence ranking task")
+                await self.s2()
+                self.logger.pipeline_log("Sequence ranking task finished")
 
             self.logger.pipeline_log("Submitting scoring task")
             fasta_files = await self.s3()
@@ -239,7 +252,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             await asyncio.gather(*alphafold_tasks, return_exceptions=True)
             self.logger.pipeline_log(f"{len(alphafold_tasks)} Alphafold tasks finished")
 
-            self.logger.pipeline_log("Submitting plddt extract")
+            self.logger.pipeline_log("Submitting pLDTT extraction task")
 
             staged_file = f"af_stats_{self.name}_pass_{self.passes}.csv"
 
@@ -254,8 +267,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     ],
                 }
             )
-            self.logger.pipeline_log("Plddt extract finished")
+            self.logger.pipeline_log("pLDTT extract finished")
 
             await self.run_adaptive_step(wait=True)
+
+            if self.kill_parent:
+                break
 
             self.passes += 1

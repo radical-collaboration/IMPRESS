@@ -55,6 +55,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             name, *_, score_str = line.split(',')
             protein = name.split('.')[0]
             pipeline.current_scores[protein] = float(score_str)
+    
 
     # First pass — just save current scores as previous
     if not pipeline.previous_scores:
@@ -69,7 +70,8 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             continue
 
         decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein])
-
+        pipeline.logger.pipeline_log(f'Adaptive descision: {decision}')
+        
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
 
@@ -91,21 +93,25 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             'type': type(pipeline),
             'adaptive_fn': adaptive_decision,
             'config': {
+                'is_child': True,
+                'start_pass': pipeline.passes,
                 'passes': pipeline.passes,
                 'iter_seqs': sub_iter_seqs,
                 'seq_rank': pipeline.seq_rank + 1,
                 'sub_order': pipeline.sub_order + 1,
                 'previous_scores': copy.deepcopy(pipeline.previous_scores),
-            } 
+            }
         }
 
         # Submit the request
         pipeline.submit_child_pipeline_request(new_config)
 
-        pipeline.finalize()
+        pipeline.finalize(sub_iter_seqs)
 
         if not pipeline.fasta_list_2:
             pipeline.kill_parent = True
+    else:
+        pipeline.previous_scores = copy.deepcopy(pipeline.current_scores)
 
 
 async def impress_protein_bind() -> None:
