@@ -36,7 +36,7 @@ async def impress_protein_bind() -> None:
     pipelines based on protein quality degradation.
     """
     manager: ImpressManager = ImpressManager(
-        execution_backend=RadicalExecutionBackend(
+        execution_backend = await RadicalExecutionBackend(
             {'gpus':2,
              'cores': 32,
              'runtime' : 13 * 60,

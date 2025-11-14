@@ -136,7 +136,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 ```python
 async def impress_protein_bind() -> None:
     manager: ImpressManager = ImpressManager(
-        execution_backend=RadicalExecutionBackend({
+        execution_backend = await RadicalExecutionBackend({
             'gpus': 2,                           # GPU allocation per pipeline
             'cores': 32,                         # CPU cores per pipeline
             'runtime': 13 * 60,                  # 13 hours maximum runtime
