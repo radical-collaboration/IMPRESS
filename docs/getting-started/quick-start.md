@@ -28,7 +28,7 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import await RadicalExecutionBackend
 ```
 
 
@@ -36,7 +36,7 @@ We use:
 
 asyncio — Python’s built-in asynchronous library.
 
-RadicalExecutionBackend — runs tasks in parallel.
+await RadicalExecutionBackend — runs tasks in parallel.
 
 ImpressBasePipeline — base class for defining a pipeline.
 
@@ -115,7 +115,7 @@ We now create a function that starts N pipelines at once.
 ```python
 async def run():
     manager = ImpressManager(
-        execution_backend=RadicalExecutionBackend({'resource': 'local.localhost'})
+        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
     )
     
     # start 3 pipelines in parallel and wait for them to finish
@@ -129,7 +129,7 @@ async def run():
 
 Here:
 
-We initialize an ImpressManager with a RadicalExecutionBackend to enable parallel task execution.
+We initialize an ImpressManager with a await RadicalExecutionBackend to enable parallel task execution.
 
 We call start() and provide a list of pipeline setups, each with a unique name (p1, p2, p3) and our ProteinPipeline class.
 
@@ -155,7 +155,7 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import await RadicalExecutionBackend
 
 
 class ProteinPipeline(ImpressBasePipeline):
@@ -186,7 +186,7 @@ class ProteinPipeline(ImpressBasePipeline):
 
 async def run_pipeline():
     manager = ImpressManager(
-        execution_backend=RadicalExecutionBackend({'resource': 'local.localhost'})
+        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
     )
 
     await manager.start(
