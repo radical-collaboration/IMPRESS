@@ -20,7 +20,7 @@ pip install .
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import await RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager

@@ -28,7 +28,7 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import await RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 ```
 
 
@@ -155,7 +155,7 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import await RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 
 
 class ProteinPipeline(ImpressBasePipeline):
