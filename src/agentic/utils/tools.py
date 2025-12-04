@@ -2,21 +2,13 @@
 
 from langchain.tools import tool, ToolRuntime
 from langchain.messages import ToolMessage
+from langgraph.types import Command
+from langgraph.graph import END
 import os
 import subprocess
-
-from .state import *
-
-@dataclass
-class Context:
-    """Runtime context schema."""
-    base_path: str = os.getcwd()
-    input_dir: str = os.path.join(base_path, 'inputs')
-    output_dir: str = os.path.join(base_path, 'outputs')
-    input_pdb_filename: str
-    mpnn_script: str = 'mpnn_wrapper.py'
-    mpnn_num_seqs: int = 10
-    name: str
+from typing_extensions import Literal
+from dataclasses import dataclass
+from .state import RuntimeContext, PipelineState
     
 # TODO: do we need this?
 #@tool
@@ -25,7 +17,7 @@ class Context:
 
 # run mpnn - s1
 @tool
-def run_mpnn(runtime: ToolRuntime[Context]) -> Command[Literal["task_sequence_generator"]]:
+def run_mpnn(runtime: ToolRuntime[RuntimeContext]) -> Command[Literal["task_sequence_generator"]]:
     """Predict sequence with ProteinMPNN.
 
     Args:
@@ -66,7 +58,7 @@ def run_mpnn(runtime: ToolRuntime[Context]) -> Command[Literal["task_sequence_ge
 
 # score mpnn - s2
 @tool
-def score_mpnn(state: PipelineState, runtime: ToolRuntime[Context]) -> Command[Literal["make_fasta_file"]]:
+def score_mpnn(runtime: ToolRuntime[RuntimeContext]) -> Command[Literal["make_fasta_file"]]:
     """Rank sequences."""
     base_path = runtime.context.basepath
     input_dir = runtime.context.input_dir
@@ -104,7 +96,7 @@ def score_mpnn(state: PipelineState, runtime: ToolRuntime[Context]) -> Command[L
 
 # fasta prep = s3
 @tool
-def make_fasta_file(state: PipelineState, runtime: ToolRuntime[Context]) -> Command[Literal["run_alphafold"]]:
+def make_fasta_file(runtime: ToolRuntime[RuntimeContext]) -> Command[Literal["run_alphafold"]]:
     """Make a fasta file with chains: A: a designed binder and B: a PDZ domain."""
     output_dir = os.path.join(runtime.context.output_dir, "af", "fasta")
     pdb_id = runtime.context.input_pdb_filename.split(".")[0]
@@ -124,7 +116,7 @@ def make_fasta_file(state: PipelineState, runtime: ToolRuntime[Context]) -> Comm
 
 # run alphafold - s4
 @tool
-def run_alphafold(runtime: ToolRuntime[Context]) -> str:
+def run_alphafold(runtime: ToolRuntime[RuntimeContext]) -> str:
     """Run AlphaFold to predict a fold for the given sequence."""
     base_path = runtime.context.base_path
     output_dir = runtime.context.output_dir
@@ -146,7 +138,7 @@ def run_alphafold(runtime: ToolRuntime[Context]) -> str:
 
 # get score - s5
 @tool
-def score_alphafold(runtime: ToolRuntime[Context]) -> str:
+def score_alphafold(runtime: ToolRuntime[RuntimeContext]) -> str:
     """Get AlphaFold scores."""
     base_path = runtime.context.base_path
     output_dir = runtime.context.output_dir
