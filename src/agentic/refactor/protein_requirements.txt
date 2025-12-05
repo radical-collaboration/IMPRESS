@@ -1,0 +1,5 @@
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+pydantic>=2.0.0
+aiofiles>=23.0.0  # For async file I/O (optional enhancement)
