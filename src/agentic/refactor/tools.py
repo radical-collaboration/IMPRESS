@@ -4,7 +4,22 @@ import os
 import asyncio
 from state import PipelineState
 
+from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import DragonTelemetryCollector
+from radical.asyncflow import DragonVllmInferenceBackend
+from radical.asyncflow import DragonExecutionBackendV3, WorkflowEngine
+from radical.asyncflow.logging import init_default_logger
 
+from flowgentic.langGraph.execution_wrappers import AsyncFlowType
+from flowgentic.langGraph.main import LangraphIntegration
+from flowgentic.langGraph.utils.supervisor import create_llm_router, supervisor_fan_out
+from flowgentic.utils.llm_providers import ChatLLMProvider
+
+import multiprocessing as mp
+
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.AGENT_TOOL_AS_FUNCTION
+)
 async def run_mpnn_node(state: PipelineState) -> PipelineState:
     """
     Async Node: Predict sequences with ProteinMPNN.
@@ -55,7 +70,9 @@ async def run_mpnn_node(state: PipelineState) -> PipelineState:
         "messages": [message]
     }
 
-
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.AGENT_TOOL_AS_FUNCTION
+)
 async def score_mpnn_node(state: PipelineState) -> PipelineState:
     """
     Async Node: Rank and select the best sequence from MPNN output.
@@ -129,6 +146,9 @@ async def score_mpnn_node(state: PipelineState) -> PipelineState:
     }
 
 
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.AGENT_TOOL_AS_FUNCTION
+)
 async def make_fasta_file_node(state: PipelineState) -> PipelineState:
     """
     Async Node: Create a FASTA file for AlphaFold input.
@@ -165,7 +185,9 @@ async def make_fasta_file_node(state: PipelineState) -> PipelineState:
         "messages": [message]
     }
 
-
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.AGENT_TOOL_AS_FUNCTION
+)
 async def run_alphafold_node(state: PipelineState) -> PipelineState:
     """
     Async Node: Run AlphaFold to predict protein structure.
@@ -216,6 +238,9 @@ async def run_alphafold_node(state: PipelineState) -> PipelineState:
     }
 
 
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.AGENT_TOOL_AS_FUNCTION
+)
 async def score_alphafold_node(state: PipelineState) -> PipelineState:
     """
     Async Node: Extract and score AlphaFold predictions.

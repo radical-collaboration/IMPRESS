@@ -8,6 +8,19 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
 from state import PipelineState, NextTaskSchema
 
+from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import DragonTelemetryCollector
+from radical.asyncflow import DragonVllmInferenceBackend
+from radical.asyncflow import DragonExecutionBackendV3, WorkflowEngine
+from radical.asyncflow.logging import init_default_logger
+
+from flowgentic.langGraph.execution_wrappers import AsyncFlowType
+from flowgentic.langGraph.main import LangraphIntegration
+from flowgentic.langGraph.utils.supervisor import create_llm_router, supervisor_fan_out
+from flowgentic.utils.llm_providers import ChatLLMProvider
+
+import multiprocessing as mp
+
 
 MODELS = {
     "llama3.2": "/home/mason/exdrive/.cache/huggingface/hub/hub/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6",
@@ -32,7 +45,9 @@ def get_llm(state: PipelineState) -> ChatOpenAI:
         max_tokens=100
     )
 
-
+@agents_manager.execution_wrappers.asyncflow(
+    flow_type=AsyncFlowType.EXECUTION_BLOCK
+)
 async def task_sequence_generator(state: PipelineState) -> PipelineState:
     """
     Async Router node: Use LLM to determine next protein task.

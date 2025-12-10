@@ -5,6 +5,19 @@ Async LangGraph-based Protein Design Pipeline
 Orchestrates MPNN sequence generation and AlphaFold structure prediction
 """
 
+from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import DragonTelemetryCollector
+from radical.asyncflow import DragonVllmInferenceBackend
+from radical.asyncflow import DragonExecutionBackendV3, WorkflowEngine
+from radical.asyncflow.logging import init_default_logger
+
+from flowgentic.langGraph.execution_wrappers import AsyncFlowType
+from flowgentic.langGraph.main import LangraphIntegration
+from flowgentic.langGraph.utils.supervisor import create_llm_router, supervisor_fan_out
+from flowgentic.utils.llm_providers import ChatLLMProvider
+
+import multiprocessing as mp
+
 import os
 import asyncio
 from langgraph.graph import StateGraph, END, START
@@ -17,6 +30,11 @@ from tools import (
     run_alphafold_node,
     score_alphafold_node
 )
+
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 
 def create_protein_pipeline(use_json_parsing: bool = True):
@@ -167,59 +185,135 @@ async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True, use_
         verbose: Whether to print detailed execution logs
         use_json_parsing: Use manual JSON parsing (True) vs with_structured_output (False)
     """
-    # Create the pipeline graph
-    pipeline = create_protein_pipeline(use_json_parsing=use_json_parsing)
+        logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d %(threadName)s %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     
-    # Initialize state
-    initial_state = initialize_pipeline_state(input_pdb_filename)
+    mp.set_start_method("dragon")
+
+    # Step-1 Create Dragon backend
+    print("    # Step-1 Create Dragon backend")
+    nodes = 1  # Total nodes in allocation
+    backend = await DragonExecutionBackendV3(
+        num_workers=1,
+        disable_background_batching=False)
+
+    num_services = 1
+    nodes_per_service = 1
+    services = []
+
+    logger.info(f"Creating {num_services} VLLM services...")
+
+    # Step-2 make multiple VLLM services (or 1 in Mason's case)
+    print("    #Step-2 make multiple VLLM services (or 1 in Mason's case)")
+    for i in range(num_services):
+        port = 8000 + i
+        offset = i * nodes_per_service  # Each pipeline starts at different node
+
+        logger.info(f"Service {i+1}: port={port}, offset={offset}, num_nodes={nodes_per_service}")
+
+        service = DragonVllmInferenceBackend(
+            config_file="/anvil/scratch/x-mason/IMPRESS/src/agentic/refactor/config.yaml",
+            model_name="/anvil/scratch/x-mason/.cache/huggingface/hub/models/hub/models--meta-llama--Llama-3.1-8B-Instruct/snapshots/0e9e39f249a16976918f6564b8830bc894c89659/",
+            num_nodes=nodes_per_service,
+            num_gpus=1,
+            tp_size=1,
+            port=port,
+            offset=offset  # Change this to control the number of nodes each inference pipeline takes
+        )
+
+        services.append(service)
     
-    if verbose:
-        print("=" * 70)
-        print("Protein Design Pipeline - Starting (Async)")
-        print("=" * 70)
-        print(f"Input PDB: {input_pdb_filename}")
-        print(f"Max Passes: {initial_state['max_passes']}")
-        print(f"MPNN Sequences per Pass: {initial_state['mpnn_num_seqs']}")
-        print(f"Router Mode: {'JSON Parsing' if use_json_parsing else 'Structured Output'}")
-        print("=" * 70)
-    
-    # Run the pipeline with streaming
-    try:
-        async for chunk in pipeline.astream(initial_state):
-            if verbose:
-                for node_name, node_state in chunk.items():
-                    print(f"\n🔄 Node: {node_name}")
-                    if "messages" in node_state and node_state["messages"]:
-                        for msg in node_state["messages"]:
-                            print(f"  📝 {msg}")
+    # Step-3 make sure to await for all services to be initialized before any agentic calls
+    # Initialize ALL services concurrently
+    print("    # Step-3 make sure to await for all services to be initialized before any agentic calls")
+    print("    # Initialize ALL services concurrently")
+    logger.info(f"Initializing all {num_services} services concurrently...")
+    await asyncio.gather(*[service.initialize() for service in services])
+
+    # Get endpoints
+    service_endpoints = [service.get_endpoint() for service in services]
+
+
+    collector = DragonTelemetryCollector(
+        collection_rate=1.0,              # Collect every second
+        checkpoint_interval=30.0,         # Checkpoint every 30 seconds
+        checkpoint_dir=os.path.join(os.getcwd(), 'telemetry-results'),  # Save checkpoints here
+        checkpoint_count=10,              # Keep last 10 checkpoints
+        enable_cpu=True,
+        enable_gpu=True,
+        enable_memory=True,
+        metric_prefix="infer-asyncflow"   # Prefix all metrics
+    )
+
+    # Start collection (spawns processes on all nodes)
+    collector.start()
+
+    logger.info(f"All {num_services} services initialized")
+    logger.info("Node allocation:")
+    for i in range(num_services):
+        offset = i * nodes_per_service
+        logger.info(f"Service {i+1}: nodes[{offset}:{offset+nodes_per_service}] -> {service_endpoints[i]}")
+
+    # Create round-robin load balancer
+    endpoint_cycle = itertools.cycle(service_endpoints)
+
+    async with LangraphIntegration(backend=backend) as agents_manager:
+        # Create the pipeline graph
+        pipeline = create_protein_pipeline(use_json_parsing=use_json_parsing)
         
-        # Get final state
-        final_state = await pipeline.ainvoke(initial_state)
+        # Initialize state
+        initial_state = initialize_pipeline_state(input_pdb_filename)
         
         if verbose:
-            print("\n" + "=" * 70)
-            print("Pipeline Execution Complete")
             print("=" * 70)
-            
-            print("\n📊 Summary:")
-            print(f"  • Total LLM Calls: {final_state.get('llm_calls', 0)}")
-            print(f"  • Tasks Executed: {len(final_state.get('task_list', []))}")
-            print(f"  • Final Pass: {final_state.get('pass_num', 1) - 1}")
-            print(f"  • Top Sequence: {final_state.get('top_sequence', 'N/A')[:50]}...")
-            print(f"  • Best Fold Score: {final_state.get('current_fold_score', 'N/A')}")
-            
-            if final_state.get("fold_scores_list"):
-                print(f"\n  Fold Score History: {final_state['fold_scores_list']}")
-            
+            print("Protein Design Pipeline - Starting (Async)")
+            print("=" * 70)
+            print(f"Input PDB: {input_pdb_filename}")
+            print(f"Max Passes: {initial_state['max_passes']}")
+            print(f"MPNN Sequences per Pass: {initial_state['mpnn_num_seqs']}")
+            print(f"Router Mode: {'JSON Parsing' if use_json_parsing else 'Structured Output'}")
             print("=" * 70)
         
-        return final_state
-        
-    except Exception as e:
-        print(f"\n❌ Pipeline failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
+        # Run the pipeline with streaming
+        try:
+            async for chunk in pipeline.astream(initial_state):
+                if verbose:
+                    for node_name, node_state in chunk.items():
+                        print(f"\n🔄 Node: {node_name}")
+                        if "messages" in node_state and node_state["messages"]:
+                            for msg in node_state["messages"]:
+                                print(f"  📝 {msg}")
+            
+            # Get final state
+            final_state = await pipeline.ainvoke(initial_state)
+            
+            if verbose:
+                print("\n" + "=" * 70)
+                print("Pipeline Execution Complete")
+                print("=" * 70)
+                
+                print("\n📊 Summary:")
+                print(f"  • Total LLM Calls: {final_state.get('llm_calls', 0)}")
+                print(f"  • Tasks Executed: {len(final_state.get('task_list', []))}")
+                print(f"  • Final Pass: {final_state.get('pass_num', 1) - 1}")
+                print(f"  • Top Sequence: {final_state.get('top_sequence', 'N/A')[:50]}...")
+                print(f"  • Best Fold Score: {final_state.get('current_fold_score', 'N/A')}")
+                
+                if final_state.get("fold_scores_list"):
+                    print(f"\n  Fold Score History: {final_state['fold_scores_list']}")
+                
+                print("=" * 70)
+            
+            return final_state
+            
+        except Exception as e:
+            print(f"\n❌ Pipeline failed with error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 def run_pipeline(input_pdb_filename: str, verbose: bool = True, use_json_parsing: bool = True):
