@@ -9,7 +9,7 @@ import os
 import asyncio
 from langgraph.graph import StateGraph, END, START
 from state import PipelineState
-from nodes import task_sequence_generator, route_to_task
+from nodes import task_sequence_generator, task_sequence_generator_json, route_to_task
 from tools import (
     run_mpnn_node,
     score_mpnn_node,
@@ -19,9 +19,13 @@ from tools import (
 )
 
 
-def create_protein_pipeline():
+def create_protein_pipeline(use_json_parsing: bool = True):
     """
     Creates and compiles the async protein design pipeline graph.
+    
+    Args:
+        use_json_parsing: If True, uses manual JSON parsing (more compatible).
+                         If False, uses with_structured_output (requires model support).
     
     Graph structure:
     - Router (task_sequence_generator) determines next task
@@ -32,8 +36,9 @@ def create_protein_pipeline():
     # Initialize the graph with state schema
     workflow = StateGraph(PipelineState)
     
-    # Add the router node
-    workflow.add_node("task_sequence_generator", task_sequence_generator)
+    # Add the router node - choose implementation based on flag
+    router_func = task_sequence_generator_json if use_json_parsing else task_sequence_generator
+    workflow.add_node("task_sequence_generator", router_func)
     
     # Add the five tool nodes
     workflow.add_node("run_mpnn", run_mpnn_node)
@@ -153,16 +158,17 @@ def initialize_pipeline_state(
     }
 
 
-async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True):
+async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True, use_json_parsing: bool = True):
     """
     Async execute the complete protein design pipeline.
     
     Args:
         input_pdb_filename: Name of the input PDB file
         verbose: Whether to print detailed execution logs
+        use_json_parsing: Use manual JSON parsing (True) vs with_structured_output (False)
     """
     # Create the pipeline graph
-    pipeline = create_protein_pipeline()
+    pipeline = create_protein_pipeline(use_json_parsing=use_json_parsing)
     
     # Initialize state
     initial_state = initialize_pipeline_state(input_pdb_filename)
@@ -174,6 +180,7 @@ async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True):
         print(f"Input PDB: {input_pdb_filename}")
         print(f"Max Passes: {initial_state['max_passes']}")
         print(f"MPNN Sequences per Pass: {initial_state['mpnn_num_seqs']}")
+        print(f"Router Mode: {'JSON Parsing' if use_json_parsing else 'Structured Output'}")
         print("=" * 70)
     
     # Run the pipeline with streaming
@@ -215,15 +222,16 @@ async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True):
         raise
 
 
-def run_pipeline(input_pdb_filename: str, verbose: bool = True):
+def run_pipeline(input_pdb_filename: str, verbose: bool = True, use_json_parsing: bool = True):
     """
     Synchronous wrapper for async pipeline execution.
     
     Args:
         input_pdb_filename: Name of the input PDB file
         verbose: Whether to print detailed execution logs
+        use_json_parsing: Use manual JSON parsing (True) vs with_structured_output (False)
     """
-    return asyncio.run(run_pipeline_async(input_pdb_filename, verbose))
+    return asyncio.run(run_pipeline_async(input_pdb_filename, verbose, use_json_parsing))
 
 
 async def stream_pipeline_async(input_pdb_filename: str):
@@ -283,6 +291,6 @@ def main():
 
 if __name__ == "__main__":
     # You can also use the streaming version:
-#     asyncio.run(stream_pipeline_async("6v7q.pdb"))
+    # asyncio.run(stream_pipeline_async("6v7q.pdb"))
     
     main()

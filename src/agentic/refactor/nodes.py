@@ -1,6 +1,8 @@
 # nodes.py
 
 import asyncio
+import json
+import re
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -53,7 +55,7 @@ async def task_sequence_generator(state: PipelineState) -> PipelineState:
     pass_num = state.get("pass_num", 1)
     max_passes = state.get("max_passes", 4)
     
-    # Build the system prompt
+    # Build the system prompt with explicit JSON schema
     task_generator_system_prompt = """You are a planner responsible for choosing the next task
 in an ongoing protein design workflow, or for choosing to end the workflow.
 
@@ -79,7 +81,14 @@ Your choice of task is determined by the previous task:
   * If previous_fold_score >= current_fold_score: choose 'END' (no improvement)
   * If max_passes reached: choose 'END'
 
-Choose the next task and explain your reasoning clearly."""
+## Response Format
+You MUST respond with ONLY a valid JSON object in this exact format:
+{
+  "next_task": "<one of: run_mpnn, score_mpnn, make_fasta_file, run_alphafold, score_alphafold, END>",
+  "reasoning": "<brief explanation of your choice>"
+}
+
+Do not include any other text before or after the JSON object."""
 
     # Build the user prompt with current state
     task_generator_user_prompt = f"""Current pipeline state:
@@ -89,24 +98,42 @@ Previous fold score: {previous_fold_score}
 Current fold score: {current_fold_score}
 Task history: {task_list}
 
-What should be the next task?"""
+Respond with a JSON object indicating the next task."""
     
-    # Create prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", task_generator_system_prompt),
-        ("user", task_generator_user_prompt)
-    ])
+    # Create messages
+    messages = [
+        SystemMessage(content=task_generator_system_prompt),
+        HumanMessage(content=task_generator_user_prompt)
+    ]
     
-    # Get structured output
+    # Get LLM response and parse JSON
     try:
-        structured_llm = model.with_structured_output(NextTaskSchema)
-        chain = prompt | structured_llm
-        
         # Async invoke
-        decision = await chain.ainvoke({})
+        response = await model.ainvoke(messages)
         
-        next_task = decision.next_task
-        reasoning = decision.reasoning
+        # Extract content
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        # Parse JSON from response
+        import json
+        import re
+        
+        # Try to extract JSON from response (handle cases with markdown backticks)
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+            decision = json.loads(json_str)
+        else:
+            raise ValueError("No JSON found in response")
+        
+        # Validate the response
+        next_task = decision.get("next_task", "").strip()
+        reasoning = decision.get("reasoning", "No reasoning provided")
+        
+        # Validate next_task is one of the allowed values
+        valid_tasks = ["run_mpnn", "score_mpnn", "make_fasta_file", "run_alphafold", "score_alphafold", "END"]
+        if next_task not in valid_tasks:
+            raise ValueError(f"Invalid next_task: {next_task}")
         
         print(f"LLM Decision: {next_task} - {reasoning}")
         
@@ -126,7 +153,114 @@ What should be the next task?"""
     }
 
 
-async def fallback_routing(state: PipelineState) -> tuple[str, str]:
+def parse_llm_response(response_text: str) -> tuple[str, str]:
+    """
+    Parse LLM response to extract next_task and reasoning.
+    Handles both JSON and plain text responses.
+    
+    Args:
+        response_text: Raw response from LLM
+        
+    Returns:
+        Tuple of (next_task, reasoning)
+    """
+    # Try JSON parsing first
+    try:
+        # Remove markdown code blocks if present
+        cleaned = re.sub(r'```json\s*|\s*```', '', response_text)
+        
+        # Extract JSON object
+        json_match = re.search(r'\{[^}]*\}', cleaned, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+            data = json.loads(json_str)
+            next_task = data.get("next_task", "").strip()
+            reasoning = data.get("reasoning", "No reasoning provided")
+            
+            # Validate next_task
+            valid_tasks = ["run_mpnn", "score_mpnn", "make_fasta_file", "run_alphafold", "score_alphafold", "END"]
+            if next_task in valid_tasks:
+                return next_task, reasoning
+    except (json.JSONDecodeError, AttributeError) as e:
+        pass
+    
+    # Fallback: Try to extract task name from text
+    valid_tasks = ["run_mpnn", "score_mpnn", "make_fasta_file", "run_alphafold", "score_alphafold", "END"]
+    response_lower = response_text.lower()
+    
+    for task in valid_tasks:
+        if task.lower() in response_lower or task.replace("_", " ") in response_lower:
+            return task, f"Extracted from text: {response_text[:100]}"
+    
+    # If all else fails, raise error
+    raise ValueError(f"Could not parse valid task from response: {response_text[:200]}")
+
+
+async def task_sequence_generator_json(state: PipelineState) -> PipelineState:
+    """
+    Alternative implementation using manual JSON parsing.
+    More compatible with models that don't support with_structured_output.
+    """
+    model = get_llm(state)
+    
+    # Get current state information
+    task_list = state.get("task_list", [])
+    previous_task = state.get("previous_task", "START")
+    previous_fold_score = state.get("previous_fold_score")
+    current_fold_score = state.get("current_fold_score")
+    pass_num = state.get("pass_num", 1)
+    max_passes = state.get("max_passes", 4)
+    
+    # Build prompt emphasizing simple response format
+    system_prompt = """You are a task router for a protein design pipeline.
+
+Available tasks: run_mpnn, score_mpnn, make_fasta_file, run_alphafold, score_alphafold, END
+
+Rules:
+- START → run_mpnn
+- run_mpnn → score_mpnn
+- score_mpnn → make_fasta_file
+- make_fasta_file → run_alphafold
+- run_alphafold → score_alphafold
+- score_alphafold → run_mpnn (if improved) OR END (if not improved or max passes reached)
+
+Respond ONLY with a JSON object:
+{"next_task": "task_name", "reasoning": "brief explanation"}"""
+
+    user_prompt = f"""Previous: {previous_task}
+Pass: {pass_num}/{max_passes}
+Scores - Previous: {previous_fold_score}, Current: {current_fold_score}
+
+Next task?"""
+    
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt)
+    ]
+    
+    try:
+        # Invoke LLM
+        response = await model.ainvoke(messages)
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        
+        # Parse response
+        next_task, reasoning = parse_llm_response(response_text)
+        
+        print(f"LLM Decision: {next_task} - {reasoning}")
+        
+    except Exception as e:
+        print(f"Warning: LLM parsing failed ({str(e)}), using fallback logic")
+        next_task, reasoning = await fallback_routing(state)
+    
+    return {
+        **state,
+        "decision": next_task,
+        "next_task": next_task,
+        "previous_task": previous_task,
+        "task_list": [next_task],
+        "messages": [f"Router: Selected {next_task}. Reasoning: {reasoning}"],
+        "llm_calls": state.get("llm_calls", 0) + 1
+    }
     """
     Async fallback rule-based routing if LLM fails.
     """
