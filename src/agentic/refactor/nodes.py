@@ -29,13 +29,16 @@ MODELS = {
 }
 
 
+#def get_llm(state: PipelineState) -> ChatOpenAI:
 def get_llm(state: PipelineState) -> ChatOpenAI:
     """
     Initialize the LLM for routing decisions.
     Uses local inference server with configurable model.
     """
-    model_path = state.get("model_path", MODELS["llama3.2"])
-    inference_server_url = state.get("inference_server_url", "http://localhost:8010/v1")
+    print("beginning nodes.get_llm()")
+
+#    model_path = state.get("model_path", MODELS["llama3.2"])
+#    inference_server_url = state.get("inference_server_url", "http://localhost:8010/v1")
     
     return ChatOpenAI(
         model=model_path,
@@ -48,6 +51,7 @@ def get_llm(state: PipelineState) -> ChatOpenAI:
 @agents_manager.execution_wrappers.asyncflow(
     flow_type=AsyncFlowType.EXECUTION_BLOCK
 )
+
 async def task_sequence_generator(state: PipelineState) -> PipelineState:
     """
     Async Router node: Use LLM to determine next protein task.
@@ -60,7 +64,7 @@ async def task_sequence_generator(state: PipelineState) -> PipelineState:
     - score_alphafold: Score the folded structure
     - END: Terminate the workflow
     """
-    model = get_llm(state)
+    print("beginning nodes.task_sequence_generator()")
     
     # Get current state information
     task_list = state.get("task_list", [])
@@ -69,6 +73,11 @@ async def task_sequence_generator(state: PipelineState) -> PipelineState:
     current_fold_score = state.get("current_fold_score")
     pass_num = state.get("pass_num", 1)
     max_passes = state.get("max_passes", 4)
+    endpoint_cycle = state.get("endpoint_cycle")
+    
+#    model = get_llm(state)
+    llm = next(endpoint_cycle)
+    model = get_llm(llm)
     
     # Build the system prompt with explicit JSON schema
     task_generator_system_prompt = """You are a planner responsible for choosing the next task
@@ -179,6 +188,7 @@ def parse_llm_response(response_text: str) -> tuple[str, str]:
     Returns:
         Tuple of (next_task, reasoning)
     """
+    print("beginning nodes.parse_llm_response()")
     # Try JSON parsing first
     try:
         # Remove markdown code blocks if present
@@ -216,6 +226,7 @@ async def task_sequence_generator_json(state: PipelineState) -> PipelineState:
     Alternative implementation using manual JSON parsing.
     More compatible with models that don't support with_structured_output.
     """
+    print("beginning nodes.task_sequence_generator_json()")
     model = get_llm(state)
     
     # Get current state information
@@ -322,6 +333,7 @@ def route_to_task(state: PipelineState) -> str:
     Conditional edge function that determines which node to route to
     based on the router's decision.
     """
+    print("beginning nodes.route_to_task()")
     decision = state.get("decision", "END")
     
     if decision == "END":

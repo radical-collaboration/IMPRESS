@@ -50,7 +50,8 @@ def create_protein_pipeline(use_json_parsing: bool = True):
     - Conditionally routes to one of five tool nodes or END
     - Each tool node executes and returns to router for next decision
     """
-    
+    print("beginning create_protein_pipeline()")
+
     # Initialize the graph with state schema
     workflow = StateGraph(PipelineState)
     
@@ -122,6 +123,8 @@ def initialize_pipeline_state(
     Returns:
         Initialized PipelineState dictionary
     """
+    print("beginning agent.initialize_pipeline_state()")
+
     if base_path is None:
         base_path = os.getcwd()
     
@@ -185,6 +188,8 @@ async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True, use_
         verbose: Whether to print detailed execution logs
         use_json_parsing: Use manual JSON parsing (True) vs with_structured_output (False)
     """
+    print("beginning agent.run_pipeline_async()")
+
         logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s.%(msecs)03d %(threadName)s %(levelname)s: %(message)s",
@@ -315,19 +320,6 @@ async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True, use_
             traceback.print_exc()
             raise
 
-
-def run_pipeline(input_pdb_filename: str, verbose: bool = True, use_json_parsing: bool = True):
-    """
-    Synchronous wrapper for async pipeline execution.
-    
-    Args:
-        input_pdb_filename: Name of the input PDB file
-        verbose: Whether to print detailed execution logs
-        use_json_parsing: Use manual JSON parsing (True) vs with_structured_output (False)
-    """
-    return asyncio.run(run_pipeline_async(input_pdb_filename, verbose, use_json_parsing))
-
-
 async def stream_pipeline_async(input_pdb_filename: str):
     """
     Stream the pipeline execution with real-time updates.
@@ -338,6 +330,8 @@ async def stream_pipeline_async(input_pdb_filename: str):
     Yields:
         Dictionary chunks with node updates
     """
+    print("beginning agent.stream_pipeline_async()")
+
     pipeline = create_protein_pipeline()
     initial_state = initialize_pipeline_state(input_pdb_filename)
     
@@ -361,6 +355,8 @@ async def main_async():
     # Example usage
     input_pdb = "6v7q.pdb"
     
+    print("beginning agent.main_async()")
+    
     # Check if input file exists
     input_path = os.path.join(os.getcwd(), "inputs", input_pdb)
     if not os.path.exists(input_path):
@@ -380,11 +376,13 @@ def main():
     """
     Synchronous main entry point.
     """
+    print("beginning agent.main()")
+
     return asyncio.run(main_async())
 
 
 if __name__ == "__main__":
     # You can also use the streaming version:
-    # asyncio.run(stream_pipeline_async("6v7q.pdb"))
+     asyncio.run(stream_pipeline_async("6v7q.pdb"))
     
-    main()
+#    main()

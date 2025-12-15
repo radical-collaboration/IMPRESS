@@ -26,6 +26,8 @@ async def run_mpnn_node(state: PipelineState) -> PipelineState:
     
     Generates a set of candidate sequences for the input protein structure.
     """
+    print("beginning tools.run_mpnn_node()")
+
     base_path = state.get("base_path", os.getcwd())
     input_dir = state.get("input_dir", os.path.join(base_path, 'inputs'))
     output_dir = state.get("output_dir", os.path.join(base_path, 'outputs'))
@@ -79,6 +81,8 @@ async def score_mpnn_node(state: PipelineState) -> PipelineState:
     
     Parses MPNN output files and selects the highest-scoring sequence.
     """
+    print("beginning tools.score_mpnn_node()")
+
     base_path = state.get("base_path", os.getcwd())
     output_dir = state.get("output_dir", os.path.join(base_path, 'outputs'))
     pass_num = state.get("pass_num", 1)
@@ -155,6 +159,8 @@ async def make_fasta_file_node(state: PipelineState) -> PipelineState:
     
     Creates a multi-chain FASTA with the designed sequence and peptide.
     """
+    print("beginning tools.make_fasta_file_node()")
+
     base_path = state.get("base_path", os.getcwd())
     output_dir = state.get("output_dir", os.path.join(base_path, 'outputs'))
     input_pdb_filename = state.get("input_pdb_filename")
@@ -194,6 +200,8 @@ async def run_alphafold_node(state: PipelineState) -> PipelineState:
     
     Folds the top sequence using AlphaFold multimer.
     """
+    print("beginning tools.run_alphafold_node()")
+
     base_path = state.get("base_path", os.getcwd())
     output_dir = state.get("output_dir", os.path.join(base_path, 'outputs'))
     input_pdb_filename = state.get("input_pdb_filename")
@@ -248,6 +256,8 @@ async def score_alphafold_node(state: PipelineState) -> PipelineState:
     Extracts pLDDT scores from AlphaFold output and determines
     if this fold is better than the previous one.
     """
+    print("beginning tools.score_mpnn_node()")
+
     base_path = state.get("base_path", os.getcwd())
     output_dir = state.get("output_dir", os.path.join(base_path, 'outputs'))
     pass_num = state.get("pass_num", 1)

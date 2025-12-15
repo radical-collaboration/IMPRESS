@@ -15,6 +15,8 @@ from flowgentic.langGraph.main import LangraphIntegration
 from flowgentic.langGraph.utils.supervisor import create_llm_router, supervisor_fan_out
 from flowgentic.utils.llm_providers import ChatLLMProvider
 
+import itertools
+
 import multiprocessing as mp
 
 class NextTaskSchema(BaseModel):
@@ -66,3 +68,4 @@ class PipelineState(TypedDict):
     mpnn_num_seqs: int
     model_path: str
     inference_server_url: str
+    endpoint_cycle: itertools.cycle
