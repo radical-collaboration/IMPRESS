@@ -17,8 +17,6 @@ from flowgentic.utils.llm_providers import ChatLLMProvider
 
 import itertools
 
-import multiprocessing as mp
-
 class NextTaskSchema(BaseModel):
     """Pydantic schema for structured output from the router."""
     next_task: Literal["run_mpnn", "score_mpnn", "make_fasta_file", "run_alphafold", "score_alphafold", "END"] = Field(
@@ -69,3 +67,4 @@ class PipelineState(TypedDict):
     model_path: str
     inference_server_url: str
     endpoint_cycle: itertools.cycle
+    agents_manager: LangraphIntegration
