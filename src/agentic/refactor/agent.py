@@ -353,17 +353,7 @@ async def run_pipeline_async(input_pdb_filename: str, backend: DragonExecutionBa
 #    # Create round-robin load balancer
 #    endpoint_cycle = itertools.cycle(service_endpoints)
 
-    async with LangraphIntegration(backend=backend) as agents_manager:
-        
-        
-        # Create the pipeline graph
-        pipeline = create_protein_pipeline(use_json_parsing=use_json_parsing)
-        
-        # Initialize state
-        initial_state = initialize_pipeline_state(input_pdb_filename)
-        
-#        initial_state["agents_manager"] = agents_manager
-        
+    async with LangraphIntegration(backend=backend) as agents_manager:                
         @agents_manager.execution_wrappers.asyncflow(
             flow_type=AsyncFlowType.EXECUTION_BLOCK
         )
@@ -783,6 +773,12 @@ async def run_pipeline_async(input_pdb_filename: str, backend: DragonExecutionBa
                 "messages": [message]
             }
         
+        # Create the pipeline graph
+        pipeline = create_protein_pipeline(use_json_parsing=use_json_parsing)
+        
+        # Initialize state
+        initial_state = initialize_pipeline_state(input_pdb_filename)
+
         if verbose:
             print("=" * 70)
             print("Protein Design Pipeline - Starting (Async)")
