@@ -68,3 +68,4 @@ class PipelineState(TypedDict):
     inference_server_url: str
     endpoint_cycle: itertools.cycle
     agents_manager: LangraphIntegration
+

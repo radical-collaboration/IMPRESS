@@ -32,6 +32,9 @@ import os
 import asyncio
 from langgraph.graph import StateGraph, END, START
 from state import PipelineState
+
+import itertools
+
 #from nodes import task_sequence_generator, task_sequence_generator_json, route_to_task
 #from nodes import route_to_task
 #from tools import (
@@ -263,7 +266,7 @@ def initialize_pipeline_state(
     }
 
 
-async def run_pipeline_async(input_pdb_filename: str, verbose: bool = True, use_json_parsing: bool = True):
+async def run_pipeline_async(input_pdb_filename: str, backend: DragonExecutionBackendV3, verbose: bool = True, use_json_parsing: bool = True):
     """
     Async execute the complete protein design pipeline.
     
@@ -906,7 +909,8 @@ async def main_async():
 
         # Get endpoints
         service_endpoints = [service.get_endpoint() for service in services]
-
+        # Create round-robin load balancer
+        endpoint_cycle = itertools.cycle(service_endpoints)
 
         collector = DragonTelemetryCollector(
             collection_rate=1.0,              # Collect every second
@@ -929,8 +933,6 @@ async def main_async():
             offset = i * nodes_per_service
             logger.info(f"Service {i+1}: nodes[{offset}:{offset+nodes_per_service}] -> {service_endpoints[i]}")
 
-        # Create round-robin load balancer
-        endpoint_cycle = itertools.cycle(service_endpoints)
 
     # Example usage
     input_pdb = "6v7q.pdb"
@@ -949,7 +951,7 @@ async def main_async():
             f.write("# Placeholder PDB file\n")
     
     # Run the pipeline
-    final_state = await run_pipeline_async(input_pdb, verbose=True)
+    final_state = await run_pipeline_async(input_pdb, backend, verbose=True)
     
     return final_state
 
