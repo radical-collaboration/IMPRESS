@@ -1,10 +1,13 @@
 import asyncio
 import copy
 import os
+import subprocess
+import sys
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 TASK_PRE_EXEC = [
+#    "source /home/mason/exdrive/rad/env_impress/bin/activate"
     "conda activate ve.impress" # local
 #    "module load anaconda",
 #    "source activate base",
@@ -33,7 +36,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 #        # Input-related
 #        self.fasta_list_2 = kwargs.get("fasta_list_2", [])
         self.base_path = kwargs.get("base_path", os.getcwd())
-        self.input_path = os.path.join(self.base_path, f"{self.name}_in")
+        self.scripts_path = os.path.join(self.base_path, "scripts")
+        self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
         self.mpnn_dir = kwargs.get("mpnn_dir", f"{self.base_path}/LigandMPNN")
 
 #        # Output paths
@@ -44,6 +48,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.output_path_lmpnn = os.path.join(
             self.output_path, "/lmpnn"
         )
+        
+        self.taskcount = 0
+        self.previous_task = "START"
 
     def set_up_new_pipeline_dirs(self, new_pipeline_name):
         base_output = os.path.join(
@@ -56,89 +63,154 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
-        
-        #packmin 1
-        @self.auto_register_task()
-        async def s1():
-            self.taskcount=1
-            self.s1_dirs=f"{self.base_path}/s1"
-            os.makedirs(f"{self.s1_dirs}/in",exist_ok=True)
-            os.makedirs(f"{self.s1_dirs}/out",exist_ok=True) 
 
-            input_dir= self.input_path #TODO if self.passes==1 else f"{self.base_path}"
-            pdb_file="3rk4.pdb"
-            lig_file="RED.params"
+        #lmpnn
+        @self.auto_register_task()
+        async def mpnn():
+            """
+            Sequence generation. Follows backbone generation.
+            """
+            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            print(f"Task count is {self.taskcount}")
+            taskname = "mpnn"
+            self.previous_task = taskname
+            taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
+            os.makedirs(f"{taskdir}/in",exist_ok=True)
+            os.makedirs(f"{taskdir}/out",exist_ok=True) 
+
+            pdb_file=os.listdir(f"{input_dir}")[0]
             pdb_path=f"{input_dir}/{pdb_file}"
-            lig_path=f"{input_dir}/{lig_file}"
-            output_dir=f"{self.s1_dirs}/out"
+            output_dir=f"{taskdir}/out"
+            fixed_residues_file = f"{self.pipeline_inputs}/fixed_residues.txt"
+            fixed_residues = os.system(f"cat {fixed_residues_file}")
+            return(
+                f"""python {self.mpnn_dir}/run.py \
+                --model_type "ligand_mpnn" \
+                --checkpoint_path_sc {self.mpnn_dir}/model_params/ligandmpnn_sc_v_32_002_16.pt \
+                --checkpoint_ligand_mpnn {self.mpnn_dir}/model_params/ligandmpnn_v_32_010_25.pt \
+                --seed 111 \
+                --pdb_path {pdb_path} \
+                --out_folder {output_dir} \
+                --pack_side_chains 1 \
+                --number_of_batches 1 \
+                --batch_size 1 \
+                --number_of_packs_per_design 1 \
+                --pack_with_ligand_context 1 \
+                --fixed_residues {fixed_residues} \
+                --repack_everything 1 \
+                --temperature 0.1
+                """
+            )
+
+#            return(
+#                f"bash {self.scripts_path}/mpnn_wrapper.sh "
+#                f"{pdb_path} "
+#                f"{output_dir} "
+#                f"{self.mpnn_dir} "
+#            )
+        
+        #packmin
+        @self.auto_register_task()
+        async def packmin():
+            """
+            SC rotamer packing. Follows sequence generation.
+            """
+            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            print(f"Task count is {self.taskcount}")
+            taskname = "packmin"
+            self.previous_task = taskname
+            taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
+            os.makedirs(f"{taskdir}/in",exist_ok=True)
+            os.makedirs(f"{taskdir}/out",exist_ok=True)
+
+            lig_file = "RED.params"
+            lig_path=f"{self.pipeline_inputs}/{lig_file}"
+            pdb_dir = f"{input_dir}/packed"
+            pdb_file = os.listdir(pdb_dir)[0]
+            output_dir=f"{taskdir}/out"
 
             return(
-                f"python {self.base_path}/packmin.py "
-                f"{pdb_path} "
+                f"python {self.scripts_path}/packmin.py "
+                f"{pdb_dir}/{pdb_file} "
                 f"-lig {lig_path} "
                 f"--out_dir {output_dir} "
             )
 
-        #lmpnn 1
+        #fast relax
         @self.auto_register_task()
-        async def s2():
-            self.taskcount=2
-            self.s2_dirs=f"{self.base_path}/s2"
-            os.makedirs(f"{self.s2_dirs}/in",exist_ok=True)
-            os.makedirs(f"{self.s2_dirs}/out",exist_ok=True) 
+        async def fastrelax():
+            """
+            Rosetta FastRelax. Final packing step.
+            """
+            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            print(f"Task count is {self.taskcount}")
+            taskname = "fastrelax"
+            self.previous_task = taskname
+            taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
+            os.makedirs(f"{taskdir}/in",exist_ok=True)
+            os.makedirs(f"{taskdir}/out",exist_ok=True) 
 
-            input_dir=f"{self.s1_dirs}/out"
-            pdb_file=os.listdir(f"{self.s1_dirs}/out")[0]
-            pdb_path=f"{input_dir}/{pdb_file}"
-            output_dir=f"{self.s2_dirs}/out"
-
-            return(
-                f"bash {self.base_path}/mpnn_wrapper.sh "
-                f"{pdb_path} "
-                f"{output_dir} "
-                f"{self.mpnn_dir} "
-            )
-
-        #packmin 2
-        @self.auto_register_task()
-        async def s3():
-            self.taskcount=3
-            self.s3_dirs=f"{self.base_path}/s3"
-            os.makedirs(f"{self.s3_dirs}/in",exist_ok=True)
-            os.makedirs(f"{self.s3_dirs}/out",exist_ok=True) 
-
-            input_dir=f"{self.s2_dirs}/out/packed"
             pdb_file=os.listdir(input_dir)[0]
             lig_file="RED.params"
             pdb_path=f"{input_dir}/{pdb_file}"
-            lig_path=f"{self.input_path}/{lig_file}"
-            output_dir=f"{self.s3_dirs}/out"
+            lig_path=f"{self.pipeline_inputs}/{lig_file}"
+            output_dir=f"{taskdir}/out"
 
             return(
-                f"python {self.base_path}/packmin.py "
+                f"python {self.scripts_path}/fastrelax.py "
                 f"{pdb_path} "
+                f"-n 1 "
                 f"-lig {lig_path} "
                 f"--out_dir {output_dir} "
             )
 
-        #lmpnn 2
+        #filter energy
         @self.auto_register_task()
-        async def s4():
-            self.taskcount=4
-            self.s4_dirs=f"{self.base_path}/s4"
-            os.makedirs(f"{self.s4_dirs}/in",exist_ok=True)
-            os.makedirs(f"{self.s4_dirs}/out",exist_ok=True) 
+        async def filter_energy():
+            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            print(f"Task count is {self.taskcount}")
+            taskname = "filter_energy"
+            self.previous_task = taskname
+            taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
+            os.makedirs(f"{taskdir}/in",exist_ok=True)
+            os.makedirs(f"{taskdir}/out",exist_ok=True) 
 
-            input_dir=f"{self.s3_dirs}/out"
-            pdb_file=os.listdir(f"{self.s3_dirs}/out")[0]
-            pdb_path=f"{input_dir}/{pdb_file}"
-            output_dir=f"{self.s4_dirs}/out"
+            pdb_directory = input_dir
+            output_file = "negative_ligand_filenames.txt"
+            output_energy_file = "negative_ligand_energies.txt"
+            common_filenames_file = f"{self.pipeline_inputs}/common_filenames.txt"
+            
+            return(
+                f"python {self.scripts_path}/filter_energy.py "
+                f"{pdb_directory} "
+                f"{output_file} "
+                f"{output_energy_file} "
+                f"{common_filenames_file} "
+            )
+
+        #filter shape
+        @self.auto_register_task()
+        async def filter_shape():
+            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            print(f"Task count is {self.taskcount}")
+            taskname = "filter_shape"
+            self.previous_task = taskname
+            taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
+            os.makedirs(f"{taskdir}/in",exist_ok=True)
+            os.makedirs(f"{taskdir}/out",exist_ok=True) 
+
+            pdb_directory = input_dir
+            SC_output_file = "shape_complementarity_values.txt"
 
             return(
-                f"bash {self.base_path}/mpnn_wrapper.sh "
-                f"{pdb_path} "
-                f"{output_dir} "
-                f"{self.mpnn_dir} "
+                f"python {self.scripts_path}/filter_shape.py "
+                f"{pdb_directory} "
+                f"{SC_output_file} "
             )
 
     async def get_scores_map(self):
@@ -162,25 +234,33 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         while self.passes <= self.max_passes:
             self.logger.pipeline_log(f"Starting pass {self.passes}")
 
-            # TODO task for initial lmpnn to create 8 outputs
-
-            self.logger.pipeline_log("running packmin 1")
-            await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
-            self.logger.pipeline_log("packmin finished")
-
             self.logger.pipeline_log("running lmpnn 1")
-            await self.s2(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.mpnn(task_description={"pre_exec": TASK_PRE_EXEC})
             self.logger.pipeline_log("lmpnn finished")
 
-            self.logger.pipeline_log("running packmin 2")
-            await self.s3(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("running packmin 1")
+            await self.packmin(task_description={"pre_exec": TASK_PRE_EXEC})
             self.logger.pipeline_log("packmin finished")
 
             self.logger.pipeline_log("running lmpnn 2")
-            await self.s4(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.mpnn(task_description={"pre_exec": TASK_PRE_EXEC})
             self.logger.pipeline_log("lmpnn finished")
-            
-            # TODO subsequent tasks packmin, lmpnn, fastrelax, etc
+
+            self.logger.pipeline_log("running packmin 2")
+            await self.packmin(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("packmin finished")
+
+            self.logger.pipeline_log("running fastrelax")
+            await self.fastrelax(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("fastrelax finished")
+
+            self.logger.pipeline_log("running energy filter")
+            await self.filter_energy(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("energy filter finished")
+
+            self.logger.pipeline_log("running shape filter")
+            await self.filter_shape(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("shape filter finished")
 
             await self.run_adaptive_step(wait=True)
 

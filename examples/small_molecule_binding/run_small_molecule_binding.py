@@ -3,7 +3,9 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import RadicalExecutionBackend
+#from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
+from concurrent.futures import ThreadPoolExecutor
 
 from impress import PipelineSetup
 from impress import ImpressManager
@@ -121,15 +123,16 @@ async def impress_protein_bind() -> None:
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    backend = await RadicalExecutionBackend(
-            {
-#                'gpus':1,
-                'cores': 4,
-                'runtime' : 23 * 60,
-                'resource': 'local.localhost'
-                }
-            )
-
+#    backend = await RadicalExecutionBackend(
+#            {
+##                'gpus':1,
+#                'cores': 4,
+#                'runtime' : 23 * 60,
+#                'resource': 'local.localhost'
+#                }
+#            )
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
