@@ -11,7 +11,8 @@ import sys
 pdb_directory           = sys.argv[1]
 output_file             = sys.argv[2]
 output_energy_file      = sys.argv[3]
-common_filenames_file   = sys.argv[4] or None
+common_filenames_file   = sys.argv[4]
+ligand_name             = sys.argv[5]
 
 # Read common filenames
 with open(common_filenames_file, 'r') as f:
@@ -34,14 +35,14 @@ for pdb_file in files_to_analyze:
     ligand_energy = None
 
     # Read the PDB file and find the ligand energy
-    with open(full_path, 'r') as file:
-        for line in file:
-            if line.startswith("RED"):
+    with open(full_path, 'r') as g:
+        for line in g:
+            if line.startswith(f"{ligand_name}"):
                 # Extract the total energy value (last element)
                 parts = line.split()
                 ligand_energy = float(parts[-1])  # The last element is the total energy
 
-                print(f"Processed: {pdb_file}, Ligand Energy (RED): {ligand_energy}")
+                print(f"Processed: {pdb_file}, Ligand Energy ({ligand_name}): {ligand_energy}")
                 
                 # Check if the ligand energy is negative
                 if ligand_energy < 0:
@@ -52,7 +53,7 @@ for pdb_file in files_to_analyze:
                 break  # No need to check further lines
 
     if ligand_energy is None:
-        print(f"File: {pdb_file} does not contain ligand RED.")
+        print(f"File: {pdb_file} does not contain ligand {ligand_name}.")
 
 
 

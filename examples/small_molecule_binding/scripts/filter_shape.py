@@ -3,10 +3,12 @@ import re
 import pyrosetta
 import sys
 
-pdb_directory = sys.argv[1] # '/WWW/PDB_Files'
-SC_output_file = sys.argv[2] # 'shape_complementarity_values.txt'
+pdb_directory   = sys.argv[1] # '/WWW/PDB_Files'
+SC_output_file  = sys.argv[2] # 'shape_complementarity_values.txt'
+ligand_name     = sys.argv[3] # 'ALR'
+gen_output_file = sys.argv[4] # 'interface_values.txt'
 
-pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa RED.params -corrections::beta_nov16 true")
+pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa {ligand_name}.params -corrections::beta_nov16 true")
 
 # Define directories and files
 #pdb_directory = '/WWW/PDB_Files'
@@ -127,6 +129,6 @@ for pdb_file in pdb_files:
         genout.write(f"{pdb_file},{pose.scores['sc2']},{pose.scores['ddg']},{pose.scores['cms']},{pose.scores['IA_dSASA_int']},{pose.scores['vbuns']},{pose.scores['sbuns']},{pose.scores['sap_score']}\n")
         genout.close()
 
-print(f"Shape complementarity values have been written to {output_file}.")
+print(f"Shape complementarity values have been written to {SC_output_file}.")
 
 

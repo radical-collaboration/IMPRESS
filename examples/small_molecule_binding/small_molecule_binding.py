@@ -82,8 +82,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             pdb_file=os.listdir(f"{input_dir}")[0]
             pdb_path=f"{input_dir}/{pdb_file}"
             output_dir=f"{taskdir}/out"
-            fixed_residues_file = f"{self.pipeline_inputs}/fixed_residues.txt"
-            fixed_residues = os.system(f"cat {fixed_residues_file}")
+#            fixed_residues_file = f"{self.pipeline_inputs}/fixed_residues.txt"
+#            fixed_residues = os.system(f"cat {fixed_residues_file}")
             return(
                 f"""python {self.mpnn_dir}/run.py \
                 --model_type "ligand_mpnn" \
@@ -97,10 +97,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 --batch_size 1 \
                 --number_of_packs_per_design 1 \
                 --pack_with_ligand_context 1 \
-                --fixed_residues {fixed_residues} \
                 --repack_everything 1 \
                 --temperature 0.1
                 """
+#                --fixed_residues {fixed_residues} \
             )
 
 #            return(
@@ -125,7 +125,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/in",exist_ok=True)
             os.makedirs(f"{taskdir}/out",exist_ok=True)
 
-            lig_file = "RED.params"
+            lig_file = "ALR.params"
             lig_path=f"{self.pipeline_inputs}/{lig_file}"
             pdb_dir = f"{input_dir}/packed"
             pdb_file = os.listdir(pdb_dir)[0]
@@ -145,7 +145,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             Rosetta FastRelax. Final packing step.
             """
             self.taskcount=self.taskcount+1
-            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out/packed"
             print(f"Task count is {self.taskcount}")
             taskname = "fastrelax"
             self.previous_task = taskname
@@ -154,7 +154,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/out",exist_ok=True) 
 
             pdb_file=os.listdir(input_dir)[0]
-            lig_file="RED.params"
+            lig_file="ALR.params"
             pdb_path=f"{input_dir}/{pdb_file}"
             lig_path=f"{self.pipeline_inputs}/{lig_file}"
             output_dir=f"{taskdir}/out"
@@ -169,19 +169,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         #filter energy
         @self.auto_register_task()
-        async def filter_energy():
-            self.taskcount=self.taskcount+1
-            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+        async def filter_energy(ligand_name:str = "ALR"):
+#            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount)}_{self.previous_task}/out"
             print(f"Task count is {self.taskcount}")
             taskname = "filter_energy"
-            self.previous_task = taskname
+#            self.previous_task = taskname
             taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
             os.makedirs(f"{taskdir}/in",exist_ok=True)
             os.makedirs(f"{taskdir}/out",exist_ok=True) 
 
             pdb_directory = input_dir
-            output_file = "negative_ligand_filenames.txt"
-            output_energy_file = "negative_ligand_energies.txt"
+            outputs_dir = f"{taskdir}/out"
+            output_file = f"{outputs_dir}/negative_ligand_filenames.txt"
+            output_energy_file = f"{outputs_dir}/negative_ligand_energies.txt"
             common_filenames_file = f"{self.pipeline_inputs}/common_filenames.txt"
             
             return(
@@ -190,16 +191,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f"{output_file} "
                 f"{output_energy_file} "
                 f"{common_filenames_file} "
+                f"{ligand_name} "
             )
 
         #filter shape
         @self.auto_register_task()
-        async def filter_shape():
-            self.taskcount=self.taskcount+1
-            input_dir=f"{str(self.taskcount-1)}_{self.previous_task}/out"
+        async def filter_shape(ligand_name:str = "ALR"):
+#            self.taskcount=self.taskcount+1
+            input_dir=f"{str(self.taskcount)}_{self.previous_task}/out"
             print(f"Task count is {self.taskcount}")
             taskname = "filter_shape"
-            self.previous_task = taskname
+#            self.previous_task = taskname
             taskdir = f"{self.base_path}/{str(self.taskcount)}_{taskname}"
             os.makedirs(f"{taskdir}/in",exist_ok=True)
             os.makedirs(f"{taskdir}/out",exist_ok=True) 
@@ -210,7 +212,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             return(
                 f"python {self.scripts_path}/filter_shape.py "
                 f"{pdb_directory} "
-                f"{SC_output_file} "
+                f"{taskdir}/out/{SC_output_file} "
+                f"{self.pipeline_inputs}/{ligand_name} "
+                f"{taskdir}/out/interface_values.txt "
             )
 
     async def get_scores_map(self):
@@ -249,6 +253,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.logger.pipeline_log("running packmin 2")
             await self.packmin(task_description={"pre_exec": TASK_PRE_EXEC})
             self.logger.pipeline_log("packmin finished")
+
+            self.logger.pipeline_log("running lmpnn 3")
+            await self.mpnn(task_description={"pre_exec": TASK_PRE_EXEC})
+            self.logger.pipeline_log("lmpnn finished")
 
             self.logger.pipeline_log("running fastrelax")
             await self.fastrelax(task_description={"pre_exec": TASK_PRE_EXEC})
