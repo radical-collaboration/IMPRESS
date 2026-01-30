@@ -66,7 +66,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         #lmpnn
         @self.auto_register_task()
-        async def mpnn():
+        async def mpnn(fixed_residues_file:str | None = None):
             """
             Sequence generation. Follows backbone generation.
             """
@@ -82,8 +82,13 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             pdb_file=os.listdir(f"{input_dir}")[0]
             pdb_path=f"{input_dir}/{pdb_file}"
             output_dir=f"{taskdir}/out"
+
 #            fixed_residues_file = f"{self.pipeline_inputs}/fixed_residues.txt"
-#            fixed_residues = os.system(f"cat {fixed_residues_file}")
+            if fixed_residues_file:
+                fixed_residues = os.system(f"cat {fixed_residues_file}")                
+                fixed_residues_line = f"""--fixed_residues {ligand_mpnn} \ """
+            else: fixed_residues=""
+
             return(
                 f"""python {self.mpnn_dir}/run.py \
                 --model_type "ligand_mpnn" \
@@ -98,9 +103,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 --number_of_packs_per_design 1 \
                 --pack_with_ligand_context 1 \
                 --repack_everything 1 \
-                --temperature 0.1
-                """
-#                --fixed_residues {fixed_residues} \
+                --temperature 0.1 \
+                """ + fixed_residues_line
             )
 
 #            return(
