@@ -1,3 +1,4 @@
+
 import asyncio
 import copy
 import os
@@ -7,11 +8,12 @@ import sys
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 TASK_PRE_EXEC = [
+    "source /anvil/scratch/x-mason/IMPRESS/env_impress/bin/activate"
 #    "source /home/mason/exdrive/rad/env_impress/bin/activate"
 #    "conda activate ve.impress" # local
 #    "module load anaconda",
 #    "source activate base",
-    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
+#    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
 ]
 
 class SmallMoleculeBindingPipeline(ImpressBasePipeline):
@@ -82,7 +84,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/in",exist_ok=True)
             os.makedirs(f"{taskdir}/out",exist_ok=True)
 
-            inputs = f"{pipeline_inputs}/ALR_binder_design.json"
+            inputs = f"{self.pipeline_inputs}/ALR_binder_design.json"
             output_dir=f"{taskdir}/out"
             foundry_project_dir="/anvil/scratch/x-mason/foundry"
 
@@ -156,7 +158,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/in",exist_ok=True)
             os.makedirs(f"{taskdir}/out",exist_ok=True)
 
-            lig_file = "ALR.params"
+            lig_file = "ALX.params"
             lig_path=f"{self.pipeline_inputs}/{lig_file}"
             pdb_dir = f"{input_dir}/packed"
             pdb_file = os.listdir(pdb_dir)[0]
@@ -185,7 +187,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/out",exist_ok=True) 
 
             pdb_file=os.listdir(input_dir)[0]
-            lig_file="ALR.params"
+            lig_file="ALX.params"
             pdb_path=f"{input_dir}/{pdb_file}"
             lig_path=f"{self.pipeline_inputs}/{lig_file}"
             output_dir=f"{taskdir}/out"
@@ -203,7 +205,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             "module load modtree/gpu",
             "module load gcc/11.2.0",
             "module load cuda/12.8.0",
-            "export PATH="/anvil/scratch/x-mason/localcolabfold/.pixi/envs/default/bin:${PATH}"
+            "export PATH=/anvil/scratch/x-mason/localcolabfold/.pixi/envs/default/bin:$PATH"
         ]
         @self.auto_register_task()
         async def af2(task_description={"gpus_per_rank":1,"pre_exec":AF2_PRE_EXEC}):
@@ -227,22 +229,22 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             RANDOMSEED="0"
 
             return(
-                f"pixi run --manifest-path {LOCALCOLABFOLD_PROJECT_DIR}"
-                f"  colabfold_batch \"
-                f"  --num-recycle 3 \"
-                f"  --amber \"
-                f"  --templates \"
-                f"  --use-gpu-relax \"
-                f"  --num-models 5 \"
-                f"  --model-order 1,2,3,4,5 \"
-                f"  --random-seed ${RANDOMSEED} \"
-                f"  {fasta_path} \"
+                f"pixi run --manifest-path {LOCALCOLABFOLD_PROJECT_DIR} "
+                f"  colabfold_batch "
+                f"  --num-recycle 3 "
+                f"  --amber "
+                f"  --templates "
+                f"  --use-gpu-relax "
+                f"  --num-models 5 "
+                f"  --model-order 1,2,3,4,5 "
+                f"  --random-seed {RANDOMSEED} "
+                f"  {fasta_path} "
                 f"  {output_dir}"
             )
 
         #filter energy
         @self.auto_register_task()
-        async def filter_energy(ligand_name:str = "ALR"):
+        async def filter_energy(ligand_name:str = "ALX"):
 #            self.taskcount=self.taskcount+1
             input_dir=f"{str(self.taskcount)}_{self.previous_task}/out"
             print(f"Task count is {self.taskcount}")
@@ -269,7 +271,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         #filter shape
         @self.auto_register_task()
-        async def filter_shape(ligand_name:str = "ALR"):
+        async def filter_shape(ligand_name:str = "ALX"):
 #            self.taskcount=self.taskcount+1
             input_dir=f"{str(self.taskcount)}_{self.previous_task}/out"
             print(f"Task count is {self.taskcount}")
