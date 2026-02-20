@@ -3,7 +3,7 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-#from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import ConcurrentExecutionBackend
 from concurrent.futures import ThreadPoolExecutor
 
@@ -115,7 +115,7 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> Optional[
 #            pipeline.kill_parent = True
 
 
-async def impress_protein_bind() -> None:
+async def impress_smallmol_bind() -> None:
     """
     Execute protein binding analysis with adaptive optimization.
     
@@ -149,4 +149,4 @@ async def impress_protein_bind() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(impress_protein_bind())
+    asyncio.run(impress_smallmol_bind())

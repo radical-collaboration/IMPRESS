@@ -7,13 +7,14 @@ import sys
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = [
-    "source /anvil/scratch/x-mason/IMPRESS/env_impress/bin/activate"
-#    "source /home/mason/exdrive/rad/env_impress/bin/activate"
-#    "conda activate ve.impress" # local
-#    "module load anaconda",
-#    "source activate base",
-#    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
+FOUNDRY_PRE_EXEC = [""]
+PYROSETTA_PRE_EXEC = ["source /anvil/scratch/x-mason/env_pyrosetta"]
+LMPNN_PRE_EXEC = [""]
+AF2_PRE_EXEC = [
+    "module load modtree/gpu",
+    "module load gcc/11.2.0",
+    "module load cuda/12.8.0",
+    "export PATH=/anvil/scratch/x-mason/localcolabfold/.pixi/envs/default/bin:$PATH"
 ]
 
 class SmallMoleculeBindingPipeline(ImpressBasePipeline):
@@ -67,11 +68,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         """Register all pipeline tasks"""
 
         #rfd3
-        RFD3_PRE_EXEC = [
-            "module load modtree/gpu"            
-        ]
         @self.auto_register_task()
-        async def rfd3(task_description={"gpus_per_rank":1,"pre_exec":RFD3_PRE_EXEC}):
+        async def rfd3(task_description={"gpus_per_rank":1):
             """
             Optionally scaffolded backbone prediction.
             """
@@ -86,16 +84,27 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             inputs = f"{self.pipeline_inputs}/ALR_binder_design.json"
             output_dir=f"{taskdir}/out"
-            foundry_project_dir="/anvil/scratch/x-mason/foundry"
-
+#            foundry_project_dir="/anvil/scratch/x-mason/foundry"
+            foundry_sif_path"/anvil/scratch/x-mason/foundry.sif"
+            
             return(
-                f"uv --directory {foundry_project_dir} run rfd3 design "
+                f"apptainer exec --nv {foundry_sif_path} rfd3 design "
                 f"out_dir={output_dir} "
                 f"inputs={inputs} "
                 f"skip_existing=False "
                 f"dump_trajectories=True "
                 f"prevalidate_inputs=True "
             )
+
+
+#            return(
+#                f"uv --directory {foundry_project_dir} run rfd3 design "
+#                f"out_dir={output_dir} "
+#                f"inputs={inputs} "
+#                f"skip_existing=False "
+#                f"dump_trajectories=True "
+#                f"prevalidate_inputs=True "
+#            )
 
         #lmpnn
         @self.auto_register_task()
@@ -200,15 +209,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f"--out_dir {output_dir} "
             )
 
-        #alphafold
-        AF2_PRE_EXEC = [
-            "module load modtree/gpu",
-            "module load gcc/11.2.0",
-            "module load cuda/12.8.0",
-            "export PATH=/anvil/scratch/x-mason/localcolabfold/.pixi/envs/default/bin:$PATH"
-        ]
+        # alphafold
         @self.auto_register_task()
-        async def af2(task_description={"gpus_per_rank":1,"pre_exec":AF2_PRE_EXEC}):
+        async def af2(task_description={"gpus_per_rank":1}):
             """
             LocalColabFold Alphafold2.
             """
@@ -321,40 +324,37 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             self.logger.pipeline_log("running lmpnn 1")
             await self.mpnn(
-                fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt",
-                task_description={"pre_exec": TASK_PRE_EXEC}
+                fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt"
             )
             self.logger.pipeline_log("lmpnn finished")
 
 
             self.logger.pipeline_log("running packmin 1")
-            await self.packmin(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.packmin(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
             self.logger.pipeline_log("packmin finished")
 
 
             self.logger.pipeline_log("running lmpnn 2")
             await self.mpnn(
                 fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt",
-                task_description={"pre_exec": TASK_PRE_EXEC}
             )
             self.logger.pipeline_log("lmpnn finished")
 
 
             self.logger.pipeline_log("running packmin 2")
-            await self.packmin(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.packmin(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
             self.logger.pipeline_log("packmin finished")
 
 
             self.logger.pipeline_log("running lmpnn 3")
             await self.mpnn(
-                fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt", 
-                task_description={"pre_exec": TASK_PRE_EXEC}
+                fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt"
             )
             self.logger.pipeline_log("lmpnn finished")
 
 
             self.logger.pipeline_log("running fastrelax")
-            await self.fastrelax(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.fastrelax(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
             self.logger.pipeline_log("fastrelax finished")
 
 
@@ -364,12 +364,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
 
             self.logger.pipeline_log("running energy filter")
-            await self.filter_energy(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.filter_energy()
             self.logger.pipeline_log("energy filter finished")
 
 
             self.logger.pipeline_log("running shape filter")
-            await self.filter_shape(task_description={"pre_exec": TASK_PRE_EXEC})
+            await self.filter_shape(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
             self.logger.pipeline_log("shape filter finished")
 
 
