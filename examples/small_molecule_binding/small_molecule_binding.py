@@ -314,13 +314,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.logger.pipeline_log(f"Running for a maximum of {self.max_passes} passes")
 
         while self.passes <= self.max_passes:
-            self.logger.pipeline_log(f"Starting pass {self.passes}")
+            self.logger.pipeline_log(
+                f"Starting pass {self.passes} "
+                f"(entry: {'backbone diffusion' if self.step_id == 1 else 'sequence design'})"
+            )
 
-
-            self.logger.pipeline_log("running rfd3")
-            await self.rfd3()
-            self.logger.pipeline_log("rfd3 finished")
-
+            # step_id == 1: backbone diffusion entry — run rfd3 before sequence design.
+            # step_id == 2: sequence design entry — skip rfd3, reuse existing backbone.
+            if self.step_id == 1:
+                self.logger.pipeline_log("running rfd3")
+                await self.rfd3()
+                self.logger.pipeline_log("rfd3 finished")
 
             self.logger.pipeline_log("running lmpnn 1")
             await self.mpnn(
