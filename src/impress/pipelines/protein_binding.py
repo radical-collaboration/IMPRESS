@@ -4,14 +4,23 @@ import os
 
 from .impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = [
-    "module load anaconda",
-    "source activate base",
-    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
+MPNN_PRE_EXEC = [
+    "source /anvil/scratch/x-mason/ProteinMPNN/.venv/bin/activate"
 ]
 
-MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
+AF2_PRE_EXEC = [
+    "module load modtree/gpu",
+    "module load cuda/12.8.0",
+    "module load gcc/11.2.0",
+    "source /anvil/scratch/x-mason/IMPRESS/.venv/bin/activate"
+]
 
+MISC_PRE_EXEC = [
+    "source /anvil/scratch/x-mason/IMPRESS/.venv/bin/activate"
+]
+
+#MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
+MPNN_PATH = f"/anvil/scratch/x-mason/ProteinMPNN"
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -146,11 +155,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         @self.auto_register_task()
         async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
             cmd = (
-                f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
-                f"{self.output_path}/af/fasta/ "
-                f"{target_fasta}.fa "
-                f"{self.output_path}/af/prediction/dimer_models/ "
+                f"pixi run --manifest-path /anvil/scratch/x-mason/localcolabfold "
+                f"colabfold_batch "
+                f"--model-type alphafold2_multimer_v3 "
+                f"--templates "
+                f"max-template-date=2020-12-01 "
+                f"--random-seed 999 " 
+                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+                f"{self.output_path}/af/prediction/dimer_models/ " 
             )
+
 
             return cmd
 
@@ -193,7 +207,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
-                await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
+                await self.s1(task_description={"pre_exec": MPNN_PRE_EXEC})
                 self.logger.pipeline_log("MPNN task finished")
 
                 self.logger.pipeline_log("Submitting sequence ranking task")
@@ -233,7 +247,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 )
 
                 s4_description = {
-                    "pre_exec": TASK_PRE_EXEC,
+                    "pre_exec": AF2_PRE_EXEC,
                     "post_exec": [
                         f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
                         f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
@@ -258,7 +272,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             await self.s5(
                 task_description={
-                    "pre_exec": TASK_PRE_EXEC,
+                    "pre_exec": MISC_PRE_EXEC,
                     "output_staging": [
                         {
                             "source": f"task:///{staged_file}",

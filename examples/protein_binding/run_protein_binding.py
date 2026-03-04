@@ -3,7 +3,9 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import RadicalExecutionBackend
+#from radical.asyncflow import RadicalExecutionBackend
+#from rhapsody.backends import DragonExecutionBackendV3
+from rhapsody.backends import RadicalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager
@@ -123,13 +125,14 @@ async def impress_protein_bind() -> None:
     pipelines based on protein quality degradation.
     """
     backend = await RadicalExecutionBackend(
-            {
-                'gpus':1,
-                'cores': 32,
-                'runtime' : 23 * 60,
-                'resource': 'purdue.anvil_gpu'
-                }
-            )
+        {
+            'gpus':1,
+            'cores':16,
+            'runtime':0.5 * 60,
+            'resource': 'purdue.anvil_gpu'
+        }
+    )
+#    backend = await DragonExecutionBackendV3()
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
