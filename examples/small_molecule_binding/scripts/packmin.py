@@ -107,6 +107,12 @@ def main(args):
         #Run the packer. (Note this may take a few minutes)
 	packer.apply(pose)
 
+        # Write Rosetta score JSON alongside the output PDB
+	import json, pathlib
+	score = sf(pose)
+	score_path = pathlib.Path(out_name).parent / (pathlib.Path(out_name).stem + '_packmin_score.json')
+	score_path.write_text(json.dumps({'total_score': score, 'pdb': str(out_name)}))
+
         #Dump the PDB
 	pose.dump_pdb(out_name)
         ##pose.dump_pdb('/outputs/2r0l_all_repack.pdb')

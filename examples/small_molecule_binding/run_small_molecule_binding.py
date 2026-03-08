@@ -1,193 +1,130 @@
-import copy
-import json
-import os
-import shutil
 import asyncio
-from typing import Dict, Any, Optional, List
-
-from radical.asyncflow import RadicalExecutionBackend
-from radical.asyncflow import ConcurrentExecutionBackend
+import os
 from concurrent.futures import ThreadPoolExecutor
+from typing import List
 
-from impress import PipelineSetup
-from impress import ImpressManager
-from small_molecule_binding import SmallMoleculeBindingPipeline
+from radical.asyncflow import ConcurrentExecutionBackend
 
+from impress import ImpressManager, PipelineSetup
+from small_molecule_binding import (
+    SmallMoleculeBindingPipeline,
+    STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
+    STEP_RETRY_SEQ,
+    ETYPE_BACKBONE, ETYPE_SEQUENCE, ETYPE_FOLD,
+    _ca_rmsd, _seq_identity, _ensemble_selective_avg,
+)
 
-# Score thresholds — adjust these to match the desired design quality bar
-ENERGY_THRESHOLD = -10.0                # REU; ligand binding energy must be below this value
-SHAPE_COMPLEMENTARITY_THRESHOLD = 0.5  # 0–1 scale; interface SC must be at or above this value
-PLDDT_THRESHOLD = 70.0                 # 0–100 scale; mean per-residue pLDDT must be at or above this
-
-# Step IDs used to route the next pipeline pass
-STEP_BACKBONE_DIFFUSION = 1  # entry point: rfd3
-STEP_SEQUENCE_DESIGN = 2     # entry point: mpnn (skips backbone diffusion)
-
-
-async def adaptive_criteria(pipeline: SmallMoleculeBindingPipeline) -> bool:
-    """
-    Read Rosetta energy, shape complementarity, and AlphaFold pLDDT scores
-    from the current pass output files and check them against predefined thresholds.
-
-    Output paths are derived from pipeline.base_path and pipeline.taskcount, which
-    reflect the last task that incremented the counter (af2/alphafold). The filter
-    tasks write to sibling directories sharing the same count.
-
-    Args:
-        pipeline: The running pipeline instance.
-
-    Returns:
-        True if ALL three score thresholds are satisfied, False otherwise.
-    """
-    base = pipeline.base_path
-    tc = pipeline.taskcount  # set by the af2 task; filter tasks do not advance it
-
-    energy_file = os.path.join(base, f"{tc}_filter_energy", "out",
-                               "negative_ligand_energies.txt")
-    shape_file  = os.path.join(base, f"{tc}_filter_shape",  "out",
-                               "shape_complementarity_values.txt")
-    af_dir      = os.path.join(base, f"{tc}_alphafold", "out")
-
-    # --- Rosetta ligand binding energy ---
-    # File format (one entry per passing structure):
-    #   <pdb_filename>\tLigand Energy: <float>
-    energy_ok = False
-    if os.path.exists(energy_file):
-        with open(energy_file) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split('\t')
-                if len(parts) >= 2:
-                    try:
-                        energy = float(parts[1].split(': ')[-1])
-                        if energy < ENERGY_THRESHOLD:
-                            energy_ok = True
-                            break
-                    except ValueError:
-                        continue
-    pipeline.logger.pipeline_log(
-        f"Energy threshold ({ENERGY_THRESHOLD} REU): {'PASS' if energy_ok else 'FAIL'}"
-    )
-
-    # --- Rosetta shape complementarity ---
-    # File format (one entry per structure):
-    #   <pdb_filename>\tShape Complementarity: <float>
-    shape_ok = False
-    if os.path.exists(shape_file):
-        with open(shape_file) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split('\t')
-                if len(parts) >= 2:
-                    try:
-                        sc = float(parts[1].split(': ')[-1])
-                        if sc >= SHAPE_COMPLEMENTARITY_THRESHOLD:
-                            shape_ok = True
-                            break
-                    except ValueError:
-                        continue
-    pipeline.logger.pipeline_log(
-        f"Shape complementarity threshold ({SHAPE_COMPLEMENTARITY_THRESHOLD}): "
-        f"{'PASS' if shape_ok else 'FAIL'}"
-    )
-
-    # --- AlphaFold mean pLDDT ---
-    # ColabFold writes per-rank JSON score files whose names contain 'scores'.
-    # Each file contains a 'plddt' key with a list of per-residue confidence values.
-    plddt_ok = False
-    if os.path.isdir(af_dir):
-        for fname in os.listdir(af_dir):
-            if 'scores' in fname and fname.endswith('.json'):
-                fpath = os.path.join(af_dir, fname)
-                try:
-                    with open(fpath) as fh:
-                        data = json.load(fh)
-                    plddt_arr = data.get('plddt', [])
-                    if plddt_arr:
-                        mean_plddt = sum(plddt_arr) / len(plddt_arr)
-                        if mean_plddt >= PLDDT_THRESHOLD:
-                            plddt_ok = True
-                            break
-                except (json.JSONDecodeError, OSError):
-                    continue
-    pipeline.logger.pipeline_log(
-        f"AlphaFold mean pLDDT threshold ({PLDDT_THRESHOLD}): "
-        f"{'PASS' if plddt_ok else 'FAIL'}"
-    )
-
-    all_met = energy_ok and shape_ok and plddt_ok
-    pipeline.logger.pipeline_log(
-        f"All thresholds met: {all_met} — next pass entry: "
-        f"{'sequence design (mpnn)' if all_met else 'backbone diffusion (rfd3)'}"
-    )
-    return all_met
+# ── Per-step quality thresholds ────────────────────────────────────────────
+BACKBONE_MAX_CA_DEVIATION = 2.0
+BACKBONE_MIN_SS_FRACTION  = 0.2
+FASTRELAX_MAX_FA_REP      = 10.0   # fa_rep REU
+FASTRELAX_MAX_SCORE       = 0.0    # total_score REU
+INTERFACE_MIN_SC          = 0.5
+FOLD_MIN_PLDDT            = 70.0
 
 
-async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> Optional[Dict[str, Any]]:
-    """
-    Set the pipeline entry point for the next pass based on score thresholds.
+async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
+    step     = pipeline.state.get('last_analysis_step')
+    metrics  = pipeline.state.get('last_analysis_metrics', {})
+    passed   = metrics.get('pass', False)
+    ensemble = pipeline.state.get('ensemble', [])
 
-    Calls adaptive_criteria() to evaluate the current pass outputs:
-    - If all thresholds (energy, shape complementarity, pLDDT) are met, the next
-      pass starts from the sequence design step (mpnn), skipping backbone diffusion.
-    - If any threshold is not met, the next pass restarts from backbone diffusion (rfd3).
+    def _prior(ttype):
+        """All ensemble entries of ttype except the most recent one (which is 'current')."""
+        current = next((t for t in reversed(ensemble) if t[0] == ttype), None)
+        return current, [t for t in ensemble if t[0] == ttype and t is not current]
 
-    The chosen entry point is recorded in pipeline.step_id for the run() loop to use.
+    if step == 'backbone':
+        if not passed:
+            pipeline.next_step = STEP_RFD3
+        else:
+            current, prior = _prior(ETYPE_BACKBONE)
+            pipeline.state['seq_retry_count'] = 0  # reset on any new backbone
+            if not prior:
+                pipeline.next_step = STEP_MPNN
+            else:
+                overall, selective, has_data = _ensemble_selective_avg(
+                    current[3], prior, _ca_rmsd, similar_if_low=True)
+                if has_data and selective is not None:
+                    pipeline.next_step = STEP_MPNN if selective > overall else STEP_RFD3
+                else:
+                    # No data (e.g. CIF.GZ in real mode) → fall back to simple gating
+                    pipeline.next_step = STEP_MPNN
 
-    Args:
-        pipeline: The running pipeline instance.
+    elif step == 'sequence':
+        current, prior = _prior(ETYPE_SEQUENCE)
+        if not prior:
+            pipeline.state['seq_retry_count'] = 0
+            pipeline.next_step = STEP_MPNN
+        else:
+            overall, selective, has_data = _ensemble_selective_avg(
+                current[3], prior, _seq_identity, similar_if_low=False)
+            if has_data and selective is not None and selective > overall:
+                pipeline.state['seq_retry_count'] = 0
+                pipeline.next_step = STEP_MPNN
+            else:
+                count = pipeline.state.get('seq_retry_count', 0) + 1
+                pipeline.state['seq_retry_count'] = count
+                if count >= 3:
+                    pipeline.state['seq_retry_count'] = 0
+                    pipeline.next_step = STEP_RFD3
+                else:
+                    pipeline.next_step = STEP_RETRY_SEQ
 
-    Returns:
-        None (pipeline.step_id is updated in place).
-    """
-    thresholds_met = await adaptive_criteria(pipeline)
+    elif step == 'packmin':
+        pipeline.next_step = STEP_MPNN
 
-    if thresholds_met:
-        pipeline.logger.pipeline_log(
-            "Adaptive decision: thresholds met — starting next pass from sequence design (mpnn)"
-        )
-        pipeline.step_id = STEP_SEQUENCE_DESIGN
+    elif step == 'fastrelax':
+        pipeline.next_step = STEP_INTERFACE if passed else STEP_MPNN
+
+    elif step == 'interface':
+        pipeline.next_step = STEP_AF2 if passed else STEP_MPNN
+
+    elif step == 'fold':
+        current, prior = _prior(ETYPE_FOLD)
+        if not prior:
+            pipeline.state['rfd3_input_pdb'] = None
+        else:
+            overall, selective, has_data = _ensemble_selective_avg(
+                current[3], prior, _ca_rmsd, similar_if_low=True)
+            if has_data and selective is not None and selective > overall:
+                pipeline.state['rfd3_input_pdb'] = current[3]  # guided backbone
+            else:
+                pipeline.state['rfd3_input_pdb'] = None         # scratch
+        pipeline.next_step = STEP_RFD3
+
     else:
-        pipeline.logger.pipeline_log(
-            "Adaptive decision: thresholds not met — restarting next pass from backbone diffusion (rfd3)"
-        )
-        pipeline.step_id = STEP_BACKBONE_DIFFUSION
+        pipeline.logger.pipeline_log(f"[adaptive] Unknown step: {step!r}")
+        pipeline.next_step = STEP_DONE
+
+    pipeline.logger.pipeline_log(
+        f"[adaptive/{step}] passed={passed} next_step={pipeline.next_step} "
+        f"ensemble={len(ensemble)}"
+    )
 
 
 async def impress_smallmol_bind() -> None:
-    """
-    Execute protein binding analysis with adaptive optimization.
-    
-    Creates and manages multiple ProteinBindingPipeline instances with
-    adaptive optimization capabilities. Each pipeline can spawn child
-    pipelines based on protein quality degradation.
-    """
-#    backend = await RadicalExecutionBackend(
-#            {
-##                'gpus':1,
-#                'cores': 4,
-#                'runtime' : 23 * 60,
-#                'resource': 'local.localhost'
-#                }
-#            )
+    """Execute the small-molecule binding pipeline."""
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name='p1',
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_decision
+            adaptive_fn=adaptive_decision,
+            kwargs={
+                "backbone_max_ca_deviation": BACKBONE_MAX_CA_DEVIATION,
+                "backbone_min_ss_fraction":  BACKBONE_MIN_SS_FRACTION,
+                "fastrelax_max_fa_rep":      FASTRELAX_MAX_FA_REP,
+                "fastrelax_max_total_score": FASTRELAX_MAX_SCORE,
+                "interface_min_sc":          INTERFACE_MIN_SC,
+                "fold_min_plddt":            FOLD_MIN_PLDDT,
+            },
         )
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
-
     await manager.flow.shutdown()
 
 

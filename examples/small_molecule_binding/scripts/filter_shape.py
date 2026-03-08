@@ -15,7 +15,6 @@ pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa 
 #SC_output_file = 'shape_complementarity_values.txt'
 
 # Set up the general output file which will have metrics that look at the interface
-gen_output_file = 'interface_values.txt'
 with open(gen_output_file, 'w') as genout:
     # Write the shape complementarity value to the output file
     genout.write(f"FileName,Shape Complementarity,ddg,contact molecular surf,SASA,Very buried unsat hbond,Surface unsat hbond,SAP SCORE\n")
