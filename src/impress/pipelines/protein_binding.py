@@ -158,11 +158,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"pixi run --manifest-path /anvil/scratch/x-mason/localcolabfold "
                 f"colabfold_batch "
                 f"--model-type alphafold2_multimer_v3 "
-                f"--templates "
-                f"max-template-date=2020-12-01 "
-                f"--random-seed 999 " 
+#                f"--templates "
+                f"--max-template-date 2020-12-01 "
+                f"--rank multimer "
+                f"--random-seed 999 "
+                f"--save-all "
+                f"--debug-logging "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
-                f"{self.output_path}/af/prediction/dimer_models/ " 
+                f"{self.output_path}/af/prediction/dimer_models/{target_fasta} "
             )
 
 
@@ -249,9 +252,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 s4_description = {
                     "pre_exec": AF2_PRE_EXEC,
                     "post_exec": [
-                        f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
-                        f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
-                        f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
+                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
+#                        f"""find {models_path}/ -name "*ranking_debug*.json" -exec cp {{}} {best_ptm_json} \\;""",
+                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
                     ],
                 }
 
