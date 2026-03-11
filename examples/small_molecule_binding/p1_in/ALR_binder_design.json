@@ -2,26 +2,26 @@
     "buried": {
         "input": "./input_pdbs/scaffold-with-ALR.pdb",
         "length": "70-170",
-        "ligand": "ALR",
+        "ligand": "A:R",
         "select_fixed_atoms": {
-            "ALR": ""
+            "A:R": ""
         },
         "select_buried": {
-            "ALR": "S1,S2,O3,O4,O5,O6,O7,O8,O9,O10,N11,N12,C13,C14,C15,C16,C17,C18,C19,C20,C21,C22,C23,C24,C25,C26,C27,C28,C29,C30"
+            "A:R": "S1,S2,O3,O4,O5,O6,O7,O8,O9,O10,N11,N12,C13,C14,C15,C16,C17,C18,C19,C20,C21,C22,C23,C24,C25,C26,C27,C28,C29,C30"
         }
     },
     "partial": {
-        "input": "./input_pdbs/scaffold-with-ALR.dpdb",
-        "ligand": "IAI",
+        "input": "./input_pdbs/scaffold-with-ALR.pdb",
+        "ligand": "A:R",
         "length": "70-170",
         "select_fixed_atoms": {
-            "ALR": ""
+            "A:R": ""
         },
         "select_exposed": {
-            "ALR": "C13,C14,C15,C16,C17,C20,C21,C22,C24,C28,N11,O4,O6,O9,O10,S2"
+            "A:R": "C13,C14,C15,C16,C17,C20,C21,C22,C24,C28,N11,O4,O6,O9,O10,S2"
         },
         "select_buried": {
-            "ALR": "C18,C19,C23,C25,C26,C27,C29,C30,N12,O3,O5,O7,O8,S1"
+            "A:R": "C18,C19,C23,C25,C26,C27,C29,C30,N12,O3,O5,O7,O8,S1"
         }
     }
 }

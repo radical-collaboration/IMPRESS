@@ -3,7 +3,8 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import LocalExecutionBackend
+from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import (
@@ -105,7 +106,8 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    #backend = await DragonExecutionBackendV3()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [

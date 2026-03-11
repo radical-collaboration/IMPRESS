@@ -9,13 +9,11 @@ from functools import lru_cache
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 FOUNDRY_PRE_EXEC = [""]
-PYROSETTA_PRE_EXEC = ["source /anvil/scratch/x-mason/env_pyrosetta"]
-LMPNN_PRE_EXEC = [""]
+PYROSETTA_PRE_EXEC = ["source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"]
+MPNN_PRE_EXEC = ["source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate"]
 AF2_PRE_EXEC = [
-    "module load modtree/gpu",
-    "module load gcc/11.2.0",
-    "module load cuda/12.8.0",
-    "export PATH=/anvil/scratch/x-mason/localcolabfold/.pixi/envs/default/bin:$PATH"
+    "module load cuda",
+    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
 ]
 
 # Step constants for the outer state machine
@@ -151,14 +149,15 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.base_path       = kwargs.get("base_path", os.getcwd())
         self.scripts_path    = os.path.join(self.base_path, "scripts")
         self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
-        self.mpnn_dir        = kwargs.get("mpnn_dir", f"{self.base_path}/LigandMPNN")
+        self.mpnn_dir        = kwargs.get("mpnn_dir", f"/ocean/projects/dmr170002p/hooten/LigandMPNN")
 
         # Configurable tool paths and ensemble sizes
-        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/anvil/scratch/x-mason/foundry.sif")
-        self.colabfold_path     = kwargs.get("colabfold_path",     "/anvil/scratch/x-mason/localcolabfold")
-        self.ligand_params      = kwargs.get("ligand_params",      "ALX.params")
+        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/ocean/projects/dmr170002p/hooten/foundry.sif")
+        self.colabfold_path     = kwargs.get("colabfold_path",     "/ocean/projects/dmr170002p/hooten/localcolabfold")
+        self.ligand_params      = kwargs.get("ligand_params",      "ALR.params")
         self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 10)
         self.num_refine_cycles  = kwargs.get("num_refine_cycles",  3)
+        self.diffusion_batch_size = kwargs.get("diffusion_batch_size", 1)
 
         # Quality thresholds (overridable at construction time)
         self.backbone_max_ca_deviation = kwargs.get("backbone_max_ca_deviation", 2.0)
@@ -404,6 +403,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             input_pdb    = self.state.get('rfd3_input_pdb')
             scaffold_arg = f"scaffoldguided.target_pdb={input_pdb} " if input_pdb else ""
+            
+            diffusion_batch_size = self.diffusion_batch_size
 
             return (
                 f"apptainer exec --nv {self.foundry_sif_path} rfd3 design "
@@ -413,6 +414,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f"skip_existing=False "
                 f"dump_trajectories=True "
                 f"prevalidate_inputs=True "
+                f"diffusion_batch_size={diffusion_batch_size} "
             )
 
         @self.auto_register_task(local_task=True)
@@ -428,7 +430,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 with open(f"{out_dir}/{jf}") as fh:
                     data = json.load(fh)
                 m       = data.get('metrics', {})
-                clashes = m.get('n_clashing', {}).get('ligand_clashes', float('inf'))
+                clashes = m.get('n_clashing.ligand_clashes', float('inf'))
                 dev     = m.get('max_ca_deviation', float('inf'))
                 ss      = m.get('helix_fraction', 0) + m.get('sheet_fraction', 0)
 
@@ -469,7 +471,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             ))
 
         @self.auto_register_task()
-        async def mpnn(fixed_residues_file: str | None = None):
+        async def mpnn(
+            fixed_residues_file: str | None = None,task_description={"pre_exec":MPNN_PRE_EXEC}
+        ):
             self.taskcount += 1
             taskname = "mpnn"
             self.previous_task = taskname
@@ -490,20 +494,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 fixed_residues_line = ""
 
             return (
-                f"python {self.mpnn_dir}/run.py \\\n"
-                f"  --model_type \"ligand_mpnn\" \\\n"
-                f"  --checkpoint_path_sc {self.mpnn_dir}/model_params/ligandmpnn_sc_v_32_002_16.pt \\\n"
-                f"  --checkpoint_ligand_mpnn {self.mpnn_dir}/model_params/ligandmpnn_v_32_010_25.pt \\\n"
-                f"  --seed 111 \\\n"
-                f"  --pdb_path {pdb_path} \\\n"
-                f"  --out_folder {output_dir} \\\n"
-                f"  --pack_side_chains 1 \\\n"
-                f"  --number_of_batches {n_batches} \\\n"
-                f"  --batch_size 1 \\\n"
-                f"  --number_of_packs_per_design 1 \\\n"
-                f"  --pack_with_ligand_context 1 \\\n"
-                f"  --repack_everything 1 \\\n"
-                f"  --temperature 0.1 \\\n"
+                f"python {self.mpnn_dir}/run.py "
+                f"  --model_type \"ligand_mpnn\""
+                f"  --checkpoint_path_sc {self.mpnn_dir}/model_params/ligandmpnn_sc_v_32_002_16.pt "
+                f"  --checkpoint_ligand_mpnn {self.mpnn_dir}/model_params/ligandmpnn_v_32_010_25.pt "
+                f"  --seed 111 "
+                f"  --pdb_path {pdb_path} "
+                f"  --out_folder {output_dir} "
+                f"  --pack_side_chains 1 "
+                f"  --number_of_batches {n_batches} "
+                f"  --batch_size 1 "
+                f"  --number_of_packs_per_design 1 "
+                f"  --pack_with_ligand_context 1 "
+                f"  --repack_everything 1 "
+                f"  --temperature 0.1 "
                 + fixed_residues_line
             )
 
@@ -698,7 +702,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f"pixi run --manifest-path {self.colabfold_path} "
                 f"colabfold_batch "
                 f"--model-type alphafold2 "
-                f"--rank multimer "
+                f"--rank auto "
                 f"--random-seed 999 "
                 f"--save-all "
                 f"--debug-logging "
@@ -785,9 +789,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     return
 
                 self.logger.pipeline_log(f"running mpnn [cycle {cycle_i}]")
-                await self.mpnn(
-                    fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt"
-                )
+                await self.mpnn(task_description={"pre_exec": MPNN_PRE_EXEC})
+#                    fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt" )
                 self.logger.pipeline_log(f"mpnn [cycle {cycle_i}] finished")
                 await self.analysis_sequence()
                 await self.run_adaptive_step()
