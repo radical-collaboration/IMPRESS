@@ -1,0 +1,10 @@
+[project]
+name = "impress-flowgentic"
+version = "0.1.0"
+description = "IMPRESS recreation with Flowgentic + LangGraph and mocked heavy tools."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flowgentic @ git+https://github.com/stride-research/flowgentic.git@main",
+    "radical.asyncflow @ git+https://github.com/radical-cybertools/radical.asyncflow.git@main",
+]

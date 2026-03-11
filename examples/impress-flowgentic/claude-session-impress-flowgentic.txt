@@ -1,0 +1,292 @@
+
+╭─── Claude Code v2.1.63 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Mason!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│                                                    │                         │
+│     Sonnet 4.6 · Claude Pro ·                      │                         │
+│     mason.hooten@protonmail.com's Organization     │                         │
+│          ~/exdrive/rad/impress-flowgentic          │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Referenced file impress_flowgentic/pipeline.py
+  ⎿  Read impress_flowgentic/state.py (55 lines)
+  ⎿  Read impress_flowgentic/mocks.py (175 lines)
+  ⎿  Read impress_flowgentic/io.py (86 lines)
+  ⎿  Read ../rhapsody/src/rhapsody/backends/execution/concurrent.py (306 lines)
+  ⎿  Plan file referenced (~/.claude/plans/crystalline-napping-newt.md)
+
+● Let me pick up the duplication investigation. First, I'll read the current
+  analyze_fold to check the trajectory accumulation, then add a quick
+  diagnostic.
+
+● Read 1 file (ctrl+o to expand)
+
+● The code looks correct at first glance. The duplication must be happening
+  either at the LangGraph state-merge level (list field being concatenated
+  instead of replaced) or analyze_fold being called twice. Let me check the
+  actual records and then trace the root cause:
+
+● Bash(python3 -c "
+      import json…)
+  ⎿  Total records: 48
+
+     Pass 1: 18 records
+     … +27 lines (ctrl+o to expand)
+
+● The pattern is clear: the exact same 9 records (identical step_index values)
+  are written twice. analyze_fold is either being called twice, or
+  append_ensemble_records is being called twice within a single invocation. Let
+  me trace the asyncflow wrapper:
+
+● Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● Let me check LangGraph's version and how it handles Pydantic state reductions:
+
+● Bash(python3 -c "import langgraph; print(langgraph.__version__)" 2>&1)
+  ⎿  Error: Exit code 1
+     Traceback (most recent call last):
+       File "<string>", line 1, in <module>
+     AttributeError: module 'langgraph' has no attribute '__version__'
+
+     Traceback (most recent call last):
+       File "<string>", line 1, in <module>
+     AttributeError: module 'langgraph' has no attribute '__version__'
+
+● Bash(pip show langgraph 2>&1 | head -5)
+  ⎿  Name: langgraph
+     Version: 1.0.3
+     Summary: Building stateful, multi-actor applications with LLMs
+     … +2 lines (ctrl+o to expand)
+
+● Bash(python3 -c "
+      # Test LangGraph state behavior with a Pydantic BaseModel and list field…)
+  ⎿  node_a sees items=[]
+     node_b sees items=['a1', 'a2']
+     Final items=['a1', 'a2', 'b1'] count=2
+
+● LangGraph does proper replacement (not concatenation). So the issue is
+  elsewhere. Let me add a temporary tracer directly to append_ensemble_records:
+
+● Bash(python3 -c "
+      import asyncio…)
+  ⎿    File "<string>", line 7, in <module>
+       File "/home/mason/exdrive/rad/impress-flowgentic/impress_flowgentic/
+     __init__.py", line 1, in <module>
+     … +4 lines (ctrl+o to expand)
+
+● The monkey-patch didn't intercept since pipeline.py imports the function by
+  name at import time. Let me add a direct trace to io.py temporarily:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(impress_flowgentic/io.py)
+  ⎿  Added 3 lines
+      72  
+      73  def append_ensemble_records(store_path: Path, records: list[dic
+          t[str, Any]]) -> None:
+      74      """Append ensemble records to the pipeline's JSONL file (on
+          e JSON object per line)."""
+      75 +    import traceback as _tb                                    
+      76 +    print(f"[TRACE] append_ensemble_records: {len(records)} rec
+         +ords → {store_path.name}", flush=True)                         
+      77 +    _tb.print_stack(limit=8)                                   
+      78      with store_path.open("a", encoding="utf-8") as f:
+      79          for rec in records:
+      80              f.write(json.dumps(rec) + "\n")
+
+● Bash(rm -f workspace/ensemble/*.jsonl && python
+      scripts/run_impress_flowgentic.py 2>&1 | grep -A 12 'TRACE')
+  ⎿  No matches found
+
+● Bash(rm -f workspace/ensemble/*.jsonl && python
+      scripts/run_impress_flowgentic.py 2>&1 | grep -E
+      '(TRACE|analyze_fold|File.*pipeline|append_ensemble)' | head -80)
+  ⎿  (No output)
+
+● Bash(rm -f workspace/ensemble/*.jsonl && python
+      scripts/run_impress_flowgentic.py 2>&1 | head -200)
+  ⎿  /bin/bash: line 1: python: command not found
+
+● Bash(rm -f workspace/ensemble/*.jsonl && python3
+      scripts/run_impress_flowgentic.py 2>&1 | head -200)
+  ⎿  Traceback (most recent call last):
+       File "/home/mason/exdrive/rad/impress-flowgentic/scripts/run_impress
+     _flowgentic.py", line 12, in <module>
+     … +11 lines (ctrl+o to expand)
+
+● Bash(. .venv/bin/activate && rm -f workspace/ensemble/*.jsonl && python3
+      scripts/run_impress_flowgentic.py 2>&1 | head -200)
+  ⎿  [2026-03-06 01:06:02,591] [🐞 DEBUG   ] (asyncio) Using selector: Epol
+     lSelector
+     [2026-03-06 01:06:02,592] [ℹ️ INFO    ] (radical.asyncflow.backends.ex
+     … +421 lines (ctrl+o to expand)
+
+● Searched memories (ctrl+o to expand)
+
+● Bash(python3 -c "
+      import json…)
+  ⎿  p1: 9 records
+     p1_sub1: file missing
+
+● Read 1 file (ctrl+o to expand)
+
+● Only one call per pass. The trace reveals the issue: the ensemble JSONL file
+  is never cleared between pipeline runs — it accumulates records from every
+  run. The previous "48 records" was from two pipeline runs being appended to
+  the same file.
+
+  Let me verify:
+
+● Bash(. .venv/bin/activate && python3 -c "
+      import json…)
+  ⎿  p1 records this run: 9
+       pass=1 target=protein_a type=backbone
+       pass=1 target=protein_b type=backbone
+     … +7 lines (ctrl+o to expand)
+
+● The root cause is clear: the ensemble store file is never cleared between 
+  pipeline runs. It's append-only with no reset at init, so running the pipeline
+   twice doubles all records. The fresh run produces exactly 9 correct,
+  unduplicated records.
+
+  The fix: truncate the file at pipeline init. Let me remove the trace and apply
+   the fix:
+
+● Update(impress_flowgentic/io.py)
+  ⎿  Removed 3 lines
+      72  
+      73  def append_ensemble_records(store_path: Path, records: list[dic
+          t[str, Any]]) -> None:
+      74      """Append ensemble records to the pipeline's JSONL file (on
+          e JSON object per line)."""
+      75 -    import traceback as _tb                                    
+      76 -    print(f"[TRACE] append_ensemble_records: {len(records)} rec
+         -ords → {store_path.name}", flush=True)                         
+      77 -    _tb.print_stack(limit=8)                                   
+      75      with store_path.open("a", encoding="utf-8") as f:
+      76          for rec in records:
+      77              f.write(json.dumps(rec) + "\n")
+
+● Now fix the root cause — clear the store at pipeline init:
+
+● Update(impress_flowgentic/pipeline.py)
+  ⎿  Added 2 lines, removed 1 line
+       98          ensure_pipeline_layout(self.base_path, name, self.max_
+           passes)
+       99          self.fasta_list_2 = sorted(path.name for path in self.
+           input_path.glob("*.pdb"))
+      100  
+      101 -        # Ensemble store: one JSONL file per pipeline, appende
+          -d across all passes.                                          
+      101 +        # Ensemble store: one JSONL file per pipeline, cleared
+          + at init and appended per pass.                               
+      102          store_path = ensure_ensemble_store(self.base_path, nam
+           e)
+      103 +        store_path.unlink(missing_ok=True)  # start each pipel
+          +ine run with a fresh store                                    
+      104          self.ensemble_store_path = str(store_path)
+      105  
+      106          super().__init__(name=name, integration=integration, *
+           *cfg)
+
+● Now run a full end-to-end check to confirm correct record counts:
+
+● Bash(. .venv/bin/activate && python3 scripts/run_impress_flowgentic.py 2>&1 |
+      tail -5)
+  ⎿    ],
+       "finished_at": "2026-03-06T01:10:36.793629"
+     }
+     … +3 lines (ctrl+o to expand)
+
+● Bash(. .venv/bin/activate && python3 -c "
+      import json…)
+  ⎿  p1: 24 records, duplicates=none
+       per pass: {1: 9, 2: 9, 3: 3, 4: 3}
+     p1_sub1: 14 records, duplicates=none
+       per pass: {2: 2, 3: 6, 4: 6}
+
+● No duplicates. The counts make sense: p1 loses targets to sub-pipelines in
+  later passes. Let me also verify the input_ref chain is intact:
+
+● Bash(. .venv/bin/activate && python3 -c "
+      import json…)
+  ⎿    type=backbone   input_ref=START                               output
+     _ref=backbone_protein_a_pass1_2659
+       type=sequence   input_ref=backbone_protein_a_pass1_2659       output
+     … +3 lines (ctrl+o to expand)
+
+● The chain is clean: START → backbone_ref → sequence_prefix → decoy_pdb_path.
+
+  Root cause: ensure_ensemble_store returns the path to an existing file; since
+  the file is opened in append mode on every write, records from previous runs
+  accumulated. The fix is the single store_path.unlink(missing_ok=True) in
+  __init__, which clears the file at the start of each pipeline run.
+
+  Summary of the bug:
+  - The JSONL file is append-only by design (correct for accumulating passes
+  within a run)
+  - But it was never cleared between runs — so running the pipeline twice gave
+  2× records
+  - The "duplication" appeared systematic (identical step_index, input_ref,
+  etc.) because the mock data is deterministic
+  - Fix: delete the store file at pipeline __init__, so each run starts with a
+  clean slate
+
+✻ Sautéed for 13m 8s
+
+❯ elaborate on "The chain is clean: ..." 
+
+● Each record in the ensemble store has input_ref pointing to the output_ref of
+  the preceding step in the same target's trajectory. For protein_a, pass 1:
+
+  ┌──────────┬───────────────────────────────┬───────────────────────────────┐
+  │   type   │           input_ref           │          output_ref           │
+  ├──────────┼───────────────────────────────┼───────────────────────────────┤
+  │ backbone │ START                         │ backbone_protein_a_pass1_2659 │
+  ├──────────┼───────────────────────────────┼───────────────────────────────┤
+  │ sequence │ backbone_protein_a_pass1_2659 │ CCDKGAEWSNTRVKKGHPQR          │
+  ├──────────┼───────────────────────────────┼───────────────────────────────┤
+  │ decoy    │ CCDKGAEWSNTRVKKGHPQR          │ /…/best_models/protein_a.pdb  │
+  └──────────┴───────────────────────────────┴───────────────────────────────┘
+
+  What each link means:
+
+  - START → backbone_ref: The backbone was predicted from nothing (or from the
+  initial PDB input). "START" is the sentinel value analyze_backbone hard-codes
+  as input_ref for every backbone record because there's no prior step in the
+  trajectory to reference.
+  - backbone_ref → sequence_prefix: analyze_sequence reads
+  state.backbone_refs[target] as input_ref. This records that the sequence
+  design was conditioned on that specific backbone structure. The output_ref is
+  the first 20 characters of the top-ranked sequence — a compact but non-unique
+  identifier (it's a prefix, not a hash).
+  - sequence_prefix → decoy_pdb_path: analyze_fold reads
+  state.selected_sequences[target][:20] as input_ref. This records that the fold
+   prediction was run on that specific sequence. The output_ref is the absolute
+  path to the PDB file written by write_mock_alphafold_for_target.
+
+  Why "the chain is intact" matters:
+
+  The chain being intact means the provenance graph is reconstructable from the
+  JSONL alone — you can trace any decoy back through the sequence that produced
+  it and the backbone it was designed on. If analyze_backbone had used a stale
+  state.backbone_refs (e.g., from a prior iteration if trajectory state was
+  leaking between passes), or if analyze_sequence had used the wrong target's
+  sequence, the input_ref links would be broken or mismatched. The fact that
+  sequence.input_ref == backbone.output_ref for the same target in the same pass
+   means LangGraph state propagation is correct and no cross-target or
+  cross-pass contamination occurred.
+
+  What's still imprecise:
+
+  The sequence output_ref is a 20-character prefix, not a unique identifier. Two
+   different sequences could share the same prefix. For the mock, this is fine —
+   the sequences are long and deterministic — but in a real pipeline the
+  output_ref for a sequence step should be a hash or a file path to the .fa
+  file, not a truncated string.

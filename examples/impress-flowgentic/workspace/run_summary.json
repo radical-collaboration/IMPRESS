@@ -1,0 +1,27 @@
+{
+  "started_at": "2026-03-07T12:46:53.573611",
+  "completed_pipelines": [
+    {
+      "name": "p1",
+      "status": "completed",
+      "passes_executed": 4,
+      "remaining_targets": 1,
+      "error": null
+    },
+    {
+      "name": "p1_sub1",
+      "status": "completed",
+      "passes_executed": 4,
+      "remaining_targets": 2,
+      "error": null
+    }
+  ],
+  "spawn_requests": [
+    {
+      "parent": "p1",
+      "child": "p1_sub1",
+      "pass": 3
+    }
+  ],
+  "finished_at": "2026-03-07T12:46:54.607661"
+}
