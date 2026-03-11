@@ -1,354 +1,226 @@
-# impress-flowgentic
-
-Recreation of the IMPRESS protein-binding workflow using **LangGraph** (workflow definition) and **Flowgentic** (execution via RADICAL AsyncFlow), with **mocked heavy tools** for AlphaFold and ProteinMPNN.
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Goals and Scope](#goals-and-scope)
-3. [How This Mirrors IMPRESS](#how-this-mirrors-impress)
-4. [Architecture](#architecture)
-5. [Program Structure](#program-structure)
-6. [Workflow Execution Details](#workflow-execution-details)
-7. [Mock Tool Behavior](#mock-tool-behavior)
-8. [Adaptive Logic](#adaptive-logic)
-9. [Run Instructions](#run-instructions)
-10. [Expected Artifacts](#expected-artifacts)
-11. [Observed Run Results](#observed-run-results)
-12. [Troubleshooting](#troubleshooting)
-13. [Limitations and Next Steps](#limitations-and-next-steps)
-
-## Overview
-
-`impress-flowgentic` reproduces the behavior of IMPRESS protein-binding pipelines in a local runnable form:
-
-- Multi-pass pipeline execution.
-- Sequence design + ranking stage.
-- Structure prediction stage per target.
-- Score extraction stage (`af_stats_<pipeline>_pass_<n>.csv`).
-- Adaptive child-pipeline spawning when targets degrade.
-
-The project intentionally mocks expensive external tools (AlphaFold and MPNN), but keeps their data contracts and output directory conventions so the workflow resembles real IMPRESS execution.
-
-## Goals and Scope
-
-### Goals
-
-- Recreate IMPRESS adaptive pipeline semantics using **Flowgentic + LangGraph**.
-- Keep artifact paths and pass-level outputs compatible with IMPRESS expectations.
-- Make the whole workflow runnable locally and observable via produced files.
-
-### Non-goals
-
-- Running real AlphaFold.
-- Running real ProteinMPNN.
-- Integrating HPC scheduler-specific runtime configs.
-
-## How This Mirrors IMPRESS
-
-This implementation follows IMPRESS behavior at three levels:
-
-1. **Manager semantics**
-   - Tracks active pipelines, adaptive tasks, and spawned children.
-   - Submits child pipelines dynamically.
-   - Supports parent termination once work is migrated.
-
-2. **Pipeline semantics**
-   - Multi-pass loop with per-pass execution.
-   - Child pipelines skip design/ranking on first inherited pass.
-   - Pipeline keeps `iter_seqs`, `score_history`, `current_scores`, and pass counters.
-
-3. **Artifact semantics**
-   - Produces IMPRESS-like layout under `af_pipeline_outputs_multi/<pipeline>/...`.
-   - Produces `af_stats_<pipeline>_pass_<n>.csv` files.
-   - Copies migrated targets into `<child>_in/`.
-
-## Architecture
-
-### High-level components
-
-- **FlowgenticImpressManager**
-  - Coordinates pipeline lifecycle and adaptive execution.
-  - File: `impress_flowgentic/manager.py`
-
-- **ProteinBindingFlowgenticPipeline**
-  - Implements pass loop.
-  - Compiles/executes LangGraph for each pass.
-  - File: `impress_flowgentic/pipeline.py`
-
-- **Adaptive policy**
-  - Detects degraded targets and requests child pipeline spawning.
-  - File: `impress_flowgentic/adaptive.py`
-
-- **Mock tool layer**
-  - Backbone, sequence, and fold prediction simulators with deterministic outputs.
-  - File: `impress_flowgentic/mocks.py`
-
-- **I/O helpers**
-  - Seeds input PDBs and output directory tree.
-  - File: `impress_flowgentic/io.py`
-
-### Per-pass LangGraph
-
-Each pass uses a `StateGraph(PassState)` with nodes wrapped by Flowgentic execution wrappers (`AsyncFlowType.EXECUTION_BLOCK`). Nodes are organized as **data/analysis pairs**:
-
-1. `prepare_pass`
-2. `mock_backbone_prediction` → `analyze_backbone`
-3. `mock_sequence_prediction` → `analyze_sequence`
-4. `mock_fold_prediction` → `analyze_fold`
-
-**Routing** is probabilistic via `_sample_route()`, driven by three hard-coded tables:
-`BACKBONE_ROUTING_PROBS`, `SEQUENCE_ROUTING_PROBS`, `FOLD_ROUTING_PROBS`.
-
-Each analysis node writes `current_route` into state; conditional edges read it to determine the next data-transformation node (or `END`). This design supports future multi-path looping within a single pass.
-
-**Default pass flow** (current probability tables set to single-path):
-
-```
-prepare_pass
-  → mock_backbone_prediction → analyze_backbone
-  → mock_sequence_prediction → analyze_sequence
-  → mock_fold_prediction     → analyze_fold
-  → END
-```
-
-**When `skip_design=True`** (child pipeline, first inherited pass):
-
-```
-prepare_pass → mock_fold_prediction → analyze_fold → END
-```
-
-`current_route` is the key state field: analysis nodes write it, router functions read it.
-
-## Program Structure
-
-```text
-impress-flowgentic/
-├── impress_flowgentic/
-│   ├── __init__.py
-│   ├── adaptive.py
-│   ├── base.py
-│   ├── io.py
-│   ├── manager.py
-│   ├── mocks.py
-│   ├── pipeline.py
-│   ├── runner.py
-│   ├── setup.py
-│   └── state.py
-├── scripts/
-│   └── run_impress_flowgentic.py
-├── workspace/                       # generated run artifacts
-│   ├── ensemble/
-│   │   ├── p1_records.jsonl
-│   │   └── p1_sub1_records.jsonl
-│   └── af_pipeline_outputs_multi/
-├── pyproject.toml
-└── README.md
-```
-
-## Workflow Execution Details
-
-1. Runner seeds initial inputs (`p1_in/*.pdb`) and required output directories.
-2. Manager starts `p1` pipeline.
-3. Pipeline executes pass graph for each pass up to `max_passes`.
-4. After each pass, pipeline triggers adaptive step.
-5. Adaptive function may spawn child pipeline (`p1_sub1`, etc.) with degraded targets only.
-6. Manager continues until all parent/child pipelines complete.
-7. Manager writes summary report to `workspace/run_summary.json`.
-
-## Mock Tool Behavior
-
-### Mock Backbone Prediction (`mock_backbone_prediction`)
-
-- Generates a mock backbone structure reference string for each active target.
-- Stores results in `backbone_refs` (target → backbone id string).
-
-### Mock Sequence Prediction (`mock_sequence_prediction`)
-
-- Generates candidate sequences per target/pass.
-- Writes files compatible with the ranking parser:
-  - `.../mpnn/job_<pass>/seqs/<target>.fa`
-- Stores results in `iter_seqs` (target → list of `SequenceScore`).
-
-### Mock Fold Prediction (`mock_fold_prediction`)
-
-- Builds FASTA inputs for the top-ranked sequence per target.
-- Produces per-target dimer model outputs:
-  - `.../af/prediction/dimer_models/<target>/...`
-- Copies selected files into:
-  - `.../af/prediction/best_models/<target>.pdb`
-  - `.../af/prediction/best_ptm/<target>.json`
-  - `.../mpnn/job_<pass>/<target>.pdb`
-
-### Analysis nodes (`analyze_backbone`, `analyze_sequence`, `analyze_fold`)
-
-- Each analysis node computes per-target metrics and writes `current_route` to state.
-- `analyze_backbone`: scores backbone structures; appends `backbone` records to the in-memory trajectory.
-- `analyze_sequence`: ranks sequences from the MPNN output directory; appends `sequence` records.
-- `analyze_fold`: computes pLDDT/PAE metrics; writes `workspace/af_stats_<pipeline>_pass_<n>.csv`; appends `decoy` records; **flushes the completed trajectory to the ensemble store** (`workspace/ensemble/<pipeline>_records.jsonl`).
-
-## Ensemble Store
-
-Each pipeline maintains a per-run JSONL file at `workspace/ensemble/<pipeline>_records.jsonl`.
-
-- **Initialized** at pipeline start via `io.ensure_ensemble_store()`; any previous file for that pipeline is cleared.
-- **Flushed** after each pass: `analyze_fold` calls `io.append_ensemble_records()` with the full `PassState.trajectory`.
-- Each line is one `EnsembleRecord` JSON object with fields:
-  - `target` — protein target identifier
-  - `step_index` — position in the within-pass trajectory
-  - `type` — `backbone` | `sequence` | `decoy`
-  - `score` — numeric quality score
-  - `input_ref` — output_ref of the preceding step (or `"START"`)
-  - `output_ref` — identifier or path for this step's output
-  - `pipeline_name` — pipeline that produced the record
-  - `pass_index` — pass that produced the record
-- Provides a full per-target trajectory across all passes of a run.
-- Loadable via `io.load_ensemble(store_path)`.
-
-`PassState` also carries `ensemble_store_path` (set at pipeline init, constant for the lifetime of a pipeline).
-
-## Adaptive Logic
-
-Adaptive policy intentionally mimics IMPRESS-style behavior:
-
-1. Wait until at least pass 2.
-2. Compare latest score vs previous score for each target.
-3. If degradation exceeds threshold, migrate target to child pipeline.
-4. Child pipeline inherits context (`score_history`, pass number, etc.) and increments `seq_rank`.
-5. Parent finalizes by removing migrated targets from local work set.
-6. Parent may terminate if no targets remain.
-
-## Run Instructions
-
-### Prerequisites
-
-- Python 3.10+.
-- `git` available (dependencies are installed from Git repositories).
-
-### Recommended command
-
-```bash
-cd /Users/yamirghofran0/STRIDE/impress-flowgentic
-uv sync
-uv run python scripts/run_impress_flowgentic.py
-```
-
-### Alternative
-
-```bash
-cd /Users/yamirghofran0/STRIDE/impress-flowgentic
-python -m venv .venv
-source .venv/bin/activate
-pip install .
-python scripts/run_impress_flowgentic.py
-```
-
-### Optional local-development override
-
-If you want to test against a local Flowgentic checkout instead of Git-installed package versions:
-
-```bash
-pip install -e ../flowgentic
-```
-
-## Expected Artifacts
-
-After a run, inspect:
-
-- `workspace/run_summary.json`
-- `workspace/af_stats_p1_pass_*.csv`
-- `workspace/af_stats_p1_sub1_pass_*.csv` (if child spawned)
-- `workspace/ensemble/p1_records.jsonl`
-- `workspace/ensemble/p1_sub1_records.jsonl` (if child spawned)
-- `workspace/p1_in/*.pdb`
-- `workspace/p1_sub1_in/*.pdb` (if child spawned)
-- `workspace/af_pipeline_outputs_multi/p1/...`
-- `workspace/af_pipeline_outputs_multi/p1_sub1/...` (if child spawned)
-
-Typical directory shape:
-
-```text
-workspace/
-├── ensemble/
-│   ├── p1_records.jsonl
-│   └── p1_sub1_records.jsonl
-├── af_pipeline_outputs_multi/
-│   ├── p1/
-│   │   ├── af/
-│   │   └── mpnn/
-│   └── p1_sub1/
-│       ├── af/
-│       └── mpnn/
-├── af_stats_p1_pass_1.csv
-├── af_stats_p1_pass_2.csv
-├── af_stats_p1_pass_3.csv
-├── af_stats_p1_pass_4.csv
-├── af_stats_p1_sub1_pass_2.csv
-├── af_stats_p1_sub1_pass_3.csv
-├── af_stats_p1_sub1_pass_4.csv
-├── p1_in/
-├── p1_sub1_in/
-└── run_summary.json
-```
-
-## Observed Run Results
-
-A validated run produced:
-
-- `p1` completed all configured passes.
-- One adaptive spawn occurred: `p1 -> p1_sub1` on parent pass 3.
-- `p1_sub1` completed inherited passes.
-- No pipeline errors reported.
-
-Example summary (`workspace/run_summary.json`):
-
-```json
-{
-  "completed_pipelines": [
-    {"name": "p1", "status": "completed", "passes_executed": 4, "remaining_targets": 1, "error": null},
-    {"name": "p1_sub1", "status": "completed", "passes_executed": 4, "remaining_targets": 2, "error": null}
-  ],
-  "spawn_requests": [
-    {"parent": "p1", "child": "p1_sub1", "pass": 3}
-  ]
-}
-```
-
-## Troubleshooting
-
-### `ModuleNotFoundError: No module named 'flowgentic'`
-
-Install project dependencies first:
-
-```bash
-uv sync
-```
-
-### No child pipeline spawned
-
-Adaptive spawning depends on score trajectories and threshold. Check:
-
-- `degradation_threshold` in `impress_flowgentic/runner.py`
-- Generated scores in `workspace/af_stats_*.csv`
-
-### Existing artifacts from previous runs
-
-This workflow reuses `workspace/` paths. If you want a clean run, remove or rename `workspace/` before running.
-
-## Limitations and Next Steps
-
-### Current limitations
-
-- Tools are mocks, not actual AlphaFold/MPNN integrations.
-- Runtime currently uses local concurrent backend, not cluster-specific backends.
-
-### Suggested next steps
-
-1. Replace mock sequence prediction (`mock_sequence_prediction`) with a real ProteinMPNN wrapper.
-2. Replace mock fold prediction (`mock_fold_prediction`) with a real AlphaFold execution command/staging.
-3. Add tests for adaptive branching and artifact contracts.
-4. Add optional telemetry artifact generation through Flowgentic introspection APIs.
+# impress-flowgentic (example)
+
+A self-contained example of an adaptive, agentic protein binder design pipeline built on
+[LangGraph](https://github.com/langchain-ai/langgraph) and RADICAL AsyncFlow. It mirrors
+the behavior of the IMPRESS HPC workflow but runs locally with deterministic mocks in
+place of ProteinMPNN and AlphaFold.
 
 ---
 
-This project is a faithful behavioral prototype of IMPRESS adaptive orchestration, implemented with Flowgentic + LangGraph and ready to evolve into real tool integrations.
+## Purpose
+
+The pipeline automates iterative protein binder design for PDZ-domain targets. Given a
+set of input backbone structures it:
+
+1. Predicts candidate backbones
+2. Designs amino-acid sequences for each backbone
+3. Folds the best candidate together with the target peptide
+4. Scores the fold (PAE, pLDDT, pTM)
+5. Decides—after every pass—whether to spawn a child pipeline that tries the next-ranked
+   sequence on any targets that are degrading
+
+All compute-intensive steps are replaced with deterministic mocks so the full adaptive
+logic can be exercised without GPU resources.
+
+---
+
+## Directory layout
+
+```
+impress-flowgentic/
+├── impress_flowgentic/
+│   ├── __init__.py          # public API exports
+│   ├── base.py              # FlowgenticImpressBasePipeline (ABC, async comms)
+│   ├── pipeline.py          # ProteinBindingFlowgenticPipeline + LangGraph pass graph
+│   ├── adaptive.py          # adaptive_decision() — child-spawning logic
+│   ├── manager.py           # FlowgenticImpressManager — async event loop
+│   ├── runner.py            # run_impress_flowgentic() entry point
+│   ├── setup.py             # PipelineSetup dataclass
+│   ├── state.py             # Pydantic models: PassState, SequenceScore, EnsembleRecord
+│   ├── mocks.py             # deterministic stubs for backbone/sequence/fold steps
+│   └── io.py                # filesystem helpers + ensemble provenance store
+├── scripts/
+│   └── run_impress_flowgentic.py   # CLI entry point
+└── workspace/               # generated run artifacts (written at runtime)
+    ├── af_pipeline_outputs_multi/
+    │   └── <pipeline>/
+    │       └── af/{fasta,prediction/{best_models,...},mpnn/}
+    ├── ensemble/
+    │   └── <pipeline>_records.jsonl   # EnsembleRecord provenance log
+    └── run_summary.json
+```
+
+---
+
+## Adaptive workflow
+
+### Overview
+
+The pipeline runs as a collection of concurrent `asyncio.Task`s managed by
+`FlowgenticImpressManager`. Each task drives one `ProteinBindingFlowgenticPipeline`
+instance through repeated design passes. After every pass the manager invokes
+`adaptive_decision()`, which may spawn new child pipelines for targets that are not
+improving.
+
+```
+Manager
+  │
+  ├─ Pipeline p1  ──pass 1──▶ pass 2 ──▶ pass 3 ──▶ …
+  │                                │
+  │                         adaptive_decision
+  │                                │  protein_b degrading
+  │                                ▼
+  └─ Pipeline p1_sub1 (seq_rank+1, inherits protein_b)
+```
+
+### Per-pass LangGraph graph
+
+Each pass is a `StateGraph(PassState)` with analysis-gated routing:
+
+```
+START
+  └─▶ prepare_pass
+        │
+        ├─ [skip_design=True] ──────────────────────────────────┐
+        │                                                        │
+        └─ [skip_design=False]                                   │
+              └─▶ mock_backbone_prediction                       │
+                    └─▶ analyze_backbone                         │
+                          └─▶ mock_sequence_prediction           │
+                                └─▶ analyze_sequence             │
+                                      └─▶ mock_fold_prediction ◀─┘
+                                              └─▶ analyze_fold
+                                                      └─▶ END
+```
+
+**Node responsibilities:**
+
+| Node | What it does |
+|---|---|
+| `prepare_pass` | Logs pass metadata; sets `skip_design=True` on child's first pass (sequences already chosen) |
+| `mock_backbone_prediction` | Generates mock backbone structures for each active target; writes provenance `EnsembleRecord`s |
+| `analyze_backbone` | Inspects backbone scores; routes to `mock_sequence_prediction` (currently weight=1.0) |
+| `mock_sequence_prediction` | Runs mock ProteinMPNN; writes ranked `.fa` files; parses back into `iter_seqs` |
+| `analyze_sequence` | Selects sequence at `seq_rank`; writes `af/fasta/<target>.fa`; routes to fold (weight=1.0) |
+| `mock_fold_prediction` | Runs mock AlphaFold multimer for all FASTA targets concurrently (`asyncio.gather`) |
+| `analyze_fold` | Computes mock PAE/pLDDT/pTM metrics; writes per-pass CSV; updates `current_scores` and `score_history`; routes to END (weight=1.0) |
+
+The routing weights (`BACKBONE_ROUTING_PROBS`, `SEQUENCE_ROUTING_PROBS`,
+`FOLD_ROUTING_PROBS`) are all currently set to 1.0 for a deterministic forward pass, but
+the conditional-edge infrastructure supports probabilistic loops for iterative refinement
+within a single pass.
+
+### Adaptive decision logic (`adaptive.py`)
+
+After pass ≥ 2, `adaptive_decision()` checks each target's score trajectory:
+
+```
+if current_score > previous_score + degradation_threshold:
+    → target is degrading
+```
+
+If any targets are degrading **and** the sub-pipeline depth limit has not been reached
+**and** there are higher-ranked sequences still to try:
+
+1. A new directory scaffold (`<parent>_sub<N>`) is created.
+2. The best-model PDB is copied into the child's `_in/` directory.
+3. A `PipelineSetup` is submitted via `pipeline.submit_child_pipeline_request()` with
+   `seq_rank + 1`, `is_child=True`, and inherited `score_history`.
+4. `pipeline.finalize()` removes the migrated targets from the parent's work set.
+5. If the parent has no targets left it sets `kill_parent = True` and exits.
+
+### Manager event loop (`manager.py`)
+
+`FlowgenticImpressManager.start()` runs an `asyncio` loop that:
+
+- Detects when a pipeline signals `invoke_adaptive_step` and fires `adaptive_decision()`
+  as a concurrent task without blocking the pipeline.
+- Drains each pipeline's child-request mailbox and buffers new `PipelineSetup`s.
+- Cancels tasks whose `kill_parent` flag is set.
+- Submits buffered child pipelines when space allows.
+- Writes `workspace/run_summary.json` when all tasks are complete.
+
+### Provenance tracking
+
+Every design step appends an `EnsembleRecord` to `workspace/ensemble/<pipeline>_records.jsonl`:
+
+```python
+EnsembleRecord(
+    target      = "protein_a",
+    step_index  = 3,
+    type        = "sequence",   # backbone | sequence | decoy
+    score       = 0.47,
+    input_ref   = "path/to/input.pdb",
+    output_ref  = "path/to/output.fa",
+)
+```
+
+This provides a full trajectory of every backbone, sequence, and fold decision across
+all passes and child pipelines.
+
+### Configuration knobs (`runner.py`)
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `max_passes` | 4 | Maximum design iterations per pipeline |
+| `num_seqs` | 6 | Sequence candidates generated per target per pass |
+| `seq_rank` | 0 (parent), +1/child | Which ranked sequence to pass to AlphaFold |
+| `max_sub_pipelines` | 3 | Maximum child-spawning depth |
+| `degradation_threshold` | 0.12 | PAE increase that triggers child spawning |
+
+---
+
+## Running
+
+```bash
+cd examples/impress-flowgentic
+python scripts/run_impress_flowgentic.py
+```
+
+Artifacts are written under `workspace/`. The mock score generator causes `protein_b` to
+degrade on the parent pipeline, triggering a child pipeline `p1_sub1` that inherits
+`protein_b` and tries `seq_rank=1`.
+
+---
+
+## Comparison with `/home/mason/exdrive/rad/impress-flowgentic`
+
+The upstream repository at `/home/mason/exdrive/rad/impress-flowgentic` is the original
+implementation from which this example evolved. The table below summarises the key
+architectural differences.
+
+| Aspect | upstream (`/rad/impress-flowgentic`) | this example (`feature/agentic_workflow`) |
+|---|---|---|
+| **Pass graph topology** | Linear 6-node DAG | Analysis-gated 7-node DAG with conditional edges |
+| **Backbone prediction** | Absent — ProteinMPNN operates directly on input PDBs | Added: `mock_backbone_prediction` + `analyze_backbone` node |
+| **Sequence node** | `mock_mpnn` (generates + writes FASTA) | `mock_sequence_prediction` (same role, now preceded by backbone step) |
+| **Fold node** | `build_fasta` + `mock_alphafold` as two separate nodes | `mock_fold_prediction` combines both into one node |
+| **Scoring node** | `mock_plddt_extract` | `analyze_fold` (same role, richer state output) |
+| **Routing** | Fixed linear edges only | Probabilistic routing tables (`*_ROUTING_PROBS`) + `conditional_edges` |
+| **Provenance** | None | `EnsembleRecord` + `trajectory` list in `PassState` + JSONL ensemble store |
+| **`state.py`** | `PassState` + `SequenceScore` | Adds `EnsembleRecord`, `current_route`, `trajectory`, `backbone_refs`, `backbone_scores`, `ensemble_store_path` |
+| **`mocks.py`** | `_stable_hash` (private) | `stable_hash` (public) + `generate_mock_backbone` |
+| **`io.py`** | Directory scaffolding only | Adds `ensure_ensemble_store`, `append_ensemble_records`, `load_ensemble` |
+| **`adaptive.py`** | Identical | Identical |
+| **`manager.py`** | Identical | Identical |
+| **`runner.py`** | Identical | Identical |
+| **README** | Present | This file |
+
+### Design philosophy shift
+
+The upstream version treats a design pass as a simple pipeline: MPNN → rank → fold →
+score. The example version introduces an **intermediate backbone stage** and wraps every
+prediction step in an **analysis node** that can route the graph differently based on
+results. This mirrors real computational protein design workflows where backbone geometry
+is evaluated before committing to sequence design, and where poor intermediates can be
+re-tried within the same pass rather than waiting for the next one.
+
+The probabilistic routing infrastructure (`*_ROUTING_PROBS` dicts) is currently set to
+deterministic forward-only weights (all 1.0), making the two implementations behaviorally
+equivalent for the mock scenario. The value of the new design is that swapping in a
+learned or heuristic routing policy—without restructuring the graph—is straightforward.
+
+The provenance / ensemble-tracking additions (`EnsembleRecord`, JSONL store) address a
+gap in the upstream repo: there was no record of which backbone was used for which
+sequence design, or how trajectories branched across child pipelines. The example repo
+makes the full decision history queryable after a run.
