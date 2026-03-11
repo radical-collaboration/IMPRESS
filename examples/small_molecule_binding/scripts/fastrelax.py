@@ -1,6 +1,10 @@
 import argparse
 import joey_utils  as ut
 from pyrosetta import init, Pose, PyJobDistributor
+from pyrosetta.rosetta.core.select.residue_selector import (
+	ResiduePropertySelector, NotResidueSelector
+)
+from pyrosetta.rosetta.core.chemical import ResidueProperty
 '''
 When downloading a new PDB file, relax with coordinate constraints to eliminate clashes.
 
@@ -79,12 +83,17 @@ def main(args):
 	# RMSD metric
 	rmsdm = ut.rmsd_metric(pose)
 
+	# Ligand interaction energy selectors
+	ligand_sel = ResiduePropertySelector(ResidueProperty.LIGAND)
+	protein_sel = NotResidueSelector(ligand_sel)
+
 	# Running relax set
 	jd = PyJobDistributor(out_name, args.n_decoys, sf)
 	while not jd.job_complete:
 		pp = Pose(pose)
 		fr.apply(pp)
 		rmsdm.apply(pp)
+		ut.interaction_energy(pp, sf, ligand_sel, protein_sel, apply_sm=True)
 		jd.output_decoy(pp)
 
 

@@ -162,7 +162,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         # Quality thresholds (overridable at construction time)
         self.backbone_max_ca_deviation = kwargs.get("backbone_max_ca_deviation", 2.0)
         self.backbone_min_ss_fraction  = kwargs.get("backbone_min_ss_fraction",  0.2)
-        self.fastrelax_max_fa_rep      = kwargs.get("fastrelax_max_fa_rep",      10.0)
+        self.fastrelax_max_interact    = kwargs.get("fastrelax_max_interact",    0.0)
         self.fastrelax_max_total_score = kwargs.get("fastrelax_max_total_score", 0.0)
         self.interface_min_sc          = kwargs.get("interface_min_sc",          0.5)
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
@@ -629,18 +629,18 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 with open(f"{out_dir}/{fasc_files[0]}") as fh:
                     data = json.load(fh)
                 total_score = data.get('total_score')
-                fa_rep      = data.get('fa_rep')
+                interact    = data.get('interaction_energy')
                 rmsd        = data.get('rmsd')
 
             passed = (
-                fa_rep      is not None and fa_rep      < self.fastrelax_max_fa_rep
+                interact      is not None and interact      < self.fastrelax_max_interact
                 and total_score is not None and total_score < self.fastrelax_max_total_score
             )
             self.state['last_analysis_step']    = 'fastrelax'
             self.state['last_analysis_metrics'] = {
                 'pass':        passed,
                 'total_score': total_score,
-                'fa_rep':      fa_rep,
+                'interact':    interact,
                 'rmsd':        rmsd,
             }
 

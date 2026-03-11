@@ -60,7 +60,7 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
         else:
             overall, selective, has_data = _ensemble_selective_avg(
                 current[3], prior, _seq_identity, similar_if_low=False)
-            if has_data and selective is not None and selective > overall:
+            if has_data and selective is not None and selective >= overall:
                 pipeline.state['seq_retry_count'] = 0
                 pipeline.next_step = STEP_MPNN
             else:
