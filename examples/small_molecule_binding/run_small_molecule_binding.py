@@ -93,15 +93,19 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
     elif step == 'fold':
         current, prior = _prior(ETYPE_FOLD)
-        if not prior:
+        if not passed:
+            # Failed fold — don't use this model as a backbone guide
             pipeline.state['rfd3_input_pdb'] = None
         else:
-            overall, selective, has_data = _ensemble_selective_avg(
-                current[3], prior, _ca_rmsd, similar_if_low=True)
-            if has_data and selective is not None and selective > overall:
-                pipeline.state['rfd3_input_pdb'] = current[3]  # guided backbone
+            if not prior:
+                pipeline.state['rfd3_input_pdb'] = None
             else:
-                pipeline.state['rfd3_input_pdb'] = None         # scratch
+                overall, selective, has_data = _ensemble_selective_avg(
+                    current[3], prior, _ca_rmsd, similar_if_low=True)
+                if has_data and selective is not None and selective > overall:
+                    pipeline.state['rfd3_input_pdb'] = current[3]  # guided backbone
+                else:
+                    pipeline.state['rfd3_input_pdb'] = None         # scratch
         pipeline.next_step = STEP_RFD3
 
     else:

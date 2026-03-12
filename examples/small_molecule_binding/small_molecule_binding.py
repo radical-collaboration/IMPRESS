@@ -165,6 +165,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.backbone_min_ss_fraction  = kwargs.get("backbone_min_ss_fraction",  0.2)
         self.fastrelax_max_interact    = kwargs.get("fastrelax_max_interact",    0.0)
         self.fastrelax_max_total_score = kwargs.get("fastrelax_max_total_score", 0.0)
+        self.fastrelax_max_fa_rep      = kwargs.get("fastrelax_max_fa_rep",      150.0)
         self.interface_min_sc          = kwargs.get("interface_min_sc",          0.5)
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
         self.max_tasks                 = kwargs.get("max_tasks",                 300)
@@ -448,23 +449,26 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             out_dir    = f"{self.base_path}/{self.taskcount}_fastrelax/out"
             fasc_files = [f for f in os.listdir(out_dir) if f.endswith('.fasc')]
 
-            total_score = fa_rep = rmsd = None
+            total_score = fa_rep = rmsd = interact = None
             if fasc_files:
                 with open(f"{out_dir}/{fasc_files[0]}") as fh:
                     data = json.load(fh)
                 total_score = data.get('total_score')
                 interact    = data.get('interaction_energy')
+                fa_rep      = data.get('fa_rep')
                 rmsd        = data.get('rmsd')
 
             passed = (
                 interact      is not None and interact      < self.fastrelax_max_interact
                 and total_score is not None and total_score < self.fastrelax_max_total_score
+                and fa_rep     is not None and fa_rep       < self.fastrelax_max_fa_rep
             )
             self.state['last_analysis_step']    = 'fastrelax'
             self.state['last_analysis_metrics'] = {
                 'pass':        passed,
                 'total_score': total_score,
                 'interact':    interact,
+                'fa_rep':      fa_rep,
                 'rmsd':        rmsd,
             }
 
