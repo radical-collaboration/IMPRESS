@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import pathlib
+import shutil
 from functools import lru_cache
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
@@ -485,6 +486,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             pdb_path  = self.state['best_backbone_path'] if cycle_i == 0 else self.state['best_packed_pdb']
             n_batches = self.mpnn_ensemble_size if cycle_i == 0 else 1
             output_dir = f"{taskdir}/out"
+
+            # Copy input to a short fixed name to prevent filename accumulation
+            # across MPNN+packmin cycles (avoids 255-char limit in AF2 result zips)
+            pdb_path_orig = pdb_path
+            if pathlib.Path(pdb_path_orig).name.endswith('.cif.gz'):
+                short_name = 'binder.cif.gz'
+            else:
+                short_name = f'binder{pathlib.Path(pdb_path_orig).suffix}'
+            short_pdb = f"{taskdir}/in/{short_name}"
+            shutil.copy(pdb_path_orig, short_pdb)
+            pdb_path = short_pdb
 
             if fixed_residues_file:
                 with open(fixed_residues_file) as f:
