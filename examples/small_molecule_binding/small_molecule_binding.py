@@ -469,7 +469,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task()
-        async def filter_shape(ligand_name: str = "ALX"):
+        async def filter_shape(ligand_name: str = "ALR"):
             taskname = "filter_shape"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
@@ -568,7 +568,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task()
-        async def filter_energy(ligand_name: str = "ALX"):
+        async def filter_energy(ligand_name: str = "ALR"):
             taskname = "filter_energy"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
