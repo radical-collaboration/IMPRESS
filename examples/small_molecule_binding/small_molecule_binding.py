@@ -519,7 +519,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
-            fasta_path = self.state['last_seq_fasta']
+            src_fasta  = self.state['last_seq_fasta']
+            short_fasta = f"{taskdir}/in/binder.fa"
+            seq_lines = []
+            with open(src_fasta) as fh:
+                for line in fh:
+                    if not line.startswith('>'):
+                        seq_lines.append(line)
+            with open(short_fasta, 'w') as fh:
+                fh.write('>binder\n')
+                fh.writelines(seq_lines)
+
             output_dir = f"{taskdir}/out"
 
             return (
@@ -530,7 +540,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f"--random-seed 999 "
                 f"--save-all "
                 f"--debug-logging "
-                f"{fasta_path} "
+                f"{short_fasta} "
                 f"{output_dir} "
             )
 
