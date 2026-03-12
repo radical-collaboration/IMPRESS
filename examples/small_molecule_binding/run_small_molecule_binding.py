@@ -20,7 +20,7 @@ BACKBONE_MAX_CA_DEVIATION = 2.0
 BACKBONE_MIN_SS_FRACTION  = 0.2
 FASTRELAX_MAX_FA_REP      = 10.0   # fa_rep REU
 FASTRELAX_MAX_SCORE       = 0.0    # total_score REU
-INTERFACE_MIN_SC          = 0.5
+INTERFACE_MIN_SC          = 0.35
 FOLD_MIN_PLDDT            = 70.0
 
 
@@ -79,7 +79,17 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
         pipeline.next_step = STEP_INTERFACE if passed else STEP_MPNN
 
     elif step == 'interface':
-        pipeline.next_step = STEP_AF2 if passed else STEP_MPNN
+        if passed:
+            pipeline.state['interface_fail_count'] = 0
+            pipeline.next_step = STEP_AF2
+        else:
+            count = pipeline.state.get('interface_fail_count', 0) + 1
+            pipeline.state['interface_fail_count'] = count
+            if count >= 5:
+                pipeline.state['interface_fail_count'] = 0
+                pipeline.next_step = STEP_RFD3
+            else:
+                pipeline.next_step = STEP_MPNN
 
     elif step == 'fold':
         current, prior = _prior(ETYPE_FOLD)
