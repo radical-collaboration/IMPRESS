@@ -22,13 +22,15 @@ CHAI_PRE_EXEC = [
 
 # ── State-machine step constants ────────────────────────────────────────────
 
-STEP_DONE          = 0
-STEP_BACKBONE_GEN  = 1   # RFD3 diffusion
-STEP_BACKBONE_POST = 2   # cif_to_pdb
-STEP_SEQ_PRED      = 3   # LigandMPNN
-STEP_SEQ_POST      = 4   # split_seqs
-STEP_FOLD_PRED     = 5   # chai-lab
-STEP_ANALYSIS      = 6   # analysis.py + plot_campaign.py
+STEP_DONE              = 0
+STEP_BACKBONE_GEN      = 1   # RFD3 diffusion
+STEP_BACKBONE_POST     = 2   # cif_to_pdb
+STEP_BACKBONE_ANALYSIS = 3   # analysis_backbone + plot_backbone_analysis
+STEP_SEQ_PRED          = 4   # LigandMPNN
+STEP_SEQ_POST          = 5   # split_seqs
+STEP_SEQ_ANALYSIS      = 6   # analysis_sequence + plot_sequence_analysis
+STEP_FOLD_PRED         = 7   # chai-lab
+STEP_ANALYSIS          = 8   # analysis.py + plot_campaign.py
 
 
 # ── Default paths ───────────────────────────────────────────────────────────
@@ -45,15 +47,17 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
     """
     IMPRESS pipeline for the discontinuous scaffolds protein design campaign.
 
-    Encodes six sequential steps:
-      1. Backbone generation   (RFDiffusion3 via apptainer)
-      2. Backbone postprocessing (cif_to_pdb.py)
-      3. Sequence prediction   (LigandMPNN)
-      4. Sequence postprocessing (split_seqs.py)
-      5. Fold prediction       (Chai-lab)
-      6. Pipeline analysis     (analysis.py + plot_campaign.py)
+    Encodes eight sequential steps:
+      1. Backbone generation      (RFDiffusion3 via apptainer)
+      2. Backbone postprocessing  (cif_to_pdb.py)
+      3. Backbone analysis        (analysis_backbone.py + plot_backbone_analysis.py)
+      4. Sequence prediction      (LigandMPNN)
+      5. Sequence postprocessing  (split_seqs.py)
+      6. Sequence analysis        (analysis_sequence.py + plot_sequence_analysis.py)
+      7. Fold prediction          (Chai-lab)
+      8. Pipeline analysis        (analysis.py + plot_campaign.py)
 
-    After step 6 a dummy adaptive step checks whether the analysis CSV is
+    After step 8 a local adaptive step checks whether the analysis CSV is
     present and, if so, restarts the pipeline from step 1.
     """
 
@@ -87,7 +91,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
     # ── Task registration ───────────────────────────────────────────────────
 
     def register_pipeline_tasks(self):
-        """Register all six pipeline steps plus the local analysis check."""
+        """Register all eight pipeline steps plus the local analysis check."""
 
         # ── Step 1: Backbone generation (GPU) ───────────────────────────────
         @self.auto_register_task()
@@ -129,7 +133,38 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"--output-dir {rfd3_out}"
             )
 
-        # ── Step 3: Sequence prediction — LigandMPNN (CPU) ──────────────────
+        # ── Step 3: Backbone analysis (CPU) ─────────────────────────────────
+        @self.auto_register_task()
+        async def backbone_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+            self.taskcount += 1
+            taskname = "backbone_analysis"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
+            os.makedirs(f"{taskdir}/in",  exist_ok=True)
+            os.makedirs(f"{taskdir}/out", exist_ok=True)
+
+            pdb_dir    = self.state['pdb_dir']
+            output_csv = f"{taskdir}/out/campaign_analysis_backbone.csv"
+            output_dir = f"{taskdir}/out"
+
+            self.state['backbone_analysis_csv']     = output_csv
+            self.state['backbone_analysis_out_dir'] = output_dir
+
+            analysis_cmd = (
+                f"python {self.scripts_path}/analysis_backbone.py "
+                f"{pdb_dir} "
+                f"--output {output_csv}"
+            )
+
+            plot_cmd = (
+                f"python {self.scripts_path}/plot_backbone_analysis.py "
+                f"{output_csv} "
+                f"{self.island_counts_csv} "
+                f"--output-dir {output_dir}"
+            )
+
+            return f"{analysis_cmd} && {plot_cmd}"
+
+        # ── Step 4: Sequence prediction — LigandMPNN (CPU) ──────────────────
         @self.auto_register_task()
         async def seq_pred(task_description={"pre_exec": LIGANDMPNN_PRE_EXEC}):
             self.taskcount += 1
@@ -155,7 +190,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"--fixed_residues_multi {self.lmpnn_fixed_res_json}"
             )
 
-        # ── Step 4: Sequence postprocessing — split_seqs (CPU) ──────────────
+        # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
         @self.auto_register_task()
         async def seq_post(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
             self.taskcount += 1
@@ -175,7 +210,38 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"--output_dir {split_dir}"
             )
 
-        # ── Step 5: Fold prediction — Chai-lab (GPU) ─────────────────────────
+        # ── Step 6: Sequence analysis (CPU) ──────────────────────────────────
+        @self.auto_register_task()
+        async def seq_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+            self.taskcount += 1
+            taskname = "seq_analysis"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
+            os.makedirs(f"{taskdir}/in",  exist_ok=True)
+            os.makedirs(f"{taskdir}/out", exist_ok=True)
+
+            seqs_split = self.state['seqs_split_dir']
+            output_csv = f"{taskdir}/out/campaign_analysis_sequence.csv"
+            output_dir = f"{taskdir}/out"
+
+            self.state['seq_analysis_csv']     = output_csv
+            self.state['seq_analysis_out_dir'] = output_dir
+
+            analysis_cmd = (
+                f"python {self.scripts_path}/analysis_sequence.py "
+                f"{seqs_split} "
+                f"--output {output_csv}"
+            )
+
+            plot_cmd = (
+                f"python {self.scripts_path}/plot_sequence_analysis.py "
+                f"{output_csv} "
+                f"{self.island_counts_csv} "
+                f"--output-dir {output_dir}"
+            )
+
+            return f"{analysis_cmd} && {plot_cmd}"
+
+        # ── Step 7: Fold prediction — Chai-lab (GPU) ─────────────────────────
         @self.auto_register_task()
         async def fold_pred(task_description={"gpus_per_rank": 1, "pre_exec": CHAI_PRE_EXEC}):
             self.taskcount += 1
@@ -195,7 +261,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"--use_msa_server"
             )
 
-        # ── Step 6: Pipeline analysis — analysis.py + plot_campaign.py (CPU) ─
+        # ── Step 8: Pipeline analysis — analysis.py + plot_campaign.py (CPU) ─
         @self.auto_register_task()
         async def pipeline_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
             self.taskcount += 1
@@ -250,10 +316,10 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
 
     async def run(self):
         """
-        Execute the six-step pipeline sequentially.
+        Execute the eight-step pipeline sequentially.
 
         The outer while-loop supports the adaptive restart: if the adaptive
-        function sets next_step = STEP_BACKBONE_GEN after analysis, all six
+        function sets next_step = STEP_BACKBONE_GEN after analysis, all eight
         steps run again from the top.
         """
         self.next_step = STEP_BACKBONE_GEN
@@ -270,23 +336,31 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             await self.backbone_post(task_description={"pre_exec": IMPRESS_PRE_EXEC})
             self.logger.pipeline_log("Step 2 finished")
 
-            self.logger.pipeline_log("Step 3: sequence prediction (LigandMPNN)")
-            await self.seq_pred(task_description={"pre_exec": LIGANDMPNN_PRE_EXEC})
+            self.logger.pipeline_log("Step 3: backbone analysis (analysis_backbone + plot_backbone_analysis)")
+            await self.backbone_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
             self.logger.pipeline_log("Step 3 finished")
 
-            self.logger.pipeline_log("Step 4: sequence postprocessing (split_seqs)")
-            await self.seq_post(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            self.logger.pipeline_log("Step 4: sequence prediction (LigandMPNN)")
+            await self.seq_pred(task_description={"pre_exec": LIGANDMPNN_PRE_EXEC})
             self.logger.pipeline_log("Step 4 finished")
 
-            self.logger.pipeline_log("Step 5: fold prediction (Chai-lab)")
+            self.logger.pipeline_log("Step 5: sequence postprocessing (split_seqs)")
+            await self.seq_post(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            self.logger.pipeline_log("Step 5 finished")
+
+            self.logger.pipeline_log("Step 6: sequence analysis (analysis_sequence + plot_sequence_analysis)")
+            await self.seq_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            self.logger.pipeline_log("Step 6 finished")
+
+            self.logger.pipeline_log("Step 7: fold prediction (Chai-lab)")
             await self.fold_pred(
                 task_description={"gpus_per_rank": 1, "pre_exec": CHAI_PRE_EXEC}
             )
-            self.logger.pipeline_log("Step 5 finished")
+            self.logger.pipeline_log("Step 7 finished")
 
-            self.logger.pipeline_log("Step 6: pipeline analysis (analysis.py + plot_campaign.py)")
+            self.logger.pipeline_log("Step 8: pipeline analysis (analysis.py + plot_campaign.py)")
             await self.pipeline_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
-            self.logger.pipeline_log("Step 6 finished")
+            self.logger.pipeline_log("Step 8 finished")
 
             await self.check_analysis_results()
             await self.run_adaptive_step(wait=True)
