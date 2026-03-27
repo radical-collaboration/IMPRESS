@@ -16,7 +16,7 @@ from discontinuous_scaffolds import (
 
 # ── Configurable parameters ─────────────────────────────────────────────────
 
-SCRIPTS_PATH     = "/home/mason/exdrive/rad/discontinuous_scaffolds/rfd3-islands-validation"
+SCRIPTS_PATH     = "/ocean/projects/dmr170002p/hooten/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
 FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry.sif"
 MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
 
