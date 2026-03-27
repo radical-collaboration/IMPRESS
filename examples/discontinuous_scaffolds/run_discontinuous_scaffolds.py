@@ -26,7 +26,7 @@ LMPNN_FIXED_RES_JSON = f"{SCRIPTS_PATH}/lmpnn_batch_jsons/batch_fixed_res_mod8-5
 ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
-DIFFUSION_BATCH_SIZE = 10
+DIFFUSION_BATCH_SIZE = 1
 
 
 # ── Adaptive function ───────────────────────────────────────────────────────
@@ -65,9 +65,9 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
 
 async def run_discontinuous_scaffolds() -> None:
     """Set up the IMPRESS manager and launch the discontinuous scaffolds pipeline."""
-    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    #backend = await LocalExecutionBackend(ThreadPoolExecutor())
     # For HPC execution use:
-    # backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackendV3()
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
