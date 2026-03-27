@@ -5,21 +5,6 @@ import os
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 
-# ── venv activation pre-exec lists ─────────────────────────────────────────
-
-IMPRESS_PRE_EXEC = [
-    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
-]
-
-LIGANDMPNN_PRE_EXEC = [
-    "source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate"
-]
-
-CHAI_PRE_EXEC = [
-    "source /ocean/projects/dmr170002p/hooten/chai-lab/.venv/bin/activate"
-]
-
-
 # ── State-machine step constants ────────────────────────────────────────────
 
 STEP_DONE              = 0
@@ -106,17 +91,16 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['rfd3_out_dir'] = output_dir
 
             return (
-                f"apptainer exec --nv {self.foundry_sif_path} rfd3 design "
-                f"out_dir={output_dir} "
-                f"inputs={self.rfd_input_filepath} "
-                f"skip_existing=False "
-                f"prevalidate_inputs=True "
-                f"diffusion_batch_size={self.diffusion_batch_size}"
+                f"bash {self.scripts_path}/step1_backbone_gen.sh "
+                f"{self.foundry_sif_path} "
+                f"{output_dir} "
+                f"{self.rfd_input_filepath} "
+                f"{self.diffusion_batch_size}"
             )
 
         # ── Step 2: Backbone postprocessing — CIF.GZ → PDB (CPU) ────────────
         @self.auto_register_task()
-        async def backbone_post(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+        async def backbone_post(task_description={}):
             self.taskcount += 1
             taskname = "backbone_post"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -128,14 +112,14 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['pdb_dir'] = rfd3_out
 
             return (
-                f"python {self.scripts_path}/cif_to_pdb.py "
-                f"--input-dir {rfd3_out} "
-                f"--output-dir {rfd3_out}"
+                f"bash {self.scripts_path}/step2_backbone_post.sh "
+                f"{self.scripts_path} "
+                f"{rfd3_out}"
             )
 
         # ── Step 3: Backbone analysis (CPU) ─────────────────────────────────
         @self.auto_register_task()
-        async def backbone_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+        async def backbone_analysis(task_description={}):
             self.taskcount += 1
             taskname = "backbone_analysis"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -149,24 +133,18 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['backbone_analysis_csv']     = output_csv
             self.state['backbone_analysis_out_dir'] = output_dir
 
-            analysis_cmd = (
-                f"python {self.scripts_path}/analysis_backbone.py "
+            return (
+                f"bash {self.scripts_path}/step3_backbone_analysis.sh "
+                f"{self.scripts_path} "
                 f"{pdb_dir} "
-                f"--output {output_csv}"
-            )
-
-            plot_cmd = (
-                f"python {self.scripts_path}/plot_backbone_analysis.py "
                 f"{output_csv} "
-                f"{self.island_counts_csv} "
-                f"--output-dir {output_dir}"
+                f"{output_dir} "
+                f"{self.island_counts_csv}"
             )
-
-            return f"{analysis_cmd} && {plot_cmd}"
 
         # ── Step 4: Sequence prediction — LigandMPNN (CPU) ──────────────────
         @self.auto_register_task()
-        async def seq_pred(task_description={"pre_exec": LIGANDMPNN_PRE_EXEC}):
+        async def seq_pred(task_description={}):
             self.taskcount += 1
             taskname = "seq_pred"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -177,22 +155,16 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['lmpnn_out_dir'] = output_dir
 
             return (
-                f"python {self.mpnn_dir}/run.py "
-                f"--model_type ligand_mpnn "
-                f"--checkpoint_path_sc {self.mpnn_dir}/model_params/ligandmpnn_sc_v_32_002_16.pt "
-                f"--checkpoint_ligand_mpnn {self.mpnn_dir}/model_params/ligandmpnn_v_32_010_25.pt "
-                f"--seed 111 "
-                f"--out_folder {output_dir} "
-                f"--number_of_batches 4 "
-                f"--batch_size 1 "
-                f"--temperature 0.1 "
-                f"--pdb_path_multi {self.lmpnn_pdb_multi_json} "
-                f"--fixed_residues_multi {self.lmpnn_fixed_res_json}"
+                f"bash {self.scripts_path}/step4_seq_pred.sh "
+                f"{self.mpnn_dir} "
+                f"{output_dir} "
+                f"{self.lmpnn_pdb_multi_json} "
+                f"{self.lmpnn_fixed_res_json}"
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
         @self.auto_register_task()
-        async def seq_post(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+        async def seq_post(task_description={}):
             self.taskcount += 1
             taskname = "seq_post"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -205,14 +177,15 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['seqs_split_dir'] = split_dir
 
             return (
-                f"python {self.scripts_path}/split_seqs.py "
-                f"--input_dir {seqs_dir} "
-                f"--output_dir {split_dir}"
+                f"bash {self.scripts_path}/step5_seq_post.sh "
+                f"{self.scripts_path} "
+                f"{seqs_dir} "
+                f"{split_dir}"
             )
 
         # ── Step 6: Sequence analysis (CPU) ──────────────────────────────────
         @self.auto_register_task()
-        async def seq_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+        async def seq_analysis(task_description={}):
             self.taskcount += 1
             taskname = "seq_analysis"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -226,24 +199,18 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['seq_analysis_csv']     = output_csv
             self.state['seq_analysis_out_dir'] = output_dir
 
-            analysis_cmd = (
-                f"python {self.scripts_path}/analysis_sequence.py "
+            return (
+                f"bash {self.scripts_path}/step6_seq_analysis.sh "
+                f"{self.scripts_path} "
                 f"{seqs_split} "
-                f"--output {output_csv}"
-            )
-
-            plot_cmd = (
-                f"python {self.scripts_path}/plot_sequence_analysis.py "
                 f"{output_csv} "
-                f"{self.island_counts_csv} "
-                f"--output-dir {output_dir}"
+                f"{output_dir} "
+                f"{self.island_counts_csv}"
             )
-
-            return f"{analysis_cmd} && {plot_cmd}"
 
         # ── Step 7: Fold prediction — Chai-lab (GPU) ─────────────────────────
         @self.auto_register_task()
-        async def fold_pred(task_description={"gpus_per_rank": 1, "pre_exec": CHAI_PRE_EXEC}):
+        async def fold_pred(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "fold_pred"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -255,15 +222,15 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['chai_out_dir'] = output_dir
 
             return (
-                f"python {self.scripts_path}/chai_batch.py "
-                f"--input_dir {input_dir} "
-                f"--output_dir {output_dir} "
-                f"--use_msa_server"
+                f"bash {self.scripts_path}/step7_fold_pred.sh "
+                f"{self.scripts_path} "
+                f"{input_dir} "
+                f"{output_dir}"
             )
 
         # ── Step 8: Pipeline analysis — analysis.py + plot_campaign.py (CPU) ─
         @self.auto_register_task()
-        async def pipeline_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC}):
+        async def pipeline_analysis(task_description={}):
             self.taskcount += 1
             taskname = "pipeline_analysis"
             taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
@@ -277,22 +244,16 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.state['analysis_csv']     = output_csv
             self.state['analysis_out_dir'] = output_dir
 
-            analysis_cmd = (
-                f"python {self.scripts_path}/analysis.py "
+            return (
+                f"bash {self.scripts_path}/step8_pipeline_analysis.sh "
+                f"{self.scripts_path} "
                 f"{chai_out} "
-                f"--output {output_csv} "
-                f"--input-pdb-dir {self.mcsa_pdb_dir}"
-            )
-
-            plot_cmd = (
-                f"python {self.scripts_path}/plot_campaign.py "
                 f"{output_csv} "
+                f"{output_dir} "
+                f"{self.mcsa_pdb_dir} "
                 f"{self.island_counts_csv} "
-                f"--output-dir {output_dir} "
-                f"--threshold {self.rmsd_threshold}"
+                f"{self.rmsd_threshold}"
             )
-
-            return f"{analysis_cmd} && {plot_cmd}"
 
         # ── Local check: did analysis produce the expected CSV? ───────────────
         @self.auto_register_task(local_task=True)
@@ -333,33 +294,31 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             self.logger.pipeline_log("Step 1 finished")
 
             self.logger.pipeline_log("Step 2: backbone postprocessing (cif_to_pdb)")
-            await self.backbone_post(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            await self.backbone_post(task_description={})
             self.logger.pipeline_log("Step 2 finished")
 
             self.logger.pipeline_log("Step 3: backbone analysis (analysis_backbone + plot_backbone_analysis)")
-            await self.backbone_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            await self.backbone_analysis(task_description={})
             self.logger.pipeline_log("Step 3 finished")
 
             self.logger.pipeline_log("Step 4: sequence prediction (LigandMPNN)")
-            await self.seq_pred(task_description={"pre_exec": LIGANDMPNN_PRE_EXEC})
+            await self.seq_pred(task_description={})
             self.logger.pipeline_log("Step 4 finished")
 
             self.logger.pipeline_log("Step 5: sequence postprocessing (split_seqs)")
-            await self.seq_post(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            await self.seq_post(task_description={})
             self.logger.pipeline_log("Step 5 finished")
 
             self.logger.pipeline_log("Step 6: sequence analysis (analysis_sequence + plot_sequence_analysis)")
-            await self.seq_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            await self.seq_analysis(task_description={})
             self.logger.pipeline_log("Step 6 finished")
 
             self.logger.pipeline_log("Step 7: fold prediction (Chai-lab)")
-            await self.fold_pred(
-                task_description={"gpus_per_rank": 1, "pre_exec": CHAI_PRE_EXEC}
-            )
+            await self.fold_pred(task_description={"gpus_per_rank": 1})
             self.logger.pipeline_log("Step 7 finished")
 
             self.logger.pipeline_log("Step 8: pipeline analysis (analysis.py + plot_campaign.py)")
-            await self.pipeline_analysis(task_description={"pre_exec": IMPRESS_PRE_EXEC})
+            await self.pipeline_analysis(task_description={})
             self.logger.pipeline_log("Step 8 finished")
 
             await self.check_analysis_results()
