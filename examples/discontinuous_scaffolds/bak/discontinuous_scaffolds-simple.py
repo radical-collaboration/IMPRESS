@@ -1,9 +1,6 @@
 
 import asyncio
-import json
 import os
-
-import pandas as pd
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
@@ -31,79 +28,22 @@ DEFAULT_RMSD_THRESHOLD   = 1.5
 DEFAULT_DIFFUSION_BATCH_SIZE = 10
 
 
-# ── Module-level helper ──────────────────────────────────────────────────────
-
-def _identify_passing_models(df, model_col, thresholds):
-    """
-    Returns (passing_models, failing_models) lists.
-
-    A model passes if any of its rows passes ALL active thresholds
-    simultaneously (full battery).  If no thresholds are active, all
-    models pass.
-
-    Args:
-        df: pandas DataFrame of analysis results.
-        model_col: column name identifying the binding motif model.
-        thresholds: dict of metric_name → (lower, upper) or None.
-            None entries are skipped.  A bound value of None means
-            that side of the interval is open (no bound applied).
-    """
-    active = {k: v for k, v in thresholds.items() if v is not None}
-    if not active:
-        return list(df[model_col].unique()), []
-
-    passing, failing = [], []
-    for model, group in df.groupby(model_col):
-        model_passes = False
-        for _, row in group.iterrows():
-            row_passes = True
-            for metric, (lower, upper) in active.items():
-                if metric not in row.index or pd.isna(row[metric]):
-                    row_passes = False
-                    break
-                v = row[metric]
-                if (lower is not None and v < lower) or (upper is not None and v > upper):
-                    row_passes = False
-                    break
-            if row_passes:
-                model_passes = True
-                break
-        (passing if model_passes else failing).append(model)
-
-    return passing, failing
-
-
 class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
     """
     IMPRESS pipeline for the discontinuous scaffolds protein design campaign.
 
-    Encodes eight sequential steps grouped into three process stages:
-
-    Backbone stage (steps 1–3):
+    Encodes eight sequential steps:
       1. Backbone generation      (RFDiffusion3 via apptainer)
       2. Backbone postprocessing  (cif_to_pdb.py)
       3. Backbone analysis        (analysis_backbone.py + plot_backbone_analysis.py)
-
-    Sequence stage (steps 4–6):
       4. Sequence prediction      (LigandMPNN)
       5. Sequence postprocessing  (split_seqs.py)
       6. Sequence analysis        (analysis_sequence.py + plot_sequence_analysis.py)
-
-    Fold stage (steps 7–8):
       7. Fold prediction          (Chai-lab)
       8. Pipeline analysis        (analysis.py + plot_campaign.py)
 
-    After each stage an adaptive step checks per-model quality against
-    configurable thresholds.  Models that fail are rerouted to a branch
-    pipeline starting from that stage; the current pipeline continues
-    with only the passing models.
-
-    Branch pipelines are supported via the ``start_step`` kwarg, which
-    causes ``run()`` to skip all stages before that step.  The
-    ``branch_id`` kwarg is used to namespace output directories.
-    ``initial_state`` allows pre-seeding ``self.state`` for pipelines
-    that start partway through (e.g. a seq-start branch needs
-    ``pdb_dir`` already set).
+    After step 8 a local adaptive step checks whether the analysis CSV is
+    present and, if so, restarts the pipeline from step 1.
     """
 
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -112,10 +52,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
 
         # ── bookkeeping ─────────────────────────────────────────────────────
         self.taskcount = 0
-
-        # ── branching control ────────────────────────────────────────────────
-        self.start_step = kwargs.get('start_step', STEP_BACKBONE_GEN)
-        self.branch_id  = kwargs.get('branch_id',  'b0')
+        self.next_step = STEP_BACKBONE_GEN
 
         # ── configurable paths ──────────────────────────────────────────────
         self.base_path        = kwargs.get("base_path",        os.getcwd())
@@ -132,37 +69,21 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         self.rmsd_threshold       = kwargs.get("rmsd_threshold",       DEFAULT_RMSD_THRESHOLD)
         self.diffusion_batch_size = kwargs.get("diffusion_batch_size", DEFAULT_DIFFUSION_BATCH_SIZE)
 
-        # ── backbone thresholds — (lower, upper) or None to disable ─────────
-        self.backbone_rog_bounds      = kwargs.get('backbone_rog_bounds',      None)
-        self.backbone_ala_bounds      = kwargs.get('backbone_ala_bounds',      None)
-        self.backbone_gly_bounds      = kwargs.get('backbone_gly_bounds',      None)
-        self.backbone_helix_bounds    = kwargs.get('backbone_helix_bounds',    None)
-        self.backbone_sheet_bounds    = kwargs.get('backbone_sheet_bounds',    None)
-        self.backbone_lig_dist_bounds = kwargs.get('backbone_lig_dist_bounds', None)
-
-        # ── sequence thresholds ──────────────────────────────────────────────
-        self.seq_ligand_conf_bounds  = kwargs.get('seq_ligand_conf_bounds',  None)
-        self.seq_overall_conf_bounds = kwargs.get('seq_overall_conf_bounds', None)
-
         # super().__init__ calls register_pipeline_tasks(), so all self.* must
         # be set before this call.
         super().__init__(name, flow, **configs, **kwargs)
 
-        # Pre-populate state for branch pipelines that skip early stages
-        # (e.g. a seq-start branch needs pdb_dir already set).
-        self.state.update(kwargs.get('initial_state', {}))
-
     # ── Task registration ───────────────────────────────────────────────────
 
     def register_pipeline_tasks(self):
-        """Register all eight pipeline steps plus the local analysis checks."""
+        """Register all eight pipeline steps plus the local analysis check."""
 
         # ── Step 1: Backbone generation (GPU) ───────────────────────────────
         @self.auto_register_task()
         async def backbone_gen(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "backbone_gen"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -182,7 +103,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def backbone_post(task_description={}):
             self.taskcount += 1
             taskname = "backbone_post"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
             print(f"state.rfd3_out_dir value before bb-post update is {self.state['rfd3_out_dir']}")
@@ -202,7 +123,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def backbone_analysis(task_description={}):
             self.taskcount += 1
             taskname = "backbone_analysis"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -227,26 +148,19 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def seq_pred(task_description={}):
             self.taskcount += 1
             taskname = "seq_pred"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
             output_dir = f"{taskdir}/out"
             self.state['lmpnn_out_dir'] = output_dir
 
-            # Use filtered JSONs if the backbone adaptive step created them;
-            # otherwise fall back to the original pipeline inputs.
-            lmpnn_json = self.state.get(
-                'current_lmpnn_pdb_multi_json', self.lmpnn_pdb_multi_json)
-            fixed_json = self.state.get(
-                'current_lmpnn_fixed_res_json', self.lmpnn_fixed_res_json)
-
             return (
                 f"bash {self.scripts_path}/step4_seq_pred.sh "
                 f"{self.mpnn_dir} "
                 f"{output_dir} "
-                f"{lmpnn_json} "
-                f"{fixed_json}"
+                f"{self.lmpnn_pdb_multi_json} "
+                f"{self.lmpnn_fixed_res_json}"
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
@@ -254,7 +168,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def seq_post(task_description={}):
             self.taskcount += 1
             taskname = "seq_post"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -275,7 +189,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def seq_analysis(task_description={}):
             self.taskcount += 1
             taskname = "seq_analysis"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -300,13 +214,11 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def fold_pred(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "fold_pred"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
-            # Use filtered seqs dir if the sequence adaptive step created one.
-            input_dir  = self.state.get(
-                'current_seqs_split_dir', self.state['seqs_split_dir'])
+            input_dir  = self.state['seqs_split_dir']
             output_dir = f"{taskdir}/out"
             self.state['chai_out_dir'] = output_dir
 
@@ -322,7 +234,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         async def pipeline_analysis(task_description={}):
             self.taskcount += 1
             taskname = "pipeline_analysis"
-            taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -344,152 +256,77 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"{self.rmsd_threshold}"
             )
 
-        # ── Local check: backbone analysis results ────────────────────────────
+        # ── Local check: did analysis produce the expected CSV? ───────────────
         @self.auto_register_task(local_task=True)
-        async def check_backbone_results():
-            csv = self.state.get('backbone_analysis_csv')
-            self.state['last_analysis_step'] = 'backbone'
+        async def check_analysis_results():
+            analysis_csv = self.state.get('analysis_csv')
 
-            if not csv or not os.path.isfile(csv):
+            if analysis_csv and os.path.isfile(analysis_csv):
+                self.state['analysis_present']   = True
+                self.state['last_analysis_step'] = 'analysis'
                 self.logger.pipeline_log(
-                    f"[check_backbone] CSV not found at {csv!r}; treating all models as failing"
+                    f"[check] Analysis CSV found at {analysis_csv}; analysis_present=True"
                 )
-                self.state['passing_backbone_models'] = []
-                self.state['failing_backbone_models'] = []
-                return
-
-            df = pd.read_csv(csv)
-            thresholds = {
-                'radius_of_gyration':           self.backbone_rog_bounds,
-                'alanine_content':              self.backbone_ala_bounds,
-                'glycine_content':              self.backbone_gly_bounds,
-                'helix_fraction':               self.backbone_helix_bounds,
-                'sheet_fraction':               self.backbone_sheet_bounds,
-                'n_clashing.ligand_min_distance': self.backbone_lig_dist_bounds,
-            }
-            passing, failing = _identify_passing_models(df, 'model_name', thresholds)
-
-            self.state['passing_backbone_models'] = passing
-            self.state['failing_backbone_models'] = failing
-            self.logger.pipeline_log(
-                f"[check_backbone] passing={len(passing)} failing={len(failing)} models"
-            )
-
-        # ── Local check: sequence analysis results ────────────────────────────
-        @self.auto_register_task(local_task=True)
-        async def check_seq_results():
-            csv = self.state.get('seq_analysis_csv')
-            self.state['last_analysis_step'] = 'sequence'
-
-            if not csv or not os.path.isfile(csv):
+            else:
+                self.state['analysis_present']   = False
+                self.state['last_analysis_step'] = 'analysis'
                 self.logger.pipeline_log(
-                    f"[check_seq] CSV not found at {csv!r}; treating all models as failing"
+                    f"[check] Analysis CSV not found at {analysis_csv!r}; analysis_present=False"
                 )
-                self.state['passing_seq_models'] = []
-                self.state['failing_seq_models'] = []
-                return
-
-            df = pd.read_csv(csv)
-            thresholds = {
-                'ligand_confidence':  self.seq_ligand_conf_bounds,
-                'overall_confidence': self.seq_overall_conf_bounds,
-            }
-            passing, failing = _identify_passing_models(df, 'model_name', thresholds)
-
-            self.state['passing_seq_models'] = passing
-            self.state['failing_seq_models'] = failing
-            self.logger.pipeline_log(
-                f"[check_seq] passing={len(passing)} failing={len(failing)} models"
-            )
-
-        # ── Local check: fold/pipeline analysis results ───────────────────────
-        @self.auto_register_task(local_task=True)
-        async def check_fold_results():
-            self.state['last_analysis_step'] = 'fold'
-            self.logger.pipeline_log("[check_fold] fold stage complete")
 
     # ── Main execution loop ─────────────────────────────────────────────────
 
     async def run(self):
         """
-        Execute pipeline stages sequentially, with an adaptive check after
-        each stage.
+        Execute the eight-step pipeline sequentially.
 
-        Supports starting at an arbitrary stage via ``self.start_step`` so
-        that branch pipelines (spawned by the adaptive function) can begin
-        at the sequence or fold stage without re-running earlier work.
-
-        Adaptive behaviour per stage:
-          - Backbone: adaptive_fn may spawn a backbone-start branch for
-            failing models and filter LMPNN inputs for the current pipeline.
-          - Sequence: adaptive_fn may spawn a sequence-start branch for
-            failing models and filter seqs_split_dir for the current pipeline.
-          - Fold: adaptive_fn sets next_step = STEP_DONE.
-
-        The adaptive_fn sets ``self.next_step``; setting it to STEP_DONE
-        terminates the current pipeline after the current stage.
+        The outer while-loop supports the adaptive restart: if the adaptive
+        function sets next_step = STEP_BACKBONE_GEN after analysis, all eight
+        steps run again from the top.
         """
+        self.next_step = STEP_BACKBONE_GEN
         self.state.setdefault('run_count', 0)
-        self.next_step = STEP_SEQ_PRED   # default continuation sentinel
+        self.logger.pipeline_log("DiscontinuousScaffoldsPipeline starting")
 
-        # ── Stage 1: Backbone (steps 1–3) ────────────────────────────────────
-        if self.start_step <= STEP_BACKBONE_GEN:
-            self.logger.pipeline_log("Stage 1 / Step 1: backbone generation (RFD3)")
+        while self.next_step != STEP_DONE:
+
+            self.logger.pipeline_log("Step 1: backbone generation (RFD3)")
             await self.backbone_gen(task_description={"gpus_per_rank": 1})
             self.logger.pipeline_log("Step 1 finished")
 
-            self.logger.pipeline_log("Stage 1 / Step 2: backbone postprocessing (cif_to_pdb)")
+            self.logger.pipeline_log("Step 2: backbone postprocessing (cif_to_pdb)")
             await self.backbone_post(task_description={})
             self.logger.pipeline_log("Step 2 finished")
 
-            self.logger.pipeline_log(
-                "Stage 1 / Step 3: backbone analysis (analysis_backbone + plot_backbone_analysis)")
+            self.logger.pipeline_log("Step 3: backbone analysis (analysis_backbone + plot_backbone_analysis)")
             await self.backbone_analysis(task_description={})
             self.logger.pipeline_log("Step 3 finished")
 
-            await self.check_backbone_results()
-            await self.run_adaptive_step(wait=True)
-
-            if self.next_step == STEP_DONE:
-                self.logger.pipeline_log(
-                    "DiscontinuousScaffoldsPipeline terminating after backbone stage")
-                return
-
-        # ── Stage 2: Sequence (steps 4–6) ────────────────────────────────────
-        if self.start_step <= STEP_SEQ_PRED:
-            self.logger.pipeline_log("Stage 2 / Step 4: sequence prediction (LigandMPNN)")
+            self.logger.pipeline_log("Step 4: sequence prediction (LigandMPNN)")
             await self.seq_pred(task_description={})
             self.logger.pipeline_log("Step 4 finished")
 
-            self.logger.pipeline_log("Stage 2 / Step 5: sequence postprocessing (split_seqs)")
+            self.logger.pipeline_log("Step 5: sequence postprocessing (split_seqs)")
             await self.seq_post(task_description={})
             self.logger.pipeline_log("Step 5 finished")
 
-            self.logger.pipeline_log(
-                "Stage 2 / Step 6: sequence analysis (analysis_sequence + plot_sequence_analysis)")
+            self.logger.pipeline_log("Step 6: sequence analysis (analysis_sequence + plot_sequence_analysis)")
             await self.seq_analysis(task_description={})
             self.logger.pipeline_log("Step 6 finished")
 
-            await self.check_seq_results()
+            self.logger.pipeline_log("Step 7: fold prediction (Chai-lab)")
+            await self.fold_pred(task_description={"gpus_per_rank": 1})
+            self.logger.pipeline_log("Step 7 finished")
+
+            self.logger.pipeline_log("Step 8: pipeline analysis (analysis.py + plot_campaign.py)")
+            await self.pipeline_analysis(task_description={})
+            self.logger.pipeline_log("Step 8 finished")
+
+            await self.check_analysis_results()
             await self.run_adaptive_step(wait=True)
-
-            if self.next_step == STEP_DONE:
-                self.logger.pipeline_log(
-                    "DiscontinuousScaffoldsPipeline terminating after sequence stage")
-                return
-
-        # ── Stage 3: Fold (steps 7–8) ─────────────────────────────────────────
-        self.logger.pipeline_log("Stage 3 / Step 7: fold prediction (Chai-lab)")
-        await self.fold_pred(task_description={"gpus_per_rank": 1})
-        self.logger.pipeline_log("Step 7 finished")
-
-        self.logger.pipeline_log(
-            "Stage 3 / Step 8: pipeline analysis (analysis.py + plot_campaign.py)")
-        await self.pipeline_analysis(task_description={})
-        self.logger.pipeline_log("Step 8 finished")
-
-        await self.check_fold_results()
-        await self.run_adaptive_step(wait=True)
+            # adaptive_fn sets self.next_step:
+            #   STEP_BACKBONE_GEN → restart loop
+            #   STEP_DONE         → exit loop
 
         self.logger.pipeline_log("DiscontinuousScaffoldsPipeline complete")
 
