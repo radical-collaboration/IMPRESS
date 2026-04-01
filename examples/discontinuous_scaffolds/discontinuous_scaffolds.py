@@ -241,12 +241,31 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             fixed_json = self.state.get(
                 'current_lmpnn_fixed_res_json', self.lmpnn_fixed_res_json)
 
+            # Remap static JSON keys to runtime pdb_dir paths.
+            # The static JSONs use relative paths (e.g. "./outputs_rfd3/model.pdb")
+            # but PDB files are generated at runtime under self.state['pdb_dir'].
+            pdb_dir = self.state['pdb_dir']
+
+            def _remap_json(src_path, dst_path):
+                with open(src_path) as fh:
+                    data = json.load(fh)
+                remapped = {
+                    os.path.join(pdb_dir, os.path.basename(k)): v
+                    for k, v in data.items()
+                }
+                with open(dst_path, 'w') as fh:
+                    json.dump(remapped, fh, indent=2)
+                return dst_path
+
+            runtime_json       = _remap_json(lmpnn_json,  f"{taskdir}/in/lmpnn_pdb_multi.json")
+            runtime_fixed_json = _remap_json(fixed_json,   f"{taskdir}/in/lmpnn_fixed_res.json")
+
             return (
                 f"bash {self.scripts_path}/step4_seq_pred.sh "
                 f"{self.mpnn_dir} "
                 f"{output_dir} "
-                f"{lmpnn_json} "
-                f"{fixed_json}"
+                f"{runtime_json} "
+                f"{runtime_fixed_json}"
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────

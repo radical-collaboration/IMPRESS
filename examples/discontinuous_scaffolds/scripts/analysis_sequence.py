@@ -63,7 +63,7 @@ def iter_rows(input_dir: Path, motif_data: dict):
             file=sys.stderr,
         )
         print(f"Defaulting to current dir.")
-        seqs_split = input_dir / "seqs_split"
+        seqs_split = input_dir
 #        return
 
     for fa_path in sorted(seqs_split.glob("*.fa")):
