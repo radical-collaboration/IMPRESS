@@ -39,15 +39,15 @@ DIFFUSION_BATCH_SIZE = 1
 # A model passes the sequence stage if at least one of its sequences
 # satisfies ALL active sequence thresholds simultaneously.
 
-BACKBONE_ROG_BOUNDS      = None   # radius_of_gyration,           e.g. (5.0, 25.0)
-BACKBONE_ALA_BOUNDS      = None   # alanine_content
-BACKBONE_GLY_BOUNDS      = None   # glycine_content
-BACKBONE_HELIX_BOUNDS    = None   # helix_fraction
-BACKBONE_SHEET_BOUNDS    = None   # sheet_fraction
-BACKBONE_LIG_DIST_BOUNDS = None   # n_clashing.ligand_min_distance
+BACKBONE_ROG_BOUNDS      = (0,19.1)   # radius_of_gyration,           e.g. (5.0, 25.0)
+BACKBONE_ALA_BOUNDS      = (.15,.55)   # alanine_content
+BACKBONE_GLY_BOUNDS      = (.035,.115)   # glycine_content
+BACKBONE_HELIX_BOUNDS    = (.01,1)   # helix_fraction
+BACKBONE_SHEET_BOUNDS    = (0,0.4)   # sheet_fraction
+BACKBONE_LIG_DIST_BOUNDS = (0,4.5)   # n_clashing.ligand_min_distance
 
-SEQ_LIGAND_CONF_BOUNDS   = None   # ligand_confidence,            e.g. (0.5, 1.0)
-SEQ_OVERALL_CONF_BOUNDS  = None   # overall_confidence
+SEQ_LIGAND_CONF_BOUNDS   = (0.37,1)   # ligand_confidence,            e.g. (0.5, 1.0)
+SEQ_OVERALL_CONF_BOUNDS  = (0.42,1)   # overall_confidence
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
