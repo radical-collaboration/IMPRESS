@@ -19,8 +19,8 @@ python "$scripts_path/analysis.py" \
     --output "$output_csv" \
     --input-pdb-dir "$mcsa_pdb_dir"
 
-python "$scripts_path/plot_campaign.py" \
-    "$output_csv" \
-    "$island_counts_csv" \
-    --output-dir "$output_dir" \
-    --threshold "$rmsd_threshold"
+#python "$scripts_path/plot_campaign.py" \
+#    "$output_csv" \
+#    "$island_counts_csv" \
+#    --output-dir "$output_dir" \
+#    --threshold "$rmsd_threshold"

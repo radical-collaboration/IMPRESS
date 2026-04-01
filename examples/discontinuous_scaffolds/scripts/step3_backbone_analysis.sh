@@ -16,7 +16,7 @@ python "$scripts_path/analysis_backbone.py" \
     "$pdb_dir" \
     --output "$output_csv"
 
-python "$scripts_path/plot_backbone_analysis.py" \
-    "$output_csv" \
-    "$island_counts_csv" \
-    --output-dir "$output_dir"
+#python "$scripts_path/plot_backbone_analysis.py" \
+#    "$output_csv" \
+#    "$island_counts_csv" \
+#    --output-dir "$output_dir"

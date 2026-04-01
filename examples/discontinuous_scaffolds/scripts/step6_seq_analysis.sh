@@ -16,7 +16,7 @@ python "$scripts_path/analysis_sequence.py" \
     "$seqs_split_dir" \
     --output "$output_csv"
 
-python "$scripts_path/plot_sequence_analysis.py" \
-    "$output_csv" \
-    "$island_counts_csv" \
-    --output-dir "$output_dir"
+#python "$scripts_path/plot_sequence_analysis.py" \
+#    "$output_csv" \
+#    "$island_counts_csv" \
+#    --output-dir "$output_dir"
