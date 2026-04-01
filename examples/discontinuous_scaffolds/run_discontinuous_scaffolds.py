@@ -25,8 +25,6 @@ FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry.sif"
 MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
 
 RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/mcsa_41_one.json"
-LMPNN_PDB_MULTI_JSON = f"{SCRIPTS_PATH}/lmpnn_batch_jsons/batch_pdbs_one.json"
-LMPNN_FIXED_RES_JSON = f"{SCRIPTS_PATH}/lmpnn_batch_jsons/batch_fixed_res_one.json"
 ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
@@ -311,8 +309,6 @@ async def run_discontinuous_scaffolds() -> None:
                 "foundry_sif_path":         FOUNDRY_SIF_PATH,
                 "mpnn_dir":                 MPNN_DIR,
                 "rfd_input_filepath":       RFD_INPUT_FILEPATH,
-                "lmpnn_pdb_multi_json":     LMPNN_PDB_MULTI_JSON,
-                "lmpnn_fixed_res_json":     LMPNN_FIXED_RES_JSON,
                 "island_counts_csv":        ISLAND_COUNTS_CSV,
                 "mcsa_pdb_dir":             MCSA_PDB_DIR,
                 "rmsd_threshold":           RMSD_THRESHOLD,

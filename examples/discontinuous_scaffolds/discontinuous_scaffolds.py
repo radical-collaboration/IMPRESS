@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import pathlib
 
 import pandas as pd
 
@@ -73,6 +74,45 @@ def _identify_passing_models(df, model_col, thresholds):
     return passing, failing
 
 
+def generate_lmpnn_jsons(rfd_input_filepath, diffusion_batch_size, output_dir):
+    """
+    Derive LMPNN batch JSON files from an RFD input file.
+
+    Generates two JSON files in ``output_dir``:
+    - ``generated_lmpnn_pdb.json``: maps expected PDB paths to ``""``
+    - ``generated_lmpnn_fixed_res.json``: maps expected PDB paths to a
+      space-separated string of fixed residue keys from ``select_fixed_atoms``
+
+    PDB path keys use the ``./outputs_rfd3/`` prefix and the filename
+    convention ``{campaign_name}_{model_name}_0_model_{num}.pdb``, where
+    ``campaign_name`` is the stem of ``rfd_input_filepath`` and ``num``
+    ranges from 0 to ``diffusion_batch_size - 1``.
+
+    Returns ``(pdb_multi_path, fixed_res_path)``.
+    """
+    campaign_name = pathlib.Path(rfd_input_filepath).stem
+    with open(rfd_input_filepath) as fh:
+        rfd_data = json.load(fh)
+
+    pdb_multi = {}
+    fixed_res = {}
+    for model_name, model_cfg in rfd_data.items():
+        fixed = " ".join(model_cfg["select_fixed_atoms"].keys())
+        for num in range(diffusion_batch_size):
+            key = f"./outputs_rfd3/{campaign_name}_{model_name}_0_model_{num}.pdb"
+            pdb_multi[key] = ""
+            fixed_res[key] = fixed
+
+    os.makedirs(output_dir, exist_ok=True)
+    pdb_path   = os.path.join(output_dir, "generated_lmpnn_pdb.json")
+    fixed_path = os.path.join(output_dir, "generated_lmpnn_fixed_res.json")
+    with open(pdb_path,   "w") as fh:
+        json.dump(pdb_multi, fh, indent=2)
+    with open(fixed_path, "w") as fh:
+        json.dump(fixed_res, fh, indent=2)
+    return pdb_path, fixed_path
+
+
 class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
     """
     IMPRESS pipeline for the discontinuous scaffolds protein design campaign.
@@ -125,12 +165,22 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
 
         # ── configurable pipeline inputs ────────────────────────────────────
         self.rfd_input_filepath   = kwargs.get("rfd_input_filepath",   DEFAULT_RFD_INPUT)
-        self.lmpnn_pdb_multi_json = kwargs.get("lmpnn_pdb_multi_json", None)
-        self.lmpnn_fixed_res_json = kwargs.get("lmpnn_fixed_res_json", None)
         self.island_counts_csv    = kwargs.get("island_counts_csv",    None)
         self.mcsa_pdb_dir         = kwargs.get("mcsa_pdb_dir",         None)
         self.rmsd_threshold       = kwargs.get("rmsd_threshold",       DEFAULT_RMSD_THRESHOLD)
         self.diffusion_batch_size = kwargs.get("diffusion_batch_size", DEFAULT_DIFFUSION_BATCH_SIZE)
+
+        # Derive LMPNN JSONs from RFD input if not explicitly provided.
+        # Branch pipelines always receive explicit (pre-filtered) JSONs, so
+        # generation is only triggered for root pipelines.
+        if kwargs.get("lmpnn_pdb_multi_json") and kwargs.get("lmpnn_fixed_res_json"):
+            self.lmpnn_pdb_multi_json = kwargs["lmpnn_pdb_multi_json"]
+            self.lmpnn_fixed_res_json = kwargs["lmpnn_fixed_res_json"]
+        else:
+            gen_dir = os.path.join(self.base_path, self.branch_id)
+            self.lmpnn_pdb_multi_json, self.lmpnn_fixed_res_json = generate_lmpnn_jsons(
+                self.rfd_input_filepath, self.diffusion_batch_size, gen_dir
+            )
 
         # ── backbone thresholds — (lower, upper) or None to disable ─────────
         self.backbone_rog_bounds      = kwargs.get('backbone_rog_bounds',      None)
