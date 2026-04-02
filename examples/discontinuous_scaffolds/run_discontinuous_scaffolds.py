@@ -68,6 +68,34 @@ def _filter_json_by_models(json_path, model_list, output_path):
     return output_path
 
 
+def _filter_rfd_json_by_models(json_path, model_list, output_path):
+    """
+    Like _filter_json_by_models but also rewrites each entry's "input" value
+    from a path relative to json_path's directory to an absolute path.
+    This is required when the filtered JSON is written to a different directory
+    (e.g. a branch pipeline directory) than the original.
+    """
+    base_dir = os.path.dirname(os.path.abspath(json_path))
+    with open(json_path) as fh:
+        data = json.load(fh)
+
+    filtered = {}
+    for k, v in data.items():
+        if k not in model_list:
+            continue
+        entry = dict(v)
+        if 'input' in entry:
+            entry['input'] = os.path.normpath(
+                os.path.join(base_dir, entry['input'])
+            )
+        filtered[k] = entry
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as fh:
+        json.dump(filtered, fh, indent=2)
+    return output_path
+
+
 def _create_filtered_seqs_dir(seqs_dir, model_list, output_dir):
     """
     Create ``output_dir`` and symlink every ``.fa`` file from ``seqs_dir``
@@ -191,7 +219,10 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             pipeline.state['current_lmpnn_fixed_res_json'] = filt_res
 
             # Build a filtered RFD input JSON for the branch pipeline.
-            branch_rfd = _filter_json_by_models(
+            # Uses _filter_rfd_json_by_models to rewrite relative "input" paths
+            # to absolute paths, since the filtered JSON lands in a different
+            # directory than the original.
+            branch_rfd = _filter_rfd_json_by_models(
                 pipeline.rfd_input_filepath,
                 failing,
                 f"{base}/{branch_id}/branch_rfd_input.json",
