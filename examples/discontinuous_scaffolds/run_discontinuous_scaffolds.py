@@ -122,7 +122,8 @@ def _next_branch_id(pipeline):
     """
     n = pipeline.state.get('branch_count', 0) + 1
     pipeline.state['branch_count'] = n
-    return f"{pipeline.branch_id}_b{n}"
+    return f"b{n}"
+#    return f"{pipeline.branch_id}_b{n}"
 
 
 def _shared_pipeline_kwargs(pipeline):
@@ -192,13 +193,6 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             f"[adaptive/backbone] passing={passing} failing={failing}"
         )
 
-        if not passing:
-            pipeline.logger.pipeline_log(
-                "[adaptive/backbone] No models passed backbone QC; terminating pipeline"
-            )
-            pipeline.next_step = STEP_DONE
-            return
-
         pipeline.next_step = STEP_SEQ_PRED
 
         if failing:
@@ -243,6 +237,14 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 'lmpnn_fixed_res_json': pipeline.lmpnn_fixed_res_json,
                 **_shared_pipeline_kwargs(pipeline),
             })
+            
+        if not passing:
+            pipeline.logger.pipeline_log(
+                "[adaptive/backbone] No models passed backbone QC; terminating pipeline"
+            )
+            pipeline.next_step = STEP_DONE
+#            return
+
 
     # ── Sequence stage adaptive ──────────────────────────────────────────────
     elif step == 'sequence':
@@ -252,13 +254,6 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
         pipeline.logger.pipeline_log(
             f"[adaptive/sequence] passing={passing} failing={failing}"
         )
-
-        if not passing:
-            pipeline.logger.pipeline_log(
-                "[adaptive/sequence] No models passed sequence QC; terminating pipeline"
-            )
-            pipeline.next_step = STEP_DONE
-            return
 
         pipeline.next_step = STEP_FOLD_PRED
 
@@ -301,6 +296,14 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 'initial_state':        {'pdb_dir': pipeline.state['pdb_dir']},
                 **_shared_pipeline_kwargs(pipeline),
             })
+
+        if not passing:
+            pipeline.logger.pipeline_log(
+                "[adaptive/sequence] No models passed sequence QC; terminating pipeline"
+            )
+            pipeline.next_step = STEP_DONE
+#            return
+
 
     # ── Fold stage adaptive ──────────────────────────────────────────────────
     elif step == 'fold':
