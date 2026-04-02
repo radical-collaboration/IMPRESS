@@ -1,15 +1,4 @@
 {
-    "buried": {
-        "input": "./input_pdbs/scaffold-with-ALR.pdb",
-        "length": "70-170",
-        "ligand": "A:R",
-        "select_fixed_atoms": {
-            "A:R": ""
-        },
-        "select_buried": {
-            "A:R": "S1,S2,O3,O4,O5,O6,O7,O8,O9,O10,N11,N12,C13,C14,C15,C16,C17,C18,C19,C20,C21,C22,C23,C24,C25,C26,C27,C28,C29,C30"
-        }
-    },
     "partial": {
         "input": "./input_pdbs/scaffold-with-ALR.pdb",
         "ligand": "A:R",
