@@ -9,13 +9,6 @@ from functools import lru_cache
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-FOUNDRY_PRE_EXEC = [""]
-PYROSETTA_PRE_EXEC = ["source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"]
-MPNN_PRE_EXEC = ["source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate"]
-AF2_PRE_EXEC = [
-    "module load cuda",
-    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
-]
 
 # Step constants for the outer state machine
 STEP_DONE      = 0   # pipeline complete
@@ -216,19 +209,15 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             output_dir = f"{taskdir}/out"
 
             input_pdb    = self.state.get('rfd3_input_pdb')
-            scaffold_arg = f"scaffoldguided.target_pdb={input_pdb} " if input_pdb else ""
-            
-            diffusion_batch_size = self.diffusion_batch_size
+            scaffold_arg = f"scaffoldguided.target_pdb={input_pdb}" if input_pdb else ""
 
             return (
-                f"apptainer exec --nv {self.foundry_sif_path} rfd3 design "
-                f"out_dir={output_dir} "
-                f"inputs={inputs} "
-                f"{scaffold_arg}"
-                f"skip_existing=False "
-                f"dump_trajectories=True "
-                f"prevalidate_inputs=True "
-                f"diffusion_batch_size={diffusion_batch_size} "
+                f"bash {self.scripts_path}/rfd3.sh"
+                f" {self.foundry_sif_path}"
+                f" {output_dir}"
+                f" {inputs}"
+                f" \"{scaffold_arg}\""
+                f" {self.diffusion_batch_size}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -286,7 +275,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()
         async def mpnn(
-            fixed_residues_file: str | None = None,task_description={"pre_exec":MPNN_PRE_EXEC}
+            fixed_residues_file: str | None = None, task_description=None
         ):
             self.taskcount += 1
             taskname = "mpnn"
@@ -314,26 +303,16 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             if fixed_residues_file:
                 with open(fixed_residues_file) as f:
                     fixed_residues = f.read().strip()
-                fixed_residues_line = f"--fixed_residues {fixed_residues} \\"
             else:
-                fixed_residues_line = ""
+                fixed_residues = ""
 
             return (
-                f"python {self.mpnn_dir}/run.py "
-                f"  --model_type \"ligand_mpnn\""
-                f"  --checkpoint_path_sc {self.mpnn_dir}/model_params/ligandmpnn_sc_v_32_002_16.pt "
-                f"  --checkpoint_ligand_mpnn {self.mpnn_dir}/model_params/ligandmpnn_v_32_010_25.pt "
-                f"  --seed 111 "
-                f"  --pdb_path {pdb_path} "
-                f"  --out_folder {output_dir} "
-                f"  --pack_side_chains 1 "
-                f"  --number_of_batches {n_batches} "
-                f"  --batch_size 1 "
-                f"  --number_of_packs_per_design 1 "
-                f"  --pack_with_ligand_context 1 "
-                f"  --repack_everything 1 "
-                f"  --temperature 0.1 "
-                + fixed_residues_line
+                f"bash {self.scripts_path}/mpnn.sh"
+                f" {self.mpnn_dir}"
+                f" {pdb_path}"
+                f" {output_dir}"
+                f" {n_batches}"
+                f" \"{fixed_residues}\""
             )
 
         @self.auto_register_task(local_task=True)
@@ -404,10 +383,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.state['best_packed_pdb'] = f"{output_dir}/{pdb_stem}_minimized.pdb"
 
             return (
-                f"python {self.scripts_path}/packmin.py "
-                f"{pdb_path} "
-                f"-lig {lig_path} "
-                f"--out_dir {output_dir} "
+                f"bash {self.scripts_path}/packmin.sh"
+                f" {pdb_path}"
+                f" {lig_path}"
+                f" {output_dir}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -437,11 +416,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             output_dir = f"{taskdir}/out"
 
             return (
-                f"python {self.scripts_path}/fastrelax.py "
-                f"{pdb_path} "
-                f"-n 1 "
-                f"-lig {lig_path} "
-                f"--out_dir {output_dir} "
+                f"bash {self.scripts_path}/fastrelax.sh"
+                f" {pdb_path}"
+                f" {lig_path}"
+                f" {output_dir}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -482,11 +460,11 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             pdb_directory = f"{self.base_path}/{self.taskcount}_fastrelax/out"
 
             return (
-                f"python {self.scripts_path}/filter_shape.py "
-                f"{pdb_directory} "
-                f"{taskdir}/out/shape_complementarity_values.txt "
-                f"{self.pipeline_inputs}/{ligand_name} "
-                f"{taskdir}/out/interface_values.txt "
+                f"bash {self.scripts_path}/filter_shape.sh"
+                f" {pdb_directory}"
+                f" {taskdir}/out/shape_complementarity_values.txt"
+                f" {self.pipeline_inputs}/{ligand_name}"
+                f" {taskdir}/out/interface_values.txt"
             )
 
         @self.auto_register_task(local_task=True)
@@ -537,15 +515,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             output_dir = f"{taskdir}/out"
 
             return (
-                f"pixi run --manifest-path {self.colabfold_path} "
-                f"colabfold_batch "
-                f"--model-type alphafold2 "
-                f"--rank auto "
-                f"--random-seed 999 "
-                f"--save-all "
-                f"--debug-logging "
-                f"{short_fasta} "
-                f"{output_dir} "
+                f"bash {self.scripts_path}/af2.sh"
+                f" {self.colabfold_path}"
+                f" {short_fasta}"
+                f" {output_dir}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -595,12 +568,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             common_filenames_file = f"{self.pipeline_inputs}/common_filenames.txt"
 
             return (
-                f"python {self.scripts_path}/filter_energy.py "
-                f"{pdb_directory} "
-                f"{output_file} "
-                f"{output_energy_file} "
-                f"{common_filenames_file} "
-                f"{ligand_name} "
+                f"bash {self.scripts_path}/filter_energy.sh"
+                f" {pdb_directory}"
+                f" {output_file}"
+                f" {output_energy_file}"
+                f" {common_filenames_file}"
+                f" {ligand_name}"
             )
 
     # ── Score utils ────────────────────────────────────────────────────────
@@ -627,7 +600,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     return
 
                 self.logger.pipeline_log(f"running mpnn [cycle {cycle_i}]")
-                await self.mpnn(task_description={"pre_exec": MPNN_PRE_EXEC})
+                await self.mpnn()
 #                    fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt" )
                 self.logger.pipeline_log(f"mpnn [cycle {cycle_i}] finished")
                 await self.analysis_sequence()
@@ -648,7 +621,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     self.next_step = STEP_DONE
                     return
                 self.logger.pipeline_log(f"running packmin [cycle {cycle_i}]")
-                await self.packmin(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
+                await self.packmin()
                 self.logger.pipeline_log(f"packmin [cycle {cycle_i}] finished")
                 await self.analysis_packmin()
                 await self.run_adaptive_step()
@@ -690,14 +663,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             elif self.next_step == STEP_FASTRELAX:
                 self.logger.pipeline_log("running fastrelax")
-                await self.fastrelax(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
+                await self.fastrelax()
                 self.logger.pipeline_log("fastrelax finished")
                 await self.analysis_fastrelax()
                 await self.run_adaptive_step()
 
             elif self.next_step == STEP_INTERFACE:
                 self.logger.pipeline_log("running filter_shape")
-                await self.filter_shape(task_description={"pre_exec": PYROSETTA_PRE_EXEC})
+                await self.filter_shape()
                 self.logger.pipeline_log("filter_shape finished")
                 await self.analysis_interface()
                 await self.run_adaptive_step()

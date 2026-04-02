@@ -16,9 +16,9 @@ from small_molecule_binding import (
 )
 
 # ── Per-step quality thresholds ────────────────────────────────────────────
-BACKBONE_MAX_CA_DEVIATION = 2.0
-BACKBONE_MIN_SS_FRACTION  = 0.2
-FASTRELAX_MAX_FA_REP      = 10.0   # fa_rep REU
+BACKBONE_MAX_CA_DEVIATION = 1.0
+BACKBONE_MIN_SS_FRACTION  = 0.5
+FASTRELAX_MAX_FA_REP      = 100.0   # fa_rep REU
 FASTRELAX_MAX_SCORE       = 0.0    # total_score REU
 INTERFACE_MIN_SC          = 0.35
 FOLD_MIN_PLDDT            = 70.0
@@ -120,8 +120,8 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
-    backend = await LocalExecutionBackend(ThreadPoolExecutor())
-    #backend = await DragonExecutionBackendV3()
+    #backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    backend = await DragonExecutionBackendV3()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
