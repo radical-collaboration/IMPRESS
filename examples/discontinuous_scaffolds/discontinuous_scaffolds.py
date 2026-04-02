@@ -317,8 +317,8 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"{self.mpnn_dir} "
                 f"{output_dir} "
                 f"{runtime_json} "
-                f"{runtime_fixed_json}"
-                f"{self.lmpnn_num_batches}"
+                f"{runtime_fixed_json} "
+                f"{self.lmpnn_num_batches} "
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
