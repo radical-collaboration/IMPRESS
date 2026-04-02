@@ -29,6 +29,7 @@ ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
 DIFFUSION_BATCH_SIZE = 1
+LMPNN_NUM_BATCHES    = 1
 
 # ── Adaptive thresholds ──────────────────────────────────────────────────────
 # Each value is either None (threshold disabled) or a (lower, upper) tuple.
@@ -347,6 +348,7 @@ async def run_discontinuous_scaffolds() -> None:
                 "mcsa_pdb_dir":             MCSA_PDB_DIR,
                 "rmsd_threshold":           RMSD_THRESHOLD,
                 "diffusion_batch_size":     DIFFUSION_BATCH_SIZE,
+                "lmpnn_num_batches":        LMPNN_NUM_BATCHES,
                 # threshold bounds
                 "backbone_rog_bounds":      BACKBONE_ROG_BOUNDS,
                 "backbone_ala_bounds":      BACKBONE_ALA_BOUNDS,

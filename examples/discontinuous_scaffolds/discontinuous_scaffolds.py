@@ -30,6 +30,7 @@ DEFAULT_MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
 DEFAULT_RFD_INPUT        = "mcsa_mod8-5.json"
 DEFAULT_RMSD_THRESHOLD   = 1.5
 DEFAULT_DIFFUSION_BATCH_SIZE = 10
+DEFAULT_LMPNN_NUM_BATCHES = 4
 
 
 # ── Module-level helper ──────────────────────────────────────────────────────
@@ -169,6 +170,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         self.mcsa_pdb_dir         = kwargs.get("mcsa_pdb_dir",         None)
         self.rmsd_threshold       = kwargs.get("rmsd_threshold",       DEFAULT_RMSD_THRESHOLD)
         self.diffusion_batch_size = kwargs.get("diffusion_batch_size", DEFAULT_DIFFUSION_BATCH_SIZE)
+        self.lmpnn_num_batches    = kwargs.get("lmpnn_num_batches",    DEFAULT_LMPNN_NUM_BATCHES)
 
         # Derive LMPNN JSONs from RFD input if not explicitly provided.
         # Branch pipelines always receive explicit (pre-filtered) JSONs, so
@@ -316,6 +318,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                 f"{output_dir} "
                 f"{runtime_json} "
                 f"{runtime_fixed_json}"
+                f"{self.lmpnn_num_batches}"
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
