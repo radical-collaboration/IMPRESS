@@ -91,10 +91,10 @@ Branch pipelines are full `DiscontinuousScaffoldsPipeline` instances that re-ent
 
 When a backbone-start branch is spawned:
 - `start_step = STEP_BACKBONE_GEN` — branch runs all three stages
-- `rfd_input_filepath` — filtered to the failing models only
-- Inherits the original `lmpnn_pdb_multi_json` and `lmpnn_fixed_res_json` (for potential future adaptive filtering within the branch)
+- `rfd_input_filepath` — filtered to the failing models only via `_filter_rfd_json_by_models()`, which also rewrites any relative `"input"` paths to absolute paths
+- `lmpnn_pdb_multi_json` / `lmpnn_fixed_res_json` — auto-generated for the branch from the filtered `rfd_input_filepath` (same mechanism as the root pipeline)
 
-The main pipeline's `current_lmpnn_pdb_multi_json` and `current_lmpnn_fixed_res_json` are updated to the filtered JSONs so Step 4 only processes passing backbone models.
+The main pipeline's `current_lmpnn_pdb_multi_json` and `current_lmpnn_fixed_res_json` are updated to filtered JSONs so Step 4 only processes passing backbone models.
 
 ### After the sequence stage
 
@@ -139,8 +139,8 @@ All arguments are passed as kwargs to `DiscontinuousScaffoldsPipeline` (via `Pip
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `rfd_input_filepath` | `str` | `DEFAULT_RFD_INPUT` | RFDiffusion3 input JSON file |
-| `lmpnn_pdb_multi_json` | `str` | `None` | LigandMPNN batch PDB JSON (maps model names to PDB paths) |
-| `lmpnn_fixed_res_json` | `str` | `None` | LigandMPNN fixed residues JSON |
+| `lmpnn_pdb_multi_json` | `str` | auto-generated | LigandMPNN batch PDB JSON (maps model names to PDB paths); auto-generated from `rfd_input_filepath` by `generate_lmpnn_jsons()` at pipeline init if not provided |
+| `lmpnn_fixed_res_json` | `str` | auto-generated | LigandMPNN fixed residues JSON; auto-generated from `rfd_input_filepath` by `generate_lmpnn_jsons()` at pipeline init if not provided |
 | `island_counts_csv` | `str` | `None` | Island counts reference CSV (used in backbone and sequence analysis) |
 | `mcsa_pdb_dir` | `str` | `None` | Directory of reference MCSA PDB files for RMSD comparison in final analysis |
 | `rmsd_threshold` | `float` | `1.5` | RMSD threshold (Å) used in Step 8 final analysis |

@@ -18,15 +18,15 @@ pip install .
 python run_discontinuous_scaffolds.py
 ```
 
-Before running on HPC, edit the path constants at the top of `run_discontinuous_scaffolds.py` (`SCRIPTS_PATH`, `FOUNDRY_SIF_PATH`, `MPNN_DIR`, `RFD_INPUT_FILEPATH`, `LMPNN_PDB_MULTI_JSON`, `LMPNN_FIXED_RES_JSON`, `ISLAND_COUNTS_CSV`, `MCSA_PDB_DIR`, etc.) to match the target system.
+Before running on HPC, edit the path constants at the top of `run_discontinuous_scaffolds.py` (`SCRIPTS_PATH`, `FOUNDRY_SIF_PATH`, `MPNN_DIR`, `RFD_INPUT_FILEPATH`, `ISLAND_COUNTS_CSV`, `MCSA_PDB_DIR`, etc.) to match the target system. LMPNN JSONs (`lmpnn_pdb_multi_json`, `lmpnn_fixed_res_json`) are auto-generated from `rfd_input_filepath` by `generate_lmpnn_jsons()` at pipeline init and do not need to be set manually.
 
 ## Architecture
 
 ### Two-file structure
 
-- **`discontinuous_scaffolds.py`** — defines `DiscontinuousScaffoldsPipeline(ImpressBasePipeline)`, the `_identify_passing_models()` helper, and all step constants. All eight pipeline steps plus three local analysis-check tasks are registered via `@self.auto_register_task()` inside `register_pipeline_tasks()`. The `run()` method drives a linear three-stage execution flow with an adaptive checkpoint after each stage.
+- **`discontinuous_scaffolds.py`** — defines `DiscontinuousScaffoldsPipeline(ImpressBasePipeline)`, the `_identify_passing_models()` helper, the `generate_lmpnn_jsons()` function (auto-generates LMPNN batch and fixed-residue JSONs from the RFD input at pipeline init), and all step constants. All eight pipeline steps plus three local analysis-check tasks are registered via `@self.auto_register_task()` inside `register_pipeline_tasks()`. The `run()` method drives a linear three-stage execution flow with an adaptive checkpoint after each stage.
 
-- **`run_discontinuous_scaffolds.py`** — entry point. Sets path/parameter constants, threshold constants, defines the `adaptive_decision()` callback and its helper functions, creates an `ImpressManager`, and launches via `manager.start(pipeline_setups=[...])`.
+- **`run_discontinuous_scaffolds.py`** — entry point. Sets path/parameter constants, threshold constants, defines the `adaptive_decision()` callback and its helper functions (`_filter_json_by_models`, `_filter_rfd_json_by_models`, `_create_filtered_seqs_dir`, `_next_branch_id`, `_shared_pipeline_kwargs`), creates an `ImpressManager`, and launches via `manager.start(pipeline_setups=[...])`.
 
 ### Eight pipeline steps (state-machine constants in `discontinuous_scaffolds.py`)
 
@@ -59,8 +59,10 @@ Fold stage     (steps 7–8)  →  check_fold_results()        →  adaptive_dec
 ### Adaptive branching for failing models
 
 When a model fails the threshold battery for the current stage, `adaptive_decision()`:
-1. Filters the **current pipeline's** downstream inputs to only the passing models (updated LMPNN JSONs after backbone; filtered `seqs_split_dir` symlink directory after sequence).
+1. Filters the **current pipeline's** downstream inputs to only the passing models (updated LMPNN JSONs and `rfd_input_filepath` after backbone; filtered `seqs_split_dir` symlink directory after sequence).
 2. Spawns a **branch pipeline** for the failing models, starting at the stage where they failed, via `pipeline.submit_child_pipeline_request(...)`.
+
+Backbone branches additionally receive a `rfd_input_filepath` filtered to only the failing models via `_filter_rfd_json_by_models()`, which also rewrites any relative `"input"` paths to absolute paths (required because the filtered JSON is written to a different directory).
 
 Branch pipelines are full `DiscontinuousScaffoldsPipeline` instances configured with:
 - `start_step` — skips earlier stages (`STEP_BACKBONE_GEN`, `STEP_SEQ_PRED`, or `STEP_FOLD_PRED`)
