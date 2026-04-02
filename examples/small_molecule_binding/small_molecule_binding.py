@@ -221,7 +221,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_backbone(task_description=None):
+        async def analysis_backbone():
             out_dir    = f"{self.base_path}/{self.taskcount}_rfd3/out"
             json_files = [
                 f for f in os.listdir(out_dir)
@@ -275,8 +275,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()
         async def mpnn(
-            fixed_residues_file: str | None = None, task_description=None
-        ):
+            fixed_residues_file: str | None = None):
             self.taskcount += 1
             taskname = "mpnn"
             self.previous_task = taskname
@@ -316,7 +315,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_sequence(task_description=None):
+        async def analysis_sequence():
             out_dir  = f"{self.base_path}/{self.taskcount}_mpnn/out"
             seqs_dir = f"{out_dir}/seqs"
             self.state['last_mpnn_seqs_dir'] = seqs_dir
@@ -390,7 +389,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_packmin(task_description=None):
+        async def analysis_packmin():
             out_dir     = f"{self.base_path}/{self.taskcount}_packmin/out"
             score_files = [f for f in os.listdir(out_dir) if f.endswith('_packmin_score.json')]
 
@@ -423,7 +422,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_fastrelax(task_description=None):
+        async def analysis_fastrelax():
             out_dir    = f"{self.base_path}/{self.taskcount}_fastrelax/out"
             fasc_files = [f for f in os.listdir(out_dir) if f.endswith('.fasc')]
 
@@ -468,7 +467,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_interface(task_description=None):
+        async def analysis_interface():
             sc_file = (
                 f"{self.base_path}/{self.taskcount}_filter_shape/out/"
                 "shape_complementarity_values.txt"
@@ -522,7 +521,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             )
 
         @self.auto_register_task(local_task=True)
-        async def analysis_fold(task_description=None):
+        async def analysis_fold():
             out_dir     = f"{self.base_path}/{self.taskcount}_alphafold/out"
             score_files = [
                 f for f in os.listdir(out_dir)
