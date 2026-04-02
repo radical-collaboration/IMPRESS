@@ -62,7 +62,7 @@ Full backbone + side-chain relaxation of the best packed structure using Rosetta
 
 - **Input**: best packed PDB; ligand `.params` file
 - **Output**: `<N>_fastrelax/out/<stem>_relaxed_0001.pdb`, `<stem>_relaxed.fasc`
-- **Scores extracted**: `total_score` (REU), `fa_rep` (REU, Lennard-Jones repulsion), `rmsd` (Å, deviation from input)
+- **Scores extracted**: `total_score` (REU), `interaction_energy` (REU, protein–ligand interaction), `fa_rep` (REU, Lennard-Jones repulsion), `rmsd` (Å, deviation from input)
 
 ### `filter_shape` + `analysis_interface` — Shape Complementarity
 PyRosetta script computing shape complementarity (SC) and interface energetics between the designed protein and ligand. Gates progression to fold prediction.
@@ -90,8 +90,9 @@ All thresholds are configurable at pipeline construction time (see [Configurable
 | `backbone` | `ligand_clashes` | must be `== 0` | No ligand atom clashes in backbone |
 | `backbone` | `max_ca_deviation` | `< 2.0 Å` | Backbone stays close to diffusion target |
 | `backbone` | `ss_fraction` | `> 0.2` | At least 20% secondary structure (helix + sheet) |
-| `fastrelax` | `fa_rep` | `< 10.0 REU` | Low steric clash energy after relaxation |
-| `fastrelax` | `total_score` | `< 0.0 REU` | Net favourable total energy |
+| `fastrelax` | `interaction_energy` | `< 0.0 REU` | Favourable protein–ligand interaction energy |
+| `fastrelax` | `total_score` | `< 0.0 REU` | Net favourable total Rosetta energy |
+| `fastrelax` | `fa_rep` | `< 150.0 REU` | Low steric clash energy after relaxation |
 | `interface` | `max_sc` | `>= 0.5` | Shape complementarity at ligand interface |
 | `fold` | `best_mean_plddt` | `>= 70.0` | AlphaFold2 confidence in predicted structure |
 
@@ -158,8 +159,8 @@ Place all input files in `<base_path>/<pipeline_name>_in/` (default: `p1_in/`).
 |---|---|---|
 | `ALR_binder_design.json` | Yes | RFdiffusion3 design config (target structure, hotspot residues, diffusion settings) |
 | `fixed_residues.txt` | Yes | Space-separated residue indices to hold fixed during MPNN sequence design |
-| `<ligand>.params` | Yes | Rosetta ligand parameter file (e.g. `ALX.params`); filename must match `ligand_params` kwarg |
-| `<ligand>/` | Yes | Directory containing the ligand PDB/SDF files for shape complementarity analysis (named by `ligand_name`, default `ALX`) |
+| `<ligand>.params` | Yes | Rosetta ligand parameter file (e.g. `ALR.params`); filename must match `ligand_params` kwarg |
+| `<ligand>/` | Yes | Directory containing the ligand PDB/SDF files for shape complementarity analysis (named by `ligand_name`, default `ALR`) |
 | `common_filenames.txt` | Yes (filter_energy) | List of accepted filenames for ligand energy filtering |
 | `input_pdbs/` | Optional | Target PDB files referenced by the diffusion config |
 
@@ -174,10 +175,10 @@ All parameters are passed as `kwargs` to `PipelineSetup`:
 | Parameter | Default | Description |
 |---|---|---|
 | `base_path` | `os.getcwd()` | Root directory for all task subdirectories and input files |
-| `mpnn_dir` | `<base_path>/LigandMPNN` | Path to LigandMPNN repository checkout |
-| `foundry_sif_path` | `/anvil/scratch/x-mason/foundry.sif` | Apptainer SIF image containing RFdiffusion3 |
-| `colabfold_path` | `/anvil/scratch/x-mason/localcolabfold` | LocalColabFold installation (pixi manifest path) |
-| `ligand_params` | `ALX.params` | Ligand parameter filename (relative to `<pipeline_name>_in/`) |
+| `mpnn_dir` | `/ocean/projects/dmr170002p/hooten/LigandMPNN` | Path to LigandMPNN repository checkout |
+| `foundry_sif_path` | `/ocean/projects/dmr170002p/hooten/foundry.sif` | Apptainer SIF image containing RFdiffusion3 |
+| `colabfold_path` | `/ocean/projects/dmr170002p/hooten/localcolabfold` | LocalColabFold installation (pixi manifest path) |
+| `ligand_params` | `ALR.params` | Ligand parameter filename (relative to `<pipeline_name>_in/`) |
 
 ### Pipeline behaviour
 
@@ -186,6 +187,7 @@ All parameters are passed as `kwargs` to `PipelineSetup`:
 | `mock` | `False` | Run with lightweight mock tasks (no HPC tools required) |
 | `num_refine_cycles` | `3` | Number of MPNN → PackMin cycles per backbone attempt |
 | `mpnn_ensemble_size` | `10` | Number of independent sequence batches on cycle 0 |
+| `diffusion_batch_size` | `1` | Number of backbone models to generate per RFdiffusion3 call |
 | `max_tasks` | `300` | Total ensemble entries before stopping (counts every backbone, sequence, and fold entry, pass and fail) |
 
 ### Quality thresholds
@@ -194,8 +196,9 @@ All parameters are passed as `kwargs` to `PipelineSetup`:
 |---|---|---|
 | `backbone_max_ca_deviation` | `2.0` Å | Maximum allowed CA deviation from diffusion target |
 | `backbone_min_ss_fraction` | `0.2` | Minimum helix + sheet fraction |
-| `fastrelax_max_fa_rep` | `10.0` REU | Maximum Lennard-Jones repulsion after relaxation |
+| `fastrelax_max_interact` | `0.0` REU | Maximum protein–ligand interaction energy after relaxation |
 | `fastrelax_max_total_score` | `0.0` REU | Maximum total Rosetta score after relaxation |
+| `fastrelax_max_fa_rep` | `150.0` REU | Maximum Lennard-Jones repulsion after relaxation |
 | `interface_min_sc` | `0.5` | Minimum shape complementarity score |
 | `fold_min_plddt` | `70.0` | Minimum mean pLDDT from ColabFold |
 
@@ -244,9 +247,9 @@ FOLD_MIN_PLDDT            = 70.0
 And in the pipeline kwargs:
 
 ```python
-"foundry_sif_path": "/path/to/foundry.sif",
-"colabfold_path":   "/path/to/localcolabfold",
-"mpnn_dir":         "/path/to/LigandMPNN",
+"foundry_sif_path": "/path/to/foundry.sif",      # overrides default
+"colabfold_path":   "/path/to/localcolabfold",   # overrides default
+"mpnn_dir":         "/path/to/LigandMPNN",        # overrides default
 "ligand_params":    "YOURLIGAND.params",
 "max_tasks":        300,
 ```
