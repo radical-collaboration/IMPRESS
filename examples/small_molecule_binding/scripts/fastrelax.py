@@ -100,7 +100,7 @@ def main(args):
 if __name__ == '__main__':
 	args = parse_args()
 
-	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false'
+	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false -out:level 500'
 	if args.constraints:
 		opts += ' -enzdes::cstfile {}'.format(args.constraints)
 		opts += ' -run:preserve_header'
@@ -120,5 +120,5 @@ if __name__ == '__main__':
 	if args.waters:
 		opts += '  -ignore_waters false'
 	init(opts)
-	
+
 	main(args)

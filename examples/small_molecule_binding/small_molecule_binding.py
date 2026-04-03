@@ -146,7 +146,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.mpnn_dir        = kwargs.get("mpnn_dir", f"/ocean/projects/dmr170002p/hooten/LigandMPNN")
 
         # Configurable tool paths and ensemble sizes
-        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/ocean/projects/dmr170002p/hooten/foundry.sif")
+        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/ocean/projects/dmr170002p/hooten/foundry_medprec.sif")
         self.colabfold_path     = kwargs.get("colabfold_path",     "/ocean/projects/dmr170002p/hooten/localcolabfold")
         self.ligand_params      = kwargs.get("ligand_params",      "ALR.params")
         self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 10)
@@ -311,7 +311,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {pdb_path}"
                 f" {output_dir}"
                 f" {n_batches}"
-                f" \"{fixed_residues}\""
+                f' "{fixed_residues}"'
+                f" > mpnnoutput.txt 2>&1"
             )
 
         @self.auto_register_task(local_task=True)
@@ -419,6 +420,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {pdb_path}"
                 f" {lig_path}"
                 f" {output_dir}"
+                f" > fastrelax.txt 2&>1"
             )
 
         @self.auto_register_task(local_task=True)
