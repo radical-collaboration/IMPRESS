@@ -220,7 +220,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             branch_rfd = _filter_rfd_json_by_models(
                 pipeline.rfd_input_filepath,
                 failing,
-                f"{base}/{branch_id}/{self.rfd_input_filepath}.json",
+                f"{base}/{branch_id}/{pipeline.rfd_input_filepath}.json",
             )
 
             pipeline.logger.pipeline_log(
@@ -238,7 +238,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 'lmpnn_fixed_res_json': pipeline.lmpnn_fixed_res_json,
                 **_shared_pipeline_kwargs(pipeline),
             })
-            
+
         if not passing:
             pipeline.logger.pipeline_log(
                 "[adaptive/backbone] No models passed backbone QC; terminating pipeline"
