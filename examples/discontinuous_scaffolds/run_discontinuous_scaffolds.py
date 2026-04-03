@@ -220,7 +220,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             branch_rfd = _filter_rfd_json_by_models(
                 pipeline.rfd_input_filepath,
                 failing,
-                f"{base}/{branch_id}/branch_rfd_input.json",
+                f"{base}/{branch_id}/{self.rfd_input_filepath}.json",
             )
 
             pipeline.logger.pipeline_log(
