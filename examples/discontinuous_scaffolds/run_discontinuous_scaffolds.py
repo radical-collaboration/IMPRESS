@@ -2,7 +2,7 @@
 import asyncio
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
 from radical.asyncflow import LocalExecutionBackend
@@ -17,6 +17,8 @@ from discontinuous_scaffolds import (
     STEP_DONE,
 )
 
+import rhapsody,logging
+rhapsody.enable_logging(level=logging.DEBUG)
 
 # ── Configurable parameters ─────────────────────────────────────────────────
 
@@ -24,7 +26,8 @@ SCRIPTS_PATH     = "/ocean/projects/dmr170002p/hooten/discontinuous_scaffolds/IM
 FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry.sif"
 MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
 
-RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/mcsa_41_one.json"
+RFD_INPUT_FILENAME   = f"mcsa_41_one.json"
+RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/{RFD_INPUT_FILENAME}"
 ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
@@ -220,7 +223,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             branch_rfd = _filter_rfd_json_by_models(
                 pipeline.rfd_input_filepath,
                 failing,
-                f"{base}/{branch_id}/{pipeline.rfd_input_filepath}.json",
+                f"{base}/{branch_id}/{pipeline.RFD_INPUT_FILENAME}",
             )
 
             pipeline.logger.pipeline_log(
@@ -328,9 +331,9 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
 
 async def run_discontinuous_scaffolds() -> None:
     """Set up the IMPRESS manager and launch the discontinuous scaffolds pipeline."""
-    #backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend(ProcessPoolExecutor())
     # For HPC execution use:
-    backend = await DragonExecutionBackendV3()
+    #backend = await DragonExecutionBackendV3()
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
