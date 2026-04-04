@@ -4,8 +4,29 @@ import os
 
 from .impress_pipeline import ImpressBasePipeline
 
+<<<<<<< Updated upstream
+=======
+MPNN_PRE_EXEC = [
+    "source /ocean/projects/dmr170002p/hooten/ProteinMPNN/.venv/bin/activate"
+]
+
+AF2_PRE_EXEC = [
+    "module load cuda",
+    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
+]
+
+MISC_PRE_EXEC = [
+    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
+]
+
+BOLTZ_PRE_EXEC = [
+    'export PYTHONPATH=""',
+    "source /ocean/projects/dmr170002p/hooten/boltz/.venv/bin/activate"
+]
+
+>>>>>>> Stashed changes
 #MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
-MPNN_PATH = f"/anvil/scratch/x-mason/ProteinMPNN"
+MPNN_PATH = f"/ocean/projects/dmr170002p/hooten/ProteinMPNN"
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -133,13 +154,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
                 fasta_path = os.path.join(output_dir, f"{base_name}.fa")
                 with open(fasta_path, "w") as f:
-                    f.write(f">pdz\n{design_seq}\n>pep\n{pep_seq}\n")
+                    f.write(f">pdz|protein\n{design_seq}\n>pep|protein\n{pep_seq}\n")
 
             return fasta_file_to_return
 
         # alphafold, must be run separately for each structure one at a time!
         @self.auto_register_task()
         async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+<<<<<<< Updated upstream
             return (
                 f"bash {self.scripts_path}/s4_alphafold.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
@@ -148,6 +170,36 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # pLDDT_extract
         async def s5():
+=======
+             cmd = (
+                 f"boltz predict "
+                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
+                 f"--out_dir {self.output_path}/af/prediction/dimer_models/{target_fasta} "
+                 f"--use_msa_server "
+                 f"--cache /ocean/projects/dmr170002p/hooten/boltz/ "
+                 f"--output_format pdb "
+                 f"--write_full_pae "
+             )
+             return cmd
+#            cmd = (
+#                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
+#                f"colabfold_batch "
+#                f"--model-type alphafold2_multimer_v3 "
+#                f"--max-template-date 2020-12-01 "
+#                f"--rank multimer "
+#                f"--random-seed 999 "
+#                f"--calc-extra-ptm "
+#                f"--save-all TRUE "
+#                f"--debug-logging "
+#                f"--save-pair-representations "
+#                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+#                f"{self.output_path}/af/prediction/dimer_models/{target_fasta} "
+#            )
+#            return cmd
+
+        @self.auto_register_task()  # pLDTT_extract
+        async def s5(task_description={}):  # noqa: B006
+>>>>>>> Stashed changes
             return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
                 f"{self.base_path} "
@@ -225,9 +277,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 )
 
                 s4_description = {
+<<<<<<< Updated upstream
+=======
+#                    "pre_exec": AF2_PRE_EXEC,
+                    "pre_exec": BOLTZ_PRE_EXEC,
+>>>>>>> Stashed changes
                     "post_exec": [
                         f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
-#                        f"""find {models_path}/ -name "*ranking_debug*.json" -exec cp {{}} {best_ptm_json} \\;""",
+                        f"""find {models_path}/ -name "pdz*rank_001*.json" -exec cp {{}} {best_ptm_json} \\;""",
                         f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
                     ],
                 }

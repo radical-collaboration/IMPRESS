@@ -8,7 +8,8 @@ base_path="$1"
 iter="$2"
 out_name="$3"
 
-source /anvil/scratch/x-mason/IMPRESS/.venv/bin/activate
+#source /anvil/scratch/x-mason/IMPRESS/.venv/bin/activate
+source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
 
 python3 "$base_path/plddt_extract_pipeline.py" \
     --path="$base_path" \

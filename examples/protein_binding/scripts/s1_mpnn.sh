@@ -11,7 +11,8 @@ mpnn_path="$4"
 num_seqs="$5"
 chain="$6"
 
-source /anvil/scratch/x-mason/ProteinMPNN/.venv/bin/activate
+#source /anvil/scratch/x-mason/ProteinMPNN/.venv/bin/activate
+source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate
 
 python3 "$mpnn_script" \
     -pdb="$input_path" \

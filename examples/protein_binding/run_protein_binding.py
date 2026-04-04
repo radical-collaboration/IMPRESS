@@ -3,14 +3,16 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-#from radical.asyncflow import RadicalExecutionBackend
-#from rhapsody.backends import DragonExecutionBackendV3
+from concurrent.futures import ThreadPoolExecutor
+from rhapsody.backends import DragonExecutionBackendV3
 from rhapsody.backends import RadicalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager
 from impress.pipelines.protein_binding import ProteinBindingPipeline
 
+from rhapsody.backends import DragonExecutionBackendV3
 
 async def adaptive_criteria(current_score: float, previous_score: float) -> bool:
     """
@@ -124,15 +126,16 @@ async def impress_protein_bind() -> None:
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    backend = await RadicalExecutionBackend(
-        {
-            'gpus':1,
-            'cores':16,
-            'runtime':0.5 * 60,
-            'resource': 'purdue.anvil_gpu'
-        }
-    )
-#    backend = await DragonExecutionBackendV3()
+#    backend = await RadicalExecutionBackend(
+#        {
+#            'gpus':1,
+#            'cores':16,
+#            'runtime':4 * 60,
+#            'resource': 'access.bridges2'
+#        }
+#    )
+    backend = await DragonExecutionBackendV3()
+#    backend = await LocalExecutionBackend(ThreadPoolExecutor())
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
