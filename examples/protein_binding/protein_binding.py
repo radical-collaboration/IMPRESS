@@ -2,30 +2,8 @@ import asyncio
 import copy
 import os
 
-from .impress_pipeline import ImpressBasePipeline
+from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-<<<<<<< Updated upstream
-=======
-MPNN_PRE_EXEC = [
-    "source /ocean/projects/dmr170002p/hooten/ProteinMPNN/.venv/bin/activate"
-]
-
-AF2_PRE_EXEC = [
-    "module load cuda",
-    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
-]
-
-MISC_PRE_EXEC = [
-    "source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate"
-]
-
-BOLTZ_PRE_EXEC = [
-    'export PYTHONPATH=""',
-    "source /ocean/projects/dmr170002p/hooten/boltz/.venv/bin/activate"
-]
-
->>>>>>> Stashed changes
-#MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
 MPNN_PATH = f"/ocean/projects/dmr170002p/hooten/ProteinMPNN"
 
 class ProteinBindingPipeline(ImpressBasePipeline):
@@ -161,7 +139,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # alphafold, must be run separately for each structure one at a time!
         @self.auto_register_task()
         async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
-<<<<<<< Updated upstream
             return (
                 f"bash {self.scripts_path}/s4_alphafold.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
@@ -170,8 +147,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # pLDDT_extract
         async def s5():
-=======
-             cmd = (
+            f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
+            f"""find {models_path}/ -name "pdz*rank_001*.json" -exec cp {{}} {best_ptm_json} \\;""",
+            f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
+
+            cmd = (
                  f"boltz predict "
                  f"{self.output_path}/af/fasta/{target_fasta}.fa "
                  f"--out_dir {self.output_path}/af/prediction/dimer_models/{target_fasta} "
@@ -199,7 +179,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # pLDTT_extract
         async def s5(task_description={}):  # noqa: B006
->>>>>>> Stashed changes
             return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
                 f"{self.base_path} "
@@ -276,22 +255,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     f"{target_fasta}.pdb",
                 )
 
-                s4_description = {
-<<<<<<< Updated upstream
-=======
-#                    "pre_exec": AF2_PRE_EXEC,
-                    "pre_exec": BOLTZ_PRE_EXEC,
->>>>>>> Stashed changes
-                    "post_exec": [
-                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
-                        f"""find {models_path}/ -name "pdz*rank_001*.json" -exec cp {{}} {best_ptm_json} \\;""",
-                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
-                    ],
-                }
+#                s4_description = {
+#                    "post_exec": [
+#                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
+#                        f"""find {models_path}/ -name "pdz*rank_001*.json" -exec cp {{}} {best_ptm_json} \\;""",
+#                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
+#                    ],
+#                }
 
                 # launch coroutine without awaiting yet
                 alphafold_tasks.append(
-                    self.s4(target_fasta=target_fasta, task_description=s4_description)
+                    self.s4(target_fasta=target_fasta)
                 )
 
             self.logger.pipeline_log(
