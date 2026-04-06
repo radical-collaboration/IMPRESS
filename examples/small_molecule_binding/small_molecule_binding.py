@@ -216,8 +216,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {self.foundry_sif_path}"
                 f" {output_dir}"
                 f" {inputs}"
-                f" \"{scaffold_arg}\""
                 f" {self.diffusion_batch_size}"
+                f" {scaffold_arg}"
             )
 
         @self.auto_register_task(local_task=True)
@@ -312,7 +312,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {output_dir}"
                 f" {n_batches}"
                 f' "{fixed_residues}"'
-                f" > mpnnoutput.txt 2>&1"
+                f" > mpnnoutput.txt"
             )
 
         @self.auto_register_task(local_task=True)
@@ -420,7 +420,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {pdb_path}"
                 f" {lig_path}"
                 f" {output_dir}"
-                f" > fastrelax.txt 2&>1"
+                f" > fastrelax.txt"
             )
 
         @self.auto_register_task(local_task=True)

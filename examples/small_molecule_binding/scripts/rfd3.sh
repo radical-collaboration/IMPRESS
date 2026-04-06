@@ -8,14 +8,20 @@ set -euo pipefail
 foundry_sif_path="$1"
 output_dir="$2"
 inputs="$3"
-scaffold_arg="$4"
-diffusion_batch_size="$5"
+diffusion_batch_size="$4"
+
+if [ $# -eq 5  ]; then
+ scaffold_arg="$5"
+else
+ scaffold_arg=""
+fi
 
 apptainer exec --nv "$foundry_sif_path" rfd3 design \
     out_dir="$output_dir" \
     inputs="$inputs" \
-    ${scaffold_arg:+$scaffold_arg} \
     skip_existing=False \
     dump_trajectories=True \
     prevalidate_inputs=True \
-    diffusion_batch_size="$diffusion_batch_size"
+    diffusion_batch_size="$diffusion_batch_size" \
+    ${scaffold_arg:+$scaffold_arg}
+

@@ -1,6 +1,6 @@
 import asyncio
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
 from radical.asyncflow import LocalExecutionBackend
@@ -14,6 +14,10 @@ from small_molecule_binding import (
     ETYPE_BACKBONE, ETYPE_SEQUENCE, ETYPE_FOLD,
     _ca_rmsd, _seq_identity, _ensemble_selective_avg,
 )
+
+import logging
+import rhapsody
+rhapsody.enable_logging(level=logging.DEBUG)
 
 # ── Per-step quality thresholds ────────────────────────────────────────────
 BACKBONE_MAX_CA_DEVIATION = 1.0
@@ -120,8 +124,8 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
-    #backend = await LocalExecutionBackend(ThreadPoolExecutor())
-    backend = await DragonExecutionBackendV3()
+    backend = await LocalExecutionBackend(ProcessPoolExecutor())
+    #backend = await DragonExecutionBackendV3()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
