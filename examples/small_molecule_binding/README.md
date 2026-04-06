@@ -1,5 +1,13 @@
 # Small Molecule Binding Pipeline
 
+## Revision History
+
+| Date | Commit | Notes |
+|---|---|---|
+| 2026-04-06 | 3390b61 | change log added |
+
+---
+
 An IMPRESS pipeline for iterative computational design of protein binders against a small molecule ligand. Starting from a ligand-containing target structure, the pipeline runs backbone diffusion → sequence design → energy minimization → structural validation → fold prediction in a loop, using an ensemble-based adaptive routing function to direct the search toward productive regions of structure-sequence space.
 
 ---
@@ -176,7 +184,7 @@ All parameters are passed as `kwargs` to `PipelineSetup`:
 |---|---|---|
 | `base_path` | `os.getcwd()` | Root directory for all task subdirectories and input files |
 | `mpnn_dir` | `/ocean/projects/dmr170002p/hooten/LigandMPNN` | Path to LigandMPNN repository checkout |
-| `foundry_sif_path` | `/ocean/projects/dmr170002p/hooten/foundry.sif` | Apptainer SIF image containing RFdiffusion3 |
+| `foundry_sif_path` | `/ocean/projects/dmr170002p/hooten/foundry_medprec.sif` | Apptainer SIF image containing RFdiffusion3 |
 | `colabfold_path` | `/ocean/projects/dmr170002p/hooten/localcolabfold` | LocalColabFold installation (pixi manifest path) |
 | `ligand_params` | `ALR.params` | Ligand parameter filename (relative to `<pipeline_name>_in/`) |
 
@@ -281,3 +289,7 @@ The following values are embedded in the code and not exposed as constructor kwa
 | `adaptive_decision` | retry count `>= 3` | Retries before abandoning backbone on sequence plateau |
 | `PYROSETTA_PRE_EXEC` | `source /anvil/scratch/x-mason/env_pyrosetta` | PyRosetta environment activation (Anvil-specific) |
 | `AF2_PRE_EXEC` | CUDA + pixi PATH setup | GPU environment for ColabFold (Anvil-specific) |
+
+### Execution backend
+
+`run_small_molecule_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.

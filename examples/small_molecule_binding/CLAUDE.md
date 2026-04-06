@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Revision History
+
+| Date | Commit | Notes |
+|---|---|---|
+| 2026-04-06 | 3390b61 | change log added |
+
 ## Context
 
 This directory is an **example workflow** within the larger [IMPRESS framework](https://github.com/radical-collaboration/IMPRESS) (Integrated Machine-learning for PRotEin Structures at Scale). IMPRESS is an HPC framework for protein inverse design using Foundation Models.
@@ -165,7 +171,7 @@ Steps communicate via `self.state`:
 
 ### Execution backends
 
-`run_small_molecule_binding.py` has `DragonExecutionBackendV3()` active by default (HPC). Switch to the commented-out `LocalExecutionBackend(ThreadPoolExecutor())` for local testing.
+`run_small_molecule_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.
 
 ### Pipeline inputs
 
