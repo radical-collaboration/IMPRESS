@@ -146,18 +146,13 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task()  # pLDDT_extract
-        async def s4():
-             cmd = (
-                 f"boltz predict "
-                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
-                 f"--out_dir {self.output_path}/af/prediction/dimer_models/{target_fasta} "
-                 f"--use_msa_server "
-                 f"--cache /ocean/projects/dmr170002p/hooten/boltz/ "
-                 f"--output_format pdb "
-                 f"--write_full_pae "
-             )
-             return cmd
+        @self.auto_register_task()
+        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+            return (
+                f"bash {self.scripts_path}/s4_boltz.sh "
+                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+            )
 #            cmd = (
 #                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
 #                f"colabfold_batch "
