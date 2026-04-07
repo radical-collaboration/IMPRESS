@@ -23,16 +23,16 @@ rhapsody.enable_logging(level=logging.DEBUG)
 # ── Configurable parameters ─────────────────────────────────────────────────
 
 SCRIPTS_PATH     = "/ocean/projects/dmr170002p/hooten/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
-FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry.sif"
+FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry_medprec.sif"
 MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
 
-RFD_INPUT_FILENAME   = f"mcsa_41_one.json"
+RFD_INPUT_FILENAME   = f"mcsa_mod8-1.json"
 RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/{RFD_INPUT_FILENAME}"
 ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
-DIFFUSION_BATCH_SIZE = 1
-LMPNN_NUM_BATCHES    = 1
+DIFFUSION_BATCH_SIZE = 8
+LMPNN_NUM_BATCHES    = 4
 
 # ── Adaptive thresholds ──────────────────────────────────────────────────────
 # Each value is either None (threshold disabled) or a (lower, upper) tuple.

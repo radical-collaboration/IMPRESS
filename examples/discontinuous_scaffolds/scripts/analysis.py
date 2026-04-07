@@ -301,7 +301,7 @@ def main():
 
     rows = []
     for input_dir in args.input_dirs:
-        chai1_outputs_dir = input_dir / "chai1_outputs"
+        chai1_outputs_dir = input_dir
         dir_rows = list(iter_rows(chai1_outputs_dir, motif_data, args.input_pdb_dir))
         if not dir_rows:
             print(f"Warning: no rows from {chai1_outputs_dir}", file=sys.stderr)

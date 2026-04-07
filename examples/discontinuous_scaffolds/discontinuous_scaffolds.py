@@ -276,7 +276,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
 
         # ── Step 4: Sequence prediction — LigandMPNN (CPU) ──────────────────
         @self.auto_register_task()
-        async def seq_pred(task_description={}):
+        async def seq_pred(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "seq_pred"
             taskdir  = f"{self.base_path}/{self.branch_id}/{self.taskcount}_{taskname}"
