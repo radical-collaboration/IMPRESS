@@ -151,7 +151,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.ligand_params      = kwargs.get("ligand_params",      "ALR.params")
         self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 10)
         self.num_refine_cycles  = kwargs.get("num_refine_cycles",  3)
-        self.diffusion_batch_size = kwargs.get("diffusion_batch_size", 1)
+        self.diffusion_batch_size = kwargs.get("diffusion_batch_size", 10)
 
         # Quality thresholds (overridable at construction time)
         self.backbone_max_ca_deviation = kwargs.get("backbone_max_ca_deviation", 2.0)
