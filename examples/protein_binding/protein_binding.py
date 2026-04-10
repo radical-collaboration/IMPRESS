@@ -148,11 +148,13 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()
         async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
+            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
+            return cmd
 #            cmd = (
 #                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
 #                f"colabfold_batch "
@@ -171,10 +173,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # pLDTT_extract
         async def s5(task_description={}):  # noqa: B006
-            f"""find {models_path}/ -name "*.pdb" -exec cp {{}} {best_model_pdb} \\;"""
-            f"""find {models_path}/ -name "*.json" -exec cp {{}} {best_ptm_json} \\;"""
-            f"""find {models_path}/ -name "*.pdb" -exec cp {{}} {mpnn_pdb} \\;"""
-            return((
+            return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
                 f"{self.base_path} "
                 f"{self.passes} "
@@ -251,24 +250,29 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     f"{target_fasta}.pdb",
                 )
 
-#                s4_description = {
-#                    "post_exec": [
-#                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {best_model_pdb} \\;""",
-#                        f"""find {models_path}/ -name "pdz*rank_001*.json" -exec cp {{}} {best_ptm_json} \\;""",
-#                        f"""find {models_path}/ -name "pdz*rank_001*.pdb" -exec cp {{}} {mpnn_pdb} \\;""",
-#                    ],
-#                }
+                s4_description = {
+                    "post_exec": [
+                        f"cp {models_path}/{target_fasta}_model_0.pdb {best_model_pdb}",
+                        f"cp {models_path}/confidence_{target_fasta}_model_0.json {best_ptm_json}",
+                        f"cp {models_path}/{target_fasta}_model_0.pdb {mpnn_pdb}",
+                    ],
+                }
 
                 # launch coroutine without awaiting yet
                 alphafold_tasks.append(
-                    self.s4(target_fasta=target_fasta)
+                    self.s4(target_fasta=target_fasta, task_description=s4_description)
                 )
 
             self.logger.pipeline_log(
                 f"Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously"
             )
-            await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            s4_results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
             self.logger.pipeline_log(f"{len(alphafold_tasks)} Alphafold tasks finished")
+            for fasta_name, result in zip(fasta_files, s4_results):
+                if isinstance(result, Exception):
+                    self.logger.pipeline_log(f"s4 FAILED for {fasta_name}: {result}")
+                else:
+                    self.logger.pipeline_log(f"s4 DONE for {fasta_name}")
 
             self.logger.pipeline_log("Submitting pLDTT extraction task")
 
