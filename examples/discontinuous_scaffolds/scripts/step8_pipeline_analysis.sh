@@ -12,9 +12,9 @@ mcsa_pdb_dir="$5"
 island_counts_csv="$6"
 rmsd_threshold="$7"
 
-source /ocean/projects/dmr170002p/hooten/chai-lab/.venv/bin/activate
+#source /ocean/projects/dmr170002p/hooten/chai-lab/.venv/bin/activate
 
-python "$scripts_path/analysis.py" \
+python3 "$scripts_path/analysis.py" \
     "$chai_out_dir" \
     --output "$output_csv" \
     --input-pdb-dir "$mcsa_pdb_dir"

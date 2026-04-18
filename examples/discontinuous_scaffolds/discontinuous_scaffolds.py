@@ -156,7 +156,8 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
 
         # ── branching control ────────────────────────────────────────────────
         self.start_step = kwargs.get('start_step', STEP_BACKBONE_GEN)
-        self.branch_id  = kwargs.get('branch_id',  'b0')
+        self.branch_ct  = kwargs.get('branch_ct',  0)
+        self.branch_id  = kwargs.get('branch_id',  f"b{self.branch_ct}")
 
         # ── configurable paths ──────────────────────────────────────────────
         self.base_path        = kwargs.get("base_path",        os.getcwd())
@@ -478,7 +479,40 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         @self.auto_register_task(local_task=True)
         async def check_fold_results():
             self.state['last_analysis_step'] = 'fold'
-            self.logger.pipeline_log("[check_fold] fold stage complete")
+            csv = self.state.get('analysis_csv')
+
+            if not csv or not os.path.isfile(csv):
+                self.logger.pipeline_log(
+                    f"[check_fold] CSV not found at {csv!r}; treating all models as failing"
+                )
+                self.state['best_fold'] = {}
+                self.state['passing_fold_models'] = []
+                self.state['failing_fold_models'] = []
+                return
+
+            df = pd.read_csv(csv)
+            chai_out = self.state.get('chai_out_dir', '')
+            best_fold = {}
+            for model_name, group in df.groupby('model_name'):
+                best_row = group.loc[group['motif_rmsd'].idxmin()]
+                best_fold[model_name] = {
+                    'motif_rmsd': float(best_row['motif_rmsd']),
+                    'run_dir':    os.path.abspath(
+                                      os.path.join(chai_out, str(best_row['run_dir']))
+                                  ),
+                    'seed':       int(best_row['seed']),
+                }
+
+            self.state['best_fold'] = best_fold
+
+            passing = [m for m, v in best_fold.items() if v['motif_rmsd'] < self.rmsd_threshold]
+            failing = [m for m, v in best_fold.items() if v['motif_rmsd'] >= self.rmsd_threshold]
+
+            self.state['passing_fold_models'] = passing
+            self.state['failing_fold_models'] = failing
+            self.logger.pipeline_log(
+                f"[check_fold] passing={len(passing)} failing={len(failing)} models"
+            )
 
     # ── Main execution loop ─────────────────────────────────────────────────
 

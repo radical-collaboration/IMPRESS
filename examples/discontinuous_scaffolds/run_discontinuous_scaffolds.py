@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import subprocess
 from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
@@ -311,9 +312,60 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
 
     # ── Fold stage adaptive ──────────────────────────────────────────────────
     elif step == 'fold':
+        passing = pipeline.state.get('passing_fold_models', [])
+        failing = pipeline.state.get('failing_fold_models', [])
+
         pipeline.logger.pipeline_log(
-            "[adaptive/fold] Fold stage complete; marking pipeline done"
+            f"[adaptive/fold] passing={passing} failing={failing}"
         )
+
+        if failing:
+            # Serialize best_fold so parse_partial_diffusion.py can read it.
+            best_fold_path = os.path.abspath(
+                f"{base}/{pipeline.branch_id}/best_fold.json"
+            )
+            os.makedirs(os.path.dirname(best_fold_path), exist_ok=True)
+            with open(best_fold_path, 'w') as fh:
+                json.dump(pipeline.state['best_fold'], fh, indent=2)
+
+            # Increment branch counter and resolve output path for partial spec.
+            pipeline.branch_ct += 1
+            branch_id = f"b{pipeline.branch_ct}"
+            partial_json_path = os.path.abspath(
+                f"{base}/{branch_id}/partial.json"
+            )
+            os.makedirs(os.path.dirname(partial_json_path), exist_ok=True)
+
+            # Run parse_partial_diffusion.py to produce partial.json.
+            subprocess.run(
+                [
+                    "python",
+                    f"{pipeline.scripts_path}/parse_partial_diffusion.py",
+                    "--best_fold",      best_fold_path,
+                    "--rfd_input",      pipeline.rfd_input_filepath,
+                    "--rmsd_threshold", str(pipeline.rmsd_threshold),
+                    "--output",         partial_json_path,
+                ],
+                check=True,
+            )
+            pipeline.state['partial_spec'] = partial_json_path
+
+            pipeline.logger.pipeline_log(
+                f"[adaptive/fold] Spawning partial-diffusion branch '{branch_id}' "
+                f"for {len(failing)} failing model(s)"
+            )
+            pipeline.submit_child_pipeline_request({
+                'name':               f"{pipeline.name}_{branch_id}",
+                'type':               DiscontinuousScaffoldsPipeline,
+                'adaptive_fn':        adaptive_decision,
+                'start_step':         STEP_BACKBONE_GEN,
+                'branch_id':          branch_id,
+                'branch_ct':          pipeline.branch_ct,
+                'base_path':          pipeline.base_path,
+                'rfd_input_filepath': partial_json_path,
+                **_shared_pipeline_kwargs(pipeline),
+            })
+
         pipeline.next_step = STEP_DONE
 
     else:
