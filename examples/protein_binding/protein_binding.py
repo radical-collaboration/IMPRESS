@@ -83,6 +83,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # MPNN
         async def s1(task_description={"gpus_per_rank": 1}):  # noqa: B006
+            self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
@@ -101,6 +102,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task(local_task=True)
         async def s2():
+            self.step_id += 1
             job_seqs_dir = f"{self.output_path_mpnn}/job_{self.passes}/seqs"
 
             for file_name in os.listdir(job_seqs_dir):
@@ -122,6 +124,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # fasta - don't use helper script - cannot run x tasks for x structures
         @self.auto_register_task(local_task=True)
         async def s3():
+            self.step_id += 1
             output_dir = os.path.join(self.output_path, "af", "fasta")
 
             fasta_file_to_return = []
@@ -148,6 +151,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()
         async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+            self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
@@ -155,6 +159,22 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             )
             self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
             return cmd
+
+        @self.auto_register_task()
+        async def s4_post_exec(
+            target_fasta,
+            models_path,
+            best_model_pdb,
+            best_ptm_json,
+            mpnn_pdb,
+            task_description={},  # noqa: B006
+        ):
+            self.step_id += 1
+            return (
+                f"cp {models_path}/{target_fasta}_model_0.pdb {best_model_pdb} && "
+                f"cp {models_path}/confidence_{target_fasta}_model_0.json {best_ptm_json} && "
+                f"cp {models_path}/{target_fasta}_model_0.pdb {mpnn_pdb}"
+            )
 #            cmd = (
 #                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
 #                f"colabfold_batch "
@@ -173,6 +193,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task()  # pLDTT_extract
         async def s5(task_description={}):  # noqa: B006
+            self.step_id += 1
             return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
                 f"{self.base_path} "
@@ -222,6 +243,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.logger.pipeline_log("Scoring task finished")
 
             alphafold_tasks = []
+            post_exec_tasks = []
 
             for target_fasta in fasta_files:
                 models_path = os.path.join(
@@ -250,17 +272,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     f"{target_fasta}.pdb",
                 )
 
-                s4_description = {
-                    "post_exec": [
-                        f"cp {models_path}/{target_fasta}_model_0.pdb {best_model_pdb}",
-                        f"cp {models_path}/confidence_{target_fasta}_model_0.json {best_ptm_json}",
-                        f"cp {models_path}/{target_fasta}_model_0.pdb {mpnn_pdb}",
-                    ],
-                }
-
                 # launch coroutine without awaiting yet
-                alphafold_tasks.append(
-                    self.s4(target_fasta=target_fasta, task_description=s4_description)
+                alphafold_tasks.append(self.s4(target_fasta=target_fasta))
+                post_exec_tasks.append(
+                    self.s4_post_exec(
+                        target_fasta=target_fasta,
+                        models_path=models_path,
+                        best_model_pdb=best_model_pdb,
+                        best_ptm_json=best_ptm_json,
+                        mpnn_pdb=mpnn_pdb,
+                    )
                 )
 
             self.logger.pipeline_log(
@@ -273,6 +294,13 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     self.logger.pipeline_log(f"s4 FAILED for {fasta_name}: {result}")
                 else:
                     self.logger.pipeline_log(f"s4 DONE for {fasta_name}")
+
+            s4_post_results = await asyncio.gather(*post_exec_tasks, return_exceptions=True)
+            for fasta_name, result in zip(fasta_files, s4_post_results):
+                if isinstance(result, Exception):
+                    self.logger.pipeline_log(f"s4_post_exec FAILED for {fasta_name}: {result}")
+                else:
+                    self.logger.pipeline_log(f"s4_post_exec DONE for {fasta_name}")
 
             self.logger.pipeline_log("Submitting pLDTT extraction task")
 
