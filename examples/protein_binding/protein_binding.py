@@ -20,7 +20,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get("seq_rank", 0)
         self.num_seqs = kwargs.get("num_seqs", 10)
         self.sub_order = kwargs.get("sub_order", 0)
-        self.max_passes = kwargs.get("max_passes", 4)
+        self.max_passes = kwargs.get("max_passes", 10)
         self.mpnn_path = kwargs.get("mpnn_path", MPNN_PATH)
 
         # Sequence and score state
@@ -82,7 +82,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Register all pipeline tasks"""
 
         @self.auto_register_task()  # MPNN
-        async def s1(task_description={"gpus_per_rank": 1}):  # noqa: B006
+        async def s1(task_description={"gpus_per_rank": 1}):
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
@@ -122,7 +122,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 self.iter_seqs[file_name.split(".")[0]] = seqs
 
         # fasta - don't use helper script - cannot run x tasks for x structures
-        @self.auto_register_task(local_task=True)
+        @self.auto_register_task(local_task=True,capture_stdio=True)
         async def s3():
             self.step_id += 1
             output_dir = os.path.join(self.output_path, "af", "fasta")
@@ -149,25 +149,24 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task()
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+        @self.auto_register_task(capture_stdio=True)
+        async def s4(target_fasta, task_description={"gpus_per_rank": 1"}):  # noqa: B006
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
-            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
+#            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
             return cmd
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def s4_post_exec(
             target_fasta,
             models_path,
             best_model_pdb,
             best_ptm_json,
-            mpnn_pdb,
-            task_description={},  # noqa: B006
+            mpnn_pdb
         ):
             self.step_id += 1
             return (
@@ -192,7 +191,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #            return cmd
 
         @self.auto_register_task()  # pLDTT_extract
-        async def s5(task_description={}):  # noqa: B006
+        async def s5():
             self.step_id += 1
             return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
