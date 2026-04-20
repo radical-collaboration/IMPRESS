@@ -5,6 +5,9 @@
 | Date | Commit | Notes |
 |---|---|---|
 | 2026-04-08 | 09de233 | Initial README rewrite; CLAUDE.md added |
+| 2026-04-09 | 25224fa | Boltz logging + FASTA validation in s4_boltz.sh; s4_post_exec task added |
+| 2026-04-09 | d46a051 | protein_binding_run.py added (LLM-adaptive runner) |
+| 2026-04-18 | 758d868 | Fix post-exec staging cp paths |
 
 ---
 
@@ -15,7 +18,9 @@ An IMPRESS pipeline for iterative computational design of PDZ-domain protein bin
 ## Pipeline Overview
 
 ```
-s1 (mpnn) ──► s2 (rank seqs) ──► s3 (write FASTA) ──► s4 (structure predict × N structures, parallel)
+s1 (mpnn) ──► s2 (rank seqs) ──► s3 (write FASTA) ──► s4 (structure predict × N, parallel)
+                                                                          │
+                                                              s4_post_exec (stage files × N, parallel)
                                                                           │
                                                                    s5 (pLDDT extract)
                                                                           │
@@ -58,6 +63,13 @@ Predicts the dimer structure for each (designed sequence, peptide) FASTA. All pe
 - **Alternative**: ColabFold/AF2 (`scripts/s4_alphafold.sh`) — commented out in code
 - **Output**: `af/prediction/dimer_models/<name>/boltz_results_<name>/predictions/<name>/` (PDB + PAE files)
 - **HPC**: 1 GPU per rank
+
+### `s4_post_exec` — File Staging (HPC)
+Copies the best-model outputs from the Boltz prediction directory into the canonical locations consumed by `s5`. Runs in parallel alongside each `s4` task via a second `asyncio.gather`.
+
+- `cp <models_path>/<name>_model_0.pdb → af/prediction/best_models/<name>.pdb`
+- `cp <models_path>/confidence_<name>_model_0.json → af/prediction/best_ptm/<name>.json`
+- `cp <models_path>/<name>_model_0.pdb → af/prediction/best_models/<name>.pdb` (MPNN input for pass 2+)
 
 ### `s5` — pLDDT Extraction
 Extracts per-structure quality scores from the structure prediction outputs and writes a per-pass CSV.
@@ -163,3 +175,7 @@ Key variables to set before running:
 ### Execution backend
 
 `run_protein_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.
+
+### LLM-adaptive runner
+
+`protein_binding_run.py` is an alternative entry point that replaces the score-comparison predicate with a Claude LLM call. After each pass it sends the current candidate metrics and the full prior-ensemble distribution to `claude-opus-4-6`, which responds with either `"The current sequence should be refined."` or `"A new sequence should be sampled."` Requires `ANTHROPIC_API_KEY` to be set.

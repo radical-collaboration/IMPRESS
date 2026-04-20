@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Date | Commit | Notes |
 |---|---|---|
 | 2026-04-08 | 09de233 | CLAUDE.md created |
+| 2026-04-09 | 25224fa | Boltz logging + FASTA validation in s4_boltz.sh; s4_post_exec task added |
+| 2026-04-09 | d46a051 | protein_binding_run.py added (LLM-adaptive runner) |
+| 2026-04-18 | 758d868 | Fix post-exec staging cp paths |
 
 ## Context
 
@@ -30,11 +33,13 @@ Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g.
 
 ## Architecture
 
-### Two-file structure
+### Runner files
 
-- **`protein_binding.py`** — defines `ProteinBindingPipeline(ImpressBasePipeline)`. Tasks `s1`–`s5` are registered via `@self.auto_register_task()` inside `register_pipeline_tasks()`. The `run()` method drives a pass loop; `set_up_new_pipeline_dirs()` is called by `adaptive_decision` when spawning a child pipeline. `finalize()` removes proteins moved to a child pipeline from the parent's tracking state.
+- **`protein_binding.py`** — defines `ProteinBindingPipeline(ImpressBasePipeline)`. Tasks `s1`–`s5` (plus `s4_post_exec`) are registered via `@self.auto_register_task()` inside `register_pipeline_tasks()`. The `run()` method drives a pass loop; `set_up_new_pipeline_dirs()` is called by `adaptive_decision` when spawning a child pipeline. `finalize()` removes proteins moved to a child pipeline from the parent's tracking state.
 
-- **`run_protein_binding.py`** — entry point. Defines `adaptive_decision()` (reads CSV, compares scores, spawns child pipelines) and `adaptive_criteria()` (score comparison predicate). Creates an `ImpressManager` and launches via `manager.start(pipeline_setups=[...])`.
+- **`run_protein_binding.py`** — primary entry point. Defines `adaptive_decision()` (reads CSV, compares scores, spawns child pipelines) and `adaptive_criteria()` (score comparison predicate). Creates an `ImpressManager` and launches via `manager.start(pipeline_setups=[...])`.
+
+- **`protein_binding_run.py`** — alternative entry point with LLM-based adaptive decision. Uses the Anthropic Claude API (`claude-opus-4-6`) to compare current candidate metrics against the prior ensemble distribution and decide whether to refine the current sequence or sample a new one. Imports `anthropic`; requires `ANTHROPIC_API_KEY`.
 
 ### Pipeline tasks and scripts
 
@@ -44,6 +49,7 @@ Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g.
 | `s2` | local | parses MPNN FASTA output; ranks by score; populates `iter_seqs` | CPU |
 | `s3` | local | writes paired FASTA (designed sequence + peptide) per structure | CPU |
 | `s4` | HPC | `scripts/s4_boltz.sh` (Boltz) or `scripts/s4_alphafold.sh` (AF2, commented out) | GPU |
+| `s4_post_exec` | HPC | `cp` commands to stage best-model PDB, PTM JSON, and MPNN PDB from Boltz output | CPU |
 | `s5` | HPC | `scripts/s5_plddt_extract.sh` → `plddt_extract_pipeline.py` (PyRosetta + BioPandas) | CPU |
 
 ### Execution flow
@@ -56,7 +62,8 @@ while passes <= max_passes:
         s1  (ProteinMPNN sequence design)
         s2  (rank sequences)
     s3  (write FASTAs)
-    s4  (structure prediction, parallel per structure)  ← asyncio.gather
+    s4             (structure prediction, parallel per structure)  ← asyncio.gather
+    s4_post_exec   (stage best-model files, parallel per structure)  ← asyncio.gather
     s5  (pLDDT extraction → CSV)
     adaptive_decision()
     passes += 1
