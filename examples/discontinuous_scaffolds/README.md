@@ -69,7 +69,11 @@ The eight steps are grouped into three stages. After each stage a local async ta
 │  Step 7: fold_pred      (Chai-lab, GPU)                  │
 │  Step 8: pipeline_analysis (final CSV + plots, CPU)      │
 │  → check_fold_results()      [local task]                │
-│  → adaptive_decision()  → pipeline terminates            │
+│       classifies by rmsd_threshold (best motif_rmsd)     │
+│  → adaptive_decision()                                   │
+│       passing models ──────────────────────────────────► │
+│       failing models → spawn partial-diffusion branch    │
+│       pipeline terminates (next_step = STEP_DONE)        │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -113,11 +117,23 @@ The main pipeline's `current_seqs_split_dir` is updated to a symlink directory c
 
 ### After the fold stage
 
-The fold stage always terminates the pipeline (`next_step = STEP_DONE`). No further branching occurs after folding.
+| Condition | Action |
+|-----------|--------|
+| All models pass | Set `next_step = STEP_DONE`; pipeline terminates |
+| All models fail | Spawn partial-diffusion branch; set `next_step = STEP_DONE` |
+| Mixed pass/fail | Spawn partial-diffusion branch for failing models; set `next_step = STEP_DONE` |
+
+When a partial-diffusion branch is spawned:
+- `adaptive_decision()` serializes `pipeline.state['best_fold']` to `{base}/{branch_id}/best_fold.json`
+- `scripts/parse_partial_diffusion.py` is run to produce `partial.json` — a filtered RFDiffusion input spec with `"input"` set to each failing model's best predicted structure directory and `"partial_t": 10` added
+- A new backbone-start branch (`start_step = STEP_BACKBONE_GEN`) is spawned using `partial.json` as `rfd_input_filepath`
+- `pipeline.branch_ct` is incremented; the new branch's `branch_id` is `f"b{pipeline.branch_ct}"`
+
+The pipeline always terminates after the fold stage (`next_step = STEP_DONE`) regardless of pass/fail results.
 
 ### Branch naming
 
-Branch IDs are derived from the parent's `branch_id`. The root pipeline uses `b0`. Its first branch becomes `b0_b1`, a branch from that becomes `b0_b1_b1`, and so on. The branch count is tracked in `pipeline.state['branch_count']`.
+Branch IDs are derived from a `branch_ct` integer attribute on the pipeline instance. The root pipeline defaults to `branch_ct=0` → `branch_id='b0'`. When a fold branch is spawned, `pipeline.branch_ct` is incremented on the parent and the new branch receives that value (e.g. `branch_ct=1` → `branch_id='b1'`). Backbone and sequence branches use a separate `_next_branch_id()` helper. Branch pipelines are named `{pipeline.name}_{branch_id}`.
 
 ---
 
@@ -227,6 +243,9 @@ This logic is implemented in `_identify_passing_models(df, model_col, thresholds
 | `failing_backbone_models` | `check_backbone_results` | `adaptive_decision` | List of model name strings that failed any active backbone threshold |
 | `passing_seq_models` | `check_seq_results` | `adaptive_decision` | List of model name strings that passed all active sequence thresholds |
 | `failing_seq_models` | `check_seq_results` | `adaptive_decision` | List of model name strings that failed any active sequence threshold |
+| `best_fold` | `check_fold_results` | `adaptive_decision` | Dict of `{model_name: {motif_rmsd, run_dir, seed}}` — best fold per model (lowest `motif_rmsd`) |
+| `passing_fold_models` | `check_fold_results` | `adaptive_decision` | List of model name strings with `motif_rmsd < rmsd_threshold` |
+| `failing_fold_models` | `check_fold_results` | `adaptive_decision` | List of model name strings with `motif_rmsd >= rmsd_threshold` |
 
 ### Set by `adaptive_decision()`
 
@@ -235,7 +254,7 @@ This logic is implemented in `_identify_passing_models(df, model_col, thresholds
 | `current_lmpnn_pdb_multi_json` | `adaptive_decision` (backbone branch) | Step 4 | Filtered LMPNN PDB JSON containing only passing backbone models; replaces `lmpnn_pdb_multi_json` for this pipeline |
 | `current_lmpnn_fixed_res_json` | `adaptive_decision` (backbone branch) | Step 4 | Filtered fixed-residue JSON for passing backbone models |
 | `current_seqs_split_dir` | `adaptive_decision` (sequence branch) | Step 7 | Symlink directory of `.fa` files for passing sequence models; replaces `seqs_split_dir` for this pipeline |
-| `branch_count` | `adaptive_decision` (any branch) | `adaptive_decision` | Running count of branches spawned by this pipeline; used to generate unique branch IDs |
+| `partial_spec` | `adaptive_decision` (fold branch) | — | Path to `partial.json` produced by `parse_partial_diffusion.py`; passed as `rfd_input_filepath` to the partial-diffusion branch |
 
 ### Set at pipeline startup
 
@@ -286,16 +305,15 @@ Each task creates its working directories under `{base_path}/{branch_id}/{taskco
     8_pipeline_analysis/
       in/
       out/                         # final CSV, campaign plots
+    best_fold.json                 # created if fold branch spawned
 
-  b0_b1/                           # first branch (e.g. backbone-start for failing models)
+  b1/                              # partial-diffusion branch for failing fold models
+    partial.json                   # filtered RFD input (input=best chai dir, partial_t=10)
     1_backbone_gen/
     ...
 
-  b0_b2/                           # second branch (e.g. sequence-start for failing models)
+  b2/                              # sequence-start branch (branch_ct incremented per branch)
     4_seq_pred/                    # taskcount continues from branch start_step
-    ...
-
-  b0_b1_b1/                        # branch spawned from b0_b1
     ...
 ```
 
