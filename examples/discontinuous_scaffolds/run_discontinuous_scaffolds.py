@@ -184,7 +184,15 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
         - Sets next_step = STEP_FOLD_PRED to continue the current pipeline.
 
     fold stage
-        - Sets next_step = STEP_DONE (pipeline complete).
+        - Reads passing/failing fold models classified by rmsd_threshold
+          (best motif_rmsd per model, set by check_fold_results()).
+        - If any models fail: serializes best_fold to best_fold.json, runs
+          parse_partial_diffusion.py to produce partial.json (input set to
+          each model's best predicted structure dir, partial_t=10 added),
+          and spawns a backbone-start branch pipeline using partial.json as
+          rfd_input_filepath.  pipeline.branch_ct is incremented; the branch
+          receives branch_id = f"b{pipeline.branch_ct}".
+        - Always sets next_step = STEP_DONE (pipeline terminates regardless).
     """
     step = pipeline.state.get('last_analysis_step')
     base = pipeline.base_path
