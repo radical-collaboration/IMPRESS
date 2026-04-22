@@ -81,7 +81,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task()  # MPNN
+        @self.auto_register_task(capture_stdio=True)  # MPNN
         async def s1(task_description={"gpus_per_rank": 1}):
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
@@ -122,7 +122,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 self.iter_seqs[file_name.split(".")[0]] = seqs
 
         # fasta - don't use helper script - cannot run x tasks for x structures
-        @self.auto_register_task(local_task=True,capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def s3():
             self.step_id += 1
             output_dir = os.path.join(self.output_path, "af", "fasta")
@@ -150,7 +150,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #            )
 
         @self.auto_register_task(capture_stdio=True)
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1"}):  # noqa: B006
+        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
@@ -160,7 +160,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
             return cmd
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def s4_post_exec(
             target_fasta,
             models_path,
