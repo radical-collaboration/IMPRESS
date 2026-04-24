@@ -39,7 +39,7 @@ Before running on HPC, edit the path constants at the top of `run_discontinuous_
 | `STEP_SEQ_POST` | 5 | `split_seqs.py` | CPU |
 | `STEP_SEQ_ANALYSIS` | 6 | `analysis_sequence.py` + `plot_sequence_analysis.py` | CPU |
 | `STEP_FOLD_PRED` | 7 | Chai-lab `chai_batch.py` | GPU |
-| `STEP_ANALYSIS` | 8 | `analysis.py` + `plot_campaign.py` | CPU |
+| `STEP_ANALYSIS` | 8 | `analysis.py` + `plot_campaign.py` | CPU | computes `motif_rmsd` and anchor residue/sequence classification per Chai-1 output |
 
 ### Three-stage execution flow with adaptive checkpoints
 
@@ -56,7 +56,7 @@ Fold stage     (steps 7–8)  →  check_fold_results()        →  adaptive_dec
 - `STEP_FOLD_PRED` — continue to the fold stage (after sequence adaptive)
 - `STEP_DONE` — terminate the current pipeline (all models failed, or fold stage complete)
 
-`check_fold_results()` reads the final analysis CSV, finds each model's best fold row (lowest `motif_rmsd`), and classifies models against `rmsd_threshold`. It sets `best_fold` (dict of `{model_name: {motif_rmsd, run_dir, seed}}`), `passing_fold_models`, and `failing_fold_models` in `pipeline.state`.
+`check_fold_results()` reads the final analysis CSV, finds each model's best fold row (lowest `motif_rmsd`), and classifies models against `rmsd_threshold`. It sets `best_fold` (dict of `{model_name: {motif_rmsd, run_dir, seed, chai1_model_idx, anchor_residues, anchor_sequences, anchor_ref_residues}}`), `passing_fold_models`, and `failing_fold_models` in `pipeline.state`. The anchor fields come from the new anchor classification columns written by `analysis.py`.
 
 ### Adaptive branching for failing models
 
@@ -68,10 +68,10 @@ When a model fails the threshold battery for the current stage, `adaptive_decisi
 
 **Sequence branches** receive filtered LMPNN JSONs and a symlink `seqs_split_dir`.
 
-**Fold branches** (partial diffusion) are spawned when models fail the `rmsd_threshold` after folding. `adaptive_decision()`:
+**Fold branches** (redesign scaffold) are spawned when models fail the `rmsd_threshold` after folding. `adaptive_decision()`:
 1. Serializes `pipeline.state['best_fold']` to `{base}/{branch_id}/best_fold.json`.
-2. Runs `scripts/parse_partial_diffusion.py` to produce `partial.json` — a filtered RFDiffusion input spec with `"input"` set to each failing model's best predicted structure directory and `"partial_t": 10` added.
-3. Spawns a new backbone-start branch (`start_step=STEP_BACKBONE_GEN`) using `partial.json` as `rfd_input_filepath`.
+2. Runs `scripts/create_redesign.py` to produce `redesign.json` and per-model `redesign_scaffold.cif` files. The scaffold is a hybrid structure: well-predicted anchor sequence regions (identified from the `anchor_sequences` field in the analysis CSV, Kabsch-aligned to the reference frame) are taken from the best Chai-1 CIF output; poorly-predicted motif residues are taken from the original reference PDB (renumbered starting at 900). The contig string and `select_fixed_atoms` in `redesign.json` are rewritten to match the new residue numbering.
+3. Spawns a new backbone-start branch (`start_step=STEP_BACKBONE_GEN`) using `redesign.json` as `rfd_input_filepath`. LMPNN JSONs are auto-generated from `redesign.json` at branch init via `generate_lmpnn_jsons()`.
 
 Branch pipelines are full `DiscontinuousScaffoldsPipeline` instances configured with:
 - `start_step` — skips earlier stages (`STEP_BACKBONE_GEN`, `STEP_SEQ_PRED`, or `STEP_FOLD_PRED`)
@@ -112,9 +112,11 @@ Each task creates its working directory as `{base_path}/{branch_id}/{taskcount}_
     filtered_lmpnn_pdb.json  # created by adaptive/backbone if models fail
     filtered_seqs_split/     # created by adaptive/sequence if models fail
     best_fold.json           # created by adaptive/fold if models fail rmsd_threshold
-  b1/                        # partial-diffusion branch for failing fold models
+  b1/                        # redesign branch for failing fold models
+    redesign.json            # updated RFD input (new contig + select_fixed_atoms)
+    M0024_1nzy/
+      redesign_scaffold.cif  # hybrid structure: anchor regions from chai + ref residues at 900+
     1_backbone_gen/out/
-    partial.json             # partial diffusion RFD input (input=best chai dir, partial_t=10)
     ...
   b2/                        # sequence-start branch (branch_ct incremented per branch)
     4_seq_pred/out/
@@ -138,20 +140,48 @@ Steps communicate through `self.state`:
 - `last_analysis_step` — `'backbone'` / `'sequence'` / `'fold'` (read by `adaptive_decision`)
 - `passing_backbone_models`, `failing_backbone_models` — lists of model name strings
 - `passing_seq_models`, `failing_seq_models` — lists of model name strings
-- `best_fold` — dict of `{model_name: {motif_rmsd, run_dir, seed}}` for the best fold per model (set by `check_fold_results`)
+- `best_fold` — dict of `{model_name: {motif_rmsd, run_dir, seed, chai1_model_idx, anchor_residues, anchor_sequences, anchor_ref_residues}}` for the best fold per model (set by `check_fold_results`)
 - `passing_fold_models`, `failing_fold_models` — lists of model name strings classified by `rmsd_threshold`
 
 **Set by `adaptive_decision`:**
 - `current_lmpnn_pdb_multi_json` — filtered LMPNN PDB JSON for passing backbone models (used by `seq_pred` if present)
 - `current_lmpnn_fixed_res_json` — filtered fixed-residue JSON for passing backbone models
 - `current_seqs_split_dir` — symlink dir of FA files for passing sequence models (used by `fold_pred` if present)
-- `partial_spec` — path to `partial.json` produced by `parse_partial_diffusion.py` for failing fold models
+- `redesign_spec` — path to `redesign.json` produced by `create_redesign.py` for failing fold models
 
 **Set at run start:**
 - `run_count` — initialized to 0 via `setdefault`
 
 **Injected via `initial_state` kwarg (branch pipelines only):**
 - `pdb_dir` — required for sequence-start branches (skips steps 1–3)
+
+### Anchor residue classification (`scripts/analysis.py`)
+
+`analysis.py` (Step 8) computes a per-atom backbone displacement for each motif residue in each Chai-1 output, alongside the overall `motif_rmsd`. Three new columns are written to `campaign_analysis.csv`:
+
+| Column | Format | Description |
+|---|---|---|
+| `anchor_residues` | `"A64,A86"` | Motif residues whose backbone atoms all have displacement < `rmsd_threshold` |
+| `anchor_sequences` | `"50-76"` | Chai-1 sequence position ranges spanning consecutive anchor residues (≥2 in a row) |
+| `anchor_ref_residues` | `"A64-A86"` | Corresponding reference structure residue ranges for each anchor sequence |
+
+Key functions:
+- `compute_motif_rmsd()` — now returns `(rmsd, motif_displacements)` where `motif_displacements = {res_key: {atom_name: Å, "refid": res_key}}`
+- `compute_anchor_info(displacements, rmsd_threshold, contig_str, select_fixed_atoms)` — classifies anchor residues and finds consecutive runs; returns `(anchor_residues, anchor_sequences, anchor_ref_ranges)`
+
+`analysis.py` accepts `--rmsd-threshold` (default 1.5); `step8_pipeline_analysis.sh` passes `$rmsd_threshold` through to it.
+
+### Redesign scaffold generation (`scripts/create_redesign.py`)
+
+Called by `adaptive_decision()` when fold models fail `rmsd_threshold`. For each failing model:
+
+1. **Kabsch alignment** — align the best Chai-1 CIF backbone to the reference PDB frame using anchor motif residues as correspondence points.
+2. **Anchor sequence extraction** — keep residues at chai sequence positions `[chai_start, chai_end]` (from `anchor_sequences` field), apply the Kabsch transform to place them in the reference coordinate frame.
+3. **Non-anchor reference residues** — remove reference residues that fall within `anchor_ref_residues` spans; renumber remaining protein residues starting at 900.
+4. **Combined structure** — merge the aligned anchor sequence and the renumbered non-anchor reference residues (plus the reference ligand) into `{branch_dir}/{model_name}/redesign_scaffold.cif`.
+5. **Contig rewrite** — consecutive anchor residues in the original contig are collapsed to `A{chai_start}-{chai_end}`; non-anchor residues become `A900`, `A901`, etc.
+6. **`select_fixed_atoms` rewrite** — anchor residue keys are renamed to their chai sequence positions; non-anchor residue keys are renamed to match the 900+ numbering; ligand keys are unchanged.
+7. **`redesign.json`** — one entry per failing model with updated `"input"`, `"contig"`, and `"select_fixed_atoms"`.
 
 ### Execution backends
 
