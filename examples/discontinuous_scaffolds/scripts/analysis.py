@@ -31,6 +31,9 @@ FIELDNAMES = [
     "has_inter_chain_clashes",
     "chain_chain_clashes",
     "motif_rmsd",
+    "anchor_residues",
+    "anchor_sequences",
+    "anchor_ref_residues",
 ]
 
 # Path to motif JSON relative to this script
@@ -135,7 +138,13 @@ def compute_motif_rmsd(
     motif_data: dict,
     pdb_dir: Path,
     chai1_outputs_dir: Path,
-) -> float | None:
+) -> tuple[float, dict] | None:
+    """Return (rmsd, motif_displacements) or None on failure.
+
+    motif_displacements maps each select_fixed_atoms protein residue key to a
+    dict of {atom_name: displacement_angstroms, "refid": residue_key}.
+    Only backbone atoms present in both ref and cif are included.
+    """
     model_name = find_model_name(experiment, motif_data)
     if model_name is None:
         return None
@@ -148,7 +157,7 @@ def compute_motif_rmsd(
     for key in motif_info["select_fixed_atoms"]:
         m = _PROTEIN_RES_RE.match(key)
         if m:
-            protein_res_keys.append((m.group(1), int(m.group(2))))
+            protein_res_keys.append((key, m.group(1), int(m.group(2))))
 
     if not protein_res_keys:
         return None
@@ -177,8 +186,10 @@ def compute_motif_rmsd(
 
     ref_bb_list, mob_bb_list = [], []
     ref_all_list, mob_all_list = [], []
+    # Track (res_key, atom_name) for each entry in ref_all / mob_all
+    atom_labels: list[tuple[str, str]] = []
 
-    for chain, resnum in protein_res_keys:
+    for res_key, chain, resnum in protein_res_keys:
         chai1_pos = contig_map.get((chain, resnum))
         if chai1_pos is None:
             continue
@@ -191,6 +202,7 @@ def compute_motif_rmsd(
             mob_coords = cif_atoms[cif_key]
             ref_all_list.append(ref_coords)
             mob_all_list.append(mob_coords)
+            atom_labels.append((res_key, atom_name))
             if atom_name in BACKBONE_ATOMS:
                 ref_bb_list.append(ref_coords)
                 mob_bb_list.append(mob_coords)
@@ -215,7 +227,80 @@ def compute_motif_rmsd(
 
     mob_all_transformed = (R @ mob_all.T).T + t
     diff = ref_all - mob_all_transformed
-    return float(np.sqrt((diff ** 2).sum(axis=1).mean()))
+    per_atom_disp = np.linalg.norm(diff, axis=1)
+    rmsd = float(np.sqrt((diff ** 2).sum(axis=1).mean()))
+
+    # Build per-residue per-atom displacement dict (backbone atoms only)
+    motif_displacements: dict[str, dict] = {}
+    for (res_key, atom_name), disp in zip(atom_labels, per_atom_disp):
+        if atom_name not in BACKBONE_ATOMS:
+            continue
+        entry = motif_displacements.setdefault(res_key, {"refid": res_key})
+        entry[atom_name] = float(disp)
+
+    return rmsd, motif_displacements
+
+
+def compute_anchor_info(
+    displacements: dict,
+    rmsd_threshold: float,
+    contig_str: str,
+    select_fixed_atoms: dict,
+) -> tuple[list[str], list[tuple[int, int]], list[tuple[str, int, int]]]:
+    """Classify motif residues as anchors and identify consecutive anchor runs.
+
+    Returns:
+        anchor_residues:  residue keys where all backbone atoms are below threshold
+        anchor_sequences: list of (chai_start, chai_end) for each consecutive anchor run
+        anchor_ref_ranges: list of (chain, ref_start, ref_end) for each run
+    """
+    contig_map = parse_contig(contig_str)
+
+    # Build ordered list of protein motif residues sorted by contig position
+    ordered: list[tuple[str, str, int]] = []  # (res_key, chain, resnum)
+    for key in select_fixed_atoms:
+        m = _PROTEIN_RES_RE.match(key)
+        if not m:
+            continue
+        chain, resnum = m.group(1), int(m.group(2))
+        ordered.append((key, chain, resnum))
+    ordered.sort(key=lambda x: contig_map.get((x[1], x[2]), 0))
+
+    # Classify each residue as anchor (all backbone atoms below threshold)
+    anchor_set: set[str] = set()
+    for res_key, chain, resnum in ordered:
+        entry = displacements.get(res_key, {})
+        bb_disps = [v for k, v in entry.items() if k in BACKBONE_ATOMS]
+        if bb_disps and all(d < rmsd_threshold for d in bb_disps):
+            anchor_set.add(res_key)
+
+    # Find consecutive anchor runs (adjacent in ordered list, both anchors)
+    anchor_sequences: list[tuple[int, int]] = []
+    anchor_ref_ranges: list[tuple[str, int, int]] = []
+
+    i = 0
+    while i < len(ordered):
+        res_key, chain, resnum = ordered[i]
+        if res_key not in anchor_set:
+            i += 1
+            continue
+        # Start of a potential run
+        run_start = i
+        j = i + 1
+        while j < len(ordered) and ordered[j][0] in anchor_set:
+            j += 1
+        run_end = j - 1  # inclusive
+        if run_end > run_start:  # run of >= 2
+            first = ordered[run_start]
+            last = ordered[run_end]
+            chai_start = contig_map.get((first[1], first[2]))
+            chai_end = contig_map.get((last[1], last[2]))
+            if chai_start is not None and chai_end is not None:
+                anchor_sequences.append((chai_start, chai_end))
+                anchor_ref_ranges.append((first[1], first[2], last[2]))
+        i = j
+
+    return sorted(anchor_set), anchor_sequences, anchor_ref_ranges
 
 
 def parse_run_dir(name: str) -> dict:
@@ -229,7 +314,7 @@ def parse_run_dir(name: str) -> dict:
     }
 
 
-def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path):
+def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path, rmsd_threshold: float = 1.5):
     run_dirs = sorted(chai1_outputs_dir.iterdir())
     if not run_dirs:
         print(f"No directories found in {chai1_outputs_dir}", file=sys.stderr)
@@ -241,6 +326,7 @@ def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path):
         meta = parse_run_dir(run_dir.name)
         experiment = meta["experiment"]
         model_name = find_model_name(experiment, motif_data) or ""
+        motif_info = motif_data.get(model_name, {}) if model_name else {}
 
         npz_files = sorted((run_dir / "prediction").glob("scores.model_idx_*.npz"))
         for npz_path in npz_files:
@@ -250,7 +336,7 @@ def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path):
             d = np.load(npz_path)
             clashes = int(d["chain_chain_clashes"].sum())
 
-            motif_rmsd = compute_motif_rmsd(
+            result = compute_motif_rmsd(
                 run_dir.name,
                 chai1_model_idx,
                 experiment,
@@ -258,6 +344,22 @@ def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path):
                 pdb_dir,
                 chai1_outputs_dir,
             )
+
+            if result is None:
+                motif_rmsd = ""
+                displacements = {}
+            else:
+                motif_rmsd, displacements = result
+
+            if displacements and motif_info:
+                anchors, seq_ranges, ref_ranges = compute_anchor_info(
+                    displacements,
+                    rmsd_threshold,
+                    motif_info["contig"],
+                    motif_info["select_fixed_atoms"],
+                )
+            else:
+                anchors, seq_ranges, ref_ranges = [], [], []
 
             yield {
                 "run_dir": run_dir.name,
@@ -269,7 +371,10 @@ def iter_rows(chai1_outputs_dir: Path, motif_data: dict, pdb_dir: Path):
                 "iptm": float(d["iptm"].item()),
                 "has_inter_chain_clashes": bool(d["has_inter_chain_clashes"].item()),
                 "chain_chain_clashes": clashes,
-                "motif_rmsd": "" if motif_rmsd is None else motif_rmsd,
+                "motif_rmsd": motif_rmsd,
+                "anchor_residues":     ",".join(sorted(anchors)),
+                "anchor_sequences":    ";".join(f"{s}-{e}" for s, e in seq_ranges),
+                "anchor_ref_residues": ";".join(f"{c}{s}-{c}{e}" for c, s, e in ref_ranges),
             }
 
 
@@ -295,6 +400,12 @@ def main():
         default=Path("../mcsa_41"),
         help="Directory containing reference PDB files (default: ../mcsa_41)",
     )
+    parser.add_argument(
+        "--rmsd-threshold",
+        type=float,
+        default=1.5,
+        help="Per-atom backbone displacement threshold for anchor residue classification (default: 1.5)",
+    )
     args = parser.parse_args()
 
     motif_data = load_motif_data(MOTIF_JSON_PATH)
@@ -302,7 +413,7 @@ def main():
     rows = []
     for input_dir in args.input_dirs:
         chai1_outputs_dir = input_dir
-        dir_rows = list(iter_rows(chai1_outputs_dir, motif_data, args.input_pdb_dir))
+        dir_rows = list(iter_rows(chai1_outputs_dir, motif_data, args.input_pdb_dir, args.rmsd_threshold))
         if not dir_rows:
             print(f"Warning: no rows from {chai1_outputs_dir}", file=sys.stderr)
         rows.extend(dir_rows)

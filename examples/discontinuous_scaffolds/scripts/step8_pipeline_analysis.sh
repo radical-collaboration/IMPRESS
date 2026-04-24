@@ -17,7 +17,8 @@ rmsd_threshold="$7"
 python3 "$scripts_path/analysis.py" \
     "$chai_out_dir" \
     --output "$output_csv" \
-    --input-pdb-dir "$mcsa_pdb_dir"
+    --input-pdb-dir "$mcsa_pdb_dir" \
+    --rmsd-threshold "$rmsd_threshold"
 
 #python "$scripts_path/plot_campaign.py" \
 #    "$output_csv" \

@@ -496,11 +496,15 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             for model_name, group in df.groupby('model_name'):
                 best_row = group.loc[group['motif_rmsd'].idxmin()]
                 best_fold[model_name] = {
-                    'motif_rmsd': float(best_row['motif_rmsd']),
-                    'run_dir':    os.path.abspath(
-                                      os.path.join(chai_out, str(best_row['run_dir']))
-                                  ),
-                    'seed':       int(best_row['seed']),
+                    'motif_rmsd':         float(best_row['motif_rmsd']),
+                    'run_dir':            os.path.abspath(
+                                              os.path.join(chai_out, str(best_row['run_dir']))
+                                          ),
+                    'seed':               int(best_row['seed']),
+                    'chai1_model_idx':    int(best_row['chai1_model_idx']),
+                    'anchor_residues':    str(best_row.get('anchor_residues', '')),
+                    'anchor_sequences':   str(best_row.get('anchor_sequences', '')),
+                    'anchor_ref_residues': str(best_row.get('anchor_ref_residues', '')),
                 }
 
             self.state['best_fold'] = best_fold

@@ -328,7 +328,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
         )
 
         if failing:
-            # Serialize best_fold so parse_partial_diffusion.py can read it.
+            # Serialize best_fold (includes chai1_model_idx and anchor info).
             best_fold_path = os.path.abspath(
                 f"{base}/{pipeline.branch_id}/best_fold.json"
             )
@@ -336,32 +336,35 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             with open(best_fold_path, 'w') as fh:
                 json.dump(pipeline.state['best_fold'], fh, indent=2)
 
-            # Increment branch counter and resolve output path for partial spec.
+            # Allocate a branch directory for the redesign.
             pipeline.branch_ct += 1
             branch_id = f"b{pipeline.branch_ct}"
-            partial_json_path = os.path.abspath(
-                f"{base}/{branch_id}/partial.json"
-            )
-            os.makedirs(os.path.dirname(partial_json_path), exist_ok=True)
+            branch_dir = os.path.abspath(f"{base}/{branch_id}")
+            os.makedirs(branch_dir, exist_ok=True)
+            redesign_json_path = os.path.join(branch_dir, "redesign.json")
 
-            # Run parse_partial_diffusion.py to produce partial.json.
+            # Run create_redesign.py to build redesign_scaffold.cif per model
+            # and write redesign.json with updated contig / select_fixed_atoms.
             subprocess.run(
                 [
                     "python",
-                    f"{pipeline.scripts_path}/parse_partial_diffusion.py",
-                    "--best_fold",      best_fold_path,
-                    "--rfd_input",      pipeline.rfd_input_filepath,
-                    "--rmsd_threshold", str(pipeline.rmsd_threshold),
-                    "--output",         partial_json_path,
+                    f"{pipeline.scripts_path}/create_redesign.py",
+                    "--best-fold",         best_fold_path,
+                    "--design-config",     pipeline.rfd_input_filepath,
+                    "--reference-pdb-dir", pipeline.mcsa_pdb_dir,
+                    "--output-dir",        branch_dir,
+                    "--rmsd-threshold",    str(pipeline.rmsd_threshold),
                 ],
                 check=True,
             )
-            pipeline.state['partial_spec'] = partial_json_path
+            pipeline.state['redesign_spec'] = redesign_json_path
 
             pipeline.logger.pipeline_log(
-                f"[adaptive/fold] Spawning partial-diffusion branch '{branch_id}' "
+                f"[adaptive/fold] Spawning redesign branch '{branch_id}' "
                 f"for {len(failing)} failing model(s)"
             )
+            # lmpnn JSONs are intentionally omitted: the branch pipeline
+            # auto-generates them from redesign.json via generate_lmpnn_jsons().
             pipeline.submit_child_pipeline_request({
                 'name':               f"{pipeline.name}_{branch_id}",
                 'type':               DiscontinuousScaffoldsPipeline,
@@ -370,7 +373,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 'branch_id':          branch_id,
                 'branch_ct':          pipeline.branch_ct,
                 'base_path':          pipeline.base_path,
-                'rfd_input_filepath': partial_json_path,
+                'rfd_input_filepath': redesign_json_path,
                 **_shared_pipeline_kwargs(pipeline),
             })
 
