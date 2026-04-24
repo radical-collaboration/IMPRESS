@@ -47,21 +47,14 @@ class ImpressBasePipeline(ABC):
 
         return None
 
-    def auto_register_task(self, local_task=False):
-        """Decorator to automatically register tasks with the flow"""
-
-        if not self.flow:
-            raise ValueError("Flow must be provided to use auto_register_task")
-
+    def auto_register_task(self, local_task=False, **task_kwargs):
         def decorator(func):
             if not local_task:
-                task = self.flow.executable_task(func)
+                task = self.flow.executable_task(**task_kwargs)(func)
             else:
                 task = func
-
             setattr(self, func.__name__, task)
             return task
-
         return decorator
 
     async def run_adaptive_step(self, wait: bool = True):
