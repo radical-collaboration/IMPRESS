@@ -56,6 +56,7 @@ class ImpressBasePipeline(ABC):
                 task = func
             setattr(self, func.__name__, task)
             return task
+
         return decorator
 
     async def run_adaptive_step(self, wait: bool = True):
