@@ -1,0 +1,1 @@
+FileName,Shape Complementarity,ddg,contact molecular surf,SASA,Very buried unsat hbond,Surface unsat hbond,SAP SCORE
