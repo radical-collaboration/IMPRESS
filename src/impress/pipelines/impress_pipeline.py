@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Any
 
 from ..utils.logger import ImpressLogger
 
@@ -74,7 +75,7 @@ class ImpressBasePipeline(ABC):
         if value:
             self._adaptive_barrier.clear()
 
-    async def _await_adaptive_unlock(self) -> any:
+    async def _await_adaptive_unlock(self) -> Any:
         """Pause until manager completes adaptive step and returns result."""
         await self._adaptive_barrier.wait()
 
