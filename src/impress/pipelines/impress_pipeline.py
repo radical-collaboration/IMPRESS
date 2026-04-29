@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Any
 
 from ..utils.logger import ImpressLogger
 
@@ -47,18 +48,12 @@ class ImpressBasePipeline(ABC):
 
         return None
 
-    def auto_register_task(self, local_task=False):
-        """Decorator to automatically register tasks with the flow"""
-
-        if not self.flow:
-            raise ValueError("Flow must be provided to use auto_register_task")
-
+    def auto_register_task(self, local_task=False, **task_kwargs):
         def decorator(func):
             if not local_task:
-                task = self.flow.executable_task(func)
+                task = self.flow.executable_task(**task_kwargs)(func)
             else:
                 task = func
-
             setattr(self, func.__name__, task)
             return task
 
@@ -81,7 +76,7 @@ class ImpressBasePipeline(ABC):
         if value:
             self._adaptive_barrier.clear()
 
-    async def _await_adaptive_unlock(self) -> any:
+    async def _await_adaptive_unlock(self) -> Any:
         """Pause until manager completes adaptive step and returns result."""
         await self._adaptive_barrier.wait()
 
