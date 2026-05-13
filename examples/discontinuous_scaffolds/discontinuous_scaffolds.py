@@ -211,7 +211,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         """Register all eight pipeline steps plus the local analysis checks."""
 
         # ── Step 1: Backbone generation (GPU) ───────────────────────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def backbone_gen(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "backbone_gen"
@@ -231,7 +231,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 2: Backbone postprocessing — CIF.GZ → PDB (CPU) ────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def backbone_post(task_description={}):
             self.taskcount += 1
             taskname = "backbone_post"
@@ -251,7 +251,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 3: Backbone analysis (CPU) ─────────────────────────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def backbone_analysis(task_description={}):
             self.taskcount += 1
             taskname = "backbone_analysis"
@@ -276,7 +276,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 4: Sequence prediction — LigandMPNN (CPU) ──────────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def seq_pred(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "seq_pred"
@@ -323,7 +323,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 5: Sequence postprocessing — split_seqs (CPU) ──────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def seq_post(task_description={}):
             self.taskcount += 1
             taskname = "seq_post"
@@ -344,7 +344,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 6: Sequence analysis (CPU) ──────────────────────────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def seq_analysis(task_description={}):
             self.taskcount += 1
             taskname = "seq_analysis"
@@ -369,7 +369,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 7: Fold prediction — Chai-lab (GPU) ─────────────────────────
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def fold_pred(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "fold_pred"
@@ -391,7 +391,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
             )
 
         # ── Step 8: Pipeline analysis — analysis.py + plot_campaign.py (CPU) ─
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def pipeline_analysis(task_description={}):
             self.taskcount += 1
             taskname = "pipeline_analysis"
