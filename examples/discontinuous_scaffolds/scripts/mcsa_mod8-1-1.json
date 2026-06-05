@@ -1,0 +1,16 @@
+{
+    "M0024_1nzy": {
+        "input": "./mcsa_41/M0024_1nzy.pdb",
+        "ligand": "BCA",
+        "contig": "49,A64,21,A86,3,A90,23,A114,22,A137,7,A145,49",
+        "select_fixed_atoms": {
+            "A64": "O,C",
+            "A86": "CB,CA,N,C",
+            "A90": "CE1,ND1,NE2,CG,CD2",
+            "A114": "N,CA",
+            "A137": "NE1,CD1,CE2,CG,CD2,CZ2",
+            "A145": "OD2,CG,CB,OD1",
+            "BCA": "C6B,C5B,C7B,C4B,O2B,C2B,C3B,C1B,S1P,O1B,C2P,C3P,N4P,C5P,C6P,O5P,C7P,N8P,C9P,CAP,O9P,CBP,OAP,CCP,CDP,CEP,O6A,P2A"
+        }
+    }
+}

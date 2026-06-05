@@ -1,0 +1,111 @@
+{
+    "M0024_1nzy": {
+        "input": "./mcsa_41/M0024_1nzy.pdb",
+        "ligand": "BCA",
+        "contig": "49,A64,21,A86,3,A90,23,A114,22,A137,7,A145,49",
+        "select_fixed_atoms": {
+            "A64": "O,C",
+            "A86": "CB,CA,N,C",
+            "A90": "CE1,ND1,NE2,CG,CD2",
+            "A114": "N,CA",
+            "A137": "NE1,CD1,CE2,CG,CD2,CZ2",
+            "A145": "OD2,CG,CB,OD1",
+            "BCA": "C6B,C5B,C7B,C4B,O2B,C2B,C3B,C1B,S1P,O1B,C2P,C3P,N4P,C5P,C6P,O5P,C7P,N8P,C9P,CAP,O9P,CBP,OAP,CCP,CDP,CEP,O6A,P2A"
+        }
+    },
+    "M0040_13pk": {
+        "input": "./mcsa_41/M0040_13pk.pdb",
+        "ligand": "ADP,MG,3PG",
+        "contig": "A39,179,A219,156,A376,22,A399",
+        "select_fixed_atoms": {
+            "A39": "NH1,CZ,NE,NH2",
+            "A219": "NZ,CE,CD",
+            "A376": "N,CA,C",
+            "A399": "N,CA",
+            "3PG": "O1,C1,O2,C2,O3,C3,O1P,P,O2P,O3P",
+            "ADP": "O2B,PB,O1B,O3B,O3A,PA,O1A,O2A,O5',C5',C4'",
+            "MG": "MG"
+        }
+    },
+    "M0050_1dbt": {
+        "input": "./mcsa_41/M0050_1dbt.pdb",
+        "ligand": "U5P",
+        "contig": "A33,26,A60,1,A62,60,A123,91,A215,20,B65",
+        "select_fixed_atoms": {
+            "A33": "NZ,CE",
+            "A60": "OD2,CG,CB,OD1",
+            "A62": "NZ,CE",
+            "A123": "OG1,CB,CA,CG2",
+            "A215": "N,CA,C,CB",
+            "B65": "OD2,CG",
+            "U5P": "C1',N1,C2',O4',C2,C6,O2',C3',C4',N3,O2"
+        }
+    },
+    "M0054_1qfe": {
+        "input": "./mcsa_41/M0054_1qfe.pdb",
+        "ligand": "DHS",
+        "contig": "47,A86,56,A143,26,A170,48",
+        "select_fixed_atoms": {
+            "A86": "O,C,CA",
+            "A143": "NE2,CD2,CE1,CG,ND1",
+            "A170": "NZ,CE,CD",
+            "DHS": "C3,C4,C2"
+        }
+    },
+    "M0058_1cju": {
+        "input": "./mcsa_41/M0058_1cju.pdb",
+        "ligand": "DAD,MG",
+        "contig": "39,A396,0,A397,42,A440,20,B1029,35,B1065,39",
+        "select_fixed_atoms": {
+            "A396": "OD2,CG",
+            "A397": "O,C,CA",
+            "A440": "OD2,CG",
+            "B1029": "NH1,CZ,NE,NH2",
+            "B1065": "NZ,CE,CD",
+            "DAD": "PA,O1A,O2A,O3A,O5',PB,C5',O1B,O2B,O3B,C4',PG,O4',C3',O1G,O2G,O3G,C1',C2',N9,C8,C4",
+            "MG": "MG"
+        }
+    },
+    "M0078_1al6": {
+        "input": "./mcsa_41/M0078_1al6.pdb",
+        "ligand": "OAA,HAX",
+        "contig": "24,A244,29,A274,45,A320,8,A329,45,A375,24",
+        "select_fixed_atoms": {
+            "A244": "OG,CB",
+            "A274": "ND1,CG,CE1,CB,CD2,NE2",
+            "A320": "NE2,CD2,CE1",
+            "A329": "NH2,CZ,NE,NH1",
+            "A375": "OD2,CG,CB,OD1",
+            "HAX": "C2,C1,O2,N2,C2P,OH,C3P,N4P,C5P,C6P,O5P,C7P,N8P,C9P,CAP,O9P,CBP,OAP,CCP,CDP,CEP,O6A,P2A,O3A,O4A,O5A,P1A,O5B,O1A,O2A,C5B,C4B,C3B,O4B,C2B",
+            "OAA": "O3,C3,C2,C4"
+        }
+    },
+    "M0092_1dli": {
+        "input": "./mcsa_41/M0092_1dli.pdb",
+        "ligand": "UDX,NAD",
+        "contig": "16,A118,26,A145,58,A204,3,A208,51,A260,3,A264,17",
+        "select_fixed_atoms": {
+            "A118": "N,CA,C,CB",
+            "A145": "N,CA",
+            "A204": "NZ,CE,CD",
+            "A208": "OD1,CG,CB,ND2",
+            "A260": "SG,CB,CA",
+            "A264": "OD1,CG,CB,OD2",
+            "NAD": "O2D,C2D,C3D,C1D",
+            "UDX": "C5',C4',O5',C3',O4',C1',C2',O3',O3B,O2',PB,O1B,O2B,O3A,PA,O1A,O2A,O5D,C5D,C4D,O4D,C3D,C1D,O3D,C2D"
+        }
+    },
+    "M0093_1dqa": {
+        "input": "./mcsa_41/M0093_1dqa.pdb",
+        "ligand": "NAP,COA",
+        "contig": "A691,75,A767,20,B559,306,B866",
+        "select_fixed_atoms": {
+            "A691": "NZ,CE,CD",
+            "A767": "OD2,CG,CB,OD1",
+            "B559": "OE2,CD",
+            "B866": "CD2,CG,NE2,CB,ND1,CE1",
+            "COA": "S1P,C2P,C3P,N4P,C5P,C6P,O5P,C7P,N8P,C9P",
+            "NAP": "C6N,N1N,C5N,C1D,C2N,C4N,O4D,C2D,C3N,C4D,C3D,O2D,C7N,C5D,O3D,O7N,N7N,O5D,PN,O3,O1N,O2N,PA,O1A,O2A,O5B,C5B,C4B,O4B,C3B,C1B,O3B,C2B,N9A,O2B"
+        }
+    }
+}
