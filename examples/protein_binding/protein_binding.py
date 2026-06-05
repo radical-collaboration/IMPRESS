@@ -5,7 +5,7 @@ import os
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-MPNN_PATH = f"/ocean/projects/dmr170002p/hooten/ProteinMPNN"
+MPNN_PATH = f"/anvil/projects/x-nairr240405/mason/ProteinMPNN"
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -68,7 +68,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             "af/prediction/dimer_models",
             "af/prediction/logs",
             "mpnn",
-            *[f"mpnn/job_{i}" for i in range(1, 6)],
+            *[f"mpnn/job_{i}" for i in range(1, self.max_passes+1)],
         ]
 
         paths_to_create = [input_dir, base_output] + [
@@ -157,7 +157,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
-#            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
+            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
             return cmd
 
         @self.auto_register_task(local_task=True)
@@ -216,6 +216,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         """Main execution logic"""
 
         self.logger.pipeline_log(f"Running for a maximum of {self.max_passes} passes")
+
+        self.set_up_new_pipeline_dirs(self.name)
 
         while self.passes <= self.max_passes:
             self.logger.pipeline_log(f"Starting pass {self.passes}")

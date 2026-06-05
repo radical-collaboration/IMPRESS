@@ -135,3 +135,10 @@ dmypy.json
 
 # asyncflow related
 asyncflow.session.*
+
+# pdzbinder wf outputs
+af_pipeline_outputs_multi/
+af_stats*
+slurm*
+*.slurm
+ddict*
