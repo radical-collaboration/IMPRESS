@@ -10,7 +10,7 @@ output_csv="$3"
 output_dir="$4"
 island_counts_csv="$5"
 
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 
 python "$scripts_path/analysis_sequence.py" \
     "$seqs_split_dir" \

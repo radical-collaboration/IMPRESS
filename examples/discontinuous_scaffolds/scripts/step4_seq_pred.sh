@@ -4,13 +4,16 @@ set -euo pipefail
 # Step 4: Sequence prediction via LigandMPNN
 # Args: $1=mpnn_dir $2=output_dir $3=lmpnn_pdb_multi_json $4=lmpnn_fixed_res_json
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 mpnn_dir="$1"
 output_dir="$2"
 lmpnn_pdb_multi_json="$3"
 lmpnn_fixed_res_json="$4"
 num_batches="$5"
 
-source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate
+module load cuda/12.8.0
+source /anvil/projects/x-nairr240405/mason/LigandMPNN/.venv/bin/activate
 
 python "$mpnn_dir/run.py" \
     --model_type ligand_mpnn \
