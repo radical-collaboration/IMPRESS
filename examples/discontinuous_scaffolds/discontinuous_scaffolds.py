@@ -502,9 +502,9 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
                                           ),
                     'seed':               int(best_row['seed']),
                     'chai1_model_idx':    int(best_row['chai1_model_idx']),
-                    'anchor_residues':    str(best_row.get('anchor_residues', '')),
-                    'anchor_sequences':   str(best_row.get('anchor_sequences', '')),
-                    'anchor_ref_residues': str(best_row.get('anchor_ref_residues', '')),
+                    'anchor_residues':     ('' if pd.isna(v := best_row.get('anchor_residues',    '')) else str(v)),
+                    'anchor_sequences':    ('' if pd.isna(v := best_row.get('anchor_sequences',   '')) else str(v)),
+                    'anchor_ref_residues': ('' if pd.isna(v := best_row.get('anchor_ref_residues','')) else str(v)),
                 }
 
             self.state['best_fold'] = best_fold
