@@ -8,7 +8,7 @@ scripts_path="$1"
 seqs_dir="$2"
 split_dir="$3"
 
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 
 python "$scripts_path/split_seqs.py" \
     --input_dir "$seqs_dir" \

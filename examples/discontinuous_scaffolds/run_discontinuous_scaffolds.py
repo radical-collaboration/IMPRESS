@@ -23,12 +23,18 @@ rhapsody.enable_logging(level=logging.DEBUG)
 
 # ── Configurable parameters ─────────────────────────────────────────────────
 
-SCRIPTS_PATH     = "/ocean/projects/dmr170002p/hooten/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
-FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry_medprec.sif"
-MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
+SCRIPTS_PATH     = "/anvil/projects/x-nairr240405/mason/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
+FOUNDRY_SIF_PATH = "/anvil/projects/x-nairr240405/mason/foundry.sif"
+MPNN_DIR         = "/anvil/projects/x-nairr240405/mason/LigandMPNN"
 
 RFD_INPUT_FILENAME   = f"mcsa_mod8-1.json"
+RFD_INPUT_FILENAME1   = f"mcsa_mod8-1.json"
+RFD_INPUT_FILENAME2   = f"mcsa_mod8-2.json"
+
 RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/{RFD_INPUT_FILENAME}"
+RFD_INPUT_FILEPATH1   = f"{SCRIPTS_PATH}/{RFD_INPUT_FILENAME1}"
+RFD_INPUT_FILEPATH2   = f"{SCRIPTS_PATH}/{RFD_INPUT_FILENAME2}"
+
 ISLAND_COUNTS_CSV    = f"{SCRIPTS_PATH}/island_counts.csv"
 MCSA_PDB_DIR         = f"{SCRIPTS_PATH}/mcsa_41"
 RMSD_THRESHOLD       = 1.5
@@ -394,9 +400,9 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
 
 async def run_discontinuous_scaffolds() -> None:
     """Set up the IMPRESS manager and launch the discontinuous scaffolds pipeline."""
-    backend = await LocalExecutionBackend(ProcessPoolExecutor())
+    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     # For HPC execution use:
-    #backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackendV3()
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
@@ -409,7 +415,7 @@ async def run_discontinuous_scaffolds() -> None:
                 "scripts_path":             SCRIPTS_PATH,
                 "foundry_sif_path":         FOUNDRY_SIF_PATH,
                 "mpnn_dir":                 MPNN_DIR,
-                "rfd_input_filepath":       RFD_INPUT_FILEPATH,
+                "rfd_input_filepath":       RFD_INPUT_FILEPATH1,
                 "island_counts_csv":        ISLAND_COUNTS_CSV,
                 "mcsa_pdb_dir":             MCSA_PDB_DIR,
                 "rmsd_threshold":           RMSD_THRESHOLD,
@@ -425,7 +431,33 @@ async def run_discontinuous_scaffolds() -> None:
                 "seq_ligand_conf_bounds":   SEQ_LIGAND_CONF_BOUNDS,
                 "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
             },
-        )
+        ),
+        PipelineSetup(
+            name="discontinuous_scaffolds_p1",
+            type=DiscontinuousScaffoldsPipeline,
+            adaptive_fn=adaptive_decision,
+            kwargs={
+                "scripts_path":             SCRIPTS_PATH,
+                "foundry_sif_path":         FOUNDRY_SIF_PATH,
+                "mpnn_dir":                 MPNN_DIR,
+                "rfd_input_filepath":       RFD_INPUT_FILEPATH2,
+                "island_counts_csv":        ISLAND_COUNTS_CSV,
+                "mcsa_pdb_dir":             MCSA_PDB_DIR,
+                "rmsd_threshold":           RMSD_THRESHOLD,
+                "diffusion_batch_size":     DIFFUSION_BATCH_SIZE,
+                "lmpnn_num_batches":        LMPNN_NUM_BATCHES,
+                # threshold bounds
+                "backbone_rog_bounds":      BACKBONE_ROG_BOUNDS,
+                "backbone_ala_bounds":      BACKBONE_ALA_BOUNDS,
+                "backbone_gly_bounds":      BACKBONE_GLY_BOUNDS,
+                "backbone_helix_bounds":    BACKBONE_HELIX_BOUNDS,
+                "backbone_sheet_bounds":    BACKBONE_SHEET_BOUNDS,
+                "backbone_lig_dist_bounds": BACKBONE_LIG_DIST_BOUNDS,
+                "seq_ligand_conf_bounds":   SEQ_LIGAND_CONF_BOUNDS,
+                "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
+            },
+	)
+
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)

@@ -135,3 +135,8 @@ dmypy.json
 
 # asyncflow related
 asyncflow.session.*
+
+# disco wf outputs
+b0
+slurm*
+*slurm

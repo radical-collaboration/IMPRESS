@@ -1,0 +1,93 @@
+{
+    "M0555_1f8r": {
+        "input": "./mcsa_41/M0555_1f8r.pdb",
+        "ligand": "CIT,FAD",
+        "contig": "38,A223,102,A326,38",
+        "select_fixed_atoms": {
+            "A223": "NE2,CD2,CE1,CG,ND1",
+            "A326": "CE,CD,NZ",
+            "CIT": "C5,C4,O3",
+            "FAD": "N5,C4X,C5X,C4,C10,C6,C9A,N3,O4,N1,N10,C7,C9,C2,C1',C7M,C8,O2,C2',C8M,O2',C3',O3',C4',O4',C5',O5',P,O1P,O2P"
+        }
+    },
+    "M0584_1ldm": {
+        "input": "./mcsa_41/M0584_1ldm.pdb",
+        "ligand": "NAD,OXM",
+        "contig": "46,A106,59,A166,2,A169,23,A193,46",
+        "select_fixed_atoms": {
+            "A106": "NE,CD,CZ",
+            "A166": "OD1,CG",
+            "A169": "NH2,CZ",
+            "A193": "NE2,CD2,CE1",
+            "NAD": "O7N,C7N,C3N,N7N,C2N,C4N,N1N,C5N,C1D",
+            "OXM": "O3,C2,C1,O2,N1"
+        }
+    },
+    "M0630_1j79": {
+        "input": "./mcsa_41/M0630_1j79.pdb",
+        "ligand": "ORO,ZN",
+        "contig": "89,A250,90",
+        "select_fixed_atoms": {
+            "A250": "OD1,CG",
+            "ORO": "N3,C2,C4,N1",
+            "ZN": "ZN"
+        }
+    },
+    "M0636_1uaq": {
+        "input": "./mcsa_41/M0636_1uaq.pdb",
+        "ligand": "DUC,ZN",
+        "contig": "76,A64,24,A89,1,A91,76",
+        "select_fixed_atoms": {
+            "A64": "OE2,CD,CG,OE1",
+            "A89": "O,C",
+            "A91": "SG,CB",
+            "DUC": "O4,C4,N3,C5,C2,C6",
+            "ZN": "ZN"
+        }
+    },
+    "M0663_1rk2": {
+        "input": "./mcsa_41/M0663_1rk2.pdb",
+        "ligand": "ADP,RIB",
+        "contig": "88,A252,0,A253,0,A254,0,A255,88",
+        "select_fixed_atoms": {
+            "A252": "N,CA",
+            "A253": "CB,CA",
+            "A254": "N,CA",
+            "A255": "OD2,CG,CB,OD1",
+            "ADP": "O1B,PB,O2B,O3B,O3A,PA,O1A,O2A,O5',C5',C4',O4',C3',C1',O3',C2',N9,O2',C8,C4,N7,C5,N3",
+            "RIB": "O5,C5,C4,O4,C3,C1"
+        }
+    },
+    "M0664_2dhn": {
+        "input": "./mcsa_41/M0664_2dhn.pdb",
+        "ligand": "PH2",
+        "contig": "50,A22,77,A100,51",
+        "select_fixed_atoms": {
+            "A22": "OE2,CD",
+            "A100": "NZ,CE,CD",
+            "PH2": "O4,C11,C2,N1,C3,C9,N4"
+        }
+    },
+    "M0674_1uf7": {
+        "input": "./mcsa_41/M0674_1uf7.pdb",
+        "ligand": "CDV",
+        "contig": "27,A46,79,A126,44,A171,27",
+        "select_fixed_atoms": {
+            "A46": "OE1,CD,CG,OE2",
+            "A126": "NZ,CE,CD",
+            "A171": "CB,CA,N,C",
+            "CDV": "OT,CT,NT,N"
+        }
+    },
+    "M0710_1ra0": {
+        "input": "./mcsa_41/M0710_1ra0.pdb",
+        "ligand": "FE,FPY",
+        "contig": "59,A156,60,A217,59",
+        "select_fixed_atoms": {
+            "A156": "OE1,CD",
+            "A217": "OE2,CD",
+            "FE": "FE",
+            "FPY": "O2,C2,N1"
+        }
+    }
+}
