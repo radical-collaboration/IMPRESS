@@ -1,132 +1,62 @@
-from biopandas.pdb import PandasPdb
+import numpy as np
 import os
 import pandas as pd
 import json
-import operator
-from pyrosetta import *
 import argparse
+
+# Peptide EGYQDYEPEA is 10 residues and always placed last in the Boltz FASTA
+PEP_LEN = 10
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--iter', type=str, help='pass iteration')
 parser.add_argument('--out', type=str, help='pipeline name')
 parser.add_argument('--path', type=str, help='base path')
-#parser.add_argument('--seq',type=str, help='sequence')
 args = parser.parse_args()
 
+af_path = os.path.join(args.path, 'af_pipeline_outputs_multi', args.out, 'af/prediction')
+dimer_models_path = os.path.join(af_path, 'dimer_models')
 
+rows = []
 
-init()
-filename=[]
-plddt_list=[]
-ptm_list=[]
-pae_list=[]
-ppdb=PandasPdb()
+for name in os.listdir(dimer_models_path):
+    pred_dir = os.path.join(
+        dimer_models_path, name, f"boltz_results_{name}", "predictions", name
+    )
+    plddt_file = os.path.join(pred_dir, f"plddt_{name}_model_0.npz")
+    conf_file = os.path.join(pred_dir, f"confidence_{name}_model_0.json")
+    pae_file = os.path.join(pred_dir, f"pae_{name}_model_0.npz")
 
+    if not all(os.path.exists(f) for f in [plddt_file, conf_file, pae_file]):
+        continue
 
-af_path= os.path.join(args.path, 'af_pipeline_outputs_multi', args.out, 'af/prediction')
+    # avg_plddt: mean per-residue pLDDT (Boltz stores 0-1; scale to 0-100)
+    plddt = np.load(plddt_file)['plddt']
+    avg_plddt = float(plddt.mean() * 100)
 
-def get_b_factor(pose, residue):
-	""" 
-	Given a pose and a residue number, will return the average b-factor of the 
-	backbone atoms (N, CA, C) for the specified residue. Requires residue to  
-	be input as a pose number, as opposed to a PDB number. 
-	"""
-	bfactor = pose.pdb_info().bfactor
-	atom_index = pose.residue(residue).atom_index
+    # iptm from Boltz confidence JSON — interface PTM is the primary binding quality metric
+    with open(conf_file) as f:
+        conf = json.load(f)
+    iptm = conf.get('iptm', conf.get('ptm', 0.0))
 
-	total_b = 0.0
-	for atom in ['N', 'CA', 'C']:
-		total_b += bfactor(residue, atom_index(atom))
+    # avg_pae: mean cross-chain PAE between PDZ domain and peptide
+    # Boltz outputs PDZ residues first, peptide last; PAE matrix is (N, N) in Angstroms
+    pae_matrix = np.load(pae_file)['pae']
+    total_res = pae_matrix.shape[0]
+    pdz_len = total_res - PEP_LEN
+    cross_pae = np.concatenate([
+        pae_matrix[:pdz_len, pdz_len:].ravel(),
+        pae_matrix[pdz_len:, :pdz_len].ravel(),
+    ])
+    avg_pae = float(cross_pae.mean()) if len(cross_pae) > 0 else 0.0
 
-	# Return average for three atoms
-	return total_b / 3
+    rows.append({
+        'ID': f"{name}.pdb",
+        'avg_plddt': avg_plddt,
+        'ptm': iptm,
+        'avg_pae': avg_pae,
+    })
 
-#for jobs in os.listdir('PDZ_structures/'):
-#	print(jobs)
-best_models_path = os.path.join(af_path, 'best_models')
-for files in os.listdir(best_models_path):
-	print(files)
-	full_path_pdb = os.path.join(af_path, 'best_models', files)
-	full_path_ptm = os.path.join(af_path, 'best_ptm')
+print(f"Processed {len(rows)} structure(s)")
 
-	pose=pose_from_pdb(full_path_pdb)
-	temp_sum=0
-	for i in range(len(pose.sequence())):
-		temp_sum+=get_b_factor(pose,i+1)
-
-	# ppdb.read_pdb(full_path_pdb)
-	# temp_list=ppdb.df['ATOM']['b_factor']
-	# counter = 0
-	# temp_sum = 0
-	# for entries in temp_list:
-	# 	temp_sum+=entries
-	# 	counter+=1
-	if len(pose.sequence())>0:
-		temp_avg=temp_sum/len(pose.sequence())
-		filename.append(files)
-		plddt_list.append(temp_avg)
-		query=files.split('.')
-		temp_max=0
-		for jsons in os.listdir(full_path_ptm):
-			hit = jsons.split('.')
-			if query[0]==hit[0]:
-				data_path = os.path.join(full_path_ptm, jsons)
-				data = json.load(open(data_path))
-				for keys, values in data.items():
-					if keys == 'iptm+ptm':
-						for keys2, values2 in values.items():
-							if values2 > temp_max:
-								temp_max=values2
-						ptm_list.append(temp_max)
-					elif keys == 'order':
-						top_rank=values[0]
-				
-				
-				#df_json=pd.json_normalize(data)
-				#order=df_json['order']
-				#ptm=df_json['iptm+ptm']
-				break
-
-		dimer_models_path = os.path.join(af_path, 'dimer_models')
-		for folders in os.listdir(dimer_models_path):
-			folder_name = files.split('.')[0]
-			if folders==folder_name:
-				for output in os.listdir(os.path.join(af_path, 'dimer_models', folders)):
-					#print(top_rank)
-					top_rank_compare="result_"+top_rank+".pkl"
-					#print("$$$$$$$$$$$$$$$$$$$$")
-					#print(top_rank_compare)
-					#print(output)
-					#print("$$$$$$$$$$$$$$$$$$$$")
-					if output == top_rank_compare: 
-						details = pd.read_pickle(os.path.join(af_path, 'dimer_models', folders, output))
-						#print(details)
-						for keys3, values3 in details.items():
-							if keys3=='predicted_aligned_error':
-								length=values3.shape[0]
-								running_sum=0
-								counter2=0
-								row_index=0
-								target_range=range(length-10,length)
-								for a in values3:
-									col_index=0
-									for b in a:
-										#print(str(row_index) +','+str(col_index))
-										#if row_index in target_range and col_index in target_range:
-										#print("do nothing")
-										if operator.xor(row_index in target_range, col_index in target_range):
-											#print("adding")
-											running_sum+=values3[row_index][col_index]
-											counter2+=1
-										col_index+=1
-									row_index+=1
-								avg_pae=running_sum/counter2
-								pae_list.append(avg_pae)
-print(len(filename))
-print(len(plddt_list))
-print(len(ptm_list))
-print(len(pae_list))
-final=tuple(zip(filename, plddt_list, ptm_list, pae_list))
-#print(final)
-df=pd.DataFrame(final, columns = ['ID', 'avg_plddt', 'ptm', 'avg_pae'])
-#print(df)	
-df.to_csv('af_stats_'+args.out+'_pass_'+args.iter+'.csv', index=False)
+df = pd.DataFrame(rows, columns=['ID', 'avg_plddt', 'ptm', 'avg_pae'])
+df.to_csv('af_stats_' + args.out + '_pass_' + args.iter + '.csv', index=False)

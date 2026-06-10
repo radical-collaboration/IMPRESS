@@ -9,7 +9,8 @@ output_dir="$2"
 
 #source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
 source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
-source $HOME/.bashrc
+module load modtree/gpu
+export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 
 boltz predict \
     "${fasta_path}" \
