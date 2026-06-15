@@ -84,12 +84,12 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
     if sub_iter_seqs and pipeline.sub_order < MAX_SUB_PIPELINES:
         new_name: str = f"{pipeline.name}_sub{pipeline.sub_order + 1}"
 
-        #pipeline.set_up_new_pipeline_dirs(new_name)
+        pipeline.set_up_new_pipeline_dirs(new_name)
 
         # Copy PDB files for bad proteins
         for protein in sub_iter_seqs:
             src = f'{pipeline.output_path_af}/{protein}.pdb'
-            dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
+            dst = f'{pipeline.base_path}/prod_in/{new_name}_in/{protein}.pdb'
             shutil.copyfile(src, dst)
 
         # Build a request for a new pipeline
@@ -142,10 +142,11 @@ async def impress_protein_bind() -> None:
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
-            name='p1',
+            name=f"p{str(i)}",
             type=ProteinBindingPipeline,
             adaptive_fn=adaptive_decision
         )
+        for i in range(17,33)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)

@@ -2,10 +2,23 @@
 import asyncio
 import copy
 import os
+import shutil
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 MPNN_PATH = f"/anvil/projects/x-nairr240405/mason/ProteinMPNN"
+
+_BOLTZ_CHAIN_MAP = {'pdz': 'A', 'pep': 'B'}
+
+def _copy_pdb_rename_chains(src, dst, chain_map=_BOLTZ_CHAIN_MAP):
+    """Copy a PDB, replacing Boltz multi-char chain IDs with standard single-char IDs."""
+    with open(src) as f_in, open(dst, 'w') as f_out:
+        for line in f_in:
+            if line.startswith(('ATOM', 'HETATM', 'TER')):
+                chain = line[21:24]
+                if chain in chain_map:
+                    line = line[:21] + chain_map[chain] + line[24:]
+            f_out.write(line)
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -34,7 +47,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.fasta_list_2 = kwargs.get("fasta_list_2", [])
         self.base_path = kwargs.get("base_path", os.getcwd())
         self.scripts_path = os.path.join(self.base_path, "scripts")
-        self.input_path = os.path.join(self.base_path, f"{self.name}_in")
+        self.input_path = os.path.join(self.base_path, f"prod_in/{self.name}_in")
 
         # Output paths
         self.output_path = os.path.join(
@@ -54,7 +67,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         base_output = os.path.join(
             self.base_path, "af_pipeline_outputs_multi", new_pipeline_name
         )
-        input_dir = os.path.join(self.base_path, f"{new_pipeline_name}_in")
+        input_dir = os.path.join(self.base_path, f"prod_in/{new_pipeline_name}_in")
 
         if os.path.isdir(base_output):
             return  # already exists, nothing to do
@@ -169,11 +182,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             mpnn_pdb
         ):
             self.step_id += 1
-            return (
-                f"cp {models_path}/{target_fasta}_model_0.pdb {best_model_pdb} && "
-                f"cp {models_path}/confidence_{target_fasta}_model_0.json {best_ptm_json} && "
-                f"cp {models_path}/{target_fasta}_model_0.pdb {mpnn_pdb}"
-            )
+            _copy_pdb_rename_chains(f"{models_path}/{target_fasta}_model_0.pdb", best_model_pdb)
+            shutil.copy(f"{models_path}/confidence_{target_fasta}_model_0.json", best_ptm_json)
+            _copy_pdb_rename_chains(f"{models_path}/{target_fasta}_model_0.pdb", mpnn_pdb)
 #            cmd = (
 #                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
 #                f"colabfold_batch "
