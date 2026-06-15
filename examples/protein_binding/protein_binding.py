@@ -39,7 +39,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # Sequence and score state
         self.current_scores = {}
         self.iter_seqs = kwargs.get("iter_seqs", {})
-        self.previous_scores = kwargs.get("previous_score", {})
+        self.previous_scores = kwargs.get("previous_scores", {})
 
         super().__init__(name, flow, **configs, **kwargs)
 
@@ -100,7 +100,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
-            chain = "A" if self.passes == 1 else "B"
+            chain = "A"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
             return (
