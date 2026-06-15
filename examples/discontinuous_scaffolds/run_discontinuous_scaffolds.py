@@ -71,7 +71,8 @@ def _filter_json_by_models(json_path, model_list, output_path):
     with open(json_path) as fh:
         data = json.load(fh)
 
-    filtered = {k: v for k, v in data.items() if k in model_list}
+    filtered = {k: v for k, v in data.items()
+                if any(model in os.path.basename(k) for model in model_list)}
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as fh:
         json.dump(filtered, fh, indent=2)
@@ -128,13 +129,13 @@ def _create_filtered_seqs_dir(seqs_dir, model_list, output_dir):
 
 def _next_branch_id(pipeline):
     """
-    Increment ``pipeline.state['branch_count']`` and return a new branch ID
+    Increment ``pipeline.state['branch_ct']`` and return a new branch ID
     string derived from the pipeline's own branch_id.
     """
-    n = pipeline.state.get('branch_count', 0) + 1
-    pipeline.state['branch_count'] = n
-    return f"b{n}"
-#    return f"{pipeline.branch_id}_b{n}"
+    n = pipeline.state.get('branch_ct', 0) + 1
+    pipeline.state['branch_ct'] = n
+    return f"{pipeline.name}_{n}"
+#    return f"b{n}"
 
 
 def _shared_pipeline_kwargs(pipeline):
@@ -147,10 +148,12 @@ def _shared_pipeline_kwargs(pipeline):
         'scripts_path':            pipeline.scripts_path,
         'foundry_sif_path':        pipeline.foundry_sif_path,
         'mpnn_dir':                pipeline.mpnn_dir,
+        'base_path':               pipeline.base_path,
         'island_counts_csv':       pipeline.island_counts_csv,
         'mcsa_pdb_dir':            pipeline.mcsa_pdb_dir,
         'rmsd_threshold':          pipeline.rmsd_threshold,
         'diffusion_batch_size':    pipeline.diffusion_batch_size,
+        'lmpnn_num_batches':       pipeline.lmpnn_num_batches,
         # threshold bounds
         'backbone_rog_bounds':      pipeline.backbone_rog_bounds,
         'backbone_ala_bounds':      pipeline.backbone_ala_bounds,
@@ -238,7 +241,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             branch_rfd = _filter_rfd_json_by_models(
                 pipeline.rfd_input_filepath,
                 failing,
-                f"{base}/{branch_id}/{pipeline.RFD_INPUT_FILENAME}",
+                f"{base}/{branch_id}/{os.path.basename(pipeline.rfd_input_filepath)}",
             )
 
             pipeline.logger.pipeline_log(
@@ -246,10 +249,11 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 f"for {len(failing)} failing model(s)"
             )
             pipeline.submit_child_pipeline_request({
-                'name':                 f"{pipeline.name}_{branch_id}",
+                'name':                 f"{pipeline.name}",
                 'type':                 DiscontinuousScaffoldsPipeline,
                 'adaptive_fn':          adaptive_decision,
                 'start_step':           STEP_BACKBONE_GEN,
+                'branch_ct':            pipeline.branch_ct,
                 'branch_id':            branch_id,
                 'rfd_input_filepath':   branch_rfd,
                 'lmpnn_pdb_multi_json': pipeline.lmpnn_pdb_multi_json,
@@ -305,10 +309,11 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 f"for {len(failing)} failing model(s)"
             )
             pipeline.submit_child_pipeline_request({
-                'name':                 f"{pipeline.name}_{branch_id}",
+                'name':                 f"{pipeline.name}",
                 'type':                 DiscontinuousScaffoldsPipeline,
                 'adaptive_fn':          adaptive_decision,
                 'start_step':           STEP_SEQ_PRED,
+                'branch_ct':            pipeline.branch_ct,
                 'branch_id':            branch_id,
                 'lmpnn_pdb_multi_json': branch_pdb,
                 'lmpnn_fixed_res_json': branch_res,
@@ -343,8 +348,9 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 json.dump(pipeline.state['best_fold'], fh, indent=2)
 
             # Allocate a branch directory for the redesign.
-            pipeline.branch_ct += 1
-            branch_id = f"b{pipeline.branch_ct}"
+            #pipeline.branch_ct += 1
+            #branch_id = f"b{pipeline.branch_ct}"
+            branch_id = f"{pipeline.name}_R"
             branch_dir = os.path.abspath(f"{base}/{branch_id}")
             os.makedirs(branch_dir, exist_ok=True)
             redesign_json_path = os.path.join(branch_dir, "redesign.json")
@@ -372,12 +378,12 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             # lmpnn JSONs are intentionally omitted: the branch pipeline
             # auto-generates them from redesign.json via generate_lmpnn_jsons().
             pipeline.submit_child_pipeline_request({
-                'name':               f"{pipeline.name}_{branch_id}",
+                'name':               f"{pipeline.name}_R",
                 'type':               DiscontinuousScaffoldsPipeline,
                 'adaptive_fn':        adaptive_decision,
                 'start_step':         STEP_BACKBONE_GEN,
                 'branch_id':          branch_id,
-                'branch_ct':          pipeline.branch_ct,
+                'branch_ct':          0,
                 'base_path':          pipeline.base_path,
                 'rfd_input_filepath': redesign_json_path,
                 **_shared_pipeline_kwargs(pipeline),
@@ -408,14 +414,15 @@ async def run_discontinuous_scaffolds() -> None:
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
-            name="discontinuous_scaffolds_p1",
+            name=f"disco_p{i}",
             type=DiscontinuousScaffoldsPipeline,
             adaptive_fn=adaptive_decision,
             kwargs={
                 "scripts_path":             SCRIPTS_PATH,
                 "foundry_sif_path":         FOUNDRY_SIF_PATH,
                 "mpnn_dir":                 MPNN_DIR,
-                "rfd_input_filepath":       RFD_INPUT_FILEPATH1,
+                "rfd_input_filename":       f"mcsa_41-{str(i)}.json",
+                "rfd_input_filepath":       f"{SCRIPTS_PATH}/mcsa_41-{str(i)}.json",
                 "island_counts_csv":        ISLAND_COUNTS_CSV,
                 "mcsa_pdb_dir":             MCSA_PDB_DIR,
                 "rmsd_threshold":           RMSD_THRESHOLD,
@@ -430,34 +437,9 @@ async def run_discontinuous_scaffolds() -> None:
                 "backbone_lig_dist_bounds": BACKBONE_LIG_DIST_BOUNDS,
                 "seq_ligand_conf_bounds":   SEQ_LIGAND_CONF_BOUNDS,
                 "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
-            },
-        ),
-        PipelineSetup(
-            name="discontinuous_scaffolds_p1",
-            type=DiscontinuousScaffoldsPipeline,
-            adaptive_fn=adaptive_decision,
-            kwargs={
-                "scripts_path":             SCRIPTS_PATH,
-                "foundry_sif_path":         FOUNDRY_SIF_PATH,
-                "mpnn_dir":                 MPNN_DIR,
-                "rfd_input_filepath":       RFD_INPUT_FILEPATH2,
-                "island_counts_csv":        ISLAND_COUNTS_CSV,
-                "mcsa_pdb_dir":             MCSA_PDB_DIR,
-                "rmsd_threshold":           RMSD_THRESHOLD,
-                "diffusion_batch_size":     DIFFUSION_BATCH_SIZE,
-                "lmpnn_num_batches":        LMPNN_NUM_BATCHES,
-                # threshold bounds
-                "backbone_rog_bounds":      BACKBONE_ROG_BOUNDS,
-                "backbone_ala_bounds":      BACKBONE_ALA_BOUNDS,
-                "backbone_gly_bounds":      BACKBONE_GLY_BOUNDS,
-                "backbone_helix_bounds":    BACKBONE_HELIX_BOUNDS,
-                "backbone_sheet_bounds":    BACKBONE_SHEET_BOUNDS,
-                "backbone_lig_dist_bounds": BACKBONE_LIG_DIST_BOUNDS,
-                "seq_ligand_conf_bounds":   SEQ_LIGAND_CONF_BOUNDS,
-                "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
-            },
-	)
-
+            }
+        )
+        for i in range(17,25)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
