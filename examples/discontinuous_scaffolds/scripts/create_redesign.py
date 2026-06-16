@@ -374,18 +374,30 @@ def _rebuild_contig_and_sfa(
 
             # Collect anchor tokens in this run
             run_anchor_toks = [tagged[k][1] for k in range(run_start, run_end + 1) if tagged[k][0] == "anchor"]
-            if len(run_anchor_toks) >= 2:
-                # Get chai positions for first and last anchor in run
-                first_m = _PROTEIN_RES_RE.match(run_anchor_toks[0])
-                last_m = _PROTEIN_RES_RE.match(run_anchor_toks[-1])
-                chai_start = contig_map.get((first_m.group(1), int(first_m.group(2))))
-                chai_end = contig_map.get((last_m.group(1), int(last_m.group(2))))
-                new_tokens.append(f"A{chai_start}-{chai_end}")
-            else:
-                # Single anchor residue in this run — emit it with its chai position
-                m = _PROTEIN_RES_RE.match(run_anchor_toks[0])
-                chai_pos = contig_map.get((m.group(1), int(m.group(2))))
-                new_tokens.append(f"A{chai_pos}")
+            # Resolve chai positions for every anchor token in the run
+            run_chai_pos = []
+            for tok in run_anchor_toks:
+                m = _PROTEIN_RES_RE.match(tok)
+                cp = contig_map.get((m.group(1), int(m.group(2))))
+                if cp is not None:
+                    run_chai_pos.append(cp)
+
+            if len(run_chai_pos) >= 2:
+                # Only collapse to a range when chai positions are strictly consecutive
+                # (no gaps in the actual scaffold). Non-consecutive anchors are emitted
+                # individually so the contig exactly matches what _extract_anchor_chain
+                # writes into the scaffold.
+                is_consecutive = all(
+                    run_chai_pos[k + 1] == run_chai_pos[k] + 1
+                    for k in range(len(run_chai_pos) - 1)
+                )
+                if is_consecutive:
+                    new_tokens.append(f"A{run_chai_pos[0]}-{run_chai_pos[-1]}")
+                else:
+                    for cp in run_chai_pos:
+                        new_tokens.append(f"A{cp}")
+            elif run_chai_pos:
+                new_tokens.append(f"A{run_chai_pos[0]}")
             i = run_end + 1
 
     new_contig = ",".join(new_tokens)
@@ -414,7 +426,11 @@ def _rebuild_contig_and_sfa(
         chain_id, resnum = m.group(1), int(m.group(2))
         if key in anchor_set:
             chai_pos = contig_map.get((chain_id, resnum))
-            new_sfa[f"{chain_id}{chai_pos}"] = atoms
+            # The anchor residue in the redesign scaffold comes from the Chai CIF
+            # (LigandMPNN-designed sequence), so its residue identity — and thus
+            # available sidechain atoms — may differ from the original reference.
+            # Use backbone atoms only, which are always present for any residue.
+            new_sfa[f"{chain_id}{chai_pos}"] = "N,CA,C,O"
         else:
             sfa_ordered[key] = atoms  # defer; number in contig order below
 

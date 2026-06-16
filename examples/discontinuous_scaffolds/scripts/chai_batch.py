@@ -99,8 +99,7 @@ def run_batch(
             )
 
             cif_paths = candidates.cif_paths
-            agg_score = candidates.aggregated_score
-            log.info(f"  ✓ {len(cif_paths)} structures | agg. score: {agg_score:.4f}")
+            log.info(f"  ✓ {len(cif_paths)} structures")
             results[job.job_id] = cif_paths
 
         except Exception as exc:
