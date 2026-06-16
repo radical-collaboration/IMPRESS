@@ -12,6 +12,15 @@ source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 module load modtree/gpu
 export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 
+# Boltz caches MSA in boltz_results_<name>/msa/ and reuses it across runs even with
+# --override, so pass 2+ would fold new MPNN-designed sequences using the pass-1 MSA.
+# Delete the stale MSA before each run to force recomputation for the current sequence.
+fasta_stem=$(basename "${fasta_path}" .fa)
+stale_msa="${output_dir}/boltz_results_${fasta_stem}/msa"
+if [ -d "${stale_msa}" ]; then
+    rm -rf "${stale_msa}"
+fi
+
 boltz predict \
     "${fasta_path}" \
     --out_dir "${output_dir}" \
