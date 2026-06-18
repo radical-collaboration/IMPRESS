@@ -80,7 +80,17 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
         pipeline.next_step = STEP_MPNN
 
     elif step == 'fastrelax':
-        pipeline.next_step = STEP_INTERFACE if passed else STEP_MPNN
+        if passed:
+            pipeline.state['fastrelax_fail_count'] = 0
+            pipeline.next_step = STEP_INTERFACE
+        else:
+            count = pipeline.state.get('fastrelax_fail_count', 0) + 1
+            pipeline.state['fastrelax_fail_count'] = count
+            if count >= 5:
+                pipeline.state['fastrelax_fail_count'] = 0
+                pipeline.next_step = STEP_RFD3
+            else:
+                pipeline.next_step = STEP_MPNN
 
     elif step == 'interface':
         if passed:
@@ -124,13 +134,13 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
-    backend = await LocalExecutionBackend(ProcessPoolExecutor())
-    #backend = await DragonExecutionBackendV3()
+    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
+    backend = await DragonExecutionBackendV3()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
-            name='p1',
+            name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
             adaptive_fn=adaptive_decision,
             kwargs={
@@ -140,8 +150,9 @@ async def impress_smallmol_bind() -> None:
                 "fastrelax_max_total_score": FASTRELAX_MAX_SCORE,
                 "interface_min_sc":          INTERFACE_MIN_SC,
                 "fold_min_plddt":            FOLD_MIN_PLDDT,
-            },
+            }
         )
+        for i in range(1,9)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
