@@ -68,15 +68,19 @@ When a model fails the threshold battery for the current stage, `adaptive_decisi
 
 **Sequence branches** receive filtered LMPNN JSONs and a symlink `seqs_split_dir`.
 
-**Fold branches** (redesign scaffold) are spawned when models fail the `rmsd_threshold` after folding. `adaptive_decision()`:
-1. Serializes `pipeline.state['best_fold']` to `{base}/{branch_id}/best_fold.json`.
+**Fold branches** (redesign scaffold) are spawned when models fail the `rmsd_threshold` after folding. Before spawning, two stopping conditions are checked:
+- `redesign_depth >= MAX_REDESIGN_DEPTH` (default 3) — stops spawning if this lineage has already been redesigned too many times.
+- `curr_rmsd >= prev_rmsd - MIN_RMSD_IMPROVEMENT` (default 0.10 Å) — stops spawning if RMSD hasn't improved enough since the last redesign.
+
+If neither condition triggers, `adaptive_decision()`:
+1. Serializes `pipeline.state['best_fold']` to `{base}/{pipeline.branch_id}/best_fold.json`.
 2. Runs `scripts/create_redesign.py` to produce `redesign.json` and per-model `redesign_scaffold.cif` files. The scaffold is a hybrid structure: well-predicted anchor sequence regions (identified from the `anchor_sequences` field in the analysis CSV, Kabsch-aligned to the reference frame) are taken from the best Chai-1 CIF output; poorly-predicted motif residues are taken from the original reference PDB (renumbered starting at 900). The contig string and `select_fixed_atoms` in `redesign.json` are rewritten to match the new residue numbering.
-3. Spawns a new backbone-start branch (`start_step=STEP_BACKBONE_GEN`) using `redesign.json` as `rfd_input_filepath`. LMPNN JSONs are auto-generated from `redesign.json` at branch init via `generate_lmpnn_jsons()`.
+3. Spawns a new backbone-start branch (`start_step=STEP_BACKBONE_GEN`) using `redesign.json` as `rfd_input_filepath`, passing `redesign_depth + 1` and `curr_rmsd` via `initial_state`. LMPNN JSONs are auto-generated from `redesign.json` at branch init via `generate_lmpnn_jsons()`.
 
 Branch pipelines are full `DiscontinuousScaffoldsPipeline` instances configured with:
 - `start_step` — skips earlier stages (`STEP_BACKBONE_GEN`, `STEP_SEQ_PRED`, or `STEP_FOLD_PRED`)
-- `branch_id` — derived from `branch_ct` counter (e.g. `b1`, `b2`); fold branches increment `pipeline.branch_ct` directly
-- `initial_state` — pre-seeds `self.state` for stages that would normally be set by earlier steps (e.g. `pdb_dir` for a sequence-start branch)
+- `branch_id` — backbone/sequence branches: `{pipeline.name}_{n}` via `_next_branch_id()`; fold redesign branches: `{pipeline.name}_R`
+- `initial_state` — pre-seeds `self.state` for stages that would normally be set by earlier steps (e.g. `pdb_dir` for a sequence-start branch; `redesign_depth` and `prev_best_rmsd` for redesign branches)
 - All shared path/threshold kwargs inherited via `_shared_pipeline_kwargs()`
 
 ### Passing / failing model classification
@@ -101,25 +105,29 @@ Thresholds are `(lower, upper)` tuples or `None`. Either bound can be `None` (op
 
 ### Output directory structure
 
-Each task creates its working directory as `{base_path}/{branch_id}/{taskcount}_{taskname}/in` and `.../out`. The `branch_id` prefix means outputs from a branch pipeline are isolated from both the originating pipeline and sibling branches:
+Each task creates its working directory as `{base_path}/{branch_id}/{taskcount}_{taskname}/in` and `.../out`. The `branch_id` prefix means outputs from a branch pipeline are isolated from both the originating pipeline and sibling branches.
+
+Branch IDs follow these conventions:
+- Root pipeline: `{pipeline_name}_0` (e.g. `disco_p26_0`)
+- Backbone/sequence branches: `{pipeline_name}_{n}` where `n` is the branch counter
+- Fold redesign branches: `{pipeline_name}_R`, and subsequent redesigns of a redesign: `{pipeline_name}_R_R`, etc.
 
 ```
 {base_path}/
-  b0/                        # root pipeline
+  disco_p26_0/               # root pipeline (branch_id = {name}_0)
     1_backbone_gen/out/
     2_backbone_post/out/
     ...
     filtered_lmpnn_pdb.json  # created by adaptive/backbone if models fail
     filtered_seqs_split/     # created by adaptive/sequence if models fail
     best_fold.json           # created by adaptive/fold if models fail rmsd_threshold
-  b1/                        # redesign branch for failing fold models
+  disco_p26_R/               # redesign branch for failing fold models
     redesign.json            # updated RFD input (new contig + select_fixed_atoms)
     M0024_1nzy/
       redesign_scaffold.cif  # hybrid structure: anchor regions from chai + ref residues at 900+
     1_backbone_gen/out/
     ...
-  b2/                        # sequence-start branch (branch_ct incremented per branch)
-    4_seq_pred/out/
+  disco_p26_R_R/             # second redesign (if first redesign also fails)
     ...
 ```
 
@@ -154,6 +162,8 @@ Steps communicate through `self.state`:
 
 **Injected via `initial_state` kwarg (branch pipelines only):**
 - `pdb_dir` — required for sequence-start branches (skips steps 1–3)
+- `redesign_depth` — integer counting how many redesign cycles this lineage has undergone; checked against `MAX_REDESIGN_DEPTH` to limit infinite redesign loops
+- `prev_best_rmsd` — best `motif_rmsd` from the previous redesign generation; checked against `MIN_RMSD_IMPROVEMENT` to stop spawning if RMSD is not improving
 
 ### Anchor residue classification (`scripts/analysis.py`)
 
@@ -189,6 +199,20 @@ Called by `adaptive_decision()` when fold models fail `rmsd_threshold`. For each
 
 ### Benchmark data
 
-`rfd3_benchmark/` contains two JSON formats for the MCSa-41 protein benchmark:
-- `mcsa_41.json` — simplified format (protein ID → RFDiffusion command string)
-- `mcsa_41_rfd3.json` — structured format with `input`, `ligand`, `contig`, `select_fixed_atoms` per protein
+`scripts/` contains input JSON files for the MCSa-41 protein benchmark:
+- `scripts/mcsa_41-1.json` … `scripts/mcsa_41-41.json` — one file per protein, each with one or more model entries in the structured RFD3 format (`input`, `ligand`, `contig`, `select_fixed_atoms`)
+- `scripts/mcsa_41_rfd3.json` — all 41 proteins in a single structured JSON
+- `scripts/mcsa_41_one.json` — single-entry convenience file for testing
+
+`run_discontinuous_scaffolds.py` launches one `DiscontinuousScaffoldsPipeline` per input file (e.g. one pipeline per `mcsa_41-{i}.json`).
+
+### Redesign loop limits
+
+Defined as module-level constants in `run_discontinuous_scaffolds.py`:
+
+| Constant | Default | Description |
+|---|---|---|
+| `MAX_REDESIGN_DEPTH` | `3` | Stop spawning redesign branches when a lineage has been redesigned this many times |
+| `MIN_RMSD_IMPROVEMENT` | `0.10` | Minimum motif RMSD improvement (Å) required to spawn another redesign branch |
+
+Both are checked in `adaptive_decision()` during the fold stage adaptive step.
