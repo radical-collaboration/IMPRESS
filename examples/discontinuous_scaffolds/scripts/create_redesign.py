@@ -434,9 +434,13 @@ def _rebuild_contig_and_sfa(
         else:
             sfa_ordered[key] = atoms  # defer; number in contig order below
 
-    # Second pass: emit non-anchor entries in contig order
+    # Second pass: emit non-anchor entries in contig order.
+    # Use backbone atoms only — non-anchor residues in the redesign scaffold are
+    # re-diffused by RFD3, so only their backbone geometry constrains the motif.
+    # Copying original sidechain atoms (e.g. GLU OE2,CD,CG,OE1) fails RFD3
+    # validation when the scaffold has only backbone density at that position.
     for key in non_anchor_order:
-        new_sfa[f"A{NON_ANCHOR_START + non_anchor_i}"] = sfa_ordered[key]
+        new_sfa[f"A{NON_ANCHOR_START + non_anchor_i}"] = "N,CA,C,O"
         non_anchor_i += 1
 
     return new_contig, new_sfa

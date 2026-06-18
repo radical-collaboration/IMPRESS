@@ -58,6 +58,11 @@ BACKBONE_LIG_DIST_BOUNDS = (0,4.5)   # n_clashing.ligand_min_distance
 SEQ_LIGAND_CONF_BOUNDS   = (0.37,1)   # ligand_confidence,            e.g. (0.5, 1.0)
 SEQ_OVERALL_CONF_BOUNDS  = (0.42,1)   # overall_confidence
 
+# ── Redesign loop limits ─────────────────────────────────────────────────────
+# Stop spawning fold-redesign branches when either limit is hit.
+MAX_REDESIGN_DEPTH   = 3     # max redesign branches per model lineage
+MIN_RMSD_IMPROVEMENT = 0.10  # Å; branch is skipped if RMSD doesn't improve by this much
+
 
 # ── Helper functions ─────────────────────────────────────────────────────────
 
@@ -195,12 +200,15 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
     fold stage
         - Reads passing/failing fold models classified by rmsd_threshold
           (best motif_rmsd per model, set by check_fold_results()).
-        - If any models fail: serializes best_fold to best_fold.json, runs
-          parse_partial_diffusion.py to produce partial.json (input set to
-          each model's best predicted structure dir, partial_t=10 added),
-          and spawns a backbone-start branch pipeline using partial.json as
-          rfd_input_filepath.  pipeline.branch_ct is incremented; the branch
-          receives branch_id = f"b{pipeline.branch_ct}".
+        - If any models fail, checks two stopping conditions before spawning:
+          (1) redesign_depth >= MAX_REDESIGN_DEPTH, or
+          (2) RMSD did not improve by at least MIN_RMSD_IMPROVEMENT vs. the
+              previous generation (tracked via pipeline.state['prev_best_rmsd']).
+          If neither condition stops it: serializes best_fold to best_fold.json,
+          runs create_redesign.py to produce redesign.json and per-model
+          redesign_scaffold.cif, and spawns a backbone-start branch pipeline
+          using redesign.json as rfd_input_filepath.  redesign_depth and
+          prev_best_rmsd are passed to the branch via initial_state.
         - Always sets next_step = STEP_DONE (pipeline terminates regardless).
     """
     step = pipeline.state.get('last_analysis_step')
@@ -339,55 +347,78 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
         )
 
         if failing:
-            # Serialize best_fold (includes chai1_model_idx and anchor info).
-            best_fold_path = os.path.abspath(
-                f"{base}/{pipeline.branch_id}/best_fold.json"
-            )
-            os.makedirs(os.path.dirname(best_fold_path), exist_ok=True)
-            with open(best_fold_path, 'w') as fh:
-                json.dump(pipeline.state['best_fold'], fh, indent=2)
+            redesign_depth = pipeline.state.get('redesign_depth', 0)
+            curr_rmsd      = min(v['motif_rmsd'] for v in pipeline.state['best_fold'].values())
+            prev_rmsd      = pipeline.state.get('prev_best_rmsd', float('inf'))
 
-            # Allocate a branch directory for the redesign.
-            #pipeline.branch_ct += 1
-            #branch_id = f"b{pipeline.branch_ct}"
-            branch_id = f"{pipeline.name}_R"
-            branch_dir = os.path.abspath(f"{base}/{branch_id}")
-            os.makedirs(branch_dir, exist_ok=True)
-            redesign_json_path = os.path.join(branch_dir, "redesign.json")
+            _spawn_redesign = True
+            if redesign_depth >= MAX_REDESIGN_DEPTH:
+                pipeline.logger.pipeline_log(
+                    f"[adaptive/fold] Max redesign depth ({MAX_REDESIGN_DEPTH}) reached "
+                    f"(depth={redesign_depth}); not spawning another branch"
+                )
+                _spawn_redesign = False
+            elif curr_rmsd >= prev_rmsd - MIN_RMSD_IMPROVEMENT:
+                pipeline.logger.pipeline_log(
+                    f"[adaptive/fold] RMSD not improving enough "
+                    f"({prev_rmsd:.3f} → {curr_rmsd:.3f}, min improvement={MIN_RMSD_IMPROVEMENT}); "
+                    f"not spawning another branch"
+                )
+                _spawn_redesign = False
 
-            # Run create_redesign.py to build redesign_scaffold.cif per model
-            # and write redesign.json with updated contig / select_fixed_atoms.
-            subprocess.run(
-                [
-                    "python",
-                    f"{pipeline.scripts_path}/create_redesign.py",
-                    "--best-fold",         best_fold_path,
-                    "--design-config",     pipeline.rfd_input_filepath,
-                    "--reference-pdb-dir", pipeline.mcsa_pdb_dir,
-                    "--output-dir",        branch_dir,
-                    "--rmsd-threshold",    str(pipeline.rmsd_threshold),
-                ],
-                check=True,
-            )
-            pipeline.state['redesign_spec'] = redesign_json_path
+            if _spawn_redesign:
+                # Serialize best_fold (includes chai1_model_idx and anchor info).
+                best_fold_path = os.path.abspath(
+                    f"{base}/{pipeline.branch_id}/best_fold.json"
+                )
+                os.makedirs(os.path.dirname(best_fold_path), exist_ok=True)
+                with open(best_fold_path, 'w') as fh:
+                    json.dump(pipeline.state['best_fold'], fh, indent=2)
 
-            pipeline.logger.pipeline_log(
-                f"[adaptive/fold] Spawning redesign branch '{branch_id}' "
-                f"for {len(failing)} failing model(s)"
-            )
-            # lmpnn JSONs are intentionally omitted: the branch pipeline
-            # auto-generates them from redesign.json via generate_lmpnn_jsons().
-            pipeline.submit_child_pipeline_request({
-                'name':               f"{pipeline.name}_R",
-                'type':               DiscontinuousScaffoldsPipeline,
-                'adaptive_fn':        adaptive_decision,
-                'start_step':         STEP_BACKBONE_GEN,
-                'branch_id':          branch_id,
-                'branch_ct':          0,
-                'base_path':          pipeline.base_path,
-                'rfd_input_filepath': redesign_json_path,
-                **_shared_pipeline_kwargs(pipeline),
-            })
+                # Allocate a branch directory for the redesign.
+                branch_id = f"{pipeline.name}_R"
+                branch_dir = os.path.abspath(f"{base}/{branch_id}")
+                os.makedirs(branch_dir, exist_ok=True)
+                redesign_json_path = os.path.join(branch_dir, "redesign.json")
+
+                # Run create_redesign.py to build redesign_scaffold.cif per model
+                # and write redesign.json with updated contig / select_fixed_atoms.
+                subprocess.run(
+                    [
+                        "python",
+                        f"{pipeline.scripts_path}/create_redesign.py",
+                        "--best-fold",         best_fold_path,
+                        "--design-config",     pipeline.rfd_input_filepath,
+                        "--reference-pdb-dir", pipeline.mcsa_pdb_dir,
+                        "--output-dir",        branch_dir,
+                        "--rmsd-threshold",    str(pipeline.rmsd_threshold),
+                    ],
+                    check=True,
+                )
+                pipeline.state['redesign_spec'] = redesign_json_path
+
+                pipeline.logger.pipeline_log(
+                    f"[adaptive/fold] Spawning redesign branch '{branch_id}' "
+                    f"for {len(failing)} failing model(s) "
+                    f"(depth={redesign_depth + 1}, RMSD {prev_rmsd:.3f} → {curr_rmsd:.3f})"
+                )
+                # lmpnn JSONs are intentionally omitted: the branch pipeline
+                # auto-generates them from redesign.json via generate_lmpnn_jsons().
+                pipeline.submit_child_pipeline_request({
+                    'name':               f"{pipeline.name}_R",
+                    'type':               DiscontinuousScaffoldsPipeline,
+                    'adaptive_fn':        adaptive_decision,
+                    'start_step':         STEP_BACKBONE_GEN,
+                    'branch_id':          branch_id,
+                    'branch_ct':          0,
+                    'base_path':          pipeline.base_path,
+                    'rfd_input_filepath': redesign_json_path,
+                    'initial_state':      {
+                        'redesign_depth': redesign_depth + 1,
+                        'prev_best_rmsd': curr_rmsd,
+                    },
+                    **_shared_pipeline_kwargs(pipeline),
+                })
 
         pipeline.next_step = STEP_DONE
 
@@ -439,7 +470,7 @@ async def run_discontinuous_scaffolds() -> None:
                 "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
             }
         )
-        for i in range(17,25)
+        for i in range(24,29)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
