@@ -121,16 +121,27 @@ The main pipeline's `current_seqs_split_dir` is updated to a symlink directory c
 | Condition | Action |
 |-----------|--------|
 | All models pass | Set `next_step = STEP_DONE`; pipeline terminates |
-| All models fail | Spawn redesign-scaffold branch; set `next_step = STEP_DONE` |
-| Mixed pass/fail | Spawn redesign-scaffold branch for failing models; set `next_step = STEP_DONE` |
-
-When a redesign-scaffold branch is spawned:
-- `adaptive_decision()` serializes `pipeline.state['best_fold']` to `{base}/{branch_id}/best_fold.json`
-- `scripts/create_redesign.py` is run to produce per-model `redesign_scaffold.cif` and a combined `redesign.json`. The scaffold is a **hybrid structure**: well-predicted anchor sequence regions (Kabsch-aligned from the best Chai-1 output) are combined with poorly-predicted motif residues taken directly from the reference PDB (renumbered starting at 900). The contig string and `select_fixed_atoms` in `redesign.json` are rewritten to reflect the new numbering.
-- A new backbone-start branch (`start_step = STEP_BACKBONE_GEN`) is spawned using `redesign.json` as `rfd_input_filepath`. LMPNN JSONs are auto-generated from `redesign.json` at branch init.
-- `pipeline.branch_ct` is incremented; the new branch's `branch_id` is `f"b{pipeline.branch_ct}"`
+| All models fail | Check stopping conditions; if clear, spawn redesign-scaffold branch; set `next_step = STEP_DONE` |
+| Mixed pass/fail | Check stopping conditions for failing models; if clear, spawn redesign-scaffold branch; set `next_step = STEP_DONE` |
 
 The pipeline always terminates after the fold stage (`next_step = STEP_DONE`) regardless of pass/fail results.
+
+#### Redesign loop stopping conditions
+
+Before spawning a redesign branch, two conditions are checked. If either is true, no branch is spawned:
+
+| Constant | Default | Condition |
+|----------|---------|-----------|
+| `MAX_REDESIGN_DEPTH` | `3` | `redesign_depth >= MAX_REDESIGN_DEPTH` — lineage has been redesigned too many times |
+| `MIN_RMSD_IMPROVEMENT` | `0.10 Å` | `curr_rmsd >= prev_rmsd - MIN_RMSD_IMPROVEMENT` — RMSD has not improved enough since the last redesign |
+
+`redesign_depth` and `prev_best_rmsd` are tracked via `pipeline.state` and passed to each redesign branch via `initial_state`.
+
+When a redesign-scaffold branch is spawned:
+- `adaptive_decision()` serializes `pipeline.state['best_fold']` to `{base}/{pipeline.branch_id}/best_fold.json`
+- `scripts/create_redesign.py` is run to produce per-model `redesign_scaffold.cif` and a combined `redesign.json`. The scaffold is a **hybrid structure**: well-predicted anchor sequence regions (Kabsch-aligned from the best Chai-1 output) are combined with poorly-predicted motif residues taken directly from the reference PDB (renumbered starting at 900). The contig string and `select_fixed_atoms` in `redesign.json` are rewritten to reflect the new numbering.
+- A new backbone-start branch (`start_step = STEP_BACKBONE_GEN`) is spawned using `redesign.json` as `rfd_input_filepath`, with `redesign_depth + 1` and the current best RMSD passed via `initial_state`. LMPNN JSONs are auto-generated from `redesign.json` at branch init.
+- The redesign branch's `branch_id` is `f"{pipeline.name}_R"`
 
 #### Anchor residue classification
 
@@ -146,7 +157,15 @@ The pipeline always terminates after the fold stage (`next_step = STEP_DONE`) re
 
 ### Branch naming
 
-Branch IDs are derived from a `branch_ct` integer attribute on the pipeline instance. The root pipeline defaults to `branch_ct=0` → `branch_id='b0'`. When a fold branch is spawned, `pipeline.branch_ct` is incremented on the parent and the new branch receives that value (e.g. `branch_ct=1` → `branch_id='b1'`). Backbone and sequence branches use a separate `_next_branch_id()` helper. Branch pipelines are named `{pipeline.name}_{branch_id}`.
+| Branch type | `branch_id` format | Example |
+|-------------|-------------------|---------|
+| Root pipeline | `{pipeline_name}_0` | `disco_p26_0` |
+| Backbone-start branch | `{pipeline_name}_{n}` via `_next_branch_id()` | `disco_p26_1` |
+| Sequence-start branch | `{pipeline_name}_{n}` via `_next_branch_id()` | `disco_p26_2` |
+| Fold redesign branch | `{pipeline_name}_R` | `disco_p26_R` |
+| Second redesign of a redesign | `{original_name}_R_R` | `disco_p26_R_R` |
+
+`_next_branch_id()` increments a `branch_ct` counter in `pipeline.state` and returns `f"{pipeline.name}_{n}"`. Redesign branches always use `f"{pipeline.name}_R"` as their name, so each successive redesign appends another `_R`.
 
 ---
 
@@ -172,8 +191,9 @@ All arguments are passed as kwargs to `DiscontinuousScaffoldsPipeline` (via `Pip
 | `lmpnn_fixed_res_json` | `str` | auto-generated | LigandMPNN fixed residues JSON; auto-generated from `rfd_input_filepath` by `generate_lmpnn_jsons()` at pipeline init if not provided |
 | `island_counts_csv` | `str` | `None` | Island counts reference CSV (used in backbone and sequence analysis) |
 | `mcsa_pdb_dir` | `str` | `None` | Directory of reference MCSA PDB files for RMSD comparison in final analysis |
-| `rmsd_threshold` | `float` | `1.5` | RMSD threshold (Å) used in Step 8 final analysis |
+| `rmsd_threshold` | `float` | `1.5` | RMSD threshold (Å) used in Step 8 final analysis and anchor residue classification |
 | `diffusion_batch_size` | `int` | `10` | Number of structures per RFDiffusion3 batch |
+| `lmpnn_num_batches` | `int` | `4` | Number of LigandMPNN sequence batches to generate per model |
 
 ### Branching control arguments
 
@@ -181,7 +201,7 @@ These are set automatically by `adaptive_decision()` when spawning branch pipeli
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `branch_id` | `str` | `'b0'` | Namespace prefix for this pipeline's output directories |
+| `branch_id` | `str` | `'{name}_0'` | Namespace prefix for this pipeline's output directories |
 | `start_step` | `int` | `STEP_BACKBONE_GEN` (1) | First step to execute; earlier stages are skipped |
 | `initial_state` | `dict` | `None` | Pre-seeds `self.state` before `run()` starts; used by sequence-start branches to inject `pdb_dir` |
 
@@ -281,6 +301,8 @@ This logic is implemented in `_identify_passing_models(df, model_col, thresholds
 | Key | Required by | Description |
 |-----|-------------|-------------|
 | `pdb_dir` | Sequence-start branches (Steps 4–8) | Pre-seeds the PDB directory that Step 2 would normally write; required because backbone stage is skipped |
+| `redesign_depth` | Redesign branches | Integer counting how many redesign cycles this lineage has undergone; compared against `MAX_REDESIGN_DEPTH` to limit infinite loops |
+| `prev_best_rmsd` | Redesign branches | Best `motif_rmsd` from the previous redesign generation; compared against `MIN_RMSD_IMPROVEMENT` to stop spawning if RMSD is not improving |
 
 ---
 
@@ -290,7 +312,7 @@ Each task creates its working directories under `{base_path}/{branch_id}/{taskco
 
 ```
 {base_path}/
-  b0/                              # root pipeline
+  disco_p26_0/                     # root pipeline (branch_id = {name}_0)
     1_backbone_gen/
       in/
       out/                         # RFDiffusion3 CIF files
@@ -320,15 +342,19 @@ Each task creates its working directories under `{base_path}/{branch_id}/{taskco
       out/                         # final CSV, campaign plots
     best_fold.json                 # created if fold branch spawned
 
-  b1/                              # redesign-scaffold branch for failing fold models
+  disco_p26_R/                     # redesign-scaffold branch (branch_id = {name}_R)
     redesign.json                  # updated RFD input (new contig + select_fixed_atoms)
     M0024_1nzy/
       redesign_scaffold.cif        # hybrid: anchor regions from chai + ref residues at 900+
     1_backbone_gen/
     ...
+    best_fold.json                 # created if this redesign also fails
 
-  b2/                              # sequence-start branch (branch_ct incremented per branch)
-    4_seq_pred/                    # taskcount continues from branch start_step
+  disco_p26_R_R/                   # second redesign (if first redesign fails again)
+    ...
+
+  disco_p26_1/                     # backbone-start branch (from _next_branch_id())
+    1_backbone_gen/
     ...
 ```
 
