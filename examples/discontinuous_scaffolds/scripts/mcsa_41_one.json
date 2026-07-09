@@ -1,0 +1,12 @@
+{
+    "M0630_1j79": {
+        "input": "./mcsa_41/M0630_1j79.pdb",
+        "ligand": "ORO,ZN",
+        "contig": "89,A250,90",
+        "select_fixed_atoms": {
+            "A250": "OD1,CG",
+            "ORO": "N3,C2,C4,N1",
+            "ZN": "ZN"
+        }
+    }
+}

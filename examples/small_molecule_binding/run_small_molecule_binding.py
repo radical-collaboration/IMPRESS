@@ -23,9 +23,10 @@ rhapsody.enable_logging(level=logging.DEBUG)
 BACKBONE_MAX_CA_DEVIATION = 1.0
 BACKBONE_MIN_SS_FRACTION  = 0.5
 FASTRELAX_MAX_FA_REP      = 100.0   # fa_rep REU
-FASTRELAX_MAX_SCORE       = 0.0    # total_score REU
-INTERFACE_MIN_SC          = 0.35
-FOLD_MIN_PLDDT            = 70.0
+FASTRELAX_MAX_SCORE       = -250.0  # total_score REU  (was 0.0 — inert; data range -193 to -510)
+FASTRELAX_MAX_INTERACT    = -8.0    # interaction energy REU  (was absent/0.0 — inert; p75=-8.8)
+INTERFACE_MIN_SC          = 0.55    # shape complementarity  (was 0.35 — passed 100%; data min=0.37)
+FOLD_MIN_PLDDT            = 75.0    # mean pLDDT  (was 70.0; ~70% of AF2 runs exceed 75)
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
@@ -77,10 +78,24 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
                     pipeline.next_step = STEP_RETRY_SEQ
 
     elif step == 'packmin':
-        pipeline.next_step = STEP_MPNN
+        total_score = metrics.get('total_score')
+        if total_score is not None and total_score > 0:
+            pipeline.next_step = STEP_RFD3   # badly packed — restart backbone
+        else:
+            pipeline.next_step = STEP_MPNN
 
     elif step == 'fastrelax':
-        pipeline.next_step = STEP_INTERFACE if passed else STEP_MPNN
+        if passed:
+            pipeline.state['fastrelax_fail_count'] = 0
+            pipeline.next_step = STEP_INTERFACE
+        else:
+            count = pipeline.state.get('fastrelax_fail_count', 0) + 1
+            pipeline.state['fastrelax_fail_count'] = count
+            if count >= 5:
+                pipeline.state['fastrelax_fail_count'] = 0
+                pipeline.next_step = STEP_RFD3
+            else:
+                pipeline.next_step = STEP_MPNN
 
     elif step == 'interface':
         if passed:
@@ -124,13 +139,13 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
-    backend = await LocalExecutionBackend(ProcessPoolExecutor())
-    #backend = await DragonExecutionBackendV3()
+    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
+    backend = await DragonExecutionBackendV3()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
-            name='p1',
+            name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
             adaptive_fn=adaptive_decision,
             kwargs={
@@ -138,10 +153,14 @@ async def impress_smallmol_bind() -> None:
                 "backbone_min_ss_fraction":  BACKBONE_MIN_SS_FRACTION,
                 "fastrelax_max_fa_rep":      FASTRELAX_MAX_FA_REP,
                 "fastrelax_max_total_score": FASTRELAX_MAX_SCORE,
+                "fastrelax_max_interact":    FASTRELAX_MAX_INTERACT,
                 "interface_min_sc":          INTERFACE_MIN_SC,
                 "fold_min_plddt":            FOLD_MIN_PLDDT,
-            },
+                "diffusion_batch_size":      4,
+                "num_refine_cycles":         2,
+            }
         )
+        for i in range(1,9)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)

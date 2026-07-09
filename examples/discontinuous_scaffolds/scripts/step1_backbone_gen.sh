@@ -4,6 +4,8 @@ set -euo pipefail
 # Step 1: Backbone generation via RFDiffusion3 (apptainer)
 # Args: $1=foundry_sif_path $2=output_dir $3=rfd_input_filepath $4=diffusion_batch_size
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 foundry_sif_path="$1"
 output_dir="$2"
 rfd_input_filepath="$3"

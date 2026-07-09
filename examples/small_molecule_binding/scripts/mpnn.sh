@@ -8,9 +8,10 @@ mpnn_dir="$1"
 pdb_path="$2"
 output_dir="$3"
 n_batches="$4"
-fixed_residues="${5:-}"
+batch_size="$5"
+fixed_residues="${6:-}"
 
-source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/LigandMPNN/.venv/bin/activate
 
 python "$mpnn_dir/run.py" \
     --model_type "ligand_mpnn" \
@@ -21,7 +22,7 @@ python "$mpnn_dir/run.py" \
     --out_folder "$output_dir" \
     --pack_side_chains 1 \
     --number_of_batches "$n_batches" \
-    --batch_size 1 \
+    --batch_size "$batch_size" \
     --number_of_packs_per_design 1 \
     --pack_with_ligand_context 1 \
     --repack_everything 1 \

@@ -1,0 +1,18 @@
+{
+    "M0907_1rbl": {
+        "input": "./mcsa_41/M0907_1rbl.pdb",
+        "ligand": "MG,FMT,CAP",
+        "contig": "10,A175,25,A201,1,A203,0,A204,89,A294,39,A334,10",
+        "select_fixed_atoms": {
+            "A175": "NZ,CE,CD",
+            "A201": "NZ,CE",
+            "A203": "OD1,CG,CB,OD2",
+            "A204": "OE1,CD,CG,OE2",
+            "A294": "NE2,CD2,CE1,CG,ND1",
+            "A334": "NZ,CE,CD",
+            "CAP": "O2,C2,C1,C3,C,O1,C4",
+            "FMT": "O2,C",
+            "MG": "MG"
+        }
+    }
+}

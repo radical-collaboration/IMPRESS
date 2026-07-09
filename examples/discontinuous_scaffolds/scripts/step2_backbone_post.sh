@@ -7,7 +7,7 @@ set -euo pipefail
 scripts_path="$1"
 rfd3_out_dir="$2"
 
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 
 python "$scripts_path/cif_to_pdb.py" \
     --input-dir "$rfd3_out_dir" \

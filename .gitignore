@@ -142,3 +142,7 @@ af_stats*
 slurm*
 *.slurm
 ddict*
+# disco wf outputs
+b0
+slurm*
+*slurm

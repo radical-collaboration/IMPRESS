@@ -128,7 +128,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.passes     = kwargs.get("passes",     1)
         self.step_id    = kwargs.get("step_id",    1)
         self.seq_rank   = kwargs.get("seq_rank",   0)
-        self.num_seqs   = kwargs.get("num_seqs",   10)
+        self.num_seqs   = kwargs.get("num_seqs",   4)
         self.sub_order  = kwargs.get("sub_order",  0)
         self.max_passes = kwargs.get("max_passes", 1)
         self.mock       = kwargs.get("mock",       False)
@@ -143,15 +143,15 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.base_path       = kwargs.get("base_path", os.getcwd())
         self.scripts_path    = os.path.join(self.base_path, "scripts")
         self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
-        self.mpnn_dir        = kwargs.get("mpnn_dir", f"/ocean/projects/dmr170002p/hooten/LigandMPNN")
+        self.mpnn_dir        = kwargs.get("mpnn_dir", f"/anvil/projects/x-nairr240405/mason/LigandMPNN")
 
         # Configurable tool paths and ensemble sizes
-        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/ocean/projects/dmr170002p/hooten/foundry_medprec.sif")
-        self.colabfold_path     = kwargs.get("colabfold_path",     "/ocean/projects/dmr170002p/hooten/localcolabfold")
+        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/anvil/projects/x-nairr240405/mason/foundry.sif")
+        self.colabfold_path     = kwargs.get("colabfold_path",     "/anvil/projects/x-nairr240405/mason/localcolabfold")
         self.ligand_params      = kwargs.get("ligand_params",      "ALR.params")
-        self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 10)
+        self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 1)
         self.num_refine_cycles  = kwargs.get("num_refine_cycles",  3)
-        self.diffusion_batch_size = kwargs.get("diffusion_batch_size", 10)
+        self.diffusion_batch_size = kwargs.get("diffusion_batch_size", 2)
 
         # Quality thresholds (overridable at construction time)
         self.backbone_max_ca_deviation = kwargs.get("backbone_max_ca_deviation", 2.0)
@@ -196,12 +196,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
     def _register_real_tasks(self):
         """Register real HPC tasks that return shell command strings."""
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def rfd3(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "rfd3"
             self.previous_task = taskname
-            taskdir    = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir    = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -222,7 +222,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task(local_task=True)
         async def analysis_backbone():
-            out_dir    = f"{self.base_path}/{self.taskcount}_rfd3/out"
+            out_dir    = f"{self.base_path}/{self.name}/{self.taskcount}_rfd3/out"
             json_files = [
                 f for f in os.listdir(out_dir)
                 if f.endswith('.json') and '_model_' in f
@@ -273,19 +273,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 ETYPE_BACKBONE, best['ss'], self.state.get('rfd3_input_pdb'), backbone_path,
             ))
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def mpnn(
             fixed_residues_file: str | None = None):
             self.taskcount += 1
             taskname = "mpnn"
             self.previous_task = taskname
-            taskdir    = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir    = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
             cycle_i   = self._current_cycle_i
             pdb_path  = self.state['best_backbone_path'] if cycle_i == 0 else self.state['best_packed_pdb']
             n_batches = self.mpnn_ensemble_size if cycle_i == 0 else 1
+            batch_size = self.num_seqs
             output_dir = f"{taskdir}/out"
 
             # Copy input to a short fixed name to prevent filename accumulation
@@ -311,13 +312,13 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {pdb_path}"
                 f" {output_dir}"
                 f" {n_batches}"
+                f" {batch_size}"
                 f' "{fixed_residues}"'
-                f" > mpnnoutput.txt"
             )
 
         @self.auto_register_task(local_task=True)
         async def analysis_sequence():
-            out_dir  = f"{self.base_path}/{self.taskcount}_mpnn/out"
+            out_dir  = f"{self.base_path}/{self.name}/{self.taskcount}_mpnn/out"
             seqs_dir = f"{out_dir}/seqs"
             self.state['last_mpnn_seqs_dir'] = seqs_dir
             self.state['last_analysis_step'] = 'sequence'
@@ -365,12 +366,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 self.state.get('best_backbone_path'), self.state.get('last_seq_fasta'),
             ))
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def packmin():
             self.taskcount += 1
             taskname = "packmin"
             self.previous_task = taskname
-            taskdir    = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir    = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -391,7 +392,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task(local_task=True)
         async def analysis_packmin():
-            out_dir     = f"{self.base_path}/{self.taskcount}_packmin/out"
+            out_dir     = f"{self.base_path}/{self.name}/{self.taskcount}_packmin/out"
             score_files = [f for f in os.listdir(out_dir) if f.endswith('_packmin_score.json')]
 
             total_score = None
@@ -402,12 +403,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.state['last_analysis_step']    = 'packmin'
             self.state['last_analysis_metrics'] = {'pass': True, 'total_score': total_score}
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def fastrelax():
             self.taskcount += 1
             taskname = "fastrelax"
             self.previous_task = taskname
-            taskdir    = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir    = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -425,7 +426,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task(local_task=True)
         async def analysis_fastrelax():
-            out_dir    = f"{self.base_path}/{self.taskcount}_fastrelax/out"
+            out_dir    = f"{self.base_path}/{self.name}/{self.taskcount}_fastrelax/out"
             fasc_files = [f for f in os.listdir(out_dir) if f.endswith('.fasc')]
 
             total_score = fa_rep = rmsd = interact = None
@@ -451,14 +452,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'rmsd':        rmsd,
             }
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def filter_shape(ligand_name: str = "ALR"):
             taskname = "filter_shape"
-            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
-            pdb_directory = f"{self.base_path}/{self.taskcount}_fastrelax/out"
+            pdb_directory = f"{self.base_path}/{self.name}/{self.taskcount}_fastrelax/out"
 
             return (
                 f"bash {self.scripts_path}/filter_shape.sh"
@@ -471,7 +472,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         @self.auto_register_task(local_task=True)
         async def analysis_interface():
             sc_file = (
-                f"{self.base_path}/{self.taskcount}_filter_shape/out/"
+                f"{self.base_path}/{self.name}/{self.taskcount}_filter_shape/out/"
                 "shape_complementarity_values.txt"
             )
             max_sc = 0.0
@@ -493,12 +494,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'max_sc': max_sc,
             }
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def af2(task_description={"gpus_per_rank": 1}):
             self.taskcount += 1
             taskname = "alphafold"
             self.previous_task = taskname
-            taskdir    = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir    = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
@@ -524,7 +525,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
         @self.auto_register_task(local_task=True)
         async def analysis_fold():
-            out_dir     = f"{self.base_path}/{self.taskcount}_alphafold/out"
+            out_dir     = f"{self.base_path}/{self.name}/{self.taskcount}_alphafold/out"
             score_files = [
                 f for f in os.listdir(out_dir)
                 if 'scores' in f and f.endswith('.json')
@@ -555,14 +556,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'best_model':      best_model,
             }
 
-        @self.auto_register_task()
+        @self.auto_register_task(capture_stdio=True)
         async def filter_energy(ligand_name: str = "ALR"):
             taskname = "filter_energy"
-            taskdir  = f"{self.base_path}/{self.taskcount}_{taskname}"
+            taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
             os.makedirs(f"{taskdir}/out", exist_ok=True)
 
-            pdb_directory         = f"{self.base_path}/{self.taskcount}_fastrelax/out"
+            pdb_directory         = f"{self.base_path}/{self.name}/{self.taskcount}_fastrelax/out"
             outputs_dir           = f"{taskdir}/out"
             output_file           = f"{outputs_dir}/negative_ligand_filenames.txt"
             output_energy_file    = f"{outputs_dir}/negative_ligand_energies.txt"

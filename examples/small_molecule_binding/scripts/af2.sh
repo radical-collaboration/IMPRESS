@@ -8,8 +8,9 @@ colabfold_path="$1"
 short_fasta="$2"
 output_dir="$3"
 
+module load gcc/11.2.0
 module load cuda
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 
 pixi run --manifest-path "$colabfold_path" \
     colabfold_batch \

@@ -11,7 +11,7 @@ interface_values_output="$4"
 
 SCRIPT_DIR="$(dirname "$0")"
 
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
 
 python "$SCRIPT_DIR/filter_shape.py" \
     "$pdb_directory" \

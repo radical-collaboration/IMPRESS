@@ -235,8 +235,7 @@ def _extract_non_anchor_ref(
                 pos = np.array([atom.pos.x, atom.pos.y, atom.pos.z])
                 atoms_out.append((atom.name, pos, atom.element))
             # Treat as ligand if residue is a hetero group (non-polymer)
-            is_het = residue.entity_type == gemmi.EntityType.NonPolymer or \
-                     residue.entity_type == gemmi.EntityType.Unknown
+            is_het = not gemmi.find_tabulated_residue(residue.name).is_amino_acid()
             if is_het:
                 ligand_residues.append((chain.name, seqnum, residue.name, atoms_out))
             else:
@@ -375,18 +374,30 @@ def _rebuild_contig_and_sfa(
 
             # Collect anchor tokens in this run
             run_anchor_toks = [tagged[k][1] for k in range(run_start, run_end + 1) if tagged[k][0] == "anchor"]
-            if len(run_anchor_toks) >= 2:
-                # Get chai positions for first and last anchor in run
-                first_m = _PROTEIN_RES_RE.match(run_anchor_toks[0])
-                last_m = _PROTEIN_RES_RE.match(run_anchor_toks[-1])
-                chai_start = contig_map.get((first_m.group(1), int(first_m.group(2))))
-                chai_end = contig_map.get((last_m.group(1), int(last_m.group(2))))
-                new_tokens.append(f"A{chai_start}-{chai_end}")
-            else:
-                # Single anchor residue in this run — emit it with its chai position
-                m = _PROTEIN_RES_RE.match(run_anchor_toks[0])
-                chai_pos = contig_map.get((m.group(1), int(m.group(2))))
-                new_tokens.append(f"A{chai_pos}")
+            # Resolve chai positions for every anchor token in the run
+            run_chai_pos = []
+            for tok in run_anchor_toks:
+                m = _PROTEIN_RES_RE.match(tok)
+                cp = contig_map.get((m.group(1), int(m.group(2))))
+                if cp is not None:
+                    run_chai_pos.append(cp)
+
+            if len(run_chai_pos) >= 2:
+                # Only collapse to a range when chai positions are strictly consecutive
+                # (no gaps in the actual scaffold). Non-consecutive anchors are emitted
+                # individually so the contig exactly matches what _extract_anchor_chain
+                # writes into the scaffold.
+                is_consecutive = all(
+                    run_chai_pos[k + 1] == run_chai_pos[k] + 1
+                    for k in range(len(run_chai_pos) - 1)
+                )
+                if is_consecutive:
+                    new_tokens.append(f"A{run_chai_pos[0]}-{run_chai_pos[-1]}")
+                else:
+                    for cp in run_chai_pos:
+                        new_tokens.append(f"A{cp}")
+            elif run_chai_pos:
+                new_tokens.append(f"A{run_chai_pos[0]}")
             i = run_end + 1
 
     new_contig = ",".join(new_tokens)
@@ -415,13 +426,21 @@ def _rebuild_contig_and_sfa(
         chain_id, resnum = m.group(1), int(m.group(2))
         if key in anchor_set:
             chai_pos = contig_map.get((chain_id, resnum))
-            new_sfa[f"{chain_id}{chai_pos}"] = atoms
+            # The anchor residue in the redesign scaffold comes from the Chai CIF
+            # (LigandMPNN-designed sequence), so its residue identity — and thus
+            # available sidechain atoms — may differ from the original reference.
+            # Use backbone atoms only, which are always present for any residue.
+            new_sfa[f"{chain_id}{chai_pos}"] = "N,CA,C,O"
         else:
             sfa_ordered[key] = atoms  # defer; number in contig order below
 
-    # Second pass: emit non-anchor entries in contig order
+    # Second pass: emit non-anchor entries in contig order.
+    # Use backbone atoms only — non-anchor residues in the redesign scaffold are
+    # re-diffused by RFD3, so only their backbone geometry constrains the motif.
+    # Copying original sidechain atoms (e.g. GLU OE2,CD,CG,OE1) fails RFD3
+    # validation when the scaffold has only backbone density at that position.
     for key in non_anchor_order:
-        new_sfa[f"A{NON_ANCHOR_START + non_anchor_i}"] = sfa_ordered[key]
+        new_sfa[f"A{NON_ANCHOR_START + non_anchor_i}"] = "N,CA,C,O"
         non_anchor_i += 1
 
     return new_contig, new_sfa
@@ -453,6 +472,18 @@ def process_model(
     anchor_ref_ranges = _parse_anchor_ref_residues(entry.get("anchor_ref_residues", ""))
     anchor_residues_str = entry.get("anchor_residues", "")
     anchor_set = set(anchor_residues_str.split(",")) if anchor_residues_str else set()
+
+    # anchor_sequences/anchor_ref_residues only cover runs of >=2 consecutive anchors.
+    # Supplement anchor_ref_ranges so that single anchors are also excluded from the
+    # non-anchor reference extraction.
+    covered_ref: set[tuple[str, int]] = set()
+    for chain_id, ref_start, ref_end in anchor_ref_ranges:
+        for rn in range(ref_start, ref_end + 1):
+            covered_ref.add((chain_id, rn))
+    for key in anchor_set:
+        m = _PROTEIN_RES_RE.match(key)
+        if m and (m.group(1), int(m.group(2))) not in covered_ref:
+            anchor_ref_ranges.append((m.group(1), int(m.group(2)), int(m.group(2))))
 
     # Locate best CIF
     run_dir = Path(entry["run_dir"])
@@ -492,18 +523,39 @@ def process_model(
         print(f"Warning: Kabsch alignment failed for {model_name}: {e}", file=sys.stderr)
         return {}
 
+    # Build anchor spans from anchor_set + contig_map.
+    # anchor_sequences only covers runs of >=2; this handles single anchors too.
+    _anchor_chai_pos = sorted([
+        chai_pos
+        for key in anchor_set
+        for m in [_PROTEIN_RES_RE.match(key)]
+        if m
+        for chai_pos in [contig_map.get((m.group(1), int(m.group(2))))]
+        if chai_pos is not None
+    ])
+    anchor_spans: list[tuple[int, int]] = []
+    if _anchor_chai_pos:
+        start = prev = _anchor_chai_pos[0]
+        for p in _anchor_chai_pos[1:]:
+            if p == prev + 1:
+                prev = p
+            else:
+                anchor_spans.append((start, prev))
+                start = prev = p
+        anchor_spans.append((start, prev))
+
     # Extract anchor residues from chai CIF (transformed to reference frame)
-    anchor_residues_data = _extract_anchor_chain(cif_st, anchor_sequences, R, t)
+    anchor_residues_data = _extract_anchor_chain(cif_st, anchor_spans, R, t)
 
     # Extract non-anchor reference residues and ligand
     non_anchor_protein, ligand_residues = _extract_non_anchor_ref(ref_st, anchor_ref_ranges)
 
-    # Write redesign_scaffold.cif
+    # Write redesign_scaffold.pdb
     model_out_dir = output_dir / model_name
     model_out_dir.mkdir(parents=True, exist_ok=True)
-    scaffold_path = model_out_dir / "redesign_scaffold.cif"
+    scaffold_path = model_out_dir / "redesign_scaffold.pdb"
     redesign_st = _build_redesign_structure(anchor_residues_data, non_anchor_protein, ligand_residues)
-    redesign_st.make_mmcif_document().write_file(str(scaffold_path))
+    redesign_st.write_pdb(str(scaffold_path))
     print(f"  [{model_name}] wrote {scaffold_path}")
 
     # Rebuild contig and select_fixed_atoms
