@@ -3,24 +3,29 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import RadicalExecutionBackend
+#from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
+from rhapsody.backends import DragonExecutionBackendV3
+#from radical.asyncflow import LocalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager
-from impress.pipelines.protein_binding import ProteinBindingPipeline
+from protein_binding import ProteinBindingPipeline
+
+import rhapsody,logging
+rhapsody.enable_logging(level=logging.DEBUG)
 
 
 async def adaptive_criteria(current_score: float, previous_score: float) -> bool:
     """
     Determine if protein quality has degraded requiring pipeline migration.
-    
+
     Compares current and previous protein scores to decide if a protein
     should be moved to a new pipeline for optimization.
-    
+
     Args:
         current_score: Current protein structure quality score
         previous_score: Previous protein structure quality score
-        
+
     Returns:
         True if quality has degraded (score increased), False otherwise
     """
@@ -36,7 +41,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
     Args:
         pipeline: The protein binding pipeline to evaluate
-        
+
     Returns:
         Pipeline configuration dictionary for new child pipeline if needed,
         None otherwise
@@ -55,7 +60,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
             name, *_, score_str = line.split(',')
             protein = name.split('.')[0]
             pipeline.current_scores[protein] = float(score_str)
-    
+
 
     # First pass — just save current scores as previous
     if not pipeline.previous_scores:
@@ -71,7 +76,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
         decision = await adaptive_criteria(curr_score, pipeline.previous_scores[protein])
         pipeline.logger.pipeline_log(f'Adaptive descision: {decision}')
-        
+
         if decision:
             sub_iter_seqs[protein] = pipeline.iter_seqs.pop(protein)
 
@@ -84,7 +89,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         # Copy PDB files for bad proteins
         for protein in sub_iter_seqs:
             src = f'{pipeline.output_path_af}/{protein}.pdb'
-            dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
+            dst = f'{pipeline.base_path}/prod_in/{new_name}_in/{protein}.pdb'
             shutil.copyfile(src, dst)
 
         # Build a request for a new pipeline
@@ -117,28 +122,31 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 async def impress_protein_bind() -> None:
     """
     Execute protein binding analysis with adaptive optimization.
-    
+
     Creates and manages multiple ProteinBindingPipeline instances with
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    backend = await RadicalExecutionBackend(
-            {
-                'gpus':1,
-                'cores': 32,
-                'runtime' : 23 * 60,
-                'resource': 'purdue.anvil_gpu'
-                }
-            )
+#    backend = await RadicalExecutionBackend(
+#        {
+#            'gpus':1,
+#            'cores':16,
+#            'runtime':4 * 60,
+#            'resource': 'access.bridges2'
+#        }
+#    )
+    backend = await DragonExecutionBackendV3()
+    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
-            name='p1',
+            name=f"p{str(i)}",
             type=ProteinBindingPipeline,
             adaptive_fn=adaptive_decision
         )
+        for i in range(17,33)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)

@@ -1,17 +1,24 @@
+
 import asyncio
 import copy
 import os
+import shutil
 
-from .impress_pipeline import ImpressBasePipeline
+from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = [
-    "module load anaconda",
-    "source activate base",
-    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
-]
+MPNN_PATH = f"/anvil/projects/x-nairr240405/mason/ProteinMPNN"
 
-MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
+_BOLTZ_CHAIN_MAP = {'pdz': 'A', 'pep': 'B'}
 
+def _copy_pdb_rename_chains(src, dst, chain_map=_BOLTZ_CHAIN_MAP):
+    """Copy a PDB, replacing Boltz multi-char chain IDs with standard single-char IDs."""
+    with open(src) as f_in, open(dst, 'w') as f_out:
+        for line in f_in:
+            if line.startswith(('ATOM', 'HETATM', 'TER')):
+                chain = line[21:24]
+                if chain in chain_map:
+                    line = line[:21] + chain_map[chain] + line[24:]
+            f_out.write(line)
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -26,20 +33,21 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.seq_rank = kwargs.get("seq_rank", 0)
         self.num_seqs = kwargs.get("num_seqs", 10)
         self.sub_order = kwargs.get("sub_order", 0)
-        self.max_passes = kwargs.get("max_passes", 4)
+        self.max_passes = kwargs.get("max_passes", 10)
         self.mpnn_path = kwargs.get("mpnn_path", MPNN_PATH)
 
         # Sequence and score state
         self.current_scores = {}
         self.iter_seqs = kwargs.get("iter_seqs", {})
-        self.previous_scores = kwargs.get("previous_score", {})
+        self.previous_scores = kwargs.get("previous_scores", {})
 
         super().__init__(name, flow, **configs, **kwargs)
 
         # Input-related
         self.fasta_list_2 = kwargs.get("fasta_list_2", [])
         self.base_path = kwargs.get("base_path", os.getcwd())
-        self.input_path = os.path.join(self.base_path, f"{self.name}_in")
+        self.scripts_path = os.path.join(self.base_path, "scripts")
+        self.input_path = os.path.join(self.base_path, f"prod_in/{self.name}_in")
 
         # Output paths
         self.output_path = os.path.join(
@@ -59,7 +67,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         base_output = os.path.join(
             self.base_path, "af_pipeline_outputs_multi", new_pipeline_name
         )
-        input_dir = os.path.join(self.base_path, f"{new_pipeline_name}_in")
+        input_dir = os.path.join(self.base_path, f"prod_in/{new_pipeline_name}_in")
 
         if os.path.isdir(base_output):
             return  # already exists, nothing to do
@@ -73,7 +81,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             "af/prediction/dimer_models",
             "af/prediction/logs",
             "mpnn",
-            *[f"mpnn/job_{i}" for i in range(1, 6)],
+            *[f"mpnn/job_{i}" for i in range(1, self.max_passes+1)],
         ]
 
         paths_to_create = [input_dir, base_output] + [
@@ -86,26 +94,28 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task()  # MPNN
-        async def s1(task_description={"gpus_per_rank": 1}):  # noqa: B006
+        @self.auto_register_task(capture_stdio=True)  # MPNN
+        async def s1(task_description={"gpus_per_rank": 1}):
+            self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
-            chain = "A" if self.passes == 1 else "B"
+            chain = "A"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
             return (
-                f"python3 {mpnn_script} "
-                f"-pdb={input_path} "
-                f"-out={output_dir} "
-                f"-mpnn={self.mpnn_path} "
-                f"-seqs={self.num_seqs} "
-                "-is_monomer=0 "
-                f"-chains={chain}"
+                f"bash {self.scripts_path}/s1_mpnn.sh "
+                f"{mpnn_script} "
+                f"{input_path} "
+                f"{output_dir} "
+                f"{self.mpnn_path} "
+                f"{self.num_seqs} "
+                f"{chain}"
             )
 
         @self.auto_register_task(local_task=True)
         async def s2():
+            self.step_id += 1
             job_seqs_dir = f"{self.output_path_mpnn}/job_{self.passes}/seqs"
 
             for file_name in os.listdir(job_seqs_dir):
@@ -127,6 +137,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # fasta - don't use helper script - cannot run x tasks for x structures
         @self.auto_register_task(local_task=True)
         async def s3():
+            self.step_id += 1
             output_dir = os.path.join(self.output_path, "af", "fasta")
 
             fasta_file_to_return = []
@@ -138,29 +149,66 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
                 fasta_path = os.path.join(output_dir, f"{base_name}.fa")
                 with open(fasta_path, "w") as f:
-                    f.write(f">pdz\n{design_seq}\n>pep\n{pep_seq}\n")
+                    f.write(f">pdz|protein\n{design_seq}\n>pep|protein\n{pep_seq}\n")
 
             return fasta_file_to_return
 
         # alphafold, must be run separately for each structure one at a time!
-        @self.auto_register_task()
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
-            cmd = (
-                f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
-                f"{self.output_path}/af/fasta/ "
-                f"{target_fasta}.fa "
-                f"{self.output_path}/af/prediction/dimer_models/ "
-            )
+#        @self.auto_register_task()
+#        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+#            return (
+#                f"bash {self.scripts_path}/s4_alphafold.sh "
+#                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+#                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+#            )
 
+        @self.auto_register_task(capture_stdio=True)
+        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+            self.step_id += 1
+            cmd = (
+                f"bash {self.scripts_path}/s4_boltz.sh "
+                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+            )
+            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
             return cmd
 
+        @self.auto_register_task(local_task=True)
+        async def s4_post_exec(
+            target_fasta,
+            models_path,
+            best_model_pdb,
+            best_ptm_json,
+            mpnn_pdb
+        ):
+            self.step_id += 1
+            _copy_pdb_rename_chains(f"{models_path}/{target_fasta}_model_0.pdb", best_model_pdb)
+            shutil.copy(f"{models_path}/confidence_{target_fasta}_model_0.json", best_ptm_json)
+            _copy_pdb_rename_chains(f"{models_path}/{target_fasta}_model_0.pdb", mpnn_pdb)
+#            cmd = (
+#                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
+#                f"colabfold_batch "
+#                f"--model-type alphafold2_multimer_v3 "
+#                f"--max-template-date 2020-12-01 "
+#                f"--rank multimer "
+#                f"--random-seed 999 "
+#                f"--calc-extra-ptm "
+#                f"--save-all TRUE "
+#                f"--debug-logging "
+#                f"--save-pair-representations "
+#                f"{self.output_path}/af/fasta/{target_fasta}.fa "
+#                f"{self.output_path}/af/prediction/dimer_models/{target_fasta} "
+#            )
+#            return cmd
+
         @self.auto_register_task()  # pLDTT_extract
-        async def s5(task_description={}):  # noqa: B006
+        async def s5():
+            self.step_id += 1
             return (
-                f"python3 {self.base_path}/plddt_extract_pipeline.py "
-                f"--path={self.base_path} "
-                f"--iter={self.passes} "
-                f"--out={self.name}"
+                f"bash {self.scripts_path}/s5_plddt_extract.sh "
+                f"{self.base_path} "
+                f"{self.passes} "
+                f"{self.name}"
             )
 
     async def get_scores_map(self):
@@ -180,6 +228,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
         self.logger.pipeline_log(f"Running for a maximum of {self.max_passes} passes")
 
+        self.set_up_new_pipeline_dirs(self.name)
+
         while self.passes <= self.max_passes:
             self.logger.pipeline_log(f"Starting pass {self.passes}")
 
@@ -193,7 +243,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
-                await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
+                await self.s1()
                 self.logger.pipeline_log("MPNN task finished")
 
                 self.logger.pipeline_log("Submitting sequence ranking task")
@@ -205,10 +255,12 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.logger.pipeline_log("Scoring task finished")
 
             alphafold_tasks = []
+            post_exec_tasks = []
 
             for target_fasta in fasta_files:
                 models_path = os.path.join(
-                    self.output_path, "af", "prediction", "dimer_models", target_fasta
+                    self.output_path, "af", "prediction", "dimer_models", target_fasta,
+                    f"boltz_results_{target_fasta}", "predictions", target_fasta
                 )
 
                 best_model_pdb = os.path.join(
@@ -232,25 +284,35 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     f"{target_fasta}.pdb",
                 )
 
-                s4_description = {
-                    "pre_exec": TASK_PRE_EXEC,
-                    "post_exec": [
-                        f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
-                        f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
-                        f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
-                    ],
-                }
-
                 # launch coroutine without awaiting yet
-                alphafold_tasks.append(
-                    self.s4(target_fasta=target_fasta, task_description=s4_description)
+                alphafold_tasks.append(self.s4(target_fasta=target_fasta))
+                post_exec_tasks.append(
+                    self.s4_post_exec(
+                        target_fasta=target_fasta,
+                        models_path=models_path,
+                        best_model_pdb=best_model_pdb,
+                        best_ptm_json=best_ptm_json,
+                        mpnn_pdb=mpnn_pdb,
+                    )
                 )
 
             self.logger.pipeline_log(
                 f"Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously"
             )
-            await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            s4_results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
             self.logger.pipeline_log(f"{len(alphafold_tasks)} Alphafold tasks finished")
+            for fasta_name, result in zip(fasta_files, s4_results):
+                if isinstance(result, Exception):
+                    self.logger.pipeline_log(f"s4 FAILED for {fasta_name}: {result}")
+                else:
+                    self.logger.pipeline_log(f"s4 DONE for {fasta_name}")
+
+            s4_post_results = await asyncio.gather(*post_exec_tasks, return_exceptions=True)
+            for fasta_name, result in zip(fasta_files, s4_post_results):
+                if isinstance(result, Exception):
+                    self.logger.pipeline_log(f"s4_post_exec FAILED for {fasta_name}: {result}")
+                else:
+                    self.logger.pipeline_log(f"s4_post_exec DONE for {fasta_name}")
 
             self.logger.pipeline_log("Submitting pLDTT extraction task")
 
@@ -258,7 +320,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             await self.s5(
                 task_description={
-                    "pre_exec": TASK_PRE_EXEC,
                     "output_staging": [
                         {
                             "source": f"task:///{staged_file}",
