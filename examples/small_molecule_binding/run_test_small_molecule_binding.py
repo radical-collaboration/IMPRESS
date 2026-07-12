@@ -19,6 +19,8 @@ from typing import List
 from radical.asyncflow import ConcurrentExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
 from small_molecule_binding import SmallMoleculeBindingPipeline
 from run_small_molecule_binding import adaptive_decision
 
@@ -48,7 +50,11 @@ async def run_mock_test() -> None:
     setup_mock_inputs(pipeline_name)
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    manager: ImpressManager = ImpressManager(
+        execution_backend=backend,
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
+    )
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -66,6 +72,11 @@ async def run_mock_test() -> None:
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    if manager.telemetry:
+        summary = manager.telemetry.summary()
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
+
     await manager.flow.shutdown()
 
 

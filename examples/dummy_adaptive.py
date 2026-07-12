@@ -5,6 +5,8 @@ from typing import Dict, Any
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
 
 from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import ConcurrentExecutionBackend
@@ -71,7 +73,11 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
 
 async def run() -> None:
     execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend)
+    manager: ImpressManager = ImpressManager(
+        execution_backend,
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
+    )
 
     pipeline_setups = [PipelineSetup(
         name=f'p{i}',
@@ -79,6 +85,12 @@ async def run() -> None:
         adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    if manager.telemetry:
+        summary = manager.telemetry.summary()
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
+
+    await manager.flow.shutdown()
 
 
 if __name__ == "__main__":

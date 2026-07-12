@@ -7,6 +7,8 @@ from radical.asyncflow import LocalExecutionBackend
 from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -141,7 +143,11 @@ async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackendV3()
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    manager: ImpressManager = ImpressManager(
+        execution_backend=backend,
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
+    )
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -164,6 +170,11 @@ async def impress_smallmol_bind() -> None:
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    if manager.telemetry:
+        summary = manager.telemetry.summary()
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
+
     await manager.flow.shutdown()
 
 

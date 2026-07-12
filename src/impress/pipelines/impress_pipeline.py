@@ -3,12 +3,14 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..utils.logger import ImpressLogger
+from ..utils.telemetry import wrap_local_task
 
 
 class ImpressBasePipeline(ABC):
-    def __init__(self, name: str, flow=None, **config):
+    def __init__(self, name: str, flow=None, telemetry=None, **config):
         self.name = name
         self.flow = flow
+        self.telemetry = telemetry
         self.state = {}
         self.config = config
         self.kill_parent = False
@@ -53,7 +55,9 @@ class ImpressBasePipeline(ABC):
             if not local_task:
                 task = self.flow.executable_task(**task_kwargs)(func)
             else:
-                task = func
+                # Local tasks never touch self.flow, so asyncflow's automatic
+                # telemetry never sees them - emit LocalTask* events instead.
+                task = wrap_local_task(self, func)
             setattr(self, func.__name__, task)
             return task
 

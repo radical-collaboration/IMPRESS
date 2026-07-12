@@ -9,6 +9,8 @@ from radical.asyncflow import ConcurrentExecutionBackend
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
@@ -88,13 +90,23 @@ async def run_dummy_pipelines() -> None:
     using the ImpressManager for coordinated execution.
     """
     execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend)
+    manager: ImpressManager = ImpressManager(
+        execution_backend,
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
+    )
 
     pipeline_setups: List[PipelineSetup] = [PipelineSetup(name='p1', type=DummyProteinPipeline),
                                             PipelineSetup(name='p2', type=DummyProteinPipeline),
                                             PipelineSetup(name='p3', type=DummyProteinPipeline)]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    if manager.telemetry:
+        summary = manager.telemetry.summary()
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
+
+    await manager.flow.shutdown()
 
 
 if __name__ == "__main__":

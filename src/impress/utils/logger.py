@@ -181,6 +181,22 @@ class ImpressLogger:
         )
         self.debug(summary, "manager")
 
+    def task_event(self, event):
+        """Log a radical.asyncflow telemetry event (TaskFailed/TaskCompleted)."""
+        task_id = getattr(event, "task_id", "?")
+        workflow_id = getattr(event, "workflow_id", None)
+        workflow_part = f" workflow={workflow_id}" if workflow_id else ""
+
+        if event.event_type == "TaskFailed":
+            error_type = getattr(event, "error_type", "")
+            message = f"Task failed: {task_id}{workflow_part} {error_type}".rstrip()
+            self.error(message, "task")
+        elif event.event_type == "TaskCompleted":
+            duration = getattr(event, "duration_seconds", None)
+            duration_str = f"{duration * 1000:.0f}ms" if duration is not None else "?"
+            message = f"Task completed: {task_id}{workflow_part} in {duration_str}"
+            self.debug(message, "task")
+
     def pipeline_log(self, message, level=LogLevel.INFO):
         pipeline_component = f"PIPELINE-{self.name.upper()}"
         formatted = self._format_message(level, pipeline_component, message)

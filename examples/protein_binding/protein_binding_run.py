@@ -18,7 +18,9 @@ rhapsody.enable_logging(level=logging.DEBUG)
 
 from impress import PipelineSetup
 from impress import ImpressManager
-from impress.pipelines.protein_binding import ProteinBindingPipeline
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
+from protein_binding import ProteinBindingPipeline
 
 
 LLM_MODEL = "claude-opus-4-6"
@@ -329,7 +331,11 @@ async def impress_protein_bind() -> None:
 #    backend = await DragonExecutionBackendV3()
     backend = await LocalExecutionBackend(ProcessPoolExecutor())
 
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    manager: ImpressManager = ImpressManager(
+        execution_backend=backend,
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
+    )
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -340,6 +346,11 @@ async def impress_protein_bind() -> None:
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
+
+    if manager.telemetry:
+        summary = manager.telemetry.summary()
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
+
     await manager.flow.shutdown()
 
 

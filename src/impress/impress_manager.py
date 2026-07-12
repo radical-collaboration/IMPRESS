@@ -84,15 +84,34 @@ class ImpressManager:
             # Create pipeline instance with config and kwargs merged
             pipeline_kwargs = {**setup.config, **setup.kwargs}
             pipeline: ImpressBasePipeline = setup.type(
-                name=setup.name, flow=self.flow, **pipeline_kwargs
+                name=setup.name,
+                flow=self.flow,
+                telemetry=self.telemetry,
+                **pipeline_kwargs,
             )
 
             pipeline._adaptive_fn = setup.adaptive_fn
 
             self.logger.pipeline_started(pipeline.name)
 
-            task: asyncio.Task = asyncio.create_task(pipeline.run())
+            task: asyncio.Task = asyncio.create_task(
+                self._run_pipeline_with_scope(pipeline)
+            )
             self.pipeline_tasks[pipeline] = task
+
+    async def _run_pipeline_with_scope(self, pipeline: ImpressBasePipeline) -> Any:
+        """
+        Run a pipeline, tagging every task it submits with a shared
+        `workflow_id` (the pipeline's name) when telemetry is active.
+
+        This is what lets telemetry subscribers/checkpoints correlate events
+        back to a specific pipeline (e.g. distinguishing `p1` from a spawned
+        `p1_sub1`).
+        """
+        if self.telemetry:
+            async with self.flow.workflow_scope(pipeline.name):
+                return await pipeline.run()
+        return await pipeline.run()
 
     async def _run_adaptive_fn(self, pipeline: ImpressBasePipeline) -> None:
         """

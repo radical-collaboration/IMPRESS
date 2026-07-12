@@ -9,6 +9,8 @@ from rhapsody.telemetry.events import make_event
 
 from impress import PipelineSetup
 from impress import ImpressManager
+from impress.utils.logger import ImpressLogger
+from impress.utils.telemetry import build_telemetry_config, make_default_subscriber
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
@@ -48,16 +50,6 @@ ChildPipelineSpawned = define_event(
 
 
 # ---------------------------------------------------------------------------
-# Real-time failure subscriber (runs on the asyncio event loop)
-# ---------------------------------------------------------------------------
-
-def _on_task_event(event) -> None:
-    if event.event_type == "TaskFailed":
-        wid = getattr(event, "workflow_id", None)
-        print(f"[TELEMETRY] TaskFailed  task={event.task_id}  workflow={wid}")
-
-
-# ---------------------------------------------------------------------------
 # Adaptive helpers
 # ---------------------------------------------------------------------------
 
@@ -70,11 +62,8 @@ async def impress_protein_bind() -> None:
 
     manager: ImpressManager = ImpressManager(
         execution_backend=backend,
-        telemetry_config={
-            "checkpoint_path": "./telemetry/",
-            "resource_poll_interval": 5.0,
-        },
-        telemetry_subscribers=[_on_task_event],
+        telemetry_config=build_telemetry_config(checkpoint_path="./telemetry/"),
+        telemetry_subscribers=[make_default_subscriber(ImpressLogger())],
     )
 
     # adaptive_decision closes over `manager` so it can emit events via
@@ -197,10 +186,12 @@ async def impress_protein_bind() -> None:
 
     if manager.telemetry:
         summary = manager.telemetry.summary()
-        print(f"[TELEMETRY] tasks={summary.get('tasks', {})}")
+        manager.logger.info(f"tasks={summary.get('tasks', {})}", "manager")
         dur = summary.get("duration")
         if dur:
-            print(f"[TELEMETRY] mean task time: {dur['mean_seconds'] * 1000:.1f} ms")
+            manager.logger.info(
+                f"mean task time: {dur['mean_seconds'] * 1000:.1f} ms", "manager"
+            )
 
     await manager.flow.shutdown()
 
