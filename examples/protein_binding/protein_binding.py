@@ -239,8 +239,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     "in the current pass only."
                 )
 
-                pass
-
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
                 await self.s1()
