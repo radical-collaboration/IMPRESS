@@ -177,15 +177,17 @@ def register_mock_tasks(pipeline):
         os.makedirs(f"{taskdir}/out", exist_ok=True)
 
         for rank in range(1, 6):
-            with open(f"{taskdir}/out/rank_{rank:03d}.pdb", "w") as fh:
+            stem = f"binder_scores_rank_{rank:03d}_alphafold2_ptm_model_1_seed_000"
+            with open(f"{taskdir}/out/{stem.replace('_scores_', '_unrelaxed_')}.pdb", "w") as fh:
                 fh.write(f"REMARK  mock af2 rank_{rank:03d}\nEND\n")
-            with open(f"{taskdir}/out/rank_{rank:03d}_scores.json", "w") as fh:
+            with open(f"{taskdir}/out/{stem}.json", "w") as fh:
                 json.dump({"plddt": [85.0 + rank] * 50, "max_pae": 5.0}, fh)
 
     @pipeline.auto_register_task(local_task=True)
     async def analysis_fold(task_description=None, **kwargs):
-        taskdir    = f"{pipeline.base_path}/{pipeline.taskcount}_alphafold"
-        best_model = f"{taskdir}/out/rank_005.pdb"
+        taskdir     = f"{pipeline.base_path}/{pipeline.taskcount}_alphafold"
+        best_scores = "binder_scores_rank_005_alphafold2_ptm_model_1_seed_000.json"
+        best_model  = f"{taskdir}/out/" + best_scores.replace('_scores_', '_unrelaxed_').replace('.json', '.pdb')
         pipeline.state['best_af2_model']        = best_model
         pipeline.state['last_analysis_step']    = 'fold'
         pipeline.state['last_analysis_metrics'] = {
