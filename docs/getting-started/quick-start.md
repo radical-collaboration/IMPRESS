@@ -10,8 +10,8 @@ By the end, you will have a working script that runs *N pipelines concurrently*,
 
 We’ll build:
 
-✅ A **custom pipeline class**, `ProteinPipeline`, which represents one protein analysis pipeline.  
-✅ A **script to start all pipelines asynchronously**.
+- A **custom pipeline class**, `ProteinPipeline`, which represents one protein analysis pipeline.
+- A **script to start all pipelines asynchronously**.
 
 You can adapt the number of pipelines (`N`) and tasks as needed.
 
@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
 This starts the event loop and runs all the pipelines concurrently.
 
-💻 Full Code
+## Full Code
 Here is the complete script for convenience:
 
 ```python

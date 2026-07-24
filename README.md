@@ -4,7 +4,7 @@ IMPRESS is a high-performance computational framework to enable the inverse desi
 
 
 ## Documentation
-📚 [IMPRESS Docs](https://radical-collaboration.github.io/IMPRESS/)
+[IMPRESS Docs](https://radical-collaboration.github.io/IMPRESS/)
 
 
 ## Installation
@@ -63,4 +63,4 @@ if __name__ == "__main__":
 
 
 ## Resources
-To learn more, please visit the project website at https://radical-project.github.io/impress/
+To learn more, please visit the [IMPRESS documentation](https://radical-collaboration.github.io/IMPRESS/).

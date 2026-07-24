@@ -71,11 +71,11 @@ class ImpressManager:
 
         Args:
             pipeline_setups: List of pipeline configuration
-            dictionaries or PipelineSetup objects
+                dictionaries or PipelineSetup objects
 
         Raises:
             ValueError: If pipeline type is not a subclass
-            of ImpressBasePipeline
+                of ImpressBasePipeline
         """
         for setup_input in pipeline_setups:
             # Normalize to PipelineSetup object
@@ -132,7 +132,7 @@ class ImpressManager:
 
         Args:
             pipeline_setups: List of initial pipeline
-            configurations (dicts or PipelineSetup objects)
+                configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 

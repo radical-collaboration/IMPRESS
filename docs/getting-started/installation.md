@@ -1,4 +1,4 @@
-# 🧰 Installation Guide
+# Installation Guide
 
 This page shows you how to set up your environment to use **Impress** and run asynchronous pipelines with it.  
 
@@ -6,9 +6,9 @@ We recommend using a **virtual environment** to isolate your dependencies.
 
 ---
 
-## 📦 Step 1: Create a Python Environment
+## Step 1: Create a Python Environment
 
-Make sure you have **Python 3.8 or newer** installed.  
+Make sure you have **Python 3.9 or newer** installed.  
 You can check your Python version with:
 
 ```bash
@@ -37,7 +37,7 @@ Your shell prompt should now show `(impress-env)` indicating the environment is 
 
 ---
 
-## 🚀 Step 2: Install Impress
+## Step 2: Install Impress
 
 Install **Impress** and its required dependencies from PyPI:
 
@@ -54,7 +54,7 @@ pip install radical.asyncflow
 
 ---
 
-## 🧪 Step 3: Verify Installation
+## Step 3: Verify Installation
 
 Check that Impress is installed and importable:
 
@@ -70,15 +70,16 @@ Impress is installed!
 
 ---
 
-## 🧬 Step 4: Run a Sample Pipeline
+## Step 4: Run a Sample Pipeline
 
-Now you’re ready to write and run your own pipelines!  
+Now you're ready to write and run your own pipelines! Continue with
+[Build A Protein Pipeline](quick-start.md) for a step-by-step tutorial.
 
 ---
 
-## 🔄 Deactivate Environment
+## Deactivate Environment
 
-When you’re done, you can deactivate your virtual environment:
+When you're done, you can deactivate your virtual environment:
 
 ```bash
 deactivate
@@ -88,9 +89,10 @@ Next time you want to work with Impress, just activate the environment again.
 
 ---
 
-## 📚 Next Steps
+## Next Steps
 
-✅ Explore the API reference  
-✅ Build your own workflows!
+- Explore the [API Reference](../reference/index.md)
+- Read [Architecture](../concepts/architecture.md) to understand the core framework
+- Build your own workflows with [Build A Protein Pipeline](quick-start.md)
 
 ---
