@@ -128,20 +128,23 @@ Threshold constants in `run_small_molecule_binding.py` override these defaults a
 
 ### Output directory structure
 
-Each HPC task creates its working directory as `{base_path}/{taskcount}_{taskname}/in` and `.../out`. `taskcount` is a flat integer incremented for every HPC task (local analysis tasks do not increment it).
+Each HPC task creates its working directory as `{base_path}/{name}/{taskcount}_{taskname}/in` and `.../out`. `taskcount` is a flat integer incremented for every HPC task (local analysis tasks do not increment it).
 
 ```
 {base_path}/
   {name}_in/           # pipeline inputs (ALR_binder_design.json, ligand .params, etc.)
-  1_rfd3/out/          # RFDiffusion3 outputs (.cif.gz + .json per model)
-  2_mpnn/out/          # LigandMPNN outputs (seqs/*.fa, packed/*.pdb)
-  3_packmin/out/       # packed+minimized PDB + _packmin_score.json
-  4_mpnn/out/          # cycle 1 MPNN ...
-  ...
-  N_fastrelax/out/     # FastRelax PDB + .fasc score file
-  N+1_filter_shape/out/
-  N+2_alphafold/out/
+  {name}/
+    1_rfd3/out/          # RFDiffusion3 outputs (.cif.gz + .json per model)
+    2_mpnn/out/          # LigandMPNN outputs (seqs/*.fa, packed/*.pdb)
+    3_packmin/out/       # packed+minimized PDB + _packmin_score.json
+    4_mpnn/out/          # cycle 1 MPNN ...
+    ...
+    N_fastrelax/out/     # FastRelax PDB + .fasc score file
+    N+1_filter_shape/out/
+    N+2_alphafold/out/
 ```
+
+Mock mode (`mock=True`, `mock.py`) mirrors this same `{base_path}/{name}/{taskcount}_{taskname}/...` layout with hardcoded fixture outputs, so the two modes stay directly comparable.
 
 MPNN copies the input backbone to a short fixed filename (`binder.cif.gz` or `binder.<ext>`) in `{taskdir}/in/` each cycle to avoid 255-character filename limits in AF2 result archives.
 
