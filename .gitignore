@@ -135,6 +135,11 @@ dmypy.json
 
 # asyncflow related
 asyncflow.session.*
+ddict_*
+
+# ROME runtime outputs
+af_stats_*.csv
+examples/protien_binding_usecase/logs/
 
 # disco wf outputs
 b0

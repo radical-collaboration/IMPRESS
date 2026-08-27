@@ -3,7 +3,9 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import RadicalExecutionBackend
+from rhapsody.backends import DragonExecutionBackend
+from rhapsody.backends import ConcurrentExecutionBackend
+from concurrent.futures import ProcessPoolExecutor
 
 from impress import PipelineSetup
 from impress import ImpressManager
@@ -84,7 +86,7 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         # Copy PDB files for bad proteins
         for protein in sub_iter_seqs:
             src = f'{pipeline.output_path_af}/{protein}.pdb'
-            dst = f'{pipeline.base_path}/{new_name}_in/{protein}.pdb'
+            dst = f'{pipeline.input_base_path}/{new_name}_in/{protein}.pdb'
             shutil.copyfile(src, dst)
 
         # Build a request for a new pipeline
@@ -114,30 +116,59 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
         pipeline.previous_scores = copy.deepcopy(pipeline.current_scores)
 
 
+def _find_gpus():
+    """Return [(hostname, gpu_id), ...] for every GPU visible to Dragon."""
+    import socket
+    from dragon.native.machine import Node, System
+    real_hostname = socket.gethostname()
+    all_gpus = []
+    for huid in System().nodes:
+        node = Node(huid)
+        hostname = node.hostname if node.hostname != "localhost" else real_hostname
+        for gpu_id in node.gpus or []:
+            all_gpus.append((hostname, gpu_id))
+    return all_gpus
+
+
+def _make_policy(all_gpus, idx=0, n_gpus=1):
+    """Create a Dragon Policy with gpu_affinity for n_gpus consecutive GPU slots."""
+    if not all_gpus:
+        print("WARNING: no GPUs found via Dragon — running without GPU affinity policy")
+        return None
+    from dragon.infrastructure.policy import Policy
+    hostname = all_gpus[idx % len(all_gpus)][0]
+    gpu_ids = [all_gpus[(idx + i) % len(all_gpus)][1] for i in range(n_gpus)]
+    return Policy(
+        placement=Policy.Placement.HOST_NAME,
+        host_name=hostname,
+        gpu_affinity=gpu_ids,
+    )
+
+
 async def impress_protein_bind() -> None:
     """
     Execute protein binding analysis with adaptive optimization.
-    
+
     Creates and manages multiple ProteinBindingPipeline instances with
     adaptive optimization capabilities. Each pipeline can spawn child
     pipelines based on protein quality degradation.
     """
-    backend = await RadicalExecutionBackend(
-            {
-                'gpus':1,
-                'cores': 32,
-                'runtime' : 23 * 60,
-                'resource': 'purdue.anvil_gpu'
-                }
-            )
+    import os
+    if os.environ.get("IMPRESS_BACKEND", "dragon").lower() == "concurrent":
+        backend = await ConcurrentExecutionBackend(ProcessPoolExecutor())
+        all_gpus = []
+    else:
+        backend = await DragonExecutionBackend()
+        all_gpus = _find_gpus()
+    policy = _make_policy(all_gpus, idx=0, n_gpus=1)
 
     manager: ImpressManager = ImpressManager(execution_backend=backend)
-
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name='p1',
             type=ProteinBindingPipeline,
-            adaptive_fn=adaptive_decision
+            adaptive_fn=adaptive_decision,
+            kwargs={"policy": policy},
         )
     ]
 

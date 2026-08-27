@@ -4,13 +4,11 @@ import os
 
 from .impress_pipeline import ImpressBasePipeline
 
-TASK_PRE_EXEC = [
-    "module load anaconda",
-    "source activate base",
-    (f"conda activate /anvil/scratch/{os.environ['USER']}/impress/ve.impress"),
-]
+_mpnn = os.environ.get("MPNN_PATH")
+if not _mpnn:
+    raise EnvironmentError("MPNN_PATH is not set (path to the ProteinMPNN repo)")
 
-MPNN_PATH = f"/anvil/scratch/{os.environ['USER']}/impress/ProteinMPNN"
+MPNN_PATH = _mpnn
 
 
 class ProteinBindingPipeline(ImpressBasePipeline):
@@ -19,50 +17,89 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         if configs is None:
             configs = {}
 
-        self.is_child: bool = kwargs.get("is_child", False)
-        self.passes = kwargs.get("passes", 1)
-        self.start_pass: int = kwargs.get("start_pass", 1)
-        self.step_id = kwargs.get("step_id", 1)
-        self.seq_rank = kwargs.get("seq_rank", 0)
-        self.num_seqs = kwargs.get("num_seqs", 10)
-        self.sub_order = kwargs.get("sub_order", 0)
-        self.max_passes = kwargs.get("max_passes", 4)
-        self.mpnn_path = kwargs.get("mpnn_path", MPNN_PATH)
+        # Child pipelines receive state in `configs`; top-level pipelines in `**kwargs`.
+        # Check kwargs first so callers can override any config key.
+        def _cfg(key, default):
+            if key in kwargs:
+                return kwargs[key]
+            if key in configs:
+                return configs[key]
+            return default
+
+        self.is_child: bool = _cfg("is_child", False)
+        self.passes = _cfg("passes", 1)
+        self.start_pass: int = _cfg("start_pass", 1)
+        self.step_id = _cfg("step_id", 1)
+        self.seq_rank = _cfg("seq_rank", 0)
+        self.num_seqs = _cfg("num_seqs", 10)
+        self.sub_order = _cfg("sub_order", 0)
+        self.max_passes = _cfg("max_passes", int(os.environ.get("ROME_MAX_PASSES", 10)))
+        self.mpnn_path = _cfg("mpnn_path", MPNN_PATH)
+        self.policy = _cfg("policy", None)
 
         # Sequence and score state
         self.current_scores = {}
-        self.iter_seqs = kwargs.get("iter_seqs", {})
-        self.previous_scores = kwargs.get("previous_score", {})
+        self.iter_seqs = _cfg("iter_seqs", {})
+        self.previous_scores = _cfg("previous_scores", {})
 
-        super().__init__(name, flow, **configs, **kwargs)
+        # Exclude from configs any keys already in kwargs to prevent duplicate-keyword TypeError.
+        filtered_configs = {k: v for k, v in configs.items() if k not in kwargs}
+        super().__init__(name, flow, **filtered_configs, **kwargs)
 
-        # Input-related
         self.fasta_list_2 = kwargs.get("fasta_list_2", [])
-        self.base_path = kwargs.get("base_path", os.getcwd())
-        self.input_path = os.path.join(self.base_path, f"{self.name}_in")
 
-        # Output paths
-        self.output_path = os.path.join(
-            self.base_path, "af_pipeline_outputs_multi", self.name
+        # Separate base directories — kwargs take priority (child pipelines),
+        # env vars are the default for top-level pipelines.
+        self.input_base_path = kwargs.get(
+            "input_base_path", os.environ.get("IMPRESS_INPUT_DIR", "")
         )
+        self.output_base_path = kwargs.get(
+            "output_base_path", os.environ.get("IMPRESS_OUTPUT_DIR", "")
+        )
+        self.scripts_path = kwargs.get(
+            "scripts_path", os.environ.get("IMPRESS_SCRIPTS_DIR", "")
+        )
+
+        if not self.input_base_path:
+            raise EnvironmentError(f"IMPRESS_INPUT_DIR is not set (dir containing {name}_in/ folders)")
+        if not self.output_base_path:
+            raise EnvironmentError("IMPRESS_OUTPUT_DIR is not set (dir for af_pipeline_outputs_multi/)")
+        if not self.scripts_path:
+            raise EnvironmentError("IMPRESS_SCRIPTS_DIR is not set (dir with mpnn_wrapper.py and af2_multimer_reduced.sh)")
+
+        self.input_path = os.path.join(self.input_base_path, f"{self.name}_in")
+        self.output_path = os.path.join(self.output_base_path, "af_pipeline_outputs_multi", self.name)
         self.output_path_mpnn = os.path.join(self.output_path, "mpnn")
-        self.output_path_af = os.path.join(
-            self.output_path, "af/prediction/best_models"
-        )
+        self.output_path_af = os.path.join(self.output_path, "af/prediction/best_models")
 
-        # might have to do outside of initialization, so new pipelines
-        # do not run this can be declared directly as argument
+        for subdir in [
+            "af/fasta",
+            "af/prediction/best_models",
+            "af/prediction/best_ptm",
+            "af/prediction/dimer_models",
+            "af/prediction/logs",
+            *[f"mpnn/job_{i}" for i in range(1, self.max_passes + 1)],
+        ]:
+            os.makedirs(os.path.join(self.output_path, subdir), exist_ok=True)
+
         for file_name in os.listdir(self.input_path):
             self.fasta_list_2.append(file_name)
 
+    def _gpu_env(self):
+        """Return subprocess env with CUDA_VISIBLE_DEVICES set from policy gpu_affinity."""
+        env = {**os.environ}
+        if self.policy and self.policy.gpu_affinity:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.policy.gpu_affinity)
+        return env
+
     def set_up_new_pipeline_dirs(self, new_pipeline_name):
         base_output = os.path.join(
-            self.base_path, "af_pipeline_outputs_multi", new_pipeline_name
+            self.output_base_path, "af_pipeline_outputs_multi", new_pipeline_name
         )
-        input_dir = os.path.join(self.base_path, f"{new_pipeline_name}_in")
+        input_dir = os.path.join(self.input_base_path, f"{new_pipeline_name}_in")
 
-        if os.path.isdir(base_output):
-            return  # already exists, nothing to do
+        # No early-return guard: max_passes may have changed since the directory was
+        # first created, and exist_ok=True makes every makedirs call idempotent.
 
         # all directories to create
         subdirs = [
@@ -73,7 +110,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             "af/prediction/dimer_models",
             "af/prediction/logs",
             "mpnn",
-            *[f"mpnn/job_{i}" for i in range(1, 6)],
+            *[f"mpnn/job_{i}" for i in range(1, self.max_passes + 1)],
         ]
 
         paths_to_create = [input_dir, base_output] + [
@@ -86,16 +123,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task()  # MPNN
-        async def s1(task_description={"gpus_per_rank": 1}):  # noqa: B006
-            mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
+        @self.auto_register_task(local_task=True)  # MPNN
+        async def s1():
+            mpnn_script = os.path.join(self.scripts_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
 
             chain = "A" if self.passes == 1 else "B"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
-            return (
-                f"python3 {mpnn_script} "
+            cmd = (
+                f"python {mpnn_script} "
                 f"-pdb={input_path} "
                 f"-out={output_dir} "
                 f"-mpnn={self.mpnn_path} "
@@ -103,6 +140,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 "-is_monomer=0 "
                 f"-chains={chain}"
             )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=self._gpu_env(),
+            )
+            stdout, _ = await proc.communicate()
+            if stdout:
+                print(stdout.decode(), end="", flush=True)
+            if proc.returncode != 0:
+                raise RuntimeError(f"MPNN failed with exit code {proc.returncode}")
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -121,7 +169,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     else:
                         seqs.append([line, score])
 
-                seqs.sort(key=lambda x: x[1])  # Sort by score
+                seqs.sort(key=lambda x: x[1], reverse=True)  # descending: best (least-negative log-prob) first
                 self.iter_seqs[file_name.split(".")[0]] = seqs
 
         # fasta - don't use helper script - cannot run x tasks for x structures
@@ -143,25 +191,71 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             return fasta_file_to_return
 
         # alphafold, must be run separately for each structure one at a time!
-        @self.auto_register_task()
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+        @self.auto_register_task(local_task=True)
+        async def s4(target_fasta):
             cmd = (
-                f"/bin/bash {self.base_path}/af2_multimer_reduced.sh "
+                f"/bin/bash {self.scripts_path}/af2_multimer_reduced.sh "
                 f"{self.output_path}/af/fasta/ "
                 f"{target_fasta}.fa "
                 f"{self.output_path}/af/prediction/dimer_models/ "
             )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=self._gpu_env(),
+            )
+            stdout, _ = await proc.communicate()
+            if stdout:
+                print(stdout.decode(), end="", flush=True)
+            if proc.returncode != 0:
+                raise RuntimeError(f"AlphaFold failed with exit code {proc.returncode}")
 
-            return cmd
+        @self.auto_register_task(local_task=True)
+        async def s4_post(target_fasta):
+            import glob
+            import shutil
 
-        @self.auto_register_task()  # pLDTT_extract
-        async def s5(task_description={}):  # noqa: B006
-            return (
-                f"python3 {self.base_path}/plddt_extract_pipeline.py "
-                f"--path={self.base_path} "
+            models_path = os.path.join(
+                self.output_path, "af", "prediction", "dimer_models", target_fasta
+            )
+            best_model_pdb = os.path.join(
+                self.output_path, "af", "prediction", "best_models", f"{target_fasta}.pdb"
+            )
+            best_ptm_json = os.path.join(
+                self.output_path, "af", "prediction", "best_ptm", f"{target_fasta}.json"
+            )
+            mpnn_pdb = os.path.join(
+                self.output_path, "mpnn", f"job_{self.passes}", f"{target_fasta}.pdb"
+            )
+
+            ranked0 = glob.glob(os.path.join(models_path, "*ranked_0*.pdb"))
+            ranking_debug = glob.glob(os.path.join(models_path, "*ranking_debug*.json"))
+
+            if ranked0:
+                shutil.copy(ranked0[0], best_model_pdb)
+                shutil.copy(ranked0[0], mpnn_pdb)
+            if ranking_debug:
+                shutil.copy(ranking_debug[0], best_ptm_json)
+
+        @self.auto_register_task(local_task=True)  # pLDTT_extract
+        async def s5():
+            cmd = (
+                f"python3 {self.scripts_path}/plddt_extract_pipeline.py "
+                f"--path={self.output_base_path} "
                 f"--iter={self.passes} "
                 f"--out={self.name}"
             )
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await proc.communicate()
+            if stdout:
+                print(stdout.decode(), end="", flush=True)
+            if proc.returncode != 0:
+                raise RuntimeError(f"pLDDT extraction failed with exit code {proc.returncode}")
 
     async def get_scores_map(self):
         """Return current and previous scores"""
@@ -193,7 +287,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
-                await self.s1(task_description={"pre_exec": TASK_PRE_EXEC})
+                await self.s1()
                 self.logger.pipeline_log("MPNN task finished")
 
                 self.logger.pipeline_log("Submitting sequence ranking task")
@@ -207,66 +301,29 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             alphafold_tasks = []
 
             for target_fasta in fasta_files:
-                models_path = os.path.join(
-                    self.output_path, "af", "prediction", "dimer_models", target_fasta
-                )
-
-                best_model_pdb = os.path.join(
-                    self.output_path,
-                    "af",
-                    "prediction",
-                    "best_models",
-                    f"{target_fasta}.pdb",
-                )
-                best_ptm_json = os.path.join(
-                    self.output_path,
-                    "af",
-                    "prediction",
-                    "best_ptm",
-                    f"{target_fasta}.json",
-                )
-                mpnn_pdb = os.path.join(
-                    self.output_path,
-                    "mpnn",
-                    f"job_{self.passes}",
-                    f"{target_fasta}.pdb",
-                )
-
-                s4_description = {
-                    "pre_exec": TASK_PRE_EXEC,
-                    "post_exec": [
-                        f"cp {models_path}/*ranked_0*.pdb {best_model_pdb}",
-                        f"cp {models_path}/*ranking_debug*.json {best_ptm_json}",
-                        f"cp {models_path}/*ranked_0*.pdb {mpnn_pdb}",
-                    ],
-                }
-
                 # launch coroutine without awaiting yet
-                alphafold_tasks.append(
-                    self.s4(target_fasta=target_fasta, task_description=s4_description)
-                )
+                alphafold_tasks.append(self.s4(target_fasta=target_fasta))
 
             self.logger.pipeline_log(
                 f"Submitting {len(alphafold_tasks)} Alphafold tasks asynchronously"
             )
-            await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
+            failed = [(i, r) for i, r in enumerate(results) if isinstance(r, Exception)]
+            for i, r in failed:
+                self.logger.pipeline_log(f"AlphaFold task {i} FAILED: {r}")
+            if failed:
+                raise RuntimeError(
+                    f"{len(failed)}/{len(alphafold_tasks)} AlphaFold task(s) failed — aborting pass {self.passes}"
+                )
             self.logger.pipeline_log(f"{len(alphafold_tasks)} Alphafold tasks finished")
 
+            self.logger.pipeline_log("Copying AlphaFold best models")
+            for target_fasta in fasta_files:
+                await self.s4_post(target_fasta=target_fasta)
+            self.logger.pipeline_log("AlphaFold best models copied")
+
             self.logger.pipeline_log("Submitting pLDTT extraction task")
-
-            staged_file = f"af_stats_{self.name}_pass_{self.passes}.csv"
-
-            await self.s5(
-                task_description={
-                    "pre_exec": TASK_PRE_EXEC,
-                    "output_staging": [
-                        {
-                            "source": f"task:///{staged_file}",
-                            "target": f"client:///{staged_file}",
-                        }
-                    ],
-                }
-            )
+            await self.s5()
             self.logger.pipeline_log("pLDTT extract finished")
 
             await self.run_adaptive_step(wait=True)

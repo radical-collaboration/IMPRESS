@@ -21,11 +21,14 @@ INPUT_FASTA_FILE_DIR=$1
 INPUT_FASTA_FILE_NAME=$2
 OUTPUT_DATA_DIR=$3
 
-apptainer run --nv \
+: "${AF2_DATABASE:?AF2_DATABASE is not set (path to AlphaFold database dir)}"
+: "${AF2_SIF:?AF2_SIF is not set (path to alphafold.sif container)}"
+
+apptainer run --nv --no-home \
   --bind $INPUT_FASTA_FILE_DIR:/fasta \
   --bind $OUTPUT_DATA_DIR:/dimer_models \
-  --bind /anvil/datasets/alphafold/db_20230311:/database \
-  /apps/biocontainers/images/tacc_alphafold:2.3.1.sif \
+  --bind ${AF2_DATABASE}:/database \
+  ${AF2_SIF} \
   --data_dir=/database \
   --uniref90_database_path=/database/uniref90/uniref90.fasta \
   --mgnify_database_path=/database/mgnify/mgy_clusters_2022_05.fa \
@@ -40,5 +43,4 @@ apptainer run --nv \
   --pdb_seqres_database_path=/database/pdb_seqres/pdb_seqres.txt \
   --max_template_date=2020-12-01 \
   --use_gpu_relax=False \
-  --num_multimer_predictions_per_model=1 \
-  --run_relax=False
+  --num_multimer_predictions_per_model=1
