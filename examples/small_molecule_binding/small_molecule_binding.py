@@ -540,7 +540,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     mean_plddt = sum(arr) / len(arr)
                     if mean_plddt > best_plddt:
                         best_plddt = mean_plddt
-                        best_model = sf.replace('_scores.json', '.pdb')
+                        best_model = sf.replace('_scores_', '_unrelaxed_').replace('.json', '.pdb')
 
             if best_model:
                 full_model_path = f"{out_dir}/{best_model}"
