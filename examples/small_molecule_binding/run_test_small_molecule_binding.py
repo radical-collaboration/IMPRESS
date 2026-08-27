@@ -33,7 +33,7 @@ def setup_mock_inputs(pipeline_name: str) -> None:
     placeholders = [
         "fixed_residues.txt",
         "common_filenames.txt",
-        "ALX.params",
+        "ALR.params",
         "ALR_binder_design.json",
     ]
     for fname in placeholders:
