@@ -19,21 +19,28 @@ class ImpressManager:
 
     def __init__(
         self,
-        execution_backend: Any,
+        execution_backend: Any = None,
         use_colors: bool = True,
         telemetry_config: Optional[dict[str, Any]] = None,
         telemetry_subscribers: Optional[list[Callable]] = None,
+        flow: Optional[WorkflowEngine] = None,
     ) -> None:
         """
         Initialize the ImpressManager.
 
         Args:
-            execution_backend: Backend for workflow execution
+            execution_backend: Backend for workflow execution. Ignored if
+                ``flow`` is supplied.
             use_colors: Whether to use colors in logging output
             telemetry_config: kwargs forwarded to flow.start_telemetry() (e.g.
                 checkpoint_path, resource_poll_interval). Pass None to disable.
             telemetry_subscribers: Callables registered via telemetry.subscribe()
                 immediately after telemetry starts.
+            flow: An already-constructed WorkflowEngine to reuse instead of
+                building a new one in start(). Lets multiple ImpressManager
+                instances (or other, non-IMPRESS work) share one engine and
+                one execution backend across a process. When supplied,
+                execution_backend is ignored and the caller owns shutdown.
         """
         self.execution_backend: Any = execution_backend
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
@@ -43,6 +50,7 @@ class ImpressManager:
         self._telemetry_config: dict[str, Any] = telemetry_config or {}
         self._telemetry_subscribers: list[Callable] = telemetry_subscribers or []
         self.telemetry: Any = None
+        self._external_flow: Optional[WorkflowEngine] = flow
 
     def _normalize_pipeline_setup(
         self, setup: Union[dict[str, Any], PipelineSetup]
@@ -136,7 +144,7 @@ class ImpressManager:
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 
-        self.flow: WorkflowEngine = await WorkflowEngine.create(
+        self.flow: WorkflowEngine = self._external_flow or await WorkflowEngine.create(
             backend=self.execution_backend
         )
 
