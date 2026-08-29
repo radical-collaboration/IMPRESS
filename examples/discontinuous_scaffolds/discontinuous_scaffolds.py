@@ -157,7 +157,7 @@ class DiscontinuousScaffoldsPipeline(ImpressBasePipeline):
         # ── branching control ────────────────────────────────────────────────
         self.start_step = kwargs.get('start_step', STEP_BACKBONE_GEN)
         self.branch_ct  = kwargs.get('branch_ct',  0)
-        self.branch_id  = kwargs.get('branch_id',  f"b{self.branch_ct}")
+        self.branch_id  = kwargs.get('branch_id',  f"{name}_{self.branch_ct}")
 
         # ── configurable paths ──────────────────────────────────────────────
         self.base_path        = kwargs.get("base_path",        os.getcwd())

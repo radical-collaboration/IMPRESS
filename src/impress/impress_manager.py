@@ -17,19 +17,32 @@ class ImpressManager:
     creation in an asynchronous environment.
     """
 
-    def __init__(self, execution_backend: Any, use_colors: bool = True) -> None:
+    def __init__(
+        self,
+        execution_backend: Any,
+        use_colors: bool = True,
+        telemetry_config: Optional[dict[str, Any]] = None,
+        telemetry_subscribers: Optional[list[Callable]] = None,
+    ) -> None:
         """
         Initialize the ImpressManager.
 
         Args:
             execution_backend: Backend for workflow execution
             use_colors: Whether to use colors in logging output
+            telemetry_config: kwargs forwarded to flow.start_telemetry() (e.g.
+                checkpoint_path, resource_poll_interval). Pass None to disable.
+            telemetry_subscribers: Callables registered via telemetry.subscribe()
+                immediately after telemetry starts.
         """
         self.execution_backend: Any = execution_backend
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
         self.adaptive_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
         self.new_pipeline_buffer: list[PipelineSetup] = []
         self.logger: ImpressLogger = ImpressLogger(use_colors=use_colors)
+        self._telemetry_config: dict[str, Any] = telemetry_config or {}
+        self._telemetry_subscribers: list[Callable] = telemetry_subscribers or []
+        self.telemetry: Any = None
 
     def _normalize_pipeline_setup(
         self, setup: Union[dict[str, Any], PipelineSetup]
@@ -126,6 +139,11 @@ class ImpressManager:
         self.flow: WorkflowEngine = await WorkflowEngine.create(
             backend=self.execution_backend
         )
+
+        if self._telemetry_config:
+            self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
+            for fn in self._telemetry_subscribers:
+                self.telemetry.subscribe(fn)
 
         self.logger.manager_starting(len(pipeline_setups))
 

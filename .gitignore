@@ -141,6 +141,12 @@ ddict_*
 af_stats_*.csv
 examples/protien_binding_usecase/logs/
 
+# pdzbinder wf outputs
+af_pipeline_outputs_multi/
+af_stats*
+slurm*
+*.slurm
+ddict*
 # disco wf outputs
 b0
 slurm*

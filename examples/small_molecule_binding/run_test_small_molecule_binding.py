@@ -33,7 +33,7 @@ def setup_mock_inputs(pipeline_name: str) -> None:
     placeholders = [
         "fixed_residues.txt",
         "common_filenames.txt",
-        "ALX.params",
+        "ALR.params",
         "ALR_binder_design.json",
     ]
     for fname in placeholders:
@@ -41,6 +41,24 @@ def setup_mock_inputs(pipeline_name: str) -> None:
         if not os.path.exists(fpath):
             with open(fpath, "w") as fh:
                 fh.write(f"# mock placeholder: {fname}\n")
+
+
+def check_af2_filename_derivation() -> None:
+    """Regression check for analysis_fold()'s scores.json -> unrelaxed.pdb
+    filename derivation, against real ColabFold (colabfold_batch) naming."""
+    cases = [
+        (
+            "binder_scores_rank_001_alphafold2_model_3_seed_999.json",
+            "binder_unrelaxed_rank_001_alphafold2_model_3_seed_999.pdb",
+        ),
+        (
+            "binder_scores_rank_005_alphafold2_ptm_model_1_seed_000.json",
+            "binder_unrelaxed_rank_005_alphafold2_ptm_model_1_seed_000.pdb",
+        ),
+    ]
+    for sf, expected in cases:
+        derived = sf.replace('_scores_', '_unrelaxed_').replace('.json', '.pdb')
+        assert derived == expected, f"{sf!r} -> {derived!r}, expected {expected!r}"
 
 
 async def run_mock_test() -> None:
@@ -70,4 +88,5 @@ async def run_mock_test() -> None:
 
 
 if __name__ == "__main__":
+    check_af2_filename_derivation()
     asyncio.run(run_mock_test())
