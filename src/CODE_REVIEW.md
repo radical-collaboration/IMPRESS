@@ -2,7 +2,10 @@
 
 **Date:** 2026-08-29  
 **Scope:** `/scratch/bblj/mgoliyad1/IMPRESS/src/impress/`  
-**Status:** bugs marked ✅ fixed or ⚠️ open
+**Status:** bugs marked ✅ fixed or ⚠️ open  
+**Note:** `protein_binding.py` was moved from `src/impress/pipelines/` to
+`examples/protein_binding/` in the `origin/main` merge; findings for that file
+are now in `examples/protein_binding/CODE_REVIEW.md`.
 
 ---
 
@@ -21,22 +24,6 @@ The cleanup loop unpacks `for pipeline, future in completed_pipelines:`, so this
 raises `ValueError: not enough values to unpack` the moment any pipeline is killed.
 
 **Fix applied:** changed to `completed_pipelines.append((pipeline, pipeline_future))`.
-
----
-
-### ⚠️ `protein_binding.py:7–9` — module-level `EnvironmentError` on import
-
-`MPNN_PATH` is validated at module import time:
-
-```python
-_mpnn = os.environ.get("MPNN_PATH")
-if not _mpnn:
-    raise EnvironmentError("MPNN_PATH is not set ...")
-```
-
-Any code that does `from impress.pipelines.protein_binding import ...` — even
-conditionally — will crash at import if the env var is absent. Should be deferred
-to `__init__`.
 
 ---
 
@@ -76,18 +63,6 @@ implementation, or declare it consistently as sync across the hierarchy.
 
 ---
 
-### `protein_binding.py:303–310` — all AF2 tasks launched concurrently
-
-```python
-results = await asyncio.gather(*alphafold_tasks, return_exceptions=True)
-```
-
-All structures are folded in parallel. If there are N structures, N AF2 processes
-compete for GPU memory simultaneously, likely causing OOM on real runs. AF2 should
-be serialised per GPU or gated by a semaphore.
-
----
-
 ## Code Quality
 
 ### `logger.py` — no log level filtering
@@ -104,45 +79,6 @@ configurable log level check should be added to `_write_log` or each log method.
 `error()` and `critical()` bypass `self.output_stream` and always write to
 `sys.stderr` directly via `_write_log(formatted, to_stderr=True)`. A caller that
 sets a custom output stream (e.g. for testing) will silently lose error messages.
-
----
-
-### `protein_binding.py:185` — hardcoded peptide sequence
-
-```python
-pep_seq = "EGYQDYEPEA"   # PDZ-domain peptide
-```
-
-This is a PDZ-specific constant hardcoded inside `s3()`. It should be a
-constructor parameter (e.g. `self.peptide_seq`) so the pipeline is reusable for
-other targets.
-
----
-
-### `protein_binding.py:267–268` — `os.unlink()` without existence check in `finalize()`
-
-```python
-os.unlink(f"{self.output_path_af}/{a}.pdb")
-os.unlink(f"{self.output_path}/af/fasta/{a}.fa")
-```
-
-If an AF2 task failed and the file was never created, `finalize()` raises
-`FileNotFoundError`. Should use `pathlib.Path.unlink(missing_ok=True)` or check
-existence first.
-
----
-
-### `protein_binding.py:282–286` — redundant `pass` statement
-
-```python
-if self.is_child and self.passes == self.start_pass:
-    self.logger.pipeline_log("Skipping MPNN and Ranking steps ...")
-    pass   # redundant — remove
-```
-
-The `pass` is a no-op. Remove it. Also the log message says "Skipping MPNN and
-Ranking" but execution still continues into `s3` (fasta), `s4` (AF2), etc. — the
-message is partially misleading.
 
 ---
 

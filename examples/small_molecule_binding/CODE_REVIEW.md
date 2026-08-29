@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29  
 **Scope:** `small_molecule_binding.py`, `run_small_molecule_binding.py`,
-`run_test_small_molecule_binding.py`, `mock.py`, `scripts/`
+`run_nonadaptive.py`, `run_test_small_molecule_binding.py`, `mock.py`, `scripts/`
 
 ---
 
@@ -70,14 +70,16 @@ silently points to the wrong directory and the task reads stale or absent files.
 
 ---
 
-### `run_small_molecule_binding.py:20` — rhapsody DEBUG logging enabled unconditionally
+### `run_small_molecule_binding.py:20`, `run_nonadaptive.py:16` — rhapsody DEBUG logging enabled unconditionally
 
 ```python
 rhapsody.enable_logging(level=logging.DEBUG)
 ```
 
-DEBUG-level rhapsody logs every Dragon message exchange. On a 8-pipeline run this
-generates thousands of lines per second and buries application output.
+DEBUG-level rhapsody logs every Dragon message exchange. On a multi-pipeline run this
+generates thousands of lines per second and buries application output. Both runner
+scripts have this unconditional call; it should default to INFO or be gated by an
+env variable.
 
 ---
 
@@ -204,3 +206,27 @@ echo "[af2.sh] data_dir: $data_dir"
 
 Acceptable while debugging, but should be removed or made conditional on a `VERBOSE`
 flag before pushing to the shared branch.
+
+---
+
+### `run_nonadaptive.py:56` — commented-out `LocalExecutionBackend` alternative
+
+```python
+#backend = await LocalExecutionBackend(ProcessPoolExecutor())
+backend = await DragonExecutionBackend()
+```
+
+The commented-out local backend is a leftover from development/testing. Remove it to
+avoid confusion about which backend is active.
+
+---
+
+### `run_nonadaptive.py:77` — hardcoded pipeline index list
+
+```python
+for i in [1,2,4,6,7,8,10,11,12,13,14,15,16,18,19,20,23,26,27,30,32]
+```
+
+Like `run_small_molecule_binding.py`'s hardcoded range, the specific protein indices
+are baked in with no clear mapping to input files. Should be a named constant or
+driven by scanning the input directory.
