@@ -133,7 +133,7 @@ class ImpressManager:
 
         while True:
             any_activity: bool = False
-            completed_pipelines: list[ImpressBasePipeline] = []
+            completed_pipelines: list[tuple] = []
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
                 # Check if pipeline needs adaptive step and isn't already running one
@@ -161,7 +161,7 @@ class ImpressManager:
                 if getattr(pipeline, "kill_parent", False):
                     self.logger.pipeline_killed(pipeline.name)
                     pipeline_future.cancel()
-                    completed_pipelines.append(pipeline)
+                    completed_pipelines.append((pipeline, pipeline_future))
                     continue
 
                 # Check if pipeline is done - but only mark as completed
@@ -173,12 +173,12 @@ class ImpressManager:
                         if not adaptive_task.done():
                             continue
 
-                    completed_pipelines.append(pipeline)
+                    completed_pipelines.append((pipeline, pipeline_future))
 
             # Clean up completed pipelines - but only if their
             # adaptive tasks are also done
             actually_completed: list[ImpressBasePipeline] = []
-            for pipeline in completed_pipelines:
+            for pipeline, future in completed_pipelines:
                 # Double-check: only clean up if adaptive task is
                 # done or doesn't exist
                 if pipeline in self.adaptive_tasks:
@@ -188,7 +188,16 @@ class ImpressManager:
                     self.adaptive_tasks.pop(pipeline)
 
                 self.pipeline_tasks.pop(pipeline, None)
-                self.logger.pipeline_completed(pipeline.name)
+                exc = None
+                if future.done() and not future.cancelled():
+                    try:
+                        exc = future.exception()
+                    except Exception:
+                        pass
+                if exc is not None:
+                    self.logger.pipeline_failed(pipeline.name, exc)
+                else:
+                    self.logger.pipeline_completed(pipeline.name)
                 actually_completed.append(pipeline)
 
             completed_pipelines = actually_completed

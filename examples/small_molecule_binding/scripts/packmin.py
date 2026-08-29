@@ -120,7 +120,7 @@ def main(args):
 if __name__ == '__main__':
 	args = parse_args()
 
-	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false'
+	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false -mute all'
 	if args.constraints:
 		opts += ' -enzdes::cstfile {}'.format(args.constraints)
 		opts += ' -run:preserve_header'

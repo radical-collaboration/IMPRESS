@@ -1,6 +1,7 @@
 
 import asyncio
 import copy
+import gzip
 import json
 import os
 import pathlib
@@ -140,8 +141,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         super().__init__(name, flow, **configs, **kwargs)
 
         # Paths
-        self.base_path       = kwargs.get("base_path", os.getcwd())
-        self.scripts_path    = os.path.join(self.base_path, "scripts")
+        self.base_path    = kwargs.get("base_path", os.getcwd())
+        self.scripts_path = kwargs.get(
+            "scripts_path", os.path.join(self.base_path, "scripts")
+        )
         self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
         self.mpnn_dir        = kwargs.get("mpnn_dir", f"/anvil/projects/x-nairr240405/mason/LigandMPNN")
 
@@ -162,6 +165,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.interface_min_sc          = kwargs.get("interface_min_sc",          0.5)
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
         self.max_tasks                 = kwargs.get("max_tasks",                 300)
+        self.policy                    = kwargs.get("policy",                    None)
 
         # Output paths (legacy)
         self.output_path         = os.path.join(self.base_path, "myoutputs", self.name)
@@ -176,6 +180,15 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state            = {}   # written by analysis tasks, read by adaptive_fn
         self.next_step        = STEP_RFD3
         self._current_cycle_i = 0   # set by run() before each mpnn call
+
+    # ── GPU env helper ─────────────────────────────────────────────────────
+
+    def _gpu_env(self):
+        """Return subprocess env with CUDA_VISIBLE_DEVICES set from Dragon Policy gpu_affinity."""
+        env = {**os.environ}
+        if self.policy and self.policy.gpu_affinity:
+            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.policy.gpu_affinity)
+        return env
 
     # ── Task registration ──────────────────────────────────────────────────
 
@@ -196,8 +209,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
     def _register_real_tasks(self):
         """Register real HPC tasks that return shell command strings."""
 
-        @self.auto_register_task(capture_stdio=True)
-        async def rfd3(task_description={"gpus_per_rank": 1}):
+        @self.auto_register_task(local_task=True)
+        async def rfd3():
             self.taskcount += 1
             taskname = "rfd3"
             self.previous_task = taskname
@@ -211,7 +224,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             input_pdb    = self.state.get('rfd3_input_pdb')
             scaffold_arg = f"scaffoldguided.target_pdb={input_pdb}" if input_pdb else ""
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/rfd3.sh"
                 f" {self.foundry_sif_path}"
                 f" {output_dir}"
@@ -219,6 +232,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {self.diffusion_batch_size}"
                 f" {scaffold_arg}"
             )
+            log_file = f"{taskdir}/rfd3.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=_lf,
+                    stderr=asyncio.subprocess.STDOUT,
+                    env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"rfd3 failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_backbone():
@@ -273,7 +297,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 ETYPE_BACKBONE, best['ss'], self.state.get('rfd3_input_pdb'), backbone_path,
             ))
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def mpnn(
             fixed_residues_file: str | None = None):
             self.taskcount += 1
@@ -300,13 +324,24 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             shutil.copy(pdb_path_orig, short_pdb)
             pdb_path = short_pdb
 
+            # LigandMPNN (ProDy parsePDB) only reads PDB format; convert CIF.GZ.
+            if pdb_path.endswith('.cif.gz'):
+                import gemmi as _gemmi
+                pdb_for_mpnn = f"{taskdir}/in/binder.pdb"
+                with gzip.open(pdb_path, 'rb') as _f:
+                    _cif_data = _f.read().decode()
+                _doc = _gemmi.cif.read_string(_cif_data)
+                _st = _gemmi.make_structure_from_block(_doc.sole_block())
+                _st.write_pdb(pdb_for_mpnn)
+                pdb_path = pdb_for_mpnn
+
             if fixed_residues_file:
                 with open(fixed_residues_file) as f:
                     fixed_residues = f.read().strip()
             else:
                 fixed_residues = ""
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/mpnn.sh"
                 f" {self.mpnn_dir}"
                 f" {pdb_path}"
@@ -315,6 +350,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {batch_size}"
                 f' "{fixed_residues}"'
             )
+            log_file = f"{taskdir}/mpnn.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=_lf,
+                    stderr=asyncio.subprocess.STDOUT,
+                    env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"mpnn failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_sequence():
@@ -366,7 +412,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 self.state.get('best_backbone_path'), self.state.get('last_seq_fasta'),
             ))
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def packmin():
             self.taskcount += 1
             taskname = "packmin"
@@ -383,12 +429,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             # Predict output path so the next mpnn can read from it
             self.state['best_packed_pdb'] = f"{output_dir}/{pdb_stem}_minimized.pdb"
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/packmin.sh"
                 f" {pdb_path}"
                 f" {lig_path}"
                 f" {output_dir}"
             )
+            log_file = f"{taskdir}/packmin.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"packmin failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_packmin():
@@ -403,7 +457,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.state['last_analysis_step']    = 'packmin'
             self.state['last_analysis_metrics'] = {'pass': True, 'total_score': total_score}
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def fastrelax():
             self.taskcount += 1
             taskname = "fastrelax"
@@ -416,13 +470,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             lig_path   = f"{self.pipeline_inputs}/{self.ligand_params}"
             output_dir = f"{taskdir}/out"
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/fastrelax.sh"
                 f" {pdb_path}"
                 f" {lig_path}"
                 f" {output_dir}"
-                f" > fastrelax.txt"
             )
+            log_file = f"{taskdir}/fastrelax.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"fastrelax failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_fastrelax():
@@ -452,7 +513,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'rmsd':        rmsd,
             }
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def filter_shape(ligand_name: str = "ALR"):
             taskname = "filter_shape"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
@@ -461,13 +522,21 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             pdb_directory = f"{self.base_path}/{self.name}/{self.taskcount}_fastrelax/out"
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/filter_shape.sh"
                 f" {pdb_directory}"
                 f" {taskdir}/out/shape_complementarity_values.txt"
                 f" {self.pipeline_inputs}/{ligand_name}"
                 f" {taskdir}/out/interface_values.txt"
             )
+            log_file = f"{taskdir}/filter_shape.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"filter_shape failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_interface():
@@ -494,8 +563,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'max_sc': max_sc,
             }
 
-        @self.auto_register_task(capture_stdio=True)
-        async def af2(task_description={"gpus_per_rank": 1}):
+        @self.auto_register_task(local_task=True)
+        async def af2():
             self.taskcount += 1
             taskname = "alphafold"
             self.previous_task = taskname
@@ -516,12 +585,20 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             output_dir = f"{taskdir}/out"
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/af2.sh"
                 f" {self.colabfold_path}"
                 f" {short_fasta}"
                 f" {output_dir}"
             )
+            log_file = f"{taskdir}/af2.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"af2 failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
         async def analysis_fold():
@@ -556,7 +633,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'best_model':      best_model,
             }
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task(local_task=True)
         async def filter_energy(ligand_name: str = "ALR"):
             taskname = "filter_energy"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
@@ -569,7 +646,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             output_energy_file    = f"{outputs_dir}/negative_ligand_energies.txt"
             common_filenames_file = f"{self.pipeline_inputs}/common_filenames.txt"
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/filter_energy.sh"
                 f" {pdb_directory}"
                 f" {output_file}"
@@ -577,6 +654,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {common_filenames_file}"
                 f" {ligand_name}"
             )
+            log_file = f"{taskdir}/filter_energy.log"
+            with open(log_file, "wb") as _lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                )
+                await proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"filter_energy failed with exit code {proc.returncode}\nSee {log_file}")
 
     # ── Score utils ────────────────────────────────────────────────────────
 

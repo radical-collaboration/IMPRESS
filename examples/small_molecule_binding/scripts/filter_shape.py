@@ -8,7 +8,7 @@ SC_output_file  = sys.argv[2] # 'shape_complementarity_values.txt'
 ligand_name     = sys.argv[3] # 'ALR'
 gen_output_file = sys.argv[4] # 'interface_values.txt'
 
-pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa {ligand_name}.params -corrections::beta_nov16 true")
+pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa {ligand_name}.params -corrections::beta_nov16 true -mute all")
 
 # Define directories and files
 #pdb_directory = '/WWW/PDB_Files'

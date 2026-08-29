@@ -136,6 +136,11 @@ class ImpressLogger:
         message = f"Pipeline completed: {colored_name}"
         self.info(message, "manager")
 
+    def pipeline_failed(self, pipeline_name, exc):
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Pipeline FAILED: {colored_name} — {exc}"
+        self.error(message, "manager")
+
     def pipeline_killed(self, pipeline_name):
         colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
         message = f"Pipeline killed: {colored_name}"

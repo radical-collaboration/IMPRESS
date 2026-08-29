@@ -16,7 +16,12 @@ else
  scaffold_arg=""
 fi
 
-apptainer exec --nv "$foundry_sif_path" rfd3 design \
+# Prevent host ~/.local Python packages from contaminating the container
+# (apptainer mounts $HOME by default; PYTHONNOUSERSITE must be SET, not unset).
+unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE
+export PYTHONNOUSERSITE=1
+
+apptainer exec --nv --writable-tmpfs --bind /scratch:/scratch "$foundry_sif_path" rfd3 design \
     out_dir="$output_dir" \
     inputs="$inputs" \
     skip_existing=False \
