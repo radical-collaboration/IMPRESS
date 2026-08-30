@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Backbone generation via RFDiffusion3 (apptainer)
-# Args: $1=foundry_sif_path $2=output_dir $3=inputs $4=scaffold_arg $5=diffusion_batch_size
-#   scaffold_arg: "scaffoldguided.target_pdb=<path>" or "" if unused
+# Args: $1=foundry_sif_path $2=output_dir $3=inputs $4=diffusion_batch_size $5=scaffold_arg
+#   scaffold_arg: "scaffoldguided.target_pdb=<path>" or "" if unused (optional, defaults to "")
 
 foundry_sif_path="$1"
 output_dir="$2"

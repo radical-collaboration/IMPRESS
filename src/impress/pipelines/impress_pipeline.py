@@ -95,7 +95,6 @@ class ImpressBasePipeline(ABC):
         """Optional: Return scores mapping"""
         return {}
 
-    @abstractmethod
     async def finalize(self):
         """Optional: Cleanup or finalization logic"""
         pass

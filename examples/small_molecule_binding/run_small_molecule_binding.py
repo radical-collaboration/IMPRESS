@@ -1,9 +1,7 @@
 import asyncio
 import os
-from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend
 from rhapsody.backends import DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
@@ -17,7 +15,7 @@ from small_molecule_binding import (
 
 import logging
 import rhapsody
-rhapsody.enable_logging(level=logging.DEBUG)
+rhapsody.enable_logging(level=logging.INFO)
 
 # ── Per-step quality thresholds ────────────────────────────────────────────
 BACKBONE_MAX_CA_DEVIATION = 1.0

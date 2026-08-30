@@ -1,8 +1,6 @@
 import asyncio
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend
-from concurrent.futures import ProcessPoolExecutor
 from rhapsody.backends import DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
@@ -13,7 +11,7 @@ from small_molecule_binding import (
 
 import logging
 import rhapsody
-rhapsody.enable_logging(level=logging.DEBUG)
+rhapsody.enable_logging(level=logging.INFO)
 
 # ── Per-step quality thresholds ────────────────────────────────────────────
 # These are passed to pipeline analysis tasks for metric logging but are not
@@ -53,7 +51,6 @@ async def nonadaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_nonadaptive() -> None:
     """Execute the small-molecule binding pipeline without adaptive routing."""
-    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackend()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 

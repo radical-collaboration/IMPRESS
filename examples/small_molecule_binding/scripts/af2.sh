@@ -28,12 +28,10 @@ if [ -z "$colabfold_bin" ]; then
     echo "ERROR: colabfold_batch not found in venv or at $colabfold_path" >&2
     exit 1
 fi
-echo "[af2.sh] using colabfold_batch: $colabfold_bin"
 
 # Use scratch for the model weights cache to avoid home quota exhaustion.
 # COLABFOLD_CACHE_DIR must be set (delta_sbatch.sh exports it).
 data_dir="${COLABFOLD_CACHE_DIR:-${HOME}/.cache/colabfold}"
-echo "[af2.sh] data_dir: $data_dir"
 
 "$colabfold_bin" \
     --model-type alphafold2 \

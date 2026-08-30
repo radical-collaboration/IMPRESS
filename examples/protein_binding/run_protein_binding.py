@@ -1,9 +1,10 @@
 import copy
+import os
 import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from rhapsody.backends import DragonExecutionBackendV3
+from rhapsody.backends import DragonExecutionBackend
 from rhapsody.telemetry import define_event
 from rhapsody.telemetry.events import make_event
 
@@ -61,12 +62,12 @@ def _on_task_event(event) -> None:
 # Adaptive helpers
 # ---------------------------------------------------------------------------
 
-async def adaptive_criteria(current_score: float, previous_score: float) -> bool:
+def adaptive_criteria(current_score: float, previous_score: float) -> bool:
     return current_score > previous_score
 
 
 async def impress_protein_bind() -> None:
-    backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackend()
 
     manager: ImpressManager = ImpressManager(
         execution_backend=backend,
@@ -85,7 +86,7 @@ async def impress_protein_bind() -> None:
         sid = tel.session_id if tel else None
 
         # Read current scores from CSV
-        file_name = f'af_stats_{pipeline.name}_pass_{pipeline.passes}.csv'
+        file_name = os.path.join(pipeline.base_path, f'af_stats_{pipeline.name}_pass_{pipeline.passes}.csv')
         with open(file_name) as fd:
             for line in fd.readlines()[1:]:
                 line = line.strip()

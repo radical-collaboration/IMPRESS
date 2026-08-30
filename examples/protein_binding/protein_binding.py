@@ -6,7 +6,7 @@ import shutil
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
-MPNN_PATH = f"/anvil/projects/x-nairr240405/mason/ProteinMPNN"
+MPNN_PATH = os.environ.get("MPNN_PATH", "")
 
 _BOLTZ_CHAIN_MAP = {'pdz': 'A', 'pep': 'B'}
 
@@ -34,7 +34,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.num_seqs = kwargs.get("num_seqs", 10)
         self.sub_order = kwargs.get("sub_order", 0)
         self.max_passes = kwargs.get("max_passes", 10)
-        self.mpnn_path = kwargs.get("mpnn_path", MPNN_PATH)
+        self.mpnn_path = kwargs.get("mpnn_path") or MPNN_PATH
+        if not self.mpnn_path:
+            raise ValueError("mpnn_path must be supplied via kwarg or MPNN_PATH env var")
 
         # Sequence and score state
         self.current_scores = {}
@@ -217,10 +219,11 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     def finalize(self, sub_iter_seqs):
         # finalize the "cleanup" of the current pipeline
+        from pathlib import Path
         for a in sub_iter_seqs:
             self.fasta_list_2.remove(f"{a}.pdb")
-            os.unlink(f"{self.output_path_af}/{a}.pdb")
-            os.unlink(f"{self.output_path}/af/fasta/{a}.fa")
+            Path(f"{self.output_path_af}/{a}.pdb").unlink(missing_ok=True)
+            Path(f"{self.output_path}/af/fasta/{a}.fa").unlink(missing_ok=True)
         self.previous_scores = copy.deepcopy(self.current_scores)
 
     async def run(self):
@@ -255,6 +258,13 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             alphafold_tasks = []
             post_exec_tasks = []
 
+            # Limit concurrent Boltz launches to avoid GPU OOM.
+            _boltz_sem = asyncio.Semaphore(2)
+
+            async def _guarded_s4(target_fasta):
+                async with _boltz_sem:
+                    return await self.s4(target_fasta=target_fasta)
+
             for target_fasta in fasta_files:
                 models_path = os.path.join(
                     self.output_path, "af", "prediction", "dimer_models", target_fasta,
@@ -282,8 +292,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     f"{target_fasta}.pdb",
                 )
 
-                # launch coroutine without awaiting yet
-                alphafold_tasks.append(self.s4(target_fasta=target_fasta))
+                # launch coroutine without awaiting yet (semaphore-gated)
+                alphafold_tasks.append(_guarded_s4(target_fasta))
                 post_exec_tasks.append(
                     self.s4_post_exec(
                         target_fasta=target_fasta,

@@ -7,11 +7,6 @@
 set -e
 set -x
 
-# work and upperdir need to be on same file system
-WORK=/tmp/work
-UPPER=/tmp/upper
-mkdir -p $WORK $UPPER
-
 export XLA_PYTHON_CLIENT_PREALLOCATE="false"
 export XLA_PYTHON_CLIENT_MEM_FRACTION=".75"
 export XLA_PYTHON_CLIENT_ALLOCATOR="platform"

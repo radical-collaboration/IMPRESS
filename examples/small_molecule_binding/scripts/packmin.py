@@ -7,21 +7,11 @@ from pyrosetta.rosetta import *
 from pyrosetta.teaching import *
 
 #Core Includes
-from rosetta.core.kinematics import MoveMap
-from rosetta.core.kinematics import FoldTree
-from rosetta.core.pack.task import TaskFactory
-from rosetta.core.pack.task import operation
-from rosetta.core.simple_metrics import metrics
-from rosetta.core.select import residue_selector as selections
-from rosetta.core import select
-from rosetta.core.select.movemap import *
+from pyrosetta.rosetta.core.pack.task import operation
+from pyrosetta.rosetta.core.select.movemap import *
 
 #Protocol Includes
-from rosetta.protocols import minimization_packing as pack_min
-from rosetta.protocols import relax as rel
-from rosetta.protocols.antibody.residue_selector import CDRResidueSelector
-from rosetta.protocols.antibody import *
-from rosetta.protocols.loops import *
+from pyrosetta.rosetta.protocols import minimization_packing as pack_min
 '''
 When downloading a new PDB file, do a pack_min minimization with coordinate constraints and a ligand.
 
@@ -93,18 +83,12 @@ def main(args):
 
 	# Packer tasks with -ex1 and -ex2
 	tf = ut.make_task_factory()
-        #From pack_min tutorial from jupyter notebooks
-        ###tf = TaskFactory()
 
 	tf.push_back(operation.InitializeFromCommandline())
 	tf.push_back(operation.RestrictToRepacking())
 	packer = pack_min.PackRotamersMover()
 	packer.task_factory(tf)
 
-        #This line is from khare lab relax code, not sure if this will be necessary:
-        #pp = Pose(pose)
-
-        #Run the packer. (Note this may take a few minutes)
 	packer.apply(pose)
 
         # Write Rosetta score JSON alongside the output PDB
@@ -115,7 +99,6 @@ def main(args):
 
         #Dump the PDB
 	pose.dump_pdb(out_name)
-        ##pose.dump_pdb('/outputs/2r0l_all_repack.pdb')
 
 if __name__ == '__main__':
 	args = parse_args()

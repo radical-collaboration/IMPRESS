@@ -146,11 +146,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             "scripts_path", os.path.join(self.base_path, "scripts")
         )
         self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
-        self.mpnn_dir        = kwargs.get("mpnn_dir", f"/anvil/projects/x-nairr240405/mason/LigandMPNN")
+        self.mpnn_dir        = kwargs.get("mpnn_dir") or os.environ.get("MPNN_DIR")
+        if not self.mpnn_dir:
+            raise ValueError("mpnn_dir must be supplied via kwarg or MPNN_DIR env var")
 
         # Configurable tool paths and ensemble sizes
-        self.foundry_sif_path   = kwargs.get("foundry_sif_path",   "/anvil/projects/x-nairr240405/mason/foundry.sif")
-        self.colabfold_path     = kwargs.get("colabfold_path",     "/anvil/projects/x-nairr240405/mason/localcolabfold")
+        self.foundry_sif_path   = kwargs.get("foundry_sif_path") or os.environ.get("FOUNDRY_SIF_PATH")
+        if not self.foundry_sif_path:
+            raise ValueError("foundry_sif_path must be supplied via kwarg or FOUNDRY_SIF_PATH env var")
+        self.colabfold_path     = kwargs.get("colabfold_path") or os.environ.get("COLABFOLD_PATH")
+        if not self.colabfold_path:
+            raise ValueError("colabfold_path must be supplied via kwarg or COLABFOLD_PATH env var")
         self.ligand_params      = kwargs.get("ligand_params",      "ALR.params")
         self.mpnn_ensemble_size = kwargs.get("mpnn_ensemble_size", 1)
         self.num_refine_cycles  = kwargs.get("num_refine_cycles",  3)
@@ -688,7 +694,6 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
                 self.logger.pipeline_log(f"running mpnn [cycle {cycle_i}]")
                 await self.mpnn()
-#                    fixed_residues_file=f"{self.pipeline_inputs}/fixed_residues.txt" )
                 self.logger.pipeline_log(f"mpnn [cycle {cycle_i}] finished")
                 await self.analysis_sequence()
                 await self.run_adaptive_step()
