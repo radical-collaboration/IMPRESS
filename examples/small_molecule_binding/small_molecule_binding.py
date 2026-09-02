@@ -145,7 +145,15 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.scripts_path = kwargs.get(
             "scripts_path", os.path.join(self.base_path, "scripts")
         )
-        self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
+        # input_dir: explicit input directory name (relative to base_path) or
+        # absolute path.  Falls back to "<name>_in" when not provided.
+        _input_dir = kwargs.get("input_dir", "")
+        if _input_dir and os.path.isabs(_input_dir):
+            self.pipeline_inputs = _input_dir
+        elif _input_dir:
+            self.pipeline_inputs = os.path.join(self.base_path, _input_dir)
+        else:
+            self.pipeline_inputs = os.path.join(self.base_path, f"{self.name}_in")
         self.mpnn_dir        = kwargs.get("mpnn_dir") or os.environ.get("MPNN_DIR")
         if not self.mpnn_dir:
             raise ValueError("mpnn_dir must be supplied via kwarg or MPNN_DIR env var")
@@ -186,15 +194,6 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state            = {}   # written by analysis tasks, read by adaptive_fn
         self.next_step        = STEP_RFD3
         self._current_cycle_i = 0   # set by run() before each mpnn call
-
-    # ── GPU env helper ─────────────────────────────────────────────────────
-
-    def _gpu_env(self):
-        """Return subprocess env with CUDA_VISIBLE_DEVICES set from Dragon Policy gpu_affinity."""
-        env = {**os.environ}
-        if self.policy and self.policy.gpu_affinity:
-            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in self.policy.gpu_affinity)
-        return env
 
     # ── Task registration ──────────────────────────────────────────────────
 
@@ -613,6 +612,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f for f in os.listdir(out_dir)
                 if 'scores' in f and f.endswith('.json')
             ]
+
+            if not score_files:
+                raise RuntimeError(
+                    f"af2 produced no score files in {out_dir} — "
+                    "GPU/cuDNN failure (Foundry container may still hold GPU memory)"
+                )
 
             best_plddt = -1.0
             best_model = None

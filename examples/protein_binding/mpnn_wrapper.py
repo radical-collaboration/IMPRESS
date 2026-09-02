@@ -32,7 +32,7 @@ if chains is None:
 index=args.index
 fix=args.fix #default false, specify non fixed
 seqs=args.seqs
-if seqs == None:
+if seqs is None:
 	seqs=1 #default 1 design per structure
 tie=args.tie
 homo=args.homo

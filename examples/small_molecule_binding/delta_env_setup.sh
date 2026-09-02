@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# IMPRESS Protein Binding environment setup — Delta HPC (NCSA)
+# IMPRESS Small Molecule Binding environment setup — Delta HPC (NCSA)
 #
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
@@ -12,6 +12,15 @@
 #   ENV_DIR     = /u/$USER/ve/impress
 #   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
 #   python      = auto-detected (python/3.11, cray-python/3.11.7, anaconda3)
+#
+# Tool directories (cloned by this script if absent):
+#   MPNN_DIR           = $SCRATCH/$USER/LigandMPNN
+#   COLABFOLD_PATH     = $SCRATCH/$USER/localcolabfold  (used only for cache ref)
+#   COLABFOLD_CACHE_DIR= $SCRATCH/$USER/.cache/colabfold
+#
+# Foundry container (RFD3 backbone diffusion) is managed separately:
+#   Run pull_foundry.sh to build the sandbox tarball; delta_gpu_run.sh unpacks
+#   it to /tmp at job start.
 # =============================================================================
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
@@ -42,9 +51,14 @@ done
 PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
+MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
+COLABFOLD_CACHE_DIR="${COLABFOLD_CACHE_DIR:-${SCRATCH}/${USER}/.cache/colabfold}"
+
 echo "================================================================="
-echo "  ENV_DIR       = ${ENV_DIR}"
-echo "  IMPRESS_DIR   = ${IMPRESS_DIR}"
+echo "  ENV_DIR            = ${ENV_DIR}"
+echo "  IMPRESS_DIR        = ${IMPRESS_DIR}"
+echo "  MPNN_DIR           = ${MPNN_DIR}"
+echo "  COLABFOLD_CACHE    = ${COLABFOLD_CACHE_DIR}"
 echo "================================================================="
 
 # ── 1. Create venv ────────────────────────────────────────────────────────────
@@ -113,107 +127,90 @@ echo ""
 echo "── Step 5: IMPRESS (editable) ──"
 "${PIP}" install -q -e "${IMPRESS_DIR}"
 
-# ── 6. PyTorch (CUDA 12.1) ───────────────────────────────────────────────────
+# ── 6. PyTorch (CUDA 12.1) — required by LigandMPNN ─────────────────────────
 echo ""
 echo "── Step 6: PyTorch (cu121) ──"
 "${PIP}" install -q torch --index-url https://download.pytorch.org/whl/cu121
 
-# ── 7. Additional dependencies ───────────────────────────────────────────────
+# ── 7. ColabFold + AlphaFold2 with pinned JAX versions ───────────────────────
+#
+# Version constraints validated on Delta gpuA40x4 (CUDA 12.8 / cuDNN 9.25):
+#
+#   colabfold 1.6.2  requires  alphafold-colabfold==2.3.18
+#                              jax>=0.5.2,<0.11
+#
+#   alphafold-colabfold 2.3.18 is compatible with jaxlib 0.5.x but NOT with
+#   jaxlib 0.10.x (MSA feature shape mismatch at runtime).
+#
+#   jax 0.5.2 / jaxlib 0.5.1 require nvidia-cudnn-cu12 >=9.1,<10.0.
+#   Upgrade cudnn to >=9.8.0 so jaxlib's cuDNN version check passes (jaxlib
+#   0.5.1 links against cuDNN 9.x; runtime version must satisfy >=compiled).
+#
 echo ""
-echo "── Step 7: pandas + biopandas ──"
+echo "── Step 7: ColabFold + AlphaFold2 (pinned JAX) ──"
+# Install colabfold with the alphafold extra (pulls alphafold-colabfold 2.3.18,
+# dm-haiku, dm-tree, ml-collections, absl-py).
+"${PIP}" install -q "colabfold[alphafold]"
+# Pin JAX to the era tested with alphafold-colabfold 2.3.18.
+# jaxlib 0.5.2 does not exist on PyPI; 0.5.1 pairs with jax 0.5.2.
+"${PIP}" install -q "jax[cuda12]==0.5.2" "jaxlib==0.5.1"
+# Upgrade cuDNN so jaxlib's runtime check (>=compiled version) passes.
+"${PIP}" install -q "nvidia-cudnn-cu12>=9.8.0,<10.0"
+
+# ── 8. LigandMPNN ─────────────────────────────────────────────────────────────
+#
+# LigandMPNN is run directly from its source tree (no package install).
+# This step clones the repo; all Python dependencies (torch, ProDy, biopython,
+# numpy) are already satisfied by the venv above.
+# LigandMPNN's own requirements.txt pins older torch/cudnn versions — do NOT
+# install it into this venv; the newer versions here are compatible at runtime.
+#
+echo ""
+echo "── Step 8: LigandMPNN (clone) ──"
+if [ ! -d "${MPNN_DIR}" ]; then
+    echo "  Cloning LigandMPNN to ${MPNN_DIR}"
+    git clone https://github.com/dauparas/LigandMPNN "${MPNN_DIR}"
+else
+    echo "  LigandMPNN already at ${MPNN_DIR}, pulling latest"
+    git -C "${MPNN_DIR}" pull --ff-only || echo "  (pull skipped — non-fast-forward or detached HEAD)"
+fi
+# Install ProDy and biopython (needed by LigandMPNN; torch already installed).
+"${PIP}" install -q ProDy biopython
+
+# ── 9. gemmi — CIF.GZ parsing for backbone conversion ────────────────────────
+echo ""
+echo "── Step 9: gemmi ──"
+"${PIP}" install -q gemmi
+
+# ── 10. Additional dependencies ───────────────────────────────────────────────
+echo ""
+echo "── Step 10: pandas + biopandas ──"
 "${PIP}" install -q pandas biopandas
 
-# ── 8. PyRosetta (via pyrosetta-installer) ───────────────────────────────────
+# ── 11. PyRosetta ─────────────────────────────────────────────────────────────
 echo ""
-echo "── Step 8: PyRosetta ──"
+echo "── Step 11: PyRosetta ──"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
-# ── 9. Boltz (structure prediction — separate Python 3.12 conda env) ─────────
+# ── 12. ColabFold model weights ───────────────────────────────────────────────
+#
+# Pre-download AlphaFold2 model weights to COLABFOLD_CACHE_DIR so compute
+# nodes (no internet) find them at runtime.  Run this step on a login node.
+#
 echo ""
-echo "── Step 9: Boltz (separate conda env) ──"
-# boltz 2.x requires numpy<2.0, scipy==1.13.1, etc. — none have Python 3.13
-# wheels, so boltz cannot be installed in the main Python 3.13 IMPRESS venv.
-# Create a dedicated Python 3.12 conda env and install boltz there.
-# s4_boltz.sh activates BOLTZ_VENV (set in delta_gpu_run.sh) instead of VIRTUAL_ENV.
-MINIFORGE="${MINIFORGE:-/scratch/bblj/${USER}/miniforge3}"
-BOLTZ_ENV="${BOLTZ_ENV:-${HOME}/ve/boltz}"
-# Cache lives in home dir — scratch inode quota can't hold the 45K CCD files.
-BOLTZ_CACHE="${BOLTZ_CACHE:-${HOME}/boltz}"
-if [ ! -x "${BOLTZ_ENV}/bin/python" ]; then
-    echo "  Creating conda env (Python 3.11) at ${BOLTZ_ENV}"
-    # Use /tmp for package cache to avoid scratch quota exhaustion.
-    CONDA_PKGS_DIRS=/tmp/conda_pkgs "${MINIFORGE}/bin/conda" create -p "${BOLTZ_ENV}" python=3.11 -y -q
-else
-    echo "  boltz conda env already exists at ${BOLTZ_ENV}"
-fi
-echo "  Installing boltz into ${BOLTZ_ENV}"
-"${BOLTZ_ENV}/bin/pip" install -q boltz
-# Pre-warm the boltz cache so compute nodes (no internet) find weights ready.
-# boltz downloads mols.tar (45K CCD pkl files) + model weights on first run.
-# Running predict on the login node (which has internet) pre-populates them.
-echo "  Pre-warming boltz cache at ${BOLTZ_CACHE}"
-mkdir -p "${BOLTZ_CACHE}"
-_WARM_FA="$(mktemp /tmp/boltz_warmup_XXXXXX.fasta)"
-printf ">warmup|A\nGSSGSSGSS\n>warmup|B\nGSSGSSGSS\n" > "${_WARM_FA}"
-BOLTZ_CACHE_DIR="${BOLTZ_CACHE}" "${BOLTZ_ENV}/bin/boltz" predict "${_WARM_FA}" \
-    --out_dir "$(mktemp -d /tmp/boltz_warmup_out_XXXXXX)" \
-    --cache "${BOLTZ_CACHE}" \
-    --override 2>&1 | grep -E "Download|Extracting|Error|error" || true
-rm -f "${_WARM_FA}"
-echo "  Boltz cache pre-warm done (model weights cached at ${BOLTZ_CACHE})"
+echo "── Step 12: ColabFold model weights ──"
+mkdir -p "${COLABFOLD_CACHE_DIR}"
+echo "  Downloading AlphaFold2 weights to ${COLABFOLD_CACHE_DIR} ..."
+"${PY}" -c "
+from colabfold.download import download_alphafold_params
+download_alphafold_params('alphafold2', '${COLABFOLD_CACHE_DIR}')
+print('  Weights downloaded.')
+"
 
-# Pre-compute MSAs for all input proteins using the MSA server (login node has internet).
-# protein_binding.py s3() reads from BOLTZ_MSA_CACHE and embeds paths in the FASTA so
-# compute nodes do not need internet access.  Entity 0 = receptor, entity 1 = peptide.
-BOLTZ_MSA_CACHE="${BOLTZ_CACHE}/msa_cache"
-mkdir -p "${BOLTZ_MSA_CACHE}"
-echo "  Pre-computing MSAs into ${BOLTZ_MSA_CACHE}"
-# IMPRESS_BASE_DIR = parent of prod_in/; IMPRESS_OUTPUT_DIR = parent of af_pipeline_outputs_multi/
-_scratch="${SCRATCH:-/scratch/bblj/${USER}}"
-_base_dir="${IMPRESS_BASE_DIR:-${_scratch}/IMPRESS_inputs}"
-_out_dir="${IMPRESS_OUTPUT_DIR:-${_scratch}/IMPRESS_outputs}"
-_msa_inputs_dir="${_base_dir}/prod_in"
-if [ -d "${_msa_inputs_dir}" ]; then
-    for _pdb_dir in "${_msa_inputs_dir}"/p*_in; do
-        for _pdb in "${_pdb_dir}"/*.pdb; do
-            [ -f "${_pdb}" ] || continue
-            _stem="$(basename "${_pdb}" .pdb)"
-            _msa_csv="${BOLTZ_MSA_CACHE}/boltz_results_${_stem}/msa/${_stem}_0.csv"
-            if [ -f "${_msa_csv}" ]; then
-                echo "    ${_stem}: MSA already cached, skipping"
-                continue
-            fi
-            echo "    ${_stem}: generating MSA via server..."
-            _tmp_fa="$(mktemp /tmp/boltz_msa_XXXXXX.fasta)"
-            # Use FASTA from a prior run (sequences match the actual protein); fall back to
-            # a placeholder that will trigger MSA generation but gives a generic MSA.
-            _prior_fa=""
-            for _cand in "${_out_dir}"/af_pipeline_outputs_multi/*/af/fasta/"${_stem}.fa"; do
-                [ -f "${_cand}" ] && { _prior_fa="${_cand}"; break; }
-            done
-            if [ -n "${_prior_fa}" ]; then
-                cp "${_prior_fa}" "${_tmp_fa}"
-            else
-                printf ">pdz|protein\nGSSGSS\n>pep|protein\nGSSG\n" > "${_tmp_fa}"
-            fi
-            BOLTZ_CACHE_DIR="${BOLTZ_CACHE}" "${BOLTZ_ENV}/bin/boltz" predict "${_tmp_fa}" \
-                --out_dir "${BOLTZ_MSA_CACHE}" \
-                --use_msa_server \
-                --cache "${BOLTZ_CACHE}" \
-                --output_format pdb \
-                --override 2>&1 | grep -E "MSA|Generat|Error|error|skip" || true
-            rm -f "${_tmp_fa}"
-        done
-    done
-else
-    echo "    prod_in not found at ${_msa_inputs_dir}, skipping MSA pre-compute"
-fi
-echo "  MSA pre-compute done"
-
-# ── 10. Verify ───────────────────────────────────────────────────────────────
+# ── 13. Verify ────────────────────────────────────────────────────────────────
 echo ""
-echo "── Step 10: Verifying installation ──"
+echo "── Step 13: Verifying installation ──"
 _check() {
     local label="$1"; shift
     if out=$("$@" 2>&1); then
@@ -228,9 +225,14 @@ _check "radical.asyncflow" "${PY}" -c "import radical.asyncflow; print(radical.a
 _check "rhapsody-py"       "${PY}" -c "import rhapsody; print('ok')"
 _check "impress"           "${PY}" -c "import impress; print('ok')"
 _check "torch"             "${PY}" -c "import torch; print(torch.__version__)"
-_check "pandas"            "${PY}" -c "import pandas; print(pandas.__version__)"
-BOLTZ_ENV="${BOLTZ_ENV:-${HOME}/ve/boltz}"
-_check "boltz"             "${BOLTZ_ENV}/bin/python" -c "import boltz; print('ok')"
+_check "jax"               "${PY}" -c "import jax; print(jax.__version__)"
+_check "colabfold"         "${PY}" -c "import colabfold; print(colabfold.__version__)"
+_check "alphafold"         "${PY}" -c "import alphafold; print('ok')"
+_check "gemmi"             "${PY}" -c "import gemmi; print(gemmi.__version__)"
+_check "pyrosetta"         "${PY}" -c "import pyrosetta; print('ok')"
+_check "ProDy"             "${PY}" -c "import prody; print(prody.__version__)"
+_check "LigandMPNN"        test -d "${MPNN_DIR}" && echo "present"
+_check "colabfold weights" test -d "${COLABFOLD_CACHE_DIR}/params" && echo "present"
 
 echo ""
 echo "================================================================="
@@ -242,6 +244,9 @@ echo ""
 echo "Run the pipeline:"
 echo "  export SCRATCH=${SCRATCH}"
 echo "  export SBATCH_ACCOUNT=bblj-delta-gpu"
-echo "  cd ${IMPRESS_DIR}/examples/protein_binding"
+echo "  cd ${IMPRESS_DIR}/examples/small_molecule_binding"
 echo "  sbatch delta_gpu_run.sh"
+echo ""
+echo "Note: Foundry container (RFD3) is managed separately."
+echo "  Build once with:  sbatch pull_foundry.sh"
 echo "================================================================="

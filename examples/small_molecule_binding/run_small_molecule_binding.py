@@ -1,10 +1,11 @@
 import asyncio
 import os
+from dataclasses import dataclass
 from typing import List
 
 from rhapsody.backends import DragonExecutionBackend
 
-from impress import ImpressManager, PipelineSetup
+from impress import GPUPolicy, _find_gpus, _make_policy, ImpressManager, PipelineSetup
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -17,14 +18,57 @@ import logging
 import rhapsody
 rhapsody.enable_logging(level=logging.INFO)
 
-# ── Per-step quality thresholds ────────────────────────────────────────────
-BACKBONE_MAX_CA_DEVIATION = 1.0
-BACKBONE_MIN_SS_FRACTION  = 0.5
-FASTRELAX_MAX_FA_REP      = 100.0   # fa_rep REU
-FASTRELAX_MAX_SCORE       = -250.0  # total_score REU  (was 0.0 — inert; data range -193 to -510)
-FASTRELAX_MAX_INTERACT    = -8.0    # interaction energy REU  (was absent/0.0 — inert; p75=-8.8)
-INTERFACE_MIN_SC          = 0.55    # shape complementarity  (was 0.35 — passed 100%; data min=0.37)
-FOLD_MIN_PLDDT            = 75.0    # mean pLDDT  (was 70.0; ~70% of AF2 runs exceed 75)
+
+@dataclass
+class RunConfig:
+    n_pipelines: int
+    max_tasks: int
+    # backbone
+    backbone_max_ca_deviation: float
+    backbone_min_ss_fraction: float
+    # fastrelax
+    fastrelax_max_fa_rep: float
+    fastrelax_max_score: float       # total_score REU
+    fastrelax_max_interact: float    # interaction energy REU
+    # interface
+    interface_min_sc: float          # shape complementarity
+    # fold
+    fold_min_plddt: float            # mean pLDDT; init is -1.0 so -1.0 = always pass
+    # diffusion / refinement
+    diffusion_batch_size: int
+    num_refine_cycles: int
+
+
+PROD = RunConfig(
+    n_pipelines               = 4,
+    max_tasks                 = 300,
+    backbone_max_ca_deviation = 1.0,
+    backbone_min_ss_fraction  = 0.5,
+    fastrelax_max_fa_rep      = 100.0,
+    fastrelax_max_score       = -250.0,  # data range -193 to -510
+    fastrelax_max_interact    = -8.0,    # p75 = -8.8
+    interface_min_sc          = 0.55,
+    fold_min_plddt            = 75.0,
+    diffusion_batch_size      = 4,
+    num_refine_cycles         = 2,
+)
+
+# Inert thresholds — everything passes; low task budget for one full cycle.
+TEST = RunConfig(
+    n_pipelines               = 2,
+    max_tasks                 = 10,
+    backbone_max_ca_deviation = 9999.0,
+    backbone_min_ss_fraction  = 0.0,
+    fastrelax_max_fa_rep      = 9999.0,
+    fastrelax_max_score       = 9999.0,
+    fastrelax_max_interact    = 9999.0,
+    interface_min_sc          = 0.0,
+    fold_min_plddt            = -1.0,
+    diffusion_batch_size      = 1,
+    num_refine_cycles         = 1,
+)
+
+cfg = TEST if os.getenv("IMPRESS_TEST_MODE", "0") == "1" else PROD
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
@@ -137,9 +181,21 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
+    # Resolve paths before launching Dragon (os.getcwd() is the examples dir).
+    examples_dir = os.path.dirname(os.path.abspath(__file__))
+    work_dir = os.environ.get(
+        "IMPRESS_WORK_DIR", os.path.join(examples_dir, "logs")
+    )
+    os.makedirs(work_dir, exist_ok=True)
+    # Input data lives in the source tree; pass as absolute so it resolves
+    # correctly regardless of what base_path / work_dir is set to.
+    input_dir = os.path.join(examples_dir, "p1_in")
+
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackend()
     manager: ImpressManager = ImpressManager(execution_backend=backend)
+
+    all_gpus = _find_gpus()
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -147,22 +203,26 @@ async def impress_smallmol_bind() -> None:
             type=SmallMoleculeBindingPipeline,
             adaptive_fn=adaptive_decision,
             kwargs={
-                "backbone_max_ca_deviation": BACKBONE_MAX_CA_DEVIATION,
-                "backbone_min_ss_fraction":  BACKBONE_MIN_SS_FRACTION,
-                "fastrelax_max_fa_rep":      FASTRELAX_MAX_FA_REP,
-                "fastrelax_max_total_score": FASTRELAX_MAX_SCORE,
-                "fastrelax_max_interact":    FASTRELAX_MAX_INTERACT,
-                "interface_min_sc":          INTERFACE_MIN_SC,
-                "fold_min_plddt":            FOLD_MIN_PLDDT,
-                "diffusion_batch_size":      4,
-                "num_refine_cycles":         2,
+                "base_path":                 work_dir,
+                "scripts_path":              os.path.join(examples_dir, "scripts"),
+                "input_dir":                 input_dir,
+                "backbone_max_ca_deviation": cfg.backbone_max_ca_deviation,
+                "backbone_min_ss_fraction":  cfg.backbone_min_ss_fraction,
+                "fastrelax_max_fa_rep":      cfg.fastrelax_max_fa_rep,
+                "fastrelax_max_total_score": cfg.fastrelax_max_score,
+                "fastrelax_max_interact":    cfg.fastrelax_max_interact,
+                "interface_min_sc":          cfg.interface_min_sc,
+                "fold_min_plddt":            cfg.fold_min_plddt,
+                "diffusion_batch_size":      cfg.diffusion_batch_size,
+                "num_refine_cycles":         cfg.num_refine_cycles,
+                "max_tasks":                 cfg.max_tasks,
+                "policy":                    _make_policy(all_gpus, i - 1),
             }
         )
-        for i in range(1,9)
+        for i in range(1, cfg.n_pipelines + 1)
     ]
 
     await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
 
 
 if __name__ == "__main__":

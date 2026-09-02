@@ -35,7 +35,8 @@ data_dir="${COLABFOLD_CACHE_DIR:-${HOME}/.cache/colabfold}"
 
 "$colabfold_bin" \
     --model-type alphafold2 \
-    --num-models 1 \
+    --msa-mode single_sequence \
+    --num-models "${AF2_NUM_MODELS:-1}" \
     --data "$data_dir" \
     --rank auto \
     --random-seed 999 \

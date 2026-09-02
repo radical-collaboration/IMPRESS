@@ -37,6 +37,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.mpnn_path = kwargs.get("mpnn_path") or MPNN_PATH
         if not self.mpnn_path:
             raise ValueError("mpnn_path must be supplied via kwarg or MPNN_PATH env var")
+        self.peptide_seq: str = kwargs.get("peptide_seq", "EGYQDYEPEA")
+        self.policy = kwargs.get("policy", None)
 
         # Sequence and score state
         self.current_scores = {}
@@ -48,12 +50,18 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         # Input-related
         self.fasta_list_2 = kwargs.get("fasta_list_2", [])
         self.base_path = kwargs.get("base_path", os.getcwd())
+        # input_base_path is the parent of prod_in/; defaults to base_path so
+        # existing callers that keep input data next to scripts still work.
+        self.input_base_path = kwargs.get("input_base_path", self.base_path)
+        # output_base_path is where af_pipeline_outputs_multi/ is written;
+        # defaults to base_path so existing callers without IMPRESS_OUTPUT_DIR work.
+        self.output_base_path = kwargs.get("output_base_path", self.base_path)
         self.scripts_path = os.path.join(self.base_path, "scripts")
-        self.input_path = os.path.join(self.base_path, f"prod_in/{self.name}_in")
+        self.input_path = os.path.join(self.input_base_path, f"prod_in/{self.name}_in")
 
         # Output paths
         self.output_path = os.path.join(
-            self.base_path, "af_pipeline_outputs_multi", self.name
+            self.output_base_path, "af_pipeline_outputs_multi", self.name
         )
         self.output_path_mpnn = os.path.join(self.output_path, "mpnn")
         self.output_path_af = os.path.join(
@@ -67,12 +75,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     def set_up_new_pipeline_dirs(self, new_pipeline_name):
         base_output = os.path.join(
-            self.base_path, "af_pipeline_outputs_multi", new_pipeline_name
+            self.output_base_path, "af_pipeline_outputs_multi", new_pipeline_name
         )
-        input_dir = os.path.join(self.base_path, f"prod_in/{new_pipeline_name}_in")
-
-        if os.path.isdir(base_output):
-            return  # already exists, nothing to do
+        input_dir = os.path.join(self.input_base_path, f"prod_in/{new_pipeline_name}_in")
 
         # all directories to create
         subdirs = [
@@ -96,16 +101,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task(capture_stdio=True)  # MPNN
-        async def s1(task_description={"gpus_per_rank": 1}):
+        @self.auto_register_task(local_task=True)  # MPNN
+        async def s1():
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
+            os.makedirs(output_dir, exist_ok=True)
 
             chain = "A"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/s1_mpnn.sh "
                 f"{mpnn_script} "
                 f"{input_path} "
@@ -114,6 +120,15 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.num_seqs} "
                 f"{chain}"
             )
+            log_path = os.path.join(output_dir, "mpnn_run.log")
+            with open(log_path, "w") as lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=lf, stderr=asyncio.subprocess.STDOUT,
+                    env=self._gpu_env(),
+                )
+            rc = await proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"s1 MPNN failed (exit {rc})")
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -141,17 +156,38 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         async def s3():
             self.step_id += 1
             output_dir = os.path.join(self.output_path, "af", "fasta")
+            # Pre-computed MSA cache (populated by delta_env_setup.sh on the login node,
+            # which has internet access).  Entity 0 = receptor (PDZ), entity 1 = peptide.
+            msa_cache = os.path.expanduser("~/boltz/msa_cache")
 
             fasta_file_to_return = []
             for fasta_file in self.fasta_list_2:
                 base_name = fasta_file.split(".")[0]
                 fasta_file_to_return.append(base_name)
                 design_seq = self.iter_seqs[base_name][self.seq_rank][0]
-                pep_seq = "EGYQDYEPEA"
+                pep_seq = self.peptide_seq
+
+                # Boltz embeds pre-computed MSAs in the FASTA header rather than
+                # running MSA search at prediction time (compute nodes have no internet).
+                # Naming convention: entity 0 = receptor (PDZ), entity 1 = peptide.
+                pdz_msa = os.path.join(
+                    msa_cache, f"boltz_results_{base_name}", "msa", f"{base_name}_0.csv"
+                )
+                pep_msa = os.path.join(
+                    msa_cache, f"boltz_results_{base_name}", "msa", f"{base_name}_1.csv"
+                )
+                if os.path.exists(pdz_msa) and os.path.exists(pep_msa):
+                    # |path/to/msa.csv| tells Boltz to load the pre-computed MSA
+                    pdz_tag = f">pdz|protein|{pdz_msa}"
+                    pep_tag = f">pep|protein|{pep_msa}"
+                else:
+                    # |empty| runs single-sequence mode — no MSA, slightly less accurate
+                    pdz_tag = ">pdz|protein|empty"
+                    pep_tag = ">pep|protein|empty"
 
                 fasta_path = os.path.join(output_dir, f"{base_name}.fa")
                 with open(fasta_path, "w") as f:
-                    f.write(f">pdz|protein\n{design_seq}\n>pep|protein\n{pep_seq}\n")
+                    f.write(f"{pdz_tag}\n{design_seq}\n{pep_tag}\n{pep_seq}\n")
 
             return fasta_file_to_return
 
@@ -164,8 +200,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task(capture_stdio=True)
-        async def s4(target_fasta, task_description={"gpus_per_rank": 1}):  # noqa: B006
+        @self.auto_register_task(local_task=True)
+        async def s4(target_fasta):
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
@@ -173,7 +209,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
             self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
-            return cmd
+            # s4_boltz.sh tees its own output to boltz_run.log in the output dir
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=self._gpu_env(),
+            )
+            rc = await proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"Boltz failed for {target_fasta} (exit {rc})")
 
         @self.auto_register_task(local_task=True)
         async def s4_post_exec(
@@ -208,7 +253,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             self.step_id += 1
             return (
                 f"bash {self.scripts_path}/s5_plddt_extract.sh "
-                f"{self.base_path} "
+                f"{self.output_base_path} "
                 f"{self.passes} "
                 f"{self.name}"
             )
@@ -316,11 +361,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     self.logger.pipeline_log(f"s4 DONE for {fasta_name}")
 
             s4_post_results = await asyncio.gather(*post_exec_tasks, return_exceptions=True)
+            any_s4_ok = False
             for fasta_name, result in zip(fasta_files, s4_post_results):
                 if isinstance(result, Exception):
                     self.logger.pipeline_log(f"s4_post_exec FAILED for {fasta_name}: {result}")
                 else:
                     self.logger.pipeline_log(f"s4_post_exec DONE for {fasta_name}")
+                    any_s4_ok = True
+
+            if not any_s4_ok:
+                raise RuntimeError("All s4 tasks failed — skipping pLDDT extraction")
 
             self.logger.pipeline_log("Submitting pLDTT extraction task")
 

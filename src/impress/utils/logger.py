@@ -34,7 +34,13 @@ class LogLevel(Enum):
 
 
 class ImpressLogger:
-    _LEVEL_ORDER = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARNING, LogLevel.ERROR, LogLevel.CRITICAL]
+    _LEVEL_ORDER = [
+        LogLevel.DEBUG,
+        LogLevel.INFO,
+        LogLevel.WARNING,
+        LogLevel.ERROR,
+        LogLevel.CRITICAL,
+    ]
 
     def __init__(self, name="ImpressManager", use_colors=True, output_stream=None,
                  min_level: LogLevel = LogLevel.DEBUG):
@@ -105,31 +111,41 @@ class ImpressLogger:
     def debug(self, message, component="manager", pipeline_name=None):
         if not self._is_enabled(LogLevel.DEBUG):
             return
-        formatted = self._format_message(LogLevel.DEBUG, component, message, pipeline_name)
+        formatted = self._format_message(
+            LogLevel.DEBUG, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def info(self, message, component="manager", pipeline_name=None):
         if not self._is_enabled(LogLevel.INFO):
             return
-        formatted = self._format_message(LogLevel.INFO, component, message, pipeline_name)
+        formatted = self._format_message(
+            LogLevel.INFO, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def warning(self, message, component="manager", pipeline_name=None):
         if not self._is_enabled(LogLevel.WARNING):
             return
-        formatted = self._format_message(LogLevel.WARNING, component, message, pipeline_name)
+        formatted = self._format_message(
+            LogLevel.WARNING, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def error(self, message, component="manager", pipeline_name=None):
         if not self._is_enabled(LogLevel.ERROR):
             return
-        formatted = self._format_message(LogLevel.ERROR, component, message, pipeline_name)
+        formatted = self._format_message(
+            LogLevel.ERROR, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def critical(self, message, component="manager", pipeline_name=None):
         if not self._is_enabled(LogLevel.CRITICAL):
             return
-        formatted = self._format_message(LogLevel.CRITICAL, component, message, pipeline_name)
+        formatted = self._format_message(
+            LogLevel.CRITICAL, component, message, pipeline_name
+        )
         self._write_log(formatted)
 
     def pipeline_started(self, pipeline_name):

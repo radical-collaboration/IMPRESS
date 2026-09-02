@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from collections.abc import Awaitable
 from typing import Any, Callable, Optional, Union
 
@@ -79,7 +81,9 @@ class ImpressManager:
             of ImpressBasePipeline
         """
         if self.flow is None:
-            raise RuntimeError("ImpressManager.start() must be called before submit_new_pipelines()")
+            raise RuntimeError(
+                "ImpressManager.start() must be called before submit_new_pipelines()"
+            )
         for setup_input in pipeline_setups:
             # Normalize to PipelineSetup object
             setup = self._normalize_pipeline_setup(setup_input)
@@ -139,13 +143,19 @@ class ImpressManager:
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 
+        # Write asyncflow session dirs to /tmp (node-local, no quota) instead of
+        # cwd on scratch, which exhausts inodes over many runs.
+        _session_base = os.environ.get("IMPRESS_SESSION_DIR", tempfile.gettempdir())
         self.flow = await WorkflowEngine.create(
-            backend=self.execution_backend
+            backend=self.execution_backend,
+            work_dir=_session_base,
         )
 
         try:
             if self._telemetry_config:
-                self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
+                self.telemetry = await self.flow.start_telemetry(
+                    **self._telemetry_config
+                )
                 for fn in self._telemetry_subscribers:
                     self.telemetry.subscribe(fn)
 
@@ -158,7 +168,7 @@ class ImpressManager:
                 completed_pipelines: list[tuple] = []
 
                 for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
-                    # Check if pipeline needs adaptive step and isn't already running one
+                    # Check if pipeline needs adaptive step and isn't running one yet
                     if (
                         getattr(pipeline, "invoke_adaptive_step", False)
                         and pipeline not in self.adaptive_tasks
@@ -170,10 +180,14 @@ class ImpressManager:
                         any_activity = True
 
                     # Check if pipeline has new config ready
-                    config: Optional[dict[str, Any]] = pipeline.get_child_pipeline_request()
+                    config: Optional[dict[str, Any]] = (
+                        pipeline.get_child_pipeline_request()
+                    )
 
                     if config:
-                        self.logger.child_pipeline_submitted(config["name"], pipeline.name)
+                        self.logger.child_pipeline_submitted(
+                            config["name"], pipeline.name
+                        )
                         # Convert dict to PipelineSetup for consistency
                         child_setup = PipelineSetup.from_dict(config)
                         self.new_pipeline_buffer.append(child_setup)
@@ -189,7 +203,7 @@ class ImpressManager:
                     # Check if pipeline is done - but only mark as completed
                     # if adaptive task is also done
                     if pipeline_future.done():
-                        # If there's an adaptive task running, don't mark as completed yet
+                        # Adaptive task still running — wait before marking completed
                         if pipeline in self.adaptive_tasks:
                             adaptive_task = self.adaptive_tasks[pipeline]
                             if not adaptive_task.done():

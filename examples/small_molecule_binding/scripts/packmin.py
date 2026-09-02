@@ -12,16 +12,7 @@ from pyrosetta.rosetta.core.select.movemap import *
 
 #Protocol Includes
 from pyrosetta.rosetta.protocols import minimization_packing as pack_min
-'''
-When downloading a new PDB file, do a pack_min minimization with coordinate constraints and a ligand.
 
-Requires a PDB file input.
-
-Options:
-Name (-n, string): change the output PDB name from [original_name]_relaxed.pdb
-Score function (-sf, string): change the score function from the default of ref2015_cst
-Catalytic residues (-cat, int, multiple accepted): list residues that should not be moved 
-'''
 
 def parse_args():
 	parser = argparse.ArgumentParser()
