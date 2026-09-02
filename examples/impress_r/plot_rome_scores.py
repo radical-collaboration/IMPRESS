@@ -21,6 +21,7 @@ import os
 import re
 import statistics
 from collections import defaultdict
+from itertools import groupby
 
 import matplotlib
 matplotlib.use("Agg")
@@ -56,6 +57,11 @@ for fname in os.listdir(args.csv_dir):
         vals = [float(r["avg_plddt"]) for r in csv.DictReader(f) if r.get("avg_plddt")]
     if vals:
         records.append((root, pipeline, depth, pass_num, statistics.mean(vals), vals))
+
+# depth_pass: (depth, pass_num) -> [values]  — used for depth-stratified plot
+depth_pass = defaultdict(list)
+for root, pipeline, depth, pass_num, mean, vals in records:
+    depth_pass[(depth, pass_num)].extend(vals)
 
 # ── Load ROME training events from log ───────────────────────────────────────
 # Extract unique (round, timestamp) from log lines like:
@@ -159,53 +165,54 @@ fig2.savefig(out2, dpi=150)
 print(f"Saved: {out2}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Plot 3 — Global mean per pass + regression + ROME round markers
+# Plot 3 — Mean per pass stratified by sub-pipeline depth + global trend
 # ═══════════════════════════════════════════════════════════════════════════════
+DEPTH_COLORS = {0: "#4C72B0", 1: "#DD8452", 2: "#55A868", 3: "#C44E52"}
+DEPTH_LABELS = {0: "depth 0 (root)", 1: "depth 1 (sub1)",
+                2: "depth 2 (sub1_sub2)", 3: "depth 3 (sub1_sub2_sub3)"}
+
+fig3, ax3 = plt.subplots(figsize=(12, 6))
+
+all_depths = sorted({d for d, p in depth_pass})
+for depth in all_depths:
+    xs = sorted(p for d, p in depth_pass if d == depth)
+    ys = [statistics.mean(depth_pass[(depth, p)]) for p in xs]
+    ns = [len(depth_pass[(depth, p)]) for p in xs]
+    color = DEPTH_COLORS.get(depth, "#888888")
+    ax3.plot(xs, ys, marker="o", markersize=5, linewidth=1.8,
+             color=color, label=DEPTH_LABELS.get(depth, f"depth {depth}"), zorder=3)
+    for x, y, n in zip(xs, ys, ns):
+        ax3.text(x, y + 0.5, f"{y:.1f}", ha="center", fontsize=6.5,
+                 color=color, alpha=0.85)
+
+# Global mean + regression
 pass_means = {p: statistics.mean(v) for p, v in pass_vals.items()}
 xs_all = sorted(pass_means)
 ys_all = [pass_means[x] for x in xs_all]
-
-# Linear regression over the mean trajectory
 coef = np.polyfit(xs_all, ys_all, 1)
 trend_y = np.polyval(coef, xs_all)
 
-fig3, ax3 = plt.subplots(figsize=(11, 6))
+ax3.plot(xs_all, ys_all, linewidth=2.2, linestyle="--",
+         color=ACCENT, alpha=0.6,
+         label=f"global mean  (slope {coef[0]:+.3f}/pass)", zorder=2)
 
-ax3.plot(xs_all, ys_all, marker="o", markersize=6, linewidth=2,
-         color=ACCENT, label="global mean avg_pLDDT", zorder=3)
-ax3.plot(xs_all, trend_y, linewidth=1.2, linestyle="--",
-         color="#888888", label=f"trend  (slope {coef[0]:+.3f}/pass)", zorder=2)
-ax3.fill_between(xs_all,
-                 [statistics.mean(pass_vals[p]) - statistics.stdev(pass_vals[p]) if len(pass_vals[p]) > 1 else pass_means[p] for p in xs_all],
-                 [statistics.mean(pass_vals[p]) + statistics.stdev(pass_vals[p]) if len(pass_vals[p]) > 1 else pass_means[p] for p in xs_all],
-                 alpha=0.12, color=ACCENT, label="±1 stdev")
-
-# Add per-pass mean labels
-for x, y in zip(xs_all, ys_all):
-    ax3.text(x, y + 0.6, f"{y:.1f}", ha="center", fontsize=8, color=ACCENT)
+# ROME round markers
+if rome_rounds:
+    max_t = max(rome_rounds.values())
+    for rnd in sorted(rome_rounds)[:10]:
+        t_frac = rome_rounds[rnd] / max_t if max_t > 0 else 0
+        x_pos = xs_all[0] + t_frac * (xs_all[-1] - xs_all[0])
+        ax3.axvline(x_pos, color="#99AACC", linewidth=0.55, linestyle=":", alpha=0.65)
+        ax3.text(x_pos, 79.5, f"v{rnd}", fontsize=6, color="#667799",
+                 ha="center", rotation=90, va="bottom")
 
 ax3.set_xlabel("Pass", fontsize=11)
 ax3.set_ylabel("Mean avg_pLDDT", fontsize=11)
-ax3.set_title("Global mean avg_pLDDT per pass with ROME training events", fontsize=13, pad=10)
-ax3.set_ylim(60, 100)
-ax3.axhline(75, color="#BBBBBB", linewidth=0.8, linestyle=":")
-
-# ROME round markers on a secondary x-axis band (minutes since start)
-if rome_rounds:
-    ax3b = ax3.twiny()
-    ax3b.set_xlim(ax3.get_xlim())
-    # Map ROME round to pass by aligning their timing with pass indices
-    # Annotate as vertical bands on the main axis (approximated)
-    for rnd in sorted(rome_rounds)[:8]:  # show first 8 to avoid clutter
-        # Place marker between pass 1 and max pass proportionally
-        t_frac = rome_rounds[rnd] / max(rome_rounds.values()) if max(rome_rounds.values()) > 0 else 0
-        x_pos = xs_all[0] + t_frac * (xs_all[-1] - xs_all[0])
-        ax3.axvline(x_pos, color="#99AACC", linewidth=0.6, linestyle=":", alpha=0.7)
-        ax3.text(x_pos, 61.5, f"v{rnd}", fontsize=6.5, color="#667799",
-                 ha="center", rotation=90, va="bottom")
-    ax3b.set_visible(False)
-
-ax3.legend(fontsize=9, loc="lower left")
+ax3.set_title("avg_pLDDT per pass by sub-pipeline depth  (ROME training markers in blue)", fontsize=13, pad=10)
+ax3.set_ylim(78, 100)
+ax3.axhline(75, color="#CCCCCC", linewidth=0.7, linestyle=":")
+ax3.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+ax3.legend(fontsize=9, loc="lower right")
 
 fig3.tight_layout()
 out3 = os.path.join(args.out_dir, "rome_global_trend.png")
@@ -213,17 +220,23 @@ fig3.savefig(out3, dpi=150)
 print(f"Saved: {out3}")
 
 # ── Text summary ──────────────────────────────────────────────────────────────
-print("\n=== Per-pass global mean ===")
+print("\n=== Per-pass global mean (all depths) ===")
+print(f"{'Pass':>4}  {'Mean':>7}  {'Median':>7}  {'n (designs)':>11}")
 for p in xs_all:
     vals = pass_vals[p]
-    print(f"  pass {p:2d}  mean={statistics.mean(vals):.2f}  "
-          f"median={statistics.median(vals):.2f}  n={len(vals)}")
+    print(f"  {p:2d}    {statistics.mean(vals):7.2f}  {statistics.median(vals):7.2f}  {len(vals):>11}")
+
+print("\n=== Per-depth per-pass mean ===")
+print(f"{'Depth':>5}  {'Pass':>4}  {'Mean':>7}  {'Median':>7}  {'n':>4}")
+for (depth, pass_num) in sorted(depth_pass):
+    vals = depth_pass[(depth, pass_num)]
+    print(f"  {depth:3d}    {pass_num:2d}    {statistics.mean(vals):7.2f}  {statistics.median(vals):7.2f}  {len(vals):>4}")
 
 slope = coef[0]
-print(f"\nLinear trend slope: {slope:+.4f} pLDDT / pass")
+print(f"\nGlobal linear trend slope: {slope:+.4f} pLDDT / pass")
 if slope > 0.2:
     print("  → Positive trend: ROME appears to be improving sequence quality.")
 elif slope < -0.2:
     print("  → Negative trend: scores declining — may reflect harder proteins in later passes.")
 else:
-    print("  → Flat trend: no clear improvement signal yet (expected early in a run).")
+    print("  → Flat trend: no clear improvement signal yet.")
