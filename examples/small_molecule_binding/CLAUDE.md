@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Date | Commit | Notes |
 |---|---|---|
 | 2026-04-06 | 3390b61 | change log added |
+| 2026-09-01 | —      | RunConfig dataclass; PROD/TEST named configs replace flat if/else constants |
 
 ## Context
 
@@ -32,7 +33,7 @@ Before running on HPC, edit the path constants at the top of `run_small_molecule
 
 - **`small_molecule_binding.py`** — defines `SmallMoleculeBindingPipeline(ImpressBasePipeline)`, all step constants, ensemble utility functions (`_ca_rmsd`, `_seq_identity`, `_ensemble_selective_avg`), and the inner `_run_refine_cycle()` loop. All pipeline tasks (HPC and local analysis) are registered via `@self.auto_register_task()` inside `_register_real_tasks()`. The `run()` method drives a state-machine loop; `_run_refine_cycle()` handles the MPNN+PackMin inner loop with per-cycle sequence retry support.
 
-- **`run_small_molecule_binding.py`** — entry point. Sets threshold constants, defines the `adaptive_decision()` callback, creates an `ImpressManager`, and launches via `manager.start(pipeline_setups=[...])`.
+- **`run_small_molecule_binding.py`** — entry point. Defines the `RunConfig` dataclass and two named instances (`PROD`, `TEST`); selects between them via `IMPRESS_TEST_MODE`; defines the `adaptive_decision()` callback; creates an `ImpressManager` and launches via `manager.start(pipeline_setups=[...])`.
 
 ### Step constants (state-machine constants in `small_molecule_binding.py`)
 
@@ -124,7 +125,7 @@ Ensemble similarity utilities (all in `small_molecule_binding.py`):
 | `fold_min_plddt` | 70.0 | minimum mean pLDDT |
 | `max_tasks` | 300 | maximum ensemble entries before stopping |
 
-Threshold constants in `run_small_molecule_binding.py` override these defaults at `PipelineSetup` construction.
+The `PROD` config in `run_small_molecule_binding.py` overrides these class defaults at `PipelineSetup` construction (e.g. `backbone_max_ca_deviation=1.0`, `fastrelax_max_interact=-8.0`, `fold_min_plddt=75.0`). The `TEST` config sets inert thresholds (everything passes) and `max_tasks=10` for integration testing.
 
 ### Output directory structure
 
@@ -174,7 +175,7 @@ Steps communicate via `self.state`:
 
 ### Execution backends
 
-`run_small_molecule_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.
+`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs. `LocalExecutionBackend(ProcessPoolExecutor())` can be swapped in for local testing.
 
 ### Pipeline inputs
 

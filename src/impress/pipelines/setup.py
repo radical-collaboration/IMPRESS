@@ -1,5 +1,5 @@
-from collections.abc import Awaitable
-from typing import Annotated, Any, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 

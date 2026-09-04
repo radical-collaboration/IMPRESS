@@ -8,9 +8,9 @@ pdb_path="$1"
 lig_path="$2"
 output_dir="$3"
 
-SCRIPT_DIR="$(dirname $0)"
+SCRIPT_DIR="$(dirname "$0")"
 
-source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
+source "${ENV_DIR:-/u/${USER}/ve/impress}/bin/activate"
 
 python "$SCRIPT_DIR/fastrelax.py" \
     "$pdb_path" \

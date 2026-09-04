@@ -1,6 +1,8 @@
 import asyncio
-from collections.abc import Awaitable
-from typing import Any, Callable, Optional, Union
+import os
+import tempfile
+from collections.abc import Awaitable, Callable
+from typing import Any, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
 
@@ -43,6 +45,7 @@ class ImpressManager:
         self._telemetry_config: dict[str, Any] = telemetry_config or {}
         self._telemetry_subscribers: list[Callable] = telemetry_subscribers or []
         self.telemetry: Any = None
+        self.flow: Optional[WorkflowEngine] = None
 
     def _normalize_pipeline_setup(
         self, setup: Union[dict[str, Any], PipelineSetup]
@@ -77,6 +80,10 @@ class ImpressManager:
             ValueError: If pipeline type is not a subclass
             of ImpressBasePipeline
         """
+        if self.flow is None:
+            raise RuntimeError(
+                "ImpressManager.start() must be called before submit_new_pipelines()"
+            )
         for setup_input in pipeline_setups:
             # Normalize to PipelineSetup object
             setup = self._normalize_pipeline_setup(setup_input)
@@ -136,113 +143,139 @@ class ImpressManager:
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 
-        self.flow: WorkflowEngine = await WorkflowEngine.create(
-            backend=self.execution_backend
+        # Write asyncflow session dirs to /tmp (node-local, no quota) instead of
+        # cwd on scratch, which exhausts inodes over many runs.
+        _session_base = os.environ.get("IMPRESS_SESSION_DIR", tempfile.gettempdir())
+        self.flow = await WorkflowEngine.create(
+            backend=self.execution_backend,
+            work_dir=_session_base,
         )
 
-        if self._telemetry_config:
-            self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
-            for fn in self._telemetry_subscribers:
-                self.telemetry.subscribe(fn)
+        try:
+            if self._telemetry_config:
+                self.telemetry = await self.flow.start_telemetry(
+                    **self._telemetry_config
+                )
+                for fn in self._telemetry_subscribers:
+                    self.telemetry.subscribe(fn)
 
-        self.logger.manager_starting(len(pipeline_setups))
+            self.logger.manager_starting(len(pipeline_setups))
 
-        self.submit_new_pipelines(pipeline_setups)
+            self.submit_new_pipelines(pipeline_setups)
 
-        while True:
-            any_activity: bool = False
-            completed_pipelines: list[ImpressBasePipeline] = []
+            while True:
+                any_activity: bool = False
+                completed_pipelines: list[tuple] = []
 
-            for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
-                # Check if pipeline needs adaptive step and isn't already running one
-                if (
-                    getattr(pipeline, "invoke_adaptive_step", False)
-                    and pipeline not in self.adaptive_tasks
-                ):
-                    adaptive_task: asyncio.Task = asyncio.create_task(
-                        self._run_adaptive_fn(pipeline)
+                for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
+                    # Check if pipeline needs adaptive step and isn't running one yet
+                    if (
+                        getattr(pipeline, "invoke_adaptive_step", False)
+                        and pipeline not in self.adaptive_tasks
+                    ):
+                        adaptive_task: asyncio.Task = asyncio.create_task(
+                            self._run_adaptive_fn(pipeline)
+                        )
+                        self.adaptive_tasks[pipeline] = adaptive_task
+                        any_activity = True
+
+                    # Check if pipeline has new config ready
+                    config: Optional[dict[str, Any]] = (
+                        pipeline.get_child_pipeline_request()
                     )
-                    self.adaptive_tasks[pipeline] = adaptive_task
-                    any_activity = True
 
-                # Check if pipeline has new config ready
-                config: Optional[dict[str, Any]] = pipeline.get_child_pipeline_request()
+                    if config:
+                        self.logger.child_pipeline_submitted(
+                            config["name"], pipeline.name
+                        )
+                        # Convert dict to PipelineSetup for consistency
+                        child_setup = PipelineSetup.from_dict(config)
+                        self.new_pipeline_buffer.append(child_setup)
+                        any_activity = True
 
-                if config:
-                    self.logger.child_pipeline_submitted(config["name"], pipeline.name)
-                    # Convert dict to PipelineSetup for consistency
-                    child_setup = PipelineSetup.from_dict(config)
-                    self.new_pipeline_buffer.append(child_setup)
-                    any_activity = True
+                    # Check if parent should be killed
+                    if getattr(pipeline, "kill_parent", False):
+                        self.logger.pipeline_killed(pipeline.name)
+                        pipeline_future.cancel()
+                        completed_pipelines.append((pipeline, pipeline_future))
+                        continue
 
-                # Check if parent should be killed
-                if getattr(pipeline, "kill_parent", False):
-                    self.logger.pipeline_killed(pipeline.name)
-                    pipeline_future.cancel()
-                    completed_pipelines.append(pipeline)
-                    continue
+                    # Check if pipeline is done - but only mark as completed
+                    # if adaptive task is also done
+                    if pipeline_future.done():
+                        # Adaptive task still running — wait before marking completed
+                        if pipeline in self.adaptive_tasks:
+                            adaptive_task = self.adaptive_tasks[pipeline]
+                            if not adaptive_task.done():
+                                continue
 
-                # Check if pipeline is done - but only mark as completed
-                # if adaptive task is also done
-                if pipeline_future.done():
-                    # If there's an adaptive task running, don't mark as completed yet
+                        completed_pipelines.append((pipeline, pipeline_future))
+
+                # Clean up completed pipelines - but only if their
+                # adaptive tasks are also done
+                actually_completed: list[ImpressBasePipeline] = []
+                for pipeline, future in completed_pipelines:
+                    # Double-check: only clean up if adaptive task is
+                    # done or doesn't exist
                     if pipeline in self.adaptive_tasks:
                         adaptive_task = self.adaptive_tasks[pipeline]
                         if not adaptive_task.done():
                             continue
+                        self.adaptive_tasks.pop(pipeline)
 
-                    completed_pipelines.append(pipeline)
+                    self.pipeline_tasks.pop(pipeline, None)
+                    exc = None
+                    if future.done() and not future.cancelled():
+                        try:
+                            exc = future.exception()
+                        except Exception:
+                            pass
+                    if exc is not None:
+                        self.logger.pipeline_failed(pipeline.name, exc)
+                    else:
+                        self.logger.pipeline_completed(pipeline.name)
+                    actually_completed.append(pipeline)
 
-            # Clean up completed pipelines - but only if their
-            # adaptive tasks are also done
-            actually_completed: list[ImpressBasePipeline] = []
-            for pipeline in completed_pipelines:
-                # Double-check: only clean up if adaptive task is
-                # done or doesn't exist
-                if pipeline in self.adaptive_tasks:
-                    adaptive_task = self.adaptive_tasks[pipeline]
-                    if not adaptive_task.done():
-                        continue
-                    self.adaptive_tasks.pop(pipeline)
+                completed_pipelines = actually_completed
 
-                self.pipeline_tasks.pop(pipeline, None)
-                self.logger.pipeline_completed(pipeline.name)
-                actually_completed.append(pipeline)
+                # Clean up completed adaptive tasks
+                completed_adaptive: list[ImpressBasePipeline] = []
+                for pipeline, adaptive_task in list(self.adaptive_tasks.items()):
+                    if adaptive_task.done():
+                        completed_adaptive.append(pipeline)
 
-            completed_pipelines = actually_completed
+                for pipeline in completed_adaptive:
+                    self.adaptive_tasks.pop(pipeline, None)
 
-            # Clean up completed adaptive tasks
-            completed_adaptive: list[ImpressBasePipeline] = []
-            for pipeline, adaptive_task in list(self.adaptive_tasks.items()):
-                if adaptive_task.done():
-                    completed_adaptive.append(pipeline)
+                # Submit new pipelines; capture count before clearing so
+                # activity_summary reports the real number submitted.
+                if self.new_pipeline_buffer:
+                    buffered_count = len(self.new_pipeline_buffer)
+                    self.submit_new_pipelines(self.new_pipeline_buffer)
+                    self.new_pipeline_buffer.clear()
+                    any_activity = True
+                else:
+                    buffered_count = 0
 
-            for pipeline in completed_adaptive:
-                self.adaptive_tasks.pop(pipeline, None)
+                # Log activity summary periodically
+                if any_activity:
+                    self.logger.activity_summary(
+                        len(self.pipeline_tasks),
+                        len(self.adaptive_tasks),
+                        buffered_count,
+                    )
 
-            # Submit new pipelines
-            if self.new_pipeline_buffer:
-                self.submit_new_pipelines(self.new_pipeline_buffer)
-                self.new_pipeline_buffer.clear()
-                any_activity = True
+                # Exit condition
+                if (
+                    not self.pipeline_tasks
+                    and not self.new_pipeline_buffer
+                    and not self.adaptive_tasks
+                ):
+                    self.logger.manager_exiting()
+                    self.logger.separator("IMPRESS MANAGER FINISHED")
+                    break
 
-            # Log activity summary periodically
-            if any_activity:
-                self.logger.activity_summary(
-                    len(self.pipeline_tasks),
-                    len(self.adaptive_tasks),
-                    len(self.new_pipeline_buffer),
-                )
-
-            # Exit condition
-            if (
-                not self.pipeline_tasks
-                and not self.new_pipeline_buffer
-                and not self.adaptive_tasks
-            ):
-                self.logger.manager_exiting()
-                self.logger.separator("IMPRESS MANAGER FINISHED")
-                break
-
-            if not any_activity:
-                await asyncio.sleep(0.5)
+                if not any_activity:
+                    await asyncio.sleep(0.5)
+        finally:
+            await self.flow.shutdown()

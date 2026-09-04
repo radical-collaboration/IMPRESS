@@ -1,0 +1,14 @@
+# SLURM log output (all workflows)
+*/logs/
+
+# Per-pipeline task directories written to cwd
+*/p*/
+
+# Dragon telemetry session dirs
+*/telemetry/
+
+# Run metadata written to cwd
+*/runinfo
+
+# Legacy output dirs
+*/myoutputs/
