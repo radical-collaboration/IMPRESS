@@ -7,18 +7,26 @@
 #   export SCRATCH=/scratch/<allocation>
 #
 # Key env vars (all have defaults):
-#   MPNN_PATH        — dauparas/ProteinMPNN checkout (inference AND fine-tune target)
-#   ROME_MPNN_REPO   — same as MPNN_PATH by default
-#   ROME_TRAINER     — mpnn (real fine-tune) | dummy (smoke test, default)
-#   ROME_MIN_SAMPLES — corpus size before the first training round (default 2)
-#   ROME_MAX_PASSES  — max design passes per pipeline (default 10)
-#   ROME_FALLBACK    — seconds to wait for a training result from Dragon (default 60)
-#   IMPRESS_BASE_DIR — parent of prod_in/ (input PDB files)
-#   IMPRESS_OUTPUT_DIR — where af_pipeline_outputs_multi/ is written
+#   MPNN_PATH               — dauparas/ProteinMPNN checkout (inference AND fine-tune target)
+#   ROME_MPNN_REPO          — same as MPNN_PATH by default
+#   ROME_TRAINER            — mpnn (real fine-tune) | dummy (smoke test, default)
+#   ROME_MIN_SAMPLES        — corpus size before the first training round (default 2)
+#   ROME_MAX_PASSES         — max design passes per pipeline (default 10)
+#   ROME_FALLBACK           — seconds Dragon may take to deliver a training result (default 60)
+#   IMPRESS_N_PIPELINES     — number of top-level pipelines to run (default 16)
+#   IMPRESS_MAX_SUB_PIPELINES — max child pipeline depth per parent (default 3; 0 = none)
+#   IMPRESS_BASE_DIR        — parent of prod_in/ (input PDB files)
+#   IMPRESS_OUTPUT_DIR      — where af_pipeline_outputs_multi/ is written
 #
 # Debug flags:
 #   IMPRESS_TEST_MODE=1  — 2 pipelines, max_passes=1, no child pipelines
 #   ROME_TRAINER=dummy   — skip real fine-tuning (useful with IMPRESS_TEST_MODE)
+#
+# Quick validation run (~1 h, sees full ROME loop to completion):
+#   IMPRESS_N_PIPELINES=4 IMPRESS_MAX_SUB_PIPELINES=1 ROME_MAX_PASSES=8 ROME_FALLBACK=120 sbatch delta_gpu_run.sh
+#
+# Full production run (~3 h):
+#   sbatch delta_gpu_run.sh
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -87,7 +95,16 @@ export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${SCRATCH}/${USER}/IMPRESS_outp
 export ROME_TRAINER="${ROME_TRAINER:-mpnn}"
 export ROME_MIN_SAMPLES="${ROME_MIN_SAMPLES:-2}"
 export ROME_MAX_PASSES="${ROME_MAX_PASSES:-10}"
-export ROME_FALLBACK="${ROME_FALLBACK:-60}"
+# 120 s gives training rounds time to finish and write train_complete before Dragon's
+# result-delivery future raises a spurious TypeError (dragonhpc 0.14.1 DDict race).
+export ROME_FALLBACK="${ROME_FALLBACK:-120}"
+
+# ── Scale settings ────────────────────────────────────────────────────────────
+# Quick run (~1 h): IMPRESS_N_PIPELINES=4 IMPRESS_MAX_SUB_PIPELINES=1 ROME_MAX_PASSES=8
+# Full run  (~3 h): leave unset (16 pipelines, 3 sub-levels, 10 passes)
+export IMPRESS_N_PIPELINES="${IMPRESS_N_PIPELINES:-16}"
+# Blank = use code default (3); set to 0 to disable child-pipeline spawning entirely.
+export IMPRESS_MAX_SUB_PIPELINES="${IMPRESS_MAX_SUB_PIPELINES:-}"
 
 # ── Test / debug flags ────────────────────────────────────────────────────────
 export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"

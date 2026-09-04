@@ -40,9 +40,12 @@ rhapsody.enable_logging(level=logging.INFO)
 # Runs 2 pipelines with max_passes=1 and no child pipelines, so a single
 # MPNN → Boltz → pLDDT → ROME cycle completes for integration testing.
 TEST_MODE = os.getenv("IMPRESS_TEST_MODE", "0") == "1"
-N_PIPELINES = 2  if TEST_MODE else 16
-MAX_PASSES  = 1  if TEST_MODE else int(os.environ.get("ROME_MAX_PASSES", 10))
-MAX_SUB_PIPELINES_OVERRIDE = 0 if TEST_MODE else None  # None = use inline default (3)
+N_PIPELINES = 2 if TEST_MODE else int(os.environ.get("IMPRESS_N_PIPELINES", 16))
+MAX_PASSES  = 1 if TEST_MODE else int(os.environ.get("ROME_MAX_PASSES", 10))
+# IMPRESS_MAX_SUB_PIPELINES: max depth of child pipeline spawning (0 = none, 3 = full).
+# Unset or blank → inherit the inline default of 3.
+_sub_env = os.environ.get("IMPRESS_MAX_SUB_PIPELINES", "").strip()
+MAX_SUB_PIPELINES_OVERRIDE = 0 if TEST_MODE else (int(_sub_env) if _sub_env else None)
 
 
 # ── ProteinMPNN repo ───────────────────────────────────────────────────────────
