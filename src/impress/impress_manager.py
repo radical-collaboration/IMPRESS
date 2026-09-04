@@ -1,8 +1,8 @@
 import asyncio
 import os
 import tempfile
-from collections.abc import Awaitable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Awaitable, Callable
+from typing import Any, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
 
