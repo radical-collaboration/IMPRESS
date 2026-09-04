@@ -11,10 +11,16 @@
 # Defaults:
 #   ENV_DIR     = /u/$USER/ve/impress
 #   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
-#   python      = auto-detected (python/3.11, cray-python/3.11.7, anaconda3)
+#   python      = auto-detected via `module load python` (Delta default: 3.13+)
 # =============================================================================
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
+fi
+
+# ── Initialize lmod (needed when run as non-interactive bash script) ──────────
+if ! declare -f module &>/dev/null; then
+    _lmod_init=/usr/share/lmod/lmod/init/bash
+    [ -f "${_lmod_init}" ] && source "${_lmod_init}"
 fi
 
 # ── Require SCRATCH ───────────────────────────────────────────────────────────
@@ -51,34 +57,22 @@ echo "================================================================="
 echo ""
 echo "── Step 1: Creating venv ──"
 
-_find_python() {
-    for candidate in python3.12 python3.11 python3 python; do
-        local p
-        p=$(command -v "${candidate}" 2>/dev/null) || continue
-        local ver
-        ver=$("${p}" -c "import sys; v=sys.version_info; print(v.major*10+v.minor)" 2>/dev/null) || continue
-        [ "${ver}" -ge 311 ] && echo "${p}" && return 0
-    done
-    return 1
-}
-
 if [ -n "${BASE_PY_OVERRIDE}" ]; then
     BASE_PY="${BASE_PY_OVERRIDE}"
     echo "Using Python override: ${BASE_PY}"
 else
-    BASE_PY=$(_find_python || true)
+    # On Delta, `module load python` gives the default Python 3.13+.
+    module load python 2>/dev/null || true
+    BASE_PY=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
     if [ -z "${BASE_PY}" ]; then
-        echo "python3.11+ not in PATH — trying modules..."
-        for mod in python/3.12 python/3.11 cray-python/3.11.7 anaconda3; do
-            module load "${mod}" 2>/dev/null || true
-            BASE_PY=$(_find_python || true)
-            [ -n "${BASE_PY}" ] && echo "  loaded module: ${mod}" && break
-        done
+        echo "ERROR: no Python found after 'module load python'."
+        echo "       Pass an explicit interpreter: --python /path/to/python3"
+        exit 1
     fi
-    if [ -z "${BASE_PY}" ]; then
-        echo "ERROR: no Python 3.11+ interpreter found."
-        echo "       Pass an explicit interpreter:  --python /path/to/python3.11"
-        echo "       Or load a module manually before running this script."
+    ver=$("${BASE_PY}" -c "import sys; v=sys.version_info; print(v.major*100+v.minor)")
+    if [ "${ver}" -lt 311 ]; then
+        echo "ERROR: ${BASE_PY} is Python ${ver} — need 3.11+."
+        echo "       Pass an explicit interpreter: --python /path/to/python3.11"
         exit 1
     fi
 fi
@@ -107,6 +101,10 @@ echo "── Step 3: radical-asyncflow (PyPI) ──"
 echo ""
 echo "── Step 4: rhapsody-py[dragon] (PyPI) ──"
 "${PIP}" install -q "rhapsody-py[dragon,telemetry]"
+# Pin dragonhpc to 0.14.1 — 0.14.2 added waitForKeys to DDRegisterClientResponse
+# but the Delta system Dragon runtime has not been updated to match; 0.14.2 fails
+# with AttributeError on every DDict operation on this cluster.
+"${PIP}" install -q "dragonhpc==0.14.1"
 
 # ── 5. IMPRESS (local editable) ───────────────────────────────────────────────
 echo ""
@@ -120,23 +118,27 @@ echo "── Step 6: PyTorch (cu121) ──"
 
 # ── 7. Additional dependencies ───────────────────────────────────────────────
 echo ""
-echo "── Step 7: pandas + biopandas ──"
-"${PIP}" install -q pandas biopandas
+echo "── Step 7: pandas + biopandas + matplotlib ──"
+"${PIP}" install -q pandas biopandas matplotlib
 
-# ── 8. PyRosetta (via pyrosetta-installer) ───────────────────────────────────
+# ── 8. PyRosetta ─────────────────────────────────────────────────────────────
 echo ""
 echo "── Step 8: PyRosetta ──"
+# pyrosetta_installer handles credential lookup internally.
+# Activate the venv in the environment so its subprocess pip installs there.
+export VIRTUAL_ENV="${ENV_DIR}"
+export PATH="${ENV_DIR}/bin:${PATH}"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
-# ── 9. Boltz (structure prediction — separate Python 3.12 conda env) ─────────
+# ── 9. Boltz (structure prediction — separate conda env) ─────────────────────
 echo ""
 echo "── Step 9: Boltz (separate conda env) ──"
-# boltz 2.x requires numpy<2.0, scipy==1.13.1, etc. — none have Python 3.13
-# wheels, so boltz cannot be installed in the main Python 3.13 IMPRESS venv.
-# Create a dedicated Python 3.12 conda env and install boltz there.
+# boltz 2.x is kept in a separate conda env so its dependency pins (scipy, etc.)
+# don't constrain the main IMPRESS venv. Boltz 2.0+ also installs fine via pip
+# in Python 3.13, but we keep the separation to avoid pin conflicts.
 # s4_boltz.sh activates BOLTZ_VENV (set in delta_gpu_run.sh) instead of VIRTUAL_ENV.
-MINIFORGE="${MINIFORGE:-/scratch/bblj/${USER}/miniforge3}"
+MINIFORGE="${MINIFORGE:-${SCRATCH}/${USER}/miniforge3}"
 BOLTZ_ENV="${BOLTZ_ENV:-${HOME}/ve/boltz}"
 # Cache lives in home dir — scratch inode quota can't hold the 45K CCD files.
 BOLTZ_CACHE="${BOLTZ_CACHE:-${HOME}/boltz}"
@@ -170,7 +172,7 @@ BOLTZ_MSA_CACHE="${BOLTZ_CACHE}/msa_cache"
 mkdir -p "${BOLTZ_MSA_CACHE}"
 echo "  Pre-computing MSAs into ${BOLTZ_MSA_CACHE}"
 # IMPRESS_BASE_DIR = parent of prod_in/; IMPRESS_OUTPUT_DIR = parent of af_pipeline_outputs_multi/
-_scratch="${SCRATCH:-/scratch/bblj/${USER}}"
+_scratch="${SCRATCH}"
 _base_dir="${IMPRESS_BASE_DIR:-${_scratch}/IMPRESS_inputs}"
 _out_dir="${IMPRESS_OUTPUT_DIR:-${_scratch}/IMPRESS_outputs}"
 _msa_inputs_dir="${_base_dir}/prod_in"
