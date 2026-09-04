@@ -227,7 +227,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             output_dir = f"{taskdir}/out"
 
             input_pdb    = self.state.get('rfd3_input_pdb')
-            scaffold_arg = f"scaffoldguided.target_pdb={input_pdb}" if input_pdb else ""
+            scaffold_arg = f"+scaffoldguided.target_pdb={input_pdb}" if input_pdb else ""
 
             cmd = (
                 f"bash {self.scripts_path}/rfd3.sh"

@@ -10,7 +10,7 @@ Usage:
     python plot_rome_scores.py [--csv-dir DIR] [--log FILE] [--out-dir DIR]
 
 Defaults:
-    --csv-dir  /scratch/bblj/$USER/IMPRESS_outputs
+    --csv-dir  /scratch/***/$USER/IMPRESS_outputs
     --log      logs/impress_21736435.out   (relative to script dir)
     --out-dir  .   (saves next to this script)
 """
@@ -31,9 +31,12 @@ import numpy as np
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-_user   = os.environ.get("USER", "mgoliyad1")
-_scratch = os.environ.get("SCRATCH", f"/scratch/bblj/{_user}")
-parser.add_argument("--csv-dir",  default=f"{_scratch}/IMPRESS_outputs")
+_scratch = os.environ.get("SCRATCH")
+parser.add_argument(
+    "--csv-dir",
+    default=f"{_scratch}/IMPRESS_outputs" if _scratch else None,
+    required=_scratch is None,
+)
 parser.add_argument("--log",      default=os.path.join(os.path.dirname(__file__), "logs", "impress_21736435.out"))
 parser.add_argument("--out-dir",  default=os.path.dirname(__file__))
 args = parser.parse_args()

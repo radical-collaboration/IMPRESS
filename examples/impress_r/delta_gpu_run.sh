@@ -60,7 +60,7 @@ export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress}"
+IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress_A}"
 unset SLURM_EXPORT_ENV
 source "${IMPRESS_VENV}/bin/activate"
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"

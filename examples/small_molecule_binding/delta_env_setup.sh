@@ -9,9 +9,9 @@
 #   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
 #
 # Defaults:
-#   ENV_DIR     = /u/$USER/ve/impress
+#   ENV_DIR     = /u/$USER/ve/small_mol
 #   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
-#   python      = auto-detected (python/3.11, cray-python/3.11.7, anaconda3)
+#   python      = auto-detected via `module load python` (Delta default: 3.13+)
 #
 # Tool directories (cloned by this script if absent):
 #   MPNN_DIR           = $SCRATCH/$USER/LigandMPNN
@@ -26,6 +26,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
 fi
 
+# ── Initialize lmod (needed when run as non-interactive bash script) ──────────
+if ! declare -f module &>/dev/null; then
+    _lmod_init=/usr/share/lmod/lmod/init/bash
+    [ -f "${_lmod_init}" ] && source "${_lmod_init}"
+fi
+
 # ── Require SCRATCH ───────────────────────────────────────────────────────────
 if [[ -z "${SCRATCH:-}" ]]; then
     echo "ERROR: set the SCRATCH env var to your allocation scratch root, e.g.:"
@@ -35,7 +41,7 @@ if [[ -z "${SCRATCH:-}" ]]; then
 fi
 
 # ── Defaults / arg parsing ────────────────────────────────────────────────────
-ENV_DIR="${ENV_DIR:-/u/${USER}/ve/impress}"
+ENV_DIR="${ENV_DIR:-/u/${USER}/ve/small_mol}"
 IMPRESS_DIR="${IMPRESS_DIR:-${SCRATCH}/${USER}/IMPRESS}"
 BASE_PY_OVERRIDE=""
 
@@ -65,34 +71,22 @@ echo "================================================================="
 echo ""
 echo "── Step 1: Creating venv ──"
 
-_find_python() {
-    for candidate in python3.12 python3.11 python3 python; do
-        local p
-        p=$(command -v "${candidate}" 2>/dev/null) || continue
-        local ver
-        ver=$("${p}" -c "import sys; v=sys.version_info; print(v.major*10+v.minor)" 2>/dev/null) || continue
-        [ "${ver}" -ge 311 ] && echo "${p}" && return 0
-    done
-    return 1
-}
-
 if [ -n "${BASE_PY_OVERRIDE}" ]; then
     BASE_PY="${BASE_PY_OVERRIDE}"
     echo "Using Python override: ${BASE_PY}"
 else
-    BASE_PY=$(_find_python || true)
+    # On Delta, `module load python` gives the default Python 3.13+.
+    module load python 2>/dev/null || true
+    BASE_PY=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
     if [ -z "${BASE_PY}" ]; then
-        echo "python3.11+ not in PATH — trying modules..."
-        for mod in python/3.12 python/3.11 cray-python/3.11.7 anaconda3; do
-            module load "${mod}" 2>/dev/null || true
-            BASE_PY=$(_find_python || true)
-            [ -n "${BASE_PY}" ] && echo "  loaded module: ${mod}" && break
-        done
+        echo "ERROR: no Python found after 'module load python'."
+        echo "       Pass an explicit interpreter: --python /path/to/python3"
+        exit 1
     fi
-    if [ -z "${BASE_PY}" ]; then
-        echo "ERROR: no Python 3.11+ interpreter found."
-        echo "       Pass an explicit interpreter:  --python /path/to/python3.11"
-        echo "       Or load a module manually before running this script."
+    ver=$("${BASE_PY}" -c "import sys; v=sys.version_info; print(v.major*100+v.minor)")
+    if [ "${ver}" -lt 311 ]; then
+        echo "ERROR: ${BASE_PY} is Python ${ver} — need 3.11+."
+        echo "       Pass an explicit interpreter: --python /path/to/python3.11"
         exit 1
     fi
 fi
@@ -121,6 +115,10 @@ echo "── Step 3: radical-asyncflow (PyPI) ──"
 echo ""
 echo "── Step 4: rhapsody-py[dragon] (PyPI) ──"
 "${PIP}" install -q "rhapsody-py[dragon,telemetry]"
+# Pin dragonhpc to 0.14.1 — 0.14.2 added waitForKeys to DDRegisterClientResponse
+# but the Delta system Dragon runtime has not been updated to match; 0.14.2 fails
+# with AttributeError on every DDict operation on this cluster.
+"${PIP}" install -q "dragonhpc==0.14.1"
 
 # ── 5. IMPRESS (local editable) ───────────────────────────────────────────────
 echo ""
@@ -184,12 +182,16 @@ echo "── Step 9: gemmi ──"
 
 # ── 10. Additional dependencies ───────────────────────────────────────────────
 echo ""
-echo "── Step 10: pandas + biopandas ──"
-"${PIP}" install -q pandas biopandas
+echo "── Step 10: pandas + biopandas + matplotlib ──"
+"${PIP}" install -q pandas biopandas matplotlib
 
 # ── 11. PyRosetta ─────────────────────────────────────────────────────────────
 echo ""
 echo "── Step 11: PyRosetta ──"
+# pyrosetta_installer handles credential lookup internally.
+# Activate the venv in the environment so its subprocess pip installs there.
+export VIRTUAL_ENV="${ENV_DIR}"
+export PATH="${ENV_DIR}/bin:${PATH}"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
@@ -203,8 +205,9 @@ echo "── Step 12: ColabFold model weights ──"
 mkdir -p "${COLABFOLD_CACHE_DIR}"
 echo "  Downloading AlphaFold2 weights to ${COLABFOLD_CACHE_DIR} ..."
 "${PY}" -c "
+from pathlib import Path
 from colabfold.download import download_alphafold_params
-download_alphafold_params('alphafold2', '${COLABFOLD_CACHE_DIR}')
+download_alphafold_params('alphafold2', Path('${COLABFOLD_CACHE_DIR}'))
 print('  Weights downloaded.')
 "
 
