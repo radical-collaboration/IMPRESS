@@ -59,4 +59,5 @@ for name in os.listdir(dimer_models_path):
 print(f"Processed {len(rows)} structure(s)")
 
 df = pd.DataFrame(rows, columns=['ID', 'avg_plddt', 'ptm', 'avg_pae'])
-df.to_csv('af_stats_' + args.out + '_pass_' + args.iter + '.csv', index=False)
+csv_path = os.path.join(args.path, 'af_stats_' + args.out + '_pass_' + args.iter + '.csv')
+df.to_csv(csv_path, index=False)

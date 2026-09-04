@@ -10,7 +10,7 @@ output_dir="$3"
 
 SCRIPT_DIR="$(dirname "$0")"
 
-source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
+source "${ENV_DIR:-/u/${USER}/ve/impress}/bin/activate"
 
 python "$SCRIPT_DIR/packmin.py" \
     "$pdb_path" \

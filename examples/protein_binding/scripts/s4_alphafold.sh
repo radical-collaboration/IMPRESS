@@ -7,14 +7,32 @@ set -euo pipefail
 fasta_path="$1"
 output_dir="$2"
 
-module load modtree/gpu
-module load cuda/12.8.0
-module load gcc/11.2.0
-#source /anvil/scratch/x-mason/IMPRESS/.venv/bin/activate
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+# Re-activate the IMPRESS venv inside Dragon tasks (VIRTUAL_ENV is exported by sbatch).
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
-pixi run --manifest-path /anvil/scratch/x-mason/localcolabfold \
-    colabfold_batch \
+# ── Test-mode stub (IMPRESS_TEST_MODE=1) ──────────────────────────────────
+# Write minimal Boltz-shaped output so plddt_extract_pipeline can run without
+# invoking the real AlphaFold model.
+if [ "${IMPRESS_TEST_MODE:-0}" = "1" ]; then
+    name="$(basename "${fasta_path}" .fa)"
+    pred_dir="${output_dir}/boltz_results_${name}/predictions/${name}"
+    mkdir -p "${pred_dir}"
+    python3 - "${pred_dir}" "${name}" <<'PYEOF'
+import sys, json
+import numpy as np
+pred_dir, name = sys.argv[1], sys.argv[2]
+n = 110  # 100 PDZ residues + 10 peptide (PEP_LEN=10 assumed by extractor)
+np.savez(f"{pred_dir}/plddt_{name}_model_0.npz", plddt=np.full(n, 0.85))
+np.savez(f"{pred_dir}/pae_{name}_model_0.npz",   pae=np.full((n, n), 2.0))
+with open(f"{pred_dir}/confidence_{name}_model_0.json", "w") as f:
+    json.dump({"iptm": 0.75, "ptm": 0.80}, f)
+PYEOF
+    echo "[MOCK] s4_alphafold stub done for ${name}"
+    exit 0
+fi
+# ── End test-mode stub ────────────────────────────────────────────────────
+
+colabfold_batch \
     --model-type alphafold2_multimer_v3 \
     --max-template-date 2020-12-01 \
     --rank multimer \

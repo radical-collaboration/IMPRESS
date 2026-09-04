@@ -1,30 +1,37 @@
+import argparse
 import os
 import re
 import pyrosetta
-import sys
 
-pdb_directory   = sys.argv[1] # '/WWW/PDB_Files'
-SC_output_file  = sys.argv[2] # 'shape_complementarity_values.txt'
-ligand_name     = sys.argv[3] # 'ALR'
-gen_output_file = sys.argv[4] # 'interface_values.txt'
 
-pyrosetta.init(f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa {ligand_name}.params -corrections::beta_nov16 true")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Rosetta shape-complementarity/interface analysis")
+    parser.add_argument("pdb_directory",   help="Directory of PDB files to analyse")
+    parser.add_argument("SC_output_file",  help="Output file for shape-complementarity values")
+    parser.add_argument("ligand_name",     help="Ligand residue name (e.g. ALR)")
+    parser.add_argument("gen_output_file", help="Output CSV for interface metrics")
+    return parser.parse_args()
 
-# Define directories and files
-#pdb_directory = '/WWW/PDB_Files'
-#SC_output_file = 'shape_complementarity_values.txt'
 
-# Set up the general output file which will have metrics that look at the interface
-with open(gen_output_file, 'w') as genout:
-    # Write the shape complementarity value to the output file
-    genout.write(f"FileName,Shape Complementarity,ddg,contact molecular surf,SASA,Very buried unsat hbond,Surface unsat hbond,SAP SCORE\n")
-    genout.close()
+def main():
+    args = parse_args()
 
-# Create list of PDB files to analyze
-pdb_files = [f for f in os.listdir(pdb_directory) if f.endswith('.pdb')]
+    pyrosetta.init(
+        f"-ignore_unrecognized_res -ignore_zero_occupancy --extra_res_fa {args.ligand_name}.params"
+        f" -corrections::beta_nov16 true -mute all"
+    )
 
-###################################################################################################################################################################################################################################
-protocol = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects().create_from_string(
+    # Set up the general output file which will have metrics that look at the interface
+    with open(args.gen_output_file, 'w') as genout:
+        genout.write(
+            "FileName,Shape Complementarity,ddg,contact molecular surf,SASA,"
+            "Very buried unsat hbond,Surface unsat hbond,SAP SCORE\n"
+        )
+
+    # Create list of PDB files to analyze
+    pdb_files = [f for f in os.listdir(args.pdb_directory) if f.endswith('.pdb')]
+
+    protocol = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects().create_from_string(
 """
 <ROSETTASCRIPTS>
     <SCOREFXNS>
@@ -34,7 +41,7 @@ protocol = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects().create_from_
     <RESIDUE_SELECTORS>
         <Chain name="chainA" chains="A" />
         <Chain name="chainB" chains="B" />
-        <ScoreTermValueBased name="clashing_res" score_type="fa_rep" score_fxn="sfxn"  lower_threshold="3" upper_threshold="99999" />
+        <ScoreTermValueBased name="clashing_res" score_type="fa_rep" score_fxn="sfxn_clean"  lower_threshold="3" upper_threshold="99999" />
 
 
     </RESIDUE_SELECTORS>
@@ -93,41 +100,25 @@ protocol = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects().create_from_
 
 """).get_mover("ParsedProtocol")
 
-####################################################################################################################################################################################################################################
+    # Analyze the selected PDB files
+    for pdb_file in pdb_files:
+        full_path = os.path.join(args.pdb_directory, pdb_file)
+
+        pose = pyrosetta.pose_from_pdb(full_path)
+        protocol.apply(pose)
+
+        with open(args.SC_output_file, 'a') as SCout:
+            SCout.write(f"{pdb_file}\tShape Complementarity: {pose.scores['sc2']}\n")
+
+        with open(args.gen_output_file, 'a') as genout:
+            genout.write(
+                f"{pdb_file},{pose.scores['sc2']},{pose.scores['ddg']},"
+                f"{pose.scores['cms']},{pose.scores['IA_dSASA_int']},"
+                f"{pose.scores['vbuns']},{pose.scores['sbuns']},{pose.scores['sap_score']}\n"
+            )
+
+    print(f"Shape complementarity values have been written to {args.SC_output_file}.")
 
 
-##print(f"""
-##shape complementarity  : {pose.scores['sc2']}
-##ddg                    : {pose.scores['ddg']}
-##contact molecular surf : {pose.scores['cms']}
-##SASA                   : {pose.scores['IA_dSASA_int']}
-##Very buried unsat hbond: {pose.scores['vbuns']}
-##Surface unsat hbond    : {pose.scores['sbuns']}
-##SAP SCORE              : {pose.scores['sap_score']}
-##""")
-
-# Analyze the selected PDB files
-for pdb_file in pdb_files:
-    full_path = os.path.join(pdb_directory, pdb_file)
-
-    # Initialize variables for ligand energy
-    pose = pyrosetta.pose_from_pdb(full_path)
-    protocol.apply(pose)
-
-    # Open the SC output file
-    with open(SC_output_file, 'a') as SCout:
-        
-        # Write the shape complementarity value to the output file
-        SCout.write(f"{pdb_file}\tShape Complementarity: {pose.scores['sc2']}\n")
-        SCout.close()
-
-    # Open the general output file
-    with open(gen_output_file, 'a') as genout:
-
-        # Write the shape complementarity value to the output file
-        genout.write(f"{pdb_file},{pose.scores['sc2']},{pose.scores['ddg']},{pose.scores['cms']},{pose.scores['IA_dSASA_int']},{pose.scores['vbuns']},{pose.scores['sbuns']},{pose.scores['sap_score']}\n")
-        genout.close()
-
-print(f"Shape complementarity values have been written to {SC_output_file}.")
-
-
+if __name__ == "__main__":
+    main()

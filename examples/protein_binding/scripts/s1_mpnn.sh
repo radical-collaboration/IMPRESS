@@ -11,8 +11,8 @@ mpnn_path="$4"
 num_seqs="$5"
 chain="$6"
 
-source /anvil/projects/x-nairr240405/mason/LigandMPNN/.venv/bin/activate
-#source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate
+# Re-activate the IMPRESS venv inside Dragon tasks (VIRTUAL_ENV is exported by sbatch).
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
 python3 "$mpnn_script" \
     -pdb="$input_path" \
