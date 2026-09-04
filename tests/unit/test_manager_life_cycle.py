@@ -12,7 +12,7 @@ class MockWorkflowEngine:
     """Mock workflow engine"""
 
     @classmethod
-    async def create(cls, backend=None):
+    async def create(cls, backend=None, **kwargs):
         return cls()
 
     async def shutdown(self):
@@ -126,8 +126,8 @@ class TestManagerLifecycle:
             async def run(self):
                 raise RuntimeError("pipeline exploded")
 
-        await impress_manager.start([
-            {"name": "boom", "type": ExplodingPipeline, "config": {}, "kwargs": {}}
-        ])
+        await impress_manager.start(
+            [{"name": "boom", "type": ExplodingPipeline, "config": {}, "kwargs": {}}]
+        )
         # If shutdown() raises AttributeError, the try/finally fix is broken
         assert len(impress_manager.pipeline_tasks) == 0

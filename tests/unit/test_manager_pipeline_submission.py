@@ -70,6 +70,6 @@ class TestPipelineSubmission:
     def test_submit_before_start_raises(self, impress_manager):
         """submit_new_pipelines raises RuntimeError when called before start()"""
         with pytest.raises(RuntimeError, match="start\\(\\) must be called"):
-            impress_manager.submit_new_pipelines([
-                {"name": "p", "type": MockPipeline, "config": {}, "kwargs": {}}
-            ])
+            impress_manager.submit_new_pipelines(
+                [{"name": "p", "type": MockPipeline, "config": {}, "kwargs": {}}]
+            )

@@ -42,8 +42,13 @@ class ImpressLogger:
         LogLevel.CRITICAL,
     ]
 
-    def __init__(self, name="ImpressManager", use_colors=True, output_stream=None,
-                 min_level: LogLevel = LogLevel.DEBUG):
+    def __init__(
+        self,
+        name="ImpressManager",
+        use_colors=True,
+        output_stream=None,
+        min_level: LogLevel = LogLevel.DEBUG,
+    ):
         self.name = name
         self.use_colors = use_colors
         self.output_stream = output_stream or sys.stdout

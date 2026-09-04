@@ -13,6 +13,7 @@ def _find_gpus() -> list:
         return [int(g) for g in cuda_visible.split(",") if g.strip().isdigit()]
     try:
         from dragon.native.machine import System
+
         sys_info = System()
         return [gpu for node in sys_info.nodes for gpu in node.gpus]
     except Exception:

@@ -82,7 +82,7 @@ class TestChildPipelines:
         # Run the manager with timeout
         try:
             await asyncio.wait_for(impress_manager.start([pipeline_setup]), timeout=3.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Print debug info if it times out
             print(f"Completed pipelines: {completed_pipelines}")
             print(f"Pipeline tasks: {len(impress_manager.pipeline_tasks)}")
