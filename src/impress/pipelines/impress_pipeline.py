@@ -91,6 +91,18 @@ class ImpressBasePipeline(ABC):
         """Register pipeline tasks - must be implemented by subclasses"""
         pass
 
+    def _generate_task_description(self) -> dict:
+        """Build a task resource description that attaches the GPU policy.
+
+        Pass the returned dict as ``task_description`` when invoking GPU tasks
+        so the execution backend routes them to the assigned GPU.
+        """
+        task_description = {}
+        policy = getattr(self, "policy", None)
+        if policy:
+            task_description["process_template"] = {"policy": policy}
+        return task_description
+
     def _gpu_env(self) -> dict:
         env = {**os.environ}
         policy = getattr(self, "policy", None)

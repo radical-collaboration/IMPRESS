@@ -17,10 +17,10 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=220G
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH --job-name=impress_protein
 #SBATCH --mail-user=mg2347@soe.rutgers.edu
-#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-type=ALL
 #SBATCH --output=logs/impress_%j.out
 #SBATCH --error=logs/impress_%j.err
 # NOTE: logs/ must exist before sbatch is called.  Create it once with:
@@ -70,6 +70,12 @@ export IMPRESS_SCRIPTS_DIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/ex
 export IMPRESS_BASE_DIR="${IMPRESS_BASE_DIR:-${SCRATCH}/${USER}/IMPRESS_inputs}"
 export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${SCRATCH}/${USER}/IMPRESS_outputs}"
 
+# IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
+# ProcessPoolExecutor — useful for development / non-Dragon clusters).
+# Set before sbatch:  IMPRESS_BACKEND=local sbatch delta_gpu_run.sh
+export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
+echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
+
 # IMPRESS_TEST_MODE=1: 2 pipelines, max_passes=1, no child pipelines.
 # Runs a single MPNN → score → AF2 cycle to verify end-to-end path.
 # Set before sbatch:  IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
@@ -96,5 +102,6 @@ rm -f ddict_orc*
 
 echo "Running: dragon ${DRAGON_MODE} run_protein_binding.py  (nodes=${SLURM_NNODES:-1})"
 dragon ${DRAGON_MODE} run_protein_binding.py
+#dragon -l DEBUG ${DRAGON_MODE} run_protein_binding.py
 
 echo "=== Protein Binding pipeline done: $(date) ==="

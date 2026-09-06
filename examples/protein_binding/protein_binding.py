@@ -100,18 +100,24 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
+        try:
+            from dragon.infrastructure.policy import Policy as _DragonPolicy
+            task_description = {"process_template": {"policy": _DragonPolicy()}}
+        except ImportError:
+            task_description = {}
+        print(f"Registering pipeline tasks with task_description: {task_description}")
 
-        @self.auto_register_task(local_task=True)  # MPNN
-        async def s1():
+        @self.auto_register_task(capture_stdio=True)  # MPNN
+        #async def s1(task_description=task_description):  # noqa: B006
+        async def s1():  # noqa: B006
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
-            os.makedirs(output_dir, exist_ok=True)
 
             chain = "A"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
-            cmd = (
+            return (
                 f"bash {self.scripts_path}/s1_mpnn.sh "
                 f"{mpnn_script} "
                 f"{input_path} "
@@ -120,15 +126,6 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.num_seqs} "
                 f"{chain}"
             )
-            log_path = os.path.join(output_dir, "mpnn_run.log")
-            with open(log_path, "w") as lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=lf, stderr=asyncio.subprocess.STDOUT,
-                    env=self._gpu_env(),
-                )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"s1 MPNN failed (exit {rc})")
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -200,8 +197,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task(local_task=True)
-        async def s4(target_fasta):
+        @self.auto_register_task(capture_stdio=True)
+        #async def s4(target_fasta, task_description=task_description):  # noqa: B006
+        async def s4(target_fasta):  # noqa: B006
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
@@ -209,16 +207,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
             self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
-            # s4_boltz.sh tees its own output to boltz_run.log in the output dir
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=self._gpu_env(),
-            )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"Boltz failed for {target_fasta} (exit {rc})")
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def s4_post_exec(
@@ -289,7 +278,20 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
-                await self.s1()
+                try:
+                    await self.s1()
+                except Exception as exc:
+                    # Dragon may report a false failure (TypeError/'NoneType' subscriptable,
+                    # or ProcessGroup state error) even when MPNN completed successfully.
+                    # Check for output before propagating.
+                    seqs_dir = os.path.join(
+                        self.output_path_mpnn, f"job_{self.passes}", "seqs"
+                    )
+                    if not (os.path.isdir(seqs_dir) and os.listdir(seqs_dir)):
+                        raise
+                    self.logger.pipeline_log(
+                        f"s1 raised {exc!r} but seqs output exists — treating as success"
+                    )
                 self.logger.pipeline_log("MPNN task finished")
 
                 self.logger.pipeline_log("Submitting sequence ranking task")
@@ -376,16 +378,25 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             staged_file = f"af_stats_{self.name}_pass_{self.passes}.csv"
 
-            await self.s5(
-                task_description={
-                    "output_staging": [
-                        {
-                            "source": f"task:///{staged_file}",
-                            "target": f"client:///{staged_file}",
-                        }
-                    ],
-                }
-            )
+            try:
+                await self.s5(
+                    task_description={
+                        "output_staging": [
+                            {
+                                "source": f"task:///{staged_file}",
+                                "target": f"client:///{staged_file}",
+                            }
+                        ],
+                    }
+                )
+            except Exception as exc:
+                # Dragon false-failure: check if s5 wrote the CSV despite the error.
+                csv_path = os.path.join(self.output_base_path, staged_file)
+                if not os.path.isfile(csv_path):
+                    raise
+                self.logger.pipeline_log(
+                    f"s5 raised {exc!r} but CSV exists — treating as success"
+                )
             self.logger.pipeline_log("pLDTT extract finished")
 
             await self.run_adaptive_step(wait=True)

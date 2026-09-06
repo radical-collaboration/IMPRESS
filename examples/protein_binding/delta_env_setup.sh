@@ -101,10 +101,6 @@ echo "── Step 3: radical-asyncflow (PyPI) ──"
 echo ""
 echo "── Step 4: rhapsody-py[dragon] (PyPI) ──"
 "${PIP}" install -q "rhapsody-py[dragon,telemetry]"
-# Pin dragonhpc to 0.14.1 — 0.14.2 added waitForKeys to DDRegisterClientResponse
-# but the Delta system Dragon runtime has not been updated to match; 0.14.2 fails
-# with AttributeError on every DDict operation on this cluster.
-"${PIP}" install -q "dragonhpc==0.14.1"
 
 # ── 5. IMPRESS (local editable) ───────────────────────────────────────────────
 echo ""

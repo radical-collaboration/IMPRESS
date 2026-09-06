@@ -4,20 +4,28 @@ import shutil
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from rhapsody.backends import DragonExecutionBackend
 from rhapsody.telemetry import define_event
 from rhapsody.telemetry.events import make_event
 
-from impress import GPUPolicy, _find_gpus, _make_policy, ImpressManager, PipelineSetup
+from impress import GPUPolicy, _make_policy, ImpressManager, PipelineSetup
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
 rhapsody.enable_logging(level=logging.DEBUG)
 
 
-# ── Test mode (IMPRESS_TEST_MODE=1) ───────────────────────────────────────
-# Runs 2 pipelines with max_passes=1 and no child pipelines, so a single
-# MPNN → score → AF2 cycle completes for integration testing.
+# ── Backend / test mode ───────────────────────────────────────────────────
+# IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
+# ProcessPoolExecutor — useful for development / non-Dragon clusters).
+BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
+
+if BACKEND == "dragon":
+    from rhapsody.backends import DragonExecutionBackend
+    from impress import find_dragon_gpus
+else:
+    from concurrent.futures import ProcessPoolExecutor
+    from rhapsody.backends import ConcurrentExecutionBackend
+    from impress import find_gpus
 TEST_MODE = os.getenv("IMPRESS_TEST_MODE", "0") == "1"
 N_PIPELINES = 2      if TEST_MODE else 16
 MAX_PASSES  = 1      if TEST_MODE else 10
@@ -75,7 +83,10 @@ def adaptive_criteria(current_score: float, previous_score: float) -> bool:
 
 
 async def impress_protein_bind() -> None:
-    backend = await DragonExecutionBackend()
+    if BACKEND == "dragon":
+        backend = await DragonExecutionBackend()
+    else:
+        backend = ConcurrentExecutionBackend(ProcessPoolExecutor())
 
     manager: ImpressManager = ImpressManager(
         execution_backend=backend,
@@ -173,6 +184,7 @@ async def impress_protein_bind() -> None:
                     'previous_scores': copy.deepcopy(pipeline.previous_scores),
                     'input_base_path': pipeline.input_base_path,
                     'output_base_path': pipeline.output_base_path,
+                    'policy': pipeline.policy,
                 }
             }
 
@@ -208,7 +220,10 @@ async def impress_protein_bind() -> None:
     output_base_dir = os.environ.get("IMPRESS_OUTPUT_DIR", scripts_dir)
     os.makedirs(output_base_dir, exist_ok=True)
 
-    all_gpus = _find_gpus()
+    if BACKEND == "dragon":
+        all_gpus = find_dragon_gpus()
+    else:
+        all_gpus = find_gpus()
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -218,7 +233,7 @@ async def impress_protein_bind() -> None:
                 "base_path": scripts_dir,
                 "input_base_path": input_base_dir,
                 "output_base_path": output_base_dir,
-                "policy": _make_policy(all_gpus, i - 1),
+                **({"policy": _make_policy(all_gpus, i - 1)} if all_gpus else {}),
             },
             adaptive_fn=adaptive_decision,
             max_passes=MAX_PASSES,

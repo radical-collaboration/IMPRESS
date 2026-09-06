@@ -31,7 +31,7 @@
 #SBATCH --mem=220G
 #SBATCH --time=02:30:00
 #SBATCH --job-name=impress_sm_binding
-#SBATCH --mail-user=mg2347@soe.rutgers.edu
+#SBATCH --mail-user=<your e-mail>
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/impress_%j.out
 #SBATCH --error=logs/impress_%j.err
@@ -121,6 +121,12 @@ mkdir -p logs
 # covered by .gitignore.  Override to write outputs elsewhere.
 export IMPRESS_WORK_DIR="${IMPRESS_WORK_DIR:-${WORKDIR}/logs}"
 mkdir -p "${IMPRESS_WORK_DIR}"
+
+# IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
+# ProcessPoolExecutor — useful for development / non-Dragon clusters).
+# Set before sbatch:  IMPRESS_BACKEND=local sbatch delta_gpu_run.sh
+export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
+echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
 
 # IMPRESS_TEST_MODE=1: 2 pipelines, inert thresholds, max_tasks=10.
 # Runs one full rfd3→mpnn→fastrelax→filter_shape→af2 cycle to verify the

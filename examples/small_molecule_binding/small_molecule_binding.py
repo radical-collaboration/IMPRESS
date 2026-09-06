@@ -213,9 +213,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
     def _register_real_tasks(self):
         """Register real HPC tasks that return shell command strings."""
+        task_description=self._generate_task_description()
 
-        @self.auto_register_task(local_task=True)
-        async def rfd3():
+        @self.auto_register_task(capture_stdio=True)
+        async def rfd3(task_description=task_description):
             self.taskcount += 1
             taskname = "rfd3"
             self.previous_task = taskname
@@ -237,17 +238,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {self.diffusion_batch_size}"
                 f" {scaffold_arg}"
             )
-            log_file = f"{taskdir}/rfd3.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=_lf,
-                    stderr=asyncio.subprocess.STDOUT,
-                    env=self._gpu_env(),
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"rfd3 failed with exit code {proc.returncode}\nSee {log_file}")
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def analysis_backbone():
@@ -568,8 +559,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'max_sc': max_sc,
             }
 
-        @self.auto_register_task(local_task=True)
-        async def af2():
+        @self.auto_register_task(capture_stdio=True)
+        async def af2(task_description=task_description):
             self.taskcount += 1
             taskname = "alphafold"
             self.previous_task = taskname
@@ -596,14 +587,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {short_fasta}"
                 f" {output_dir}"
             )
-            log_file = f"{taskdir}/af2.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"af2 failed with exit code {proc.returncode}\nSee {log_file}")
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def analysis_fold():
