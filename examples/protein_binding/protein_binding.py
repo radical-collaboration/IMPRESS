@@ -107,17 +107,19 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             task_description = {}
         print(f"Registering pipeline tasks with task_description: {task_description}")
 
-        @self.auto_register_task(capture_stdio=True)  # MPNN
+        #@self.auto_register_task(capture_stdio=True)  # MPNN
         #async def s1(task_description=task_description):  # noqa: B006
+        @self.auto_register_task(local_task=True)
         async def s1():  # noqa: B006
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
+            os.makedirs(output_dir, exist_ok=True)
 
             chain = "A"
             input_path = self.input_path if self.passes == 1 else self.output_path_af
 
-            return (
+            cmd = (
                 f"bash {self.scripts_path}/s1_mpnn.sh "
                 f"{mpnn_script} "
                 f"{input_path} "
@@ -126,6 +128,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.num_seqs} "
                 f"{chain}"
             )
+            log_path = os.path.join(output_dir, "mpnn_run.log")
+            with open(log_path, "w") as lf:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd, stdout=lf, stderr=asyncio.subprocess.STDOUT,
+                    env=self._gpu_env(),
+                )
+            rc = await proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"s1 MPNN failed (exit {rc})")
+            
+            # return cmd
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -197,8 +210,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task(capture_stdio=True)
+        #@self.auto_register_task(capture_stdio=True)
         #async def s4(target_fasta, task_description=task_description):  # noqa: B006
+        @self.auto_register_task(local_task=True)
         async def s4(target_fasta):  # noqa: B006
             self.step_id += 1
             cmd = (
@@ -207,7 +221,18 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
             )
             self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
-            return cmd
+            # s4_boltz.sh tees its own output to boltz_run.log in the output dir
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=self._gpu_env(),
+            )
+            rc = await proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"Boltz failed for {target_fasta} (exit {rc})")
+
+            # return cmd
 
         @self.auto_register_task(local_task=True)
         async def s4_post_exec(
