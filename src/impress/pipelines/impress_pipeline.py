@@ -1,5 +1,4 @@
 import asyncio
-import os
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -90,25 +89,6 @@ class ImpressBasePipeline(ABC):
     def register_pipeline_tasks(self):
         """Register pipeline tasks - must be implemented by subclasses"""
         pass
-
-    def _generate_task_description(self) -> dict:
-        """Build a task resource description that attaches the GPU policy.
-
-        Pass the returned dict as ``task_description`` when invoking GPU tasks
-        so the execution backend routes them to the assigned GPU.
-        """
-        task_description = {}
-        policy = getattr(self, "policy", None)
-        if policy:
-            task_description["process_template"] = {"policy": policy}
-        return task_description
-
-    def _gpu_env(self) -> dict:
-        env = {**os.environ}
-        policy = getattr(self, "policy", None)
-        if policy and getattr(policy, "gpu_affinity", None):
-            env["CUDA_VISIBLE_DEVICES"] = ",".join(str(g) for g in policy.gpu_affinity)
-        return env
 
     # Optional methods that subclasses can override
     async def get_scores_map(self):

@@ -17,9 +17,9 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=220G
-#SBATCH --time=00:30:00
+#SBATCH --time=02:30:00
 #SBATCH --job-name=impress_protein
-#SBATCH --mail-user=mg2347@soe.rutgers.edu
+#SBATCH --mail-user=<your e-mail>
 #SBATCH --mail-type=ALL
 #SBATCH --output=logs/impress_%j.out
 #SBATCH --error=logs/impress_%j.err
@@ -87,9 +87,13 @@ WORKDIR="${IMPRESS_SCRIPTS_DIR}"
 cd "${WORKDIR}"
 mkdir -p logs
 
+# IMPRESS_SESSION_DIR: asyncflow session dir — runinfo, captured task
+# stdout/stderr (.stdout/.stderr per task UID).  Must be on Lustre so files
+# survive the job and can be reviewed after failures.
+export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${WORKDIR}/logs/sessions}"
+mkdir -p "${IMPRESS_SESSION_DIR}"
+
 # ── Run ───────────────────────────────────────────────────────────────────────
-# asyncflow session dirs now go to /tmp (node-local, no quota) via
-# IMPRESS_SESSION_DIR; no need to clean them from cwd.
 
 # -s = single-node Dragon runtime; -m = multi-node (uses MPI/OFI fabric).
 if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
@@ -98,10 +102,13 @@ else
     DRAGON_MODE="-s"
 fi
 
-rm -f ddict_orc*
-
-echo "Running: dragon ${DRAGON_MODE} run_protein_binding.py  (nodes=${SLURM_NNODES:-1})"
-dragon ${DRAGON_MODE} run_protein_binding.py
-#dragon -l DEBUG ${DRAGON_MODE} run_protein_binding.py
+if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
+    rm -f ddict_orc*
+    echo "Running: dragon ${DRAGON_MODE} run_protein_binding.py  (nodes=${SLURM_NNODES:-1})"
+    dragon ${DRAGON_MODE} run_protein_binding.py
+else
+    echo "Running: python3 run_protein_binding.py  (backend=${IMPRESS_BACKEND})"
+    python3 run_protein_binding.py
+fi
 
 echo "=== Protein Binding pipeline done: $(date) ==="

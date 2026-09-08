@@ -122,6 +122,12 @@ mkdir -p logs
 export IMPRESS_WORK_DIR="${IMPRESS_WORK_DIR:-${WORKDIR}/logs}"
 mkdir -p "${IMPRESS_WORK_DIR}"
 
+# IMPRESS_SESSION_DIR: asyncflow session dir — runinfo, captured task
+# stdout/stderr (.stdout/.stderr per task UID).  Must be on Lustre so files
+# survive the job and can be reviewed after failures.
+export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${IMPRESS_WORK_DIR}/sessions}"
+mkdir -p "${IMPRESS_SESSION_DIR}"
+
 # IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
 # ProcessPoolExecutor — useful for development / non-Dragon clusters).
 # Set before sbatch:  IMPRESS_BACKEND=local sbatch delta_gpu_run.sh
@@ -136,7 +142,6 @@ export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"
 echo "TEST_MODE:         ${IMPRESS_TEST_MODE}"
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-# asyncflow session dirs now go to /tmp (node-local, no quota) via IMPRESS_SESSION_DIR.
 
 # -s = single-node Dragon runtime; -m = multi-node (uses MPI/OFI fabric).
 if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
@@ -145,10 +150,15 @@ else
     DRAGON_MODE="-s"
 fi
 
-rm -f ddict_orc*
-
 RUNNER="${1:-run_small_molecule_binding.py}"
-echo "Running: dragon ${DRAGON_MODE} ${RUNNER}  (nodes=${SLURM_NNODES:-1})"
-dragon ${DRAGON_MODE} "${RUNNER}"
+
+if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
+    rm -f ddict_orc*
+    echo "Running: dragon ${DRAGON_MODE} ${RUNNER}  (nodes=${SLURM_NNODES:-1})"
+    dragon ${DRAGON_MODE} "${RUNNER}"
+else
+    echo "Running: python3 ${RUNNER}  (backend=${IMPRESS_BACKEND})"
+    python3 "${RUNNER}"
+fi
 
 echo "=== Small Molecule Binding pipeline done: $(date) ==="

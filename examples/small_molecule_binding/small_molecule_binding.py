@@ -179,7 +179,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.interface_min_sc          = kwargs.get("interface_min_sc",          0.5)
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
         self.max_tasks                 = kwargs.get("max_tasks",                 300)
-        self.policy                    = kwargs.get("policy",                    None)
+        self.gpu_id                    = kwargs.get("gpu_id",                    None)
 
         # Output paths (legacy)
         self.output_path         = os.path.join(self.base_path, "myoutputs", self.name)
@@ -194,6 +194,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state            = {}   # written by analysis tasks, read by adaptive_fn
         self.next_step        = STEP_RFD3
         self._current_cycle_i = 0   # set by run() before each mpnn call
+
+    def _gpu_env(self) -> dict:
+        env = {**os.environ}
+        if self.gpu_id is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
+        return env
 
     # ── Task registration ──────────────────────────────────────────────────
 
@@ -213,10 +219,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
     def _register_real_tasks(self):
         """Register real HPC tasks that return shell command strings."""
-        task_description=self._generate_task_description()
-
         @self.auto_register_task(capture_stdio=True)
-        async def rfd3(task_description=task_description):
+        async def rfd3():
             self.taskcount += 1
             taskname = "rfd3"
             self.previous_task = taskname
@@ -560,7 +564,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task(capture_stdio=True)
-        async def af2(task_description=task_description):
+        async def af2():
             self.taskcount += 1
             taskname = "alphafold"
             self.previous_task = taskname

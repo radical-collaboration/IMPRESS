@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List
 from rhapsody.telemetry import define_event
 from rhapsody.telemetry.events import make_event
 
-from impress import GPUPolicy, _make_policy, ImpressManager, PipelineSetup
+from impress import find_gpus, ImpressManager, PipelineSetup
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
@@ -21,16 +21,15 @@ BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
-    from impress import find_dragon_gpus
 else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
-    from impress import find_gpus
 TEST_MODE = os.getenv("IMPRESS_TEST_MODE", "0") == "1"
-N_PIPELINES = 2      if TEST_MODE else 16
-MAX_PASSES  = 1      if TEST_MODE else 10
-MAX_SUB_PIPELINES_OVERRIDE = 0 if TEST_MODE else None  # None = use inline default
+N_PIPELINES = 4      if TEST_MODE else 4
+MAX_PASSES  = 10      if TEST_MODE else 10
+MAX_SUB_PIPELINES_OVERRIDE = 3 if TEST_MODE else None  # None = use inline default
 
+print(f"[INFO] IMPRESS_BACKEND={BACKEND}  TEST_MODE={TEST_MODE}  N_PIPELINES={N_PIPELINES}  MAX_PASSES={MAX_PASSES}  MAX_SUB_PIPELINES_OVERRIDE={MAX_SUB_PIPELINES_OVERRIDE}")
 
 # ---------------------------------------------------------------------------
 # Custom application-level telemetry events
@@ -86,7 +85,7 @@ async def impress_protein_bind() -> None:
     if BACKEND == "dragon":
         backend = await DragonExecutionBackend()
     else:
-        backend = ConcurrentExecutionBackend(ProcessPoolExecutor())
+        backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
 
     manager: ImpressManager = ImpressManager(
         execution_backend=backend,
@@ -184,7 +183,7 @@ async def impress_protein_bind() -> None:
                     'previous_scores': copy.deepcopy(pipeline.previous_scores),
                     'input_base_path': pipeline.input_base_path,
                     'output_base_path': pipeline.output_base_path,
-                    'policy': pipeline.policy,
+                    'gpu_id': pipeline.gpu_id,
                 }
             }
 
@@ -220,10 +219,13 @@ async def impress_protein_bind() -> None:
     output_base_dir = os.environ.get("IMPRESS_OUTPUT_DIR", scripts_dir)
     os.makedirs(output_base_dir, exist_ok=True)
 
-    if BACKEND == "dragon":
-        all_gpus = find_dragon_gpus()
-    else:
-        all_gpus = find_gpus()
+    all_gpus = find_gpus()
+
+    if all_gpus:
+        print("[INFO] GPU assignment:")
+        for i in range(1, N_PIPELINES + 1):
+            gpu_id = all_gpus[(i - 1) % len(all_gpus)]
+            print(f"[INFO]   p{i:>2} -> gpu={gpu_id}")
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -233,10 +235,10 @@ async def impress_protein_bind() -> None:
                 "base_path": scripts_dir,
                 "input_base_path": input_base_dir,
                 "output_base_path": output_base_dir,
-                **({"policy": _make_policy(all_gpus, i - 1)} if all_gpus else {}),
+                "max_passes": MAX_PASSES,
+                **({"gpu_id": all_gpus[(i - 1) % len(all_gpus)]} if all_gpus else {}),
             },
             adaptive_fn=adaptive_decision,
-            max_passes=MAX_PASSES,
         )
         for i in range(1, N_PIPELINES + 1)
     ]

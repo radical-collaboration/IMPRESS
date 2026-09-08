@@ -38,7 +38,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         if not self.mpnn_path:
             raise ValueError("mpnn_path must be supplied via kwarg or MPNN_PATH env var")
         self.peptide_seq: str = kwargs.get("peptide_seq", "EGYQDYEPEA")
-        self.policy = kwargs.get("policy", None)
+        self.gpu_id = kwargs.get("gpu_id", None)
 
         # Sequence and score state
         self.current_scores = {}
@@ -100,16 +100,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
-        try:
-            from dragon.infrastructure.policy import Policy as _DragonPolicy
-            task_description = {"process_template": {"policy": _DragonPolicy()}}
-        except ImportError:
-            task_description = {}
-        print(f"Registering pipeline tasks with task_description: {task_description}")
 
-        #@self.auto_register_task(capture_stdio=True)  # MPNN
-        #async def s1(task_description=task_description):  # noqa: B006
-        @self.auto_register_task(local_task=True)
+        @self.auto_register_task(capture_stdio=True)  # MPNN
         async def s1():  # noqa: B006
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
@@ -128,17 +120,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.num_seqs} "
                 f"{chain}"
             )
-            log_path = os.path.join(output_dir, "mpnn_run.log")
-            with open(log_path, "w") as lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=lf, stderr=asyncio.subprocess.STDOUT,
-                    env=self._gpu_env(),
-                )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"s1 MPNN failed (exit {rc})")
-            
-            # return cmd
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -210,29 +192,16 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        #@self.auto_register_task(capture_stdio=True)
-        #async def s4(target_fasta, task_description=task_description):  # noqa: B006
-        @self.auto_register_task(local_task=True)
+        @self.auto_register_task(capture_stdio=True)
         async def s4(target_fasta):  # noqa: B006
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
                 f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+                + (f" {self.gpu_id}" if self.gpu_id is not None else "")
             )
-            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
-            # s4_boltz.sh tees its own output to boltz_run.log in the output dir
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=self._gpu_env(),
-            )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"Boltz failed for {target_fasta} (exit {rc})")
-
-            # return cmd
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def s4_post_exec(
@@ -287,6 +256,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
     async def run(self):
         """Main execution logic"""
+
+        if self.gpu_id is not None:
+            self.logger.pipeline_log(f"gpu={self.gpu_id}")
 
         self.logger.pipeline_log(f"Running for a maximum of {self.max_passes} passes")
 

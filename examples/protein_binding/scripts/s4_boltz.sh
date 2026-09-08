@@ -6,6 +6,11 @@ set -e
 
 fasta_path="$1"
 output_dir="$2"
+# Optional: caller passes the assigned GPU index as $3 so tasks spread
+# across GPUs 0-3 rather than all piling on device 0.
+if [ -n "${3:-}" ]; then
+    export CUDA_VISIBLE_DEVICES="$3"
+fi
 
 # Boltz requires Python <=3.12 (numpy<2.0 etc.) so it lives in its own env.
 # BOLTZ_VENV may point to a conda env (no bin/activate) or a pip venv; prepend

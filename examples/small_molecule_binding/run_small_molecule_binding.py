@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import List
 
-from impress import GPUPolicy, _make_policy, ImpressManager, PipelineSetup
+from impress import find_gpus, ImpressManager, PipelineSetup
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -70,11 +70,9 @@ BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
-    from impress import find_dragon_gpus
 else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
-    from impress import find_gpus
 
 cfg = TEST if os.getenv("IMPRESS_TEST_MODE", "0") == "1" else PROD
 
@@ -171,10 +169,10 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
             else:
                 overall, selective, has_data = _ensemble_selective_avg(
                     current[3], prior, _ca_rmsd, similar_if_low=True)
-                # rfd3 scaffold guidance expects the TARGET-only PDB; the fold
-                # output (current[3]) is the full binder+target complex and
-                # causes rfd3 prevalidation to fail.  Always run scratch for now.
-                pipeline.state['rfd3_input_pdb'] = None
+                if has_data and selective is not None and selective > overall:
+                    pipeline.state['rfd3_input_pdb'] = current[3]  # guided backbone
+                else:
+                    pipeline.state['rfd3_input_pdb'] = None         # scratch
         pipeline.next_step = STEP_RFD3
 
     else:
@@ -202,13 +200,10 @@ async def impress_smallmol_bind() -> None:
     if BACKEND == "dragon":
         backend = await DragonExecutionBackend()
     else:
-        backend = ConcurrentExecutionBackend(ProcessPoolExecutor())
+        backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
     manager: ImpressManager = ImpressManager(execution_backend=backend)
 
-    if BACKEND == "dragon":
-        all_gpus = find_dragon_gpus()
-    else:
-        all_gpus = find_gpus()
+    all_gpus = find_gpus()
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -229,7 +224,7 @@ async def impress_smallmol_bind() -> None:
                 "diffusion_batch_size":      cfg.diffusion_batch_size,
                 "num_refine_cycles":         cfg.num_refine_cycles,
                 "max_tasks":                 cfg.max_tasks,
-                **({"policy": _make_policy(all_gpus, i - 1)} if all_gpus else {}),
+                **({"gpu_id": all_gpus[(i - 1) % len(all_gpus)]} if all_gpus else {}),
             }
         )
         for i in range(1, cfg.n_pipelines + 1)
