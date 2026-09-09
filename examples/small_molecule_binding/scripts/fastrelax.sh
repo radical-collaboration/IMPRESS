@@ -10,7 +10,7 @@ output_dir="$3"
 
 SCRIPT_DIR="$(dirname "$0")"
 
-source "${ENV_DIR:-/u/${USER}/ve/impress}/bin/activate"
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
 python "$SCRIPT_DIR/fastrelax.py" \
     "$pdb_path" \

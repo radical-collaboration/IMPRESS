@@ -11,7 +11,7 @@ interface_values_output="$4"
 
 SCRIPT_DIR="$(dirname "$0")"
 
-source "${ENV_DIR:-/u/${USER}/ve/impress}/bin/activate"
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
 python "$SCRIPT_DIR/filter_shape.py" \
     "$pdb_directory" \

@@ -2,12 +2,11 @@
 set -e
 
 # Step 4: Structure prediction via Boltz
-# Args: $1=fasta_path $2=output_dir
+# Args: $1=fasta_path $2=output_dir $3=gpu_id (optional)
 
 fasta_path="$1"
 output_dir="$2"
-# Optional: caller passes the assigned GPU index as $3 so tasks spread
-# across GPUs 0-3 rather than all piling on device 0.
+# Optional GPU assignment passed by the caller so tasks spread across GPUs.
 if [ -n "${3:-}" ]; then
     export CUDA_VISIBLE_DEVICES="$3"
 fi

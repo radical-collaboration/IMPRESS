@@ -20,6 +20,10 @@ def _copy_pdb_rename_chains(src, dst, chain_map=_BOLTZ_CHAIN_MAP):
                     line = line[:21] + chain_map[chain] + line[24:]
             f_out.write(line)
 
+# One semaphore per GPU shared across all pipeline instances — caps concurrent
+# Boltz launches per GPU at 2 regardless of how many pipelines share that GPU.
+_boltz_sem_per_gpu: dict = {}
+
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
         # Execution metadata
@@ -278,9 +282,9 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 try:
                     await self.s1()
                 except Exception as exc:
-                    # Dragon may report a false failure (TypeError/'NoneType' subscriptable,
-                    # or ProcessGroup state error) even when MPNN completed successfully.
-                    # Check for output before propagating.
+                    # The execution backend may report a spurious failure (TypeError/
+                    # 'NoneType' subscriptable, or ProcessGroup state error) even when
+                    # MPNN completed successfully. Check for output before propagating.
                     seqs_dir = os.path.join(
                         self.output_path_mpnn, f"job_{self.passes}", "seqs"
                     )
@@ -302,12 +306,28 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             alphafold_tasks = []
             post_exec_tasks = []
 
-            # Limit concurrent Boltz launches to avoid GPU OOM.
-            _boltz_sem = asyncio.Semaphore(2)
+            # Shared per-GPU semaphore caps concurrent Boltz launches at 2 per GPU
+            # across all pipeline instances pinned to the same GPU.
+            gpu_key = self.gpu_id if self.gpu_id is not None else "default"
+            if gpu_key not in _boltz_sem_per_gpu:
+                _boltz_sem_per_gpu[gpu_key] = asyncio.Semaphore(2)
+            _boltz_sem = _boltz_sem_per_gpu[gpu_key]
 
             async def _guarded_s4(target_fasta):
                 async with _boltz_sem:
-                    return await self.s4(target_fasta=target_fasta)
+                    try:
+                        return await self.s4(target_fasta=target_fasta)
+                    except Exception as exc:
+                        # The execution backend may raise a spurious failure even when
+                        # Boltz completed successfully. Check for the output PDB before propagating.
+                        pred_dir = os.path.join(
+                            self.output_path, "af", "prediction", "dimer_models",
+                            target_fasta, f"boltz_results_{target_fasta}",
+                            "predictions", target_fasta,
+                        )
+                        if os.path.isfile(os.path.join(pred_dir, f"{target_fasta}_model_0.pdb")):
+                            return None  # output exists; treat as success
+                        raise
 
             for target_fasta in fasta_files:
                 models_path = os.path.join(
@@ -387,7 +407,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                     }
                 )
             except Exception as exc:
-                # Dragon false-failure: check if s5 wrote the CSV despite the error.
+                # Spurious backend failure: check if s5 wrote the CSV despite the error.
                 csv_path = os.path.join(self.output_base_path, staged_file)
                 if not os.path.isfile(csv_path):
                     raise
