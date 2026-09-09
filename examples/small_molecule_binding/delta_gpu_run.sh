@@ -71,7 +71,7 @@ dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
 
 # Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
-# Pre-warm once on a login node via delta_env_setup.sh's Step 12 (boltz has no
+# Pre-warm once on a login node via delta_env_setup.sh's Step 13 (boltz has no
 # dedicated "download weights" subcommand; weights auto-download on first
 # `boltz predict` call).
 export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"

@@ -170,48 +170,47 @@ def _ligand_resname_from_params(params_path: str) -> str:
     raise ValueError(f"no NAME record found in {params_path}")
 
 
-def _normalize_ligand_id(fold_pdb_path: str, ligand_resname: str, out_pdb_path: str,
-                          ligand_chain_id: str = "B") -> bool:
-    """Rewrites a Boltz co-folded PDB's ligand HETATM residue name (via gemmi) to
-    match ligand_resname, so RFD3's ligand/select_exposed/select_buried selectors
-    (which key off the literal resname) resolve against it. Purely a string edit
-    -- no coordinate transform, since Boltz already places the ligand correctly
-    relative to the protein it just folded. Locates the ligand residue by HETATM
-    on ligand_chain_id first; if Boltz didn't honor the requested chain letter,
+def _find_ligand_hetatm_residue(st, ligand_chain_id: str = "B"):
+    """Locates the ligand HETATM residue in a gemmi Structure. Tries
+    ligand_chain_id first; if Boltz didn't honor the requested chain letter,
     falls back to the first HETATM residue found anywhere in the structure.
-    Writes out_pdb_path and returns True on success. Returns False (writing
-    nothing) if no HETATM residue is found at all, so the caller can fall back
-    to unguided diffusion instead of crashing."""
-    import gemmi
-    st = gemmi.read_structure(fold_pdb_path)
-
-    target_res = None
+    Returns None if no HETATM residue exists at all. Shared by
+    _normalize_ligand_id and _normalize_ligand_atom_names so both agree on
+    exactly which residue is "the ligand"."""
     for model in st:
         for chain in model:
             if chain.name != ligand_chain_id:
                 continue
             for res in chain:
                 if res.het_flag == 'H':
-                    target_res = res
-                    break
-            if target_res:
-                break
-        if target_res:
-            break
+                    return res
 
-    if target_res is None:
-        # Fallback: Boltz may not have honored the requested chain id.
-        for model in st:
-            for chain in model:
-                for res in chain:
-                    if res.het_flag == 'H':
-                        target_res = res
-                        break
-                if target_res:
-                    break
-            if target_res:
-                break
+    for model in st:
+        for chain in model:
+            for res in chain:
+                if res.het_flag == 'H':
+                    return res
 
+    return None
+
+
+def _normalize_ligand_id(fold_pdb_path: str, ligand_resname: str, out_pdb_path: str,
+                          ligand_chain_id: str = "B") -> bool:
+    """Rewrites a Boltz co-folded PDB's ligand HETATM residue name (via gemmi) to
+    match ligand_resname, so RFD3's ligand/select_exposed/select_buried selectors
+    (which key off the literal resname) resolve against it. Purely a string edit
+    -- no coordinate transform, since Boltz already places the ligand correctly
+    relative to the protein it just folded. Writes out_pdb_path and returns True
+    on success. Returns False (writing nothing) if no HETATM residue is found at
+    all, so the caller can fall back to unguided diffusion instead of crashing.
+
+    NOTE: this only fixes the residue name. Boltz also assigns its own,
+    unrelated atom names within that residue -- see _normalize_ligand_atom_names
+    for why those need fixing too before the guided spec is usable."""
+    import gemmi
+    st = gemmi.read_structure(fold_pdb_path)
+
+    target_res = _find_ligand_hetatm_residue(st, ligand_chain_id)
     if target_res is None:
         return False
 
@@ -220,35 +219,335 @@ def _normalize_ligand_id(fold_pdb_path: str, ligand_resname: str, out_pdb_path: 
     return True
 
 
+# Fallback table keyed on Rosetta atom TYPE prefix, used only when a params
+# ATOM name's leading alphabetic run doesn't parse to a valid element symbol.
+# Mirrors scripts/derive_ligand_smiles.py's _ROSETTA_TYPE_ELEMENT_FALLBACK
+# (duplicated, not imported -- see _params_heavy_atom_graph). Verified only
+# against ALR's C/N/O/S/H atom set; extend if a future ligand needs 2-letter
+# elements (Cl/Br/Zn, etc.).
+_ROSETTA_TYPE_ELEMENT_FALLBACK = {
+    "Nhis": "N", "Nlys": "N",
+    "CH1": "C", "CH2": "C", "CH3": "C", "COO": "C", "aroC": "C",
+    "OH": "O", "OOC": "O", "ONH2": "O",
+    "Hapo": "H", "Hpol": "H",
+    "S": "S", "SH1": "S",
+}
+
+
+def _infer_ligand_element(atom_name: str, rosetta_type: str) -> str:
+    """Infers an element symbol from a params ATOM record's name/type. Primary
+    rule: the atom NAME's leading alphabetic run is the element itself (e.g.
+    'C18' -> 'C', 'N11' -> 'N'); falls back to _ROSETTA_TYPE_ELEMENT_FALLBACK
+    keyed on the Rosetta TYPE prefix. Mirrors
+    scripts/derive_ligand_smiles.py's _infer_element (duplicated, not
+    imported -- that script is a standalone offline tool, not part of this
+    per-cycle pipeline path; scripts/ isn't an importable package)."""
+    import re
+    from rdkit import Chem
+    periodic_table = Chem.GetPeriodicTable()
+
+    match = re.match(r'[A-Za-z]+', atom_name)
+    if match:
+        candidate = match.group(0)
+        for length in (2, 1):
+            if len(candidate) >= length:
+                symbol = candidate[:length].capitalize()
+                if periodic_table.GetAtomicNumber(symbol) > 0:
+                    return symbol
+
+    for prefix, element in _ROSETTA_TYPE_ELEMENT_FALLBACK.items():
+        if rosetta_type.startswith(prefix):
+            return element
+
+    raise ValueError(
+        f"could not infer element for atom name={atom_name!r} type={rosetta_type!r}"
+    )
+
+
+def _params_heavy_atom_graph(params_path: str):
+    """Parses a Rosetta .params file's ATOM/BOND records into a heavy-atom-only
+    connectivity graph: ({atom_name: element}, [(atom1, atom2), ...]) where
+    both bond endpoints are heavy atoms. Hydrogens are dropped entirely --
+    unlike scripts/derive_ligand_smiles.py (which needs them to resolve bond
+    order via DetermineBondOrders), _infer_ligand_atom_mapping only needs
+    connectivity for graph-isomorphism matching, so no bond-order solving or
+    placeholder hydrogen placement is needed here."""
+    atom_types = {}
+    bonds = []
+    with open(params_path) as fh:
+        for line in fh:
+            fields = line.split()
+            if not fields:
+                continue
+            record = fields[0]
+            if record == 'ATOM':
+                atom_types[fields[1]] = fields[2]
+            elif record in ('BOND', 'BOND_TYPE'):
+                bonds.append((fields[1], fields[2]))
+
+    elements = {name: _infer_ligand_element(name, rtype) for name, rtype in atom_types.items()}
+    heavy_names = {name for name, el in elements.items() if el != 'H'}
+    heavy_elements = {name: elements[name] for name in heavy_names}
+    heavy_bonds = [(a, b) for a, b in bonds if a in heavy_names and b in heavy_names]
+    return heavy_elements, heavy_bonds
+
+
+def _resolve_reference_pdb_path(base_json_path: str) -> str:
+    """Reads partial.input from the base RFD3 design spec and resolves it
+    relative to the spec's own directory (always pipeline_inputs). This is
+    the correctly-named, real-coordinate reference ligand structure already
+    shipped alongside every pipeline's inputs -- used as ground truth for
+    atom identity/connectivity/geometry in _infer_ligand_atom_mapping."""
+    with open(base_json_path) as fh:
+        base = json.load(fh)
+    ref = base['partial']['input']
+    if os.path.isabs(ref):
+        return ref
+    return os.path.join(os.path.dirname(base_json_path), ref)
+
+
+def _iter_ligand_atom_names(pdb_path: str, resname: str):
+    """Atom names (fixed-column PDB parsing) of every HETATM record in
+    pdb_path whose resname matches exactly. Fixed-column parsing (not a
+    whitespace split) is required because names like 'A:R' contain a colon
+    -- see _ligand_resname_from_params's docstring."""
+    names = []
+    with open(pdb_path) as fh:
+        for line in fh:
+            if line.startswith('HETATM') and line[17:20].strip() == resname:
+                names.append(line[12:16].strip())
+    return names
+
+
+def _load_reference_ligand_coords(pdb_path: str, resname: str):
+    """Reads {atom_name: (x, y, z)} for the first HETATM residue named
+    exactly resname in pdb_path. Mirrors
+    scripts/derive_ligand_smiles.py's _load_reference_coords (duplicated,
+    not imported -- see _params_heavy_atom_graph); uses the same
+    fixed-column parsing for the same reason (resnames like 'A:R' contain a
+    colon a whitespace split would mangle)."""
+    coords = {}
+    target_resseq = None
+    with open(pdb_path) as fh:
+        for line in fh:
+            if not (line.startswith('HETATM') or line.startswith('ATOM  ')):
+                continue
+            if line[17:20].strip() != resname:
+                if coords:
+                    break  # moved past the matching residue's contiguous block
+                continue
+            resseq = line[22:26].strip()
+            if target_resseq is None:
+                target_resseq = resseq
+            elif resseq != target_resseq:
+                break  # a different residue instance with the same name
+            atom_name = line[12:16].strip()
+            coords[atom_name] = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+    return coords
+
+
+def _infer_ligand_atom_mapping(boltz_atoms: dict, params_path: str, reference_pdb_path: str):
+    """Maps Boltz's arbitrarily-named ligand atom names onto the canonical
+    names read from params_path, via element+connectivity graph isomorphism
+    with a Kabsch-RMSD tie-break. boltz_atoms is
+    {boltz_atom_name: (element, (x, y, z))} for one ligand residue.
+
+    Boltz co-folding assigns its own atom names to the ligand (unrelated to
+    the params file's canonical names), so select_exposed/select_buried
+    (copied verbatim from the base RFD3 spec, keyed by canonical names) never
+    match a Boltz-derived PDB's atom names without this step. Bond order is
+    ignored throughout (the .params file has none) -- only element identity
+    and heavy-atom connectivity establish correspondence:
+      - reference graph: heavy atoms + bonds parsed straight from
+        params_path's ATOM/BOND records (exact, no perception needed)
+      - reference coordinates: the real 3D structure at reference_pdb_path
+        (already correctly named -- see _resolve_reference_pdb_path)
+      - query graph: boltz_atoms' connectivity, perceived from 3D distances
+        via rdkit's DetermineConnectivity (Boltz's ligand output carries no
+        CONECT records)
+    Local topological symmetry (e.g. a sulfonate's three interchangeable
+    terminal oxygens) can produce more than one graph-valid isomorphism; both
+    structures carry real, roughly comparable 3D coordinates for the same
+    ligand pose, so each candidate mapping is Kabsch-superposed against the
+    reference and the lowest-RMSD one wins -- deterministic, and grounded in
+    actual geometry rather than an arbitrary tiebreak. When more than one
+    isomorphism exists, the best-vs-next-best RMSD gap is logged so a
+    suspiciously close tie (a symmetry case this heuristic can't actually
+    distinguish) is visible after the fact rather than silently accepted.
+
+    Returns {boltz_name: canonical_name}, or None (never raises) if: heavy
+    atom counts or element multisets differ, the reference PDB is missing
+    coordinates for a params heavy atom, Boltz connectivity perception fails
+    or yields a disconnected graph, or no isomorphism exists at all --
+    callers must treat None exactly like _normalize_ligand_id returning
+    False (fall back to unguided diffusion)."""
+    from rdkit import Chem
+    from rdkit.Chem import rdDetermineBonds
+    from rdkit.Geometry import Point3D
+
+    ref_elements, ref_bonds = _params_heavy_atom_graph(params_path)
+    ref_resname = _ligand_resname_from_params(params_path)
+    ref_coords = _load_reference_ligand_coords(reference_pdb_path, ref_resname)
+    ref_names = [name for name in ref_elements if name in ref_coords]
+    if len(ref_names) != len(ref_elements):
+        return None  # reference PDB is missing coordinates for a params heavy atom
+
+    if len(boltz_atoms) != len(ref_names):
+        return None
+    if sorted(element for element, _ in boltz_atoms.values()) != sorted(ref_elements[n] for n in ref_names):
+        return None
+
+    ref_mol = Chem.RWMol()
+    ref_idx = {}
+    for name in ref_names:
+        ref_idx[name] = ref_mol.AddAtom(Chem.Atom(ref_elements[name]))
+    for a, b in ref_bonds:
+        if a in ref_idx and b in ref_idx:
+            i, j = ref_idx[a], ref_idx[b]
+            if ref_mol.GetBondBetweenAtoms(i, j) is None:
+                ref_mol.AddBond(i, j, Chem.BondType.SINGLE)
+    ref_conf = Chem.Conformer(ref_mol.GetNumAtoms())
+    for name, idx in ref_idx.items():
+        ref_conf.SetAtomPosition(idx, Point3D(*ref_coords[name]))
+    ref_mol.AddConformer(ref_conf, assignId=True)
+    Chem.SanitizeMol(ref_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_NONE)
+
+    boltz_names = list(boltz_atoms)
+    boltz_mol = Chem.RWMol()
+    boltz_idx = {}
+    for name in boltz_names:
+        element, _ = boltz_atoms[name]
+        boltz_idx[name] = boltz_mol.AddAtom(Chem.Atom(element))
+    boltz_conf = Chem.Conformer(boltz_mol.GetNumAtoms())
+    for name, idx in boltz_idx.items():
+        _, xyz = boltz_atoms[name]
+        boltz_conf.SetAtomPosition(idx, Point3D(*xyz))
+    boltz_mol.AddConformer(boltz_conf, assignId=True)
+    Chem.SanitizeMol(boltz_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_NONE)
+
+    try:
+        rdDetermineBonds.DetermineConnectivity(boltz_mol)
+    except Exception:
+        return None
+    if len(Chem.GetMolFrags(boltz_mol)) != 1:
+        return None
+
+    matches = boltz_mol.GetSubstructMatches(ref_mol, uniquify=False, useChirality=False, maxMatches=10000)
+    if not matches:
+        return None
+
+    ref_coord_list = [ref_coords[name] for name in ref_names]  # order == ref_mol atom order
+    best_mapping, best_rmsd, second_best_rmsd = None, None, None
+    for match in matches:
+        # match[i] is the boltz_mol atom index matched to ref_mol atom i (ref_names[i]).
+        query_coord_list = [boltz_atoms[boltz_names[qi]][1] for qi in match]
+        rmsd = _kabsch_rmsd(ref_coord_list, query_coord_list)
+        if best_rmsd is None or rmsd < best_rmsd:
+            second_best_rmsd = best_rmsd
+            best_rmsd = rmsd
+            best_mapping = {boltz_names[qi]: ref_names[i] for i, qi in enumerate(match)}
+        elif second_best_rmsd is None or rmsd < second_best_rmsd:
+            second_best_rmsd = rmsd
+
+    if len(matches) > 1:
+        gap = (second_best_rmsd - best_rmsd) if second_best_rmsd is not None else float('inf')
+        print(
+            f"[rfd3 guided] ligand atom-name mapping: {len(matches)} candidate "
+            f"isomorphisms, best RMSD={best_rmsd:.4f} vs next-best={second_best_rmsd:.4f} "
+            f"(gap={gap:.4f}) -- a small gap means the tie-break may not be decisive"
+        )
+
+    return best_mapping
+
+
+def _normalize_ligand_atom_names(pdb_path: str, params_path: str, base_json_path: str,
+                                  out_pdb_path: str, ligand_chain_id: str = "B") -> bool:
+    """Rewrites a resname-normalized guided PDB's ligand HETATM *atom* names
+    (not just its residue name -- see _normalize_ligand_id) to match the
+    canonical names read from params_path, via _infer_ligand_atom_mapping.
+    Required because select_exposed/select_buried in the guided RFD3 spec are
+    copied verbatim from the base spec and are keyed by those canonical
+    names, but Boltz assigns its own arbitrary atom names during co-folding
+    -- without this, RFD3's input validator rejects every guided run.
+
+    Writes out_pdb_path (may be the same path as pdb_path) and returns True
+    on success. Returns False (writing nothing) if no ligand residue is
+    found, or no full atom-name mapping could be established, so the caller
+    falls back to unguided diffusion instead of producing a guided spec RFD3
+    will reject."""
+    import gemmi
+    st = gemmi.read_structure(pdb_path)
+
+    target_res = _find_ligand_hetatm_residue(st, ligand_chain_id)
+    if target_res is None:
+        return False
+
+    boltz_atoms = {
+        atom.name: (atom.element.name, (atom.pos.x, atom.pos.y, atom.pos.z))
+        for atom in target_res
+    }
+    reference_pdb_path = _resolve_reference_pdb_path(base_json_path)
+    mapping = _infer_ligand_atom_mapping(boltz_atoms, params_path, reference_pdb_path)
+    if mapping is None:
+        return False
+
+    for atom in target_res:
+        atom.name = mapping[atom.name]
+    st.write_pdb(out_pdb_path)
+    return True
+
+
 def _write_guided_rfd3_json(base_json_path: str, guided_pdb_path: str, partial_t: float,
-                             out_json_path: str) -> None:
+                             out_json_path: str) -> bool:
     """Loads the base per-pipeline RFD3 InputSpecification JSON, copies its
     ligand/length/select_exposed/select_buried fields verbatim, replaces 'input'
     with guided_pdb_path, adds partial_t, and writes the result to
-    out_json_path. Only 'input'/'partial_t' differ from the base file."""
+    out_json_path. Only 'input'/'partial_t' differ from the base file.
+
+    Before writing, verifies every atom name referenced by select_exposed/
+    select_buried is actually present in guided_pdb_path's ligand residue --
+    fails safe (returns False, writes nothing) on a stale/mismatched base
+    spec or an atom-mapping bug, rather than reproducing RFD3's
+    ComponentValidationError in a new form. Returns True on success."""
     with open(base_json_path) as fh:
         base = json.load(fh)
     partial = dict(base.get('partial', {}))
+
+    ligand_key = partial.get('ligand')
+    expected_names = set()
+    for field in ('select_exposed', 'select_buried'):
+        names_csv = partial.get(field, {}).get(ligand_key, '')
+        expected_names.update(name for name in names_csv.split(',') if name)
+    present_names = set(_iter_ligand_atom_names(guided_pdb_path, ligand_key))
+    if not expected_names <= present_names:
+        return False
+
     partial['input']     = guided_pdb_path
     partial['partial_t'] = partial_t
     guided = dict(base)
     guided['partial'] = partial
     with open(out_json_path, 'w') as fh:
         json.dump(guided, fh, indent=4)
+    return True
 
 
 def _prepare_guided_rfd3_inputs(base_json_path: str, fold_pdb_path: str, ligand_resname: str,
-                                 partial_t: float, taskdir: str):
-    """Orchestrates _normalize_ligand_id + _write_guided_rfd3_json: writes
-    {taskdir}/in/guided_scaffold.pdb and {taskdir}/in/guided_binder_design.json.
-    Returns the guided JSON path, or None if ligand normalization failed (e.g.
-    no HETATM residue found in fold_pdb_path) -- callers should fall back to
+                                 params_path: str, partial_t: float, taskdir: str):
+    """Orchestrates _normalize_ligand_id + _normalize_ligand_atom_names +
+    _write_guided_rfd3_json: writes {taskdir}/in/guided_scaffold.pdb and
+    {taskdir}/in/guided_binder_design.json. Returns the guided JSON path, or
+    None if any step failed (no ligand found in fold_pdb_path, no full
+    atom-name mapping could be established, or the select_exposed/
+    select_buried coverage check failed) -- callers should fall back to
     unguided diffusion in that case."""
     guided_pdb  = f"{taskdir}/in/guided_scaffold.pdb"
     guided_json = f"{taskdir}/in/guided_binder_design.json"
     if not _normalize_ligand_id(fold_pdb_path, ligand_resname, guided_pdb):
         return None
-    _write_guided_rfd3_json(base_json_path, guided_pdb, partial_t, guided_json)
+    if not _normalize_ligand_atom_names(guided_pdb, params_path, base_json_path, guided_pdb):
+        return None
+    if not _write_guided_rfd3_json(base_json_path, guided_pdb, partial_t, guided_json):
+        return None
     return guided_json
 
 
@@ -368,13 +667,13 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             fold_pdb = self.state.get('rfd3_input_pdb')
             inputs   = base_inputs
             if fold_pdb:
-                ligand_resname = _ligand_resname_from_params(
-                    f"{self.pipeline_inputs}/{self.ligand_params}"
-                )
+                params_path = f"{self.pipeline_inputs}/{self.ligand_params}"
+                ligand_resname = _ligand_resname_from_params(params_path)
                 guided_json = _prepare_guided_rfd3_inputs(
                     base_json_path=base_inputs,
                     fold_pdb_path=fold_pdb,
                     ligand_resname=ligand_resname,
+                    params_path=params_path,
                     partial_t=self.rfd3_partial_t,
                     taskdir=taskdir,
                 )
