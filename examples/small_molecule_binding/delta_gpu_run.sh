@@ -9,8 +9,7 @@
 #
 # Optional overrides (all have defaults based on SCRATCH/$USER):
 #   export MPNN_DIR=/path/to/LigandMPNN
-#   export COLABFOLD_PATH=/path/to/localcolabfold
-#   export COLABFOLD_CACHE_DIR=/path/to/colabfold_cache
+#   export BOLTZ_CACHE=/path/to/boltz_cache
 #
 # Foundry container (RFD3):
 #   The foundry sandbox is stored as a .tar.gz on scratch (built by pull_foundry.sh).
@@ -29,12 +28,12 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=220G
-#SBATCH --time=02:30:00
+#SBATCH --time=04:00:00
 #SBATCH --job-name=impress_sm_binding
-#SBATCH --mail-user=<your e-mail>
+#SBATCH --mail-user=mh1314@scarletmail.rutgers.edu
 #SBATCH --mail-type=ALL
-#SBATCH --output=logs/impress_%j.out
-#SBATCH --error=logs/impress_%j.err
+#SBATCH --output=impress_%j.out
+##SBATCH --error=logs/impress_%j.err
 # NOTE: logs/ must exist before sbatch is called.  Create it once with:
 #   mkdir -p <small_molecule_binding_dir>/logs
 
@@ -68,26 +67,27 @@ dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
 export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
 
-export COLABFOLD_PATH="${COLABFOLD_PATH:-${SCRATCH}/${USER}/localcolabfold}"
-
-# ColabFold model weights cache — kept on scratch to avoid home quota exhaustion.
-# Pre-download once on login node:
-#   export COLABFOLD_CACHE_DIR=${SCRATCH}/${USER}/.cache/colabfold
-#   python -c "from colabfold.download import download_alphafold_params; \
-#              download_alphafold_params('alphafold2', '${COLABFOLD_CACHE_DIR}')"
-export COLABFOLD_CACHE_DIR="${COLABFOLD_CACHE_DIR:-${SCRATCH}/${USER}/.cache/colabfold}"
-mkdir -p "${COLABFOLD_CACHE_DIR}"
+# Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
+# Pre-warm once on a login node via delta_env_setup.sh's Step 12 (boltz has no
+# dedicated "download weights" subcommand; weights auto-download on first
+# `boltz predict` call).
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
 # Extracting to /tmp avoids the scratch quota. Compute nodes have ample /tmp
 # space that is not quota-counted.  If FOUNDRY_SIF_PATH is already set (e.g.
 # a pre-built .sif or a persistent sandbox on a large allocation), extraction
 # is skipped entirely.
+if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
+    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
+fi
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/${USER}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it first: sbatch pull_foundry.sh"
+        echo "       (or set FOUNDRY_SIF_PATH to an existing .sif/sandbox)"
         exit 1
     fi
     _FOUNDRY_TMP="/tmp/foundry_${SLURM_JOB_ID:-$$}"
@@ -101,8 +101,7 @@ fi
 
 echo "MPNN_DIR:          ${MPNN_DIR}"
 echo "FOUNDRY_SIF_PATH:  ${FOUNDRY_SIF_PATH}"
-echo "COLABFOLD_PATH:    ${COLABFOLD_PATH}"
-echo "COLABFOLD_CACHE:   ${COLABFOLD_CACHE_DIR}"
+echo "BOLTZ_CACHE:       ${BOLTZ_CACHE}"
 
 # ── Tool existence checks ──────────────────────────────────────────────────────
 if [ ! -d "${MPNN_DIR}" ]; then
@@ -112,7 +111,8 @@ if [ ! -d "${MPNN_DIR}" ]; then
 fi
 
 # ── Working directory ─────────────────────────────────────────────────────────
-WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
+#WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
+WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/IMPRESS/examples/small_molecule_binding}"
 cd "${WORKDIR}"
 mkdir -p logs
 

@@ -151,3 +151,5 @@ ddict*
 b0
 slurm*
 *slurm
+# scratch archives
+arch/

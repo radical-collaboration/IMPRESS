@@ -15,8 +15,7 @@
 #
 # Tool directories (cloned by this script if absent):
 #   MPNN_DIR           = $SCRATCH/$USER/LigandMPNN
-#   COLABFOLD_PATH     = $SCRATCH/$USER/localcolabfold  (used only for cache ref)
-#   COLABFOLD_CACHE_DIR= $SCRATCH/$USER/.cache/colabfold
+#   BOLTZ_CACHE        = $SCRATCH/$USER/.cache/boltz  (model weights cache)
 #
 # Foundry container (RFD3 backbone diffusion) is managed separately:
 #   Run pull_foundry.sh to build the sandbox tarball; delta_gpu_run.sh unpacks
@@ -52,13 +51,13 @@ PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
 MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
-COLABFOLD_CACHE_DIR="${COLABFOLD_CACHE_DIR:-${SCRATCH}/${USER}/.cache/colabfold}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
 
 echo "================================================================="
 echo "  ENV_DIR            = ${ENV_DIR}"
 echo "  IMPRESS_DIR        = ${IMPRESS_DIR}"
 echo "  MPNN_DIR           = ${MPNN_DIR}"
-echo "  COLABFOLD_CACHE    = ${COLABFOLD_CACHE_DIR}"
+echo "  BOLTZ_CACHE        = ${BOLTZ_CACHE}"
 echo "================================================================="
 
 # ── 1. Create venv ────────────────────────────────────────────────────────────
@@ -70,7 +69,7 @@ _find_python() {
         local p
         p=$(command -v "${candidate}" 2>/dev/null) || continue
         local ver
-        ver=$("${p}" -c "import sys; v=sys.version_info; print(v.major*10+v.minor)" 2>/dev/null) || continue
+        ver=$("${p}" -c "import sys; v=sys.version_info; print(v.major*100+v.minor)" 2>/dev/null) || continue
         [ "${ver}" -ge 311 ] && echo "${p}" && return 0
     done
     return 1
@@ -83,7 +82,7 @@ else
     BASE_PY=$(_find_python || true)
     if [ -z "${BASE_PY}" ]; then
         echo "python3.11+ not in PATH — trying modules..."
-        for mod in python/3.12 python/3.11 cray-python/3.11.7 anaconda3; do
+        for mod in python/3.13.5-gcc13.3.1 cray-python/3.12.12 anaconda3; do
             module load "${mod}" 2>/dev/null || true
             BASE_PY=$(_find_python || true)
             [ -n "${BASE_PY}" ] && echo "  loaded module: ${mod}" && break
@@ -132,30 +131,39 @@ echo ""
 echo "── Step 6: PyTorch (cu121) ──"
 "${PIP}" install -q torch --index-url https://download.pytorch.org/whl/cu121
 
-# ── 7. ColabFold + AlphaFold2 with pinned JAX versions ───────────────────────
+# ── 7. Boltz-2 ────────────────────────────────────────────────────────────────
 #
-# Version constraints validated on Delta gpuA40x4 (CUDA 12.8 / cuDNN 9.25):
+# EMPIRICALLY CONFIRMED: `pip install "boltz[cuda]"` (with or without `-U`)
+# thrashes pip's resolver for a very long time (observed: 28GB+ pip cache,
+# 60-75+ pip-metadata/pip-unpack temp dirs, no completion after ~1hr each
+# attempt) -- boltz pins several dependencies (`numpy<2.0`, `gemmi==0.6.5`,
+# `pytorch-lightning==2.5.0`, etc.) that genuinely conflict with what's
+# already installed in this venv (numpy 2.x from other packages, gemmi 0.7.5,
+# etc. -- see this repo's other steps). Resolving a real, deep conflict like
+# this is inherently slow/combinatorial for pip's resolver, `-U` or not.
 #
-#   colabfold 1.6.2  requires  alphafold-colabfold==2.3.18
-#                              jax>=0.5.2,<0.11
-#
-#   alphafold-colabfold 2.3.18 is compatible with jaxlib 0.5.x but NOT with
-#   jaxlib 0.10.x (MSA feature shape mismatch at runtime).
-#
-#   jax 0.5.2 / jaxlib 0.5.1 require nvidia-cudnn-cu12 >=9.1,<10.0.
-#   Upgrade cudnn to >=9.8.0 so jaxlib's cuDNN version check passes (jaxlib
-#   0.5.1 links against cuDNN 9.x; runtime version must satisfy >=compiled).
+# WORKING APPROACH (installs cleanly in seconds instead of hanging):
+# install boltz with --no-deps, then install its actually-imported runtime
+# dependencies individually, also with --no-deps, accepting the versions
+# already present rather than forcing boltz's exact pins. Verified working:
+# boltz 2.2.1 imports and `boltz predict --help` runs correctly against
+# numpy 1.26.4 (downgraded from whatever was there before -- re-verify
+# pyrosetta/ProDy/impress/asyncflow/rhapsody still import after this step,
+# they were confirmed OK against numpy 1.26.4 during initial validation) and
+# gemmi 0.6.5 (downgraded from 0.7.5). `pip check` will still report several
+# cosmetic mismatches (pytorch-lightning, cuequivariance-ops-torch-cu12,
+# colabfold/ml-dtypes leftovers from before ColabFold was removed, torch's
+# own sympy/triton/nvidia-cublas sub-pins) -- none of these broke any actual
+# import in testing; only re-investigate if a real runtime failure surfaces.
 #
 echo ""
-echo "── Step 7: ColabFold + AlphaFold2 (pinned JAX) ──"
-# Install colabfold with the alphafold extra (pulls alphafold-colabfold 2.3.18,
-# dm-haiku, dm-tree, ml-collections, absl-py).
-"${PIP}" install -q "colabfold[alphafold]"
-# Pin JAX to the era tested with alphafold-colabfold 2.3.18.
-# jaxlib 0.5.2 does not exist on PyPI; 0.5.1 pairs with jax 0.5.2.
-"${PIP}" install -q "jax[cuda12]==0.5.2" "jaxlib==0.5.1"
-# Upgrade cuDNN so jaxlib's runtime check (>=compiled version) passes.
-"${PIP}" install -q "nvidia-cudnn-cu12>=9.8.0,<10.0"
+echo "── Step 7: Boltz-2 ──"
+"${PIP}" install -q --no-deps "boltz[cuda]"
+"${PIP}" install -q --no-deps \
+    pytorch_lightning torchmetrics fairscale einops einx mashumaro modelcif \
+    wandb dm-tree chembl_structure_pipeline \
+    cuequivariance_ops_cu12 cuequivariance_ops_torch_cu12
+"${PY}" -c "import boltz; import torch; print('boltz', boltz.__version__ if hasattr(boltz, '__version__') else '(no __version__)', '+ torch', torch.__version__, 'import OK')"
 
 # ── 8. LigandMPNN ─────────────────────────────────────────────────────────────
 #
@@ -178,9 +186,19 @@ fi
 "${PIP}" install -q ProDy biopython
 
 # ── 9. gemmi — CIF.GZ parsing for backbone conversion ────────────────────────
+#
+# Pinned to 0.6.5, NOT latest: Step 7 installs boltz, which pins gemmi==0.6.5
+# exactly. An unpinned `pip install gemmi` here would silently upgrade to
+# latest and re-break that pin (this happened during initial validation).
+# Verified empirically that 0.6.5 has everything this pipeline's gemmi usage
+# needs: mpnn()'s CIF.GZ->PDB conversion (gemmi.cif.read_string,
+# make_structure_from_block, write_pdb) and rfd3()'s ligand-normalization
+# helper (read_structure, res.het_flag, mutable res.name, write_pdb) both
+# round-trip correctly against 0.6.5.
+#
 echo ""
 echo "── Step 9: gemmi ──"
-"${PIP}" install -q gemmi
+"${PIP}" install -q "gemmi==0.6.5"
 
 # ── 10. Additional dependencies ───────────────────────────────────────────────
 echo ""
@@ -193,20 +211,31 @@ echo "── Step 11: PyRosetta ──"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
-# ── 12. ColabFold model weights ───────────────────────────────────────────────
+# ── 12. Boltz-2 model weights ─────────────────────────────────────────────────
 #
-# Pre-download AlphaFold2 model weights to COLABFOLD_CACHE_DIR so compute
-# nodes (no internet) find them at runtime.  Run this step on a login node.
+# Boltz has no dedicated "download weights" subcommand — weights auto-download
+# on first `boltz predict` call.  Warm the cache with a trivial CPU prediction
+# on a login node so compute nodes (no internet) find them already present at
+# BOLTZ_CACHE.
 #
 echo ""
-echo "── Step 12: ColabFold model weights ──"
-mkdir -p "${COLABFOLD_CACHE_DIR}"
-echo "  Downloading AlphaFold2 weights to ${COLABFOLD_CACHE_DIR} ..."
-"${PY}" -c "
-from colabfold.download import download_alphafold_params
-download_alphafold_params('alphafold2', '${COLABFOLD_CACHE_DIR}')
-print('  Weights downloaded.')
-"
+echo "── Step 12: Boltz-2 model weights (cache warm-up) ──"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+mkdir -p "${BOLTZ_CACHE}"
+_WARM_DIR=$(mktemp -d)
+cat > "${_WARM_DIR}/warm.yaml" <<'YAML'
+version: 1
+sequences:
+  - protein:
+      id: [A]
+      sequence: MAAAAAAAAAAAAAAAAAAA
+      msa: empty
+YAML
+"${ENV_DIR}/bin/boltz" predict "${_WARM_DIR}/warm.yaml" \
+    --out_dir "${_WARM_DIR}/out" --cache "${BOLTZ_CACHE}" \
+    --devices 1 --accelerator cpu --output_format pdb \
+    || echo "WARNING: boltz cache warm-up failed — check login-node internet access"
+rm -rf "${_WARM_DIR}"
 
 # ── 13. Verify ────────────────────────────────────────────────────────────────
 echo ""
@@ -225,14 +254,12 @@ _check "radical.asyncflow" "${PY}" -c "import radical.asyncflow; print(radical.a
 _check "rhapsody-py"       "${PY}" -c "import rhapsody; print('ok')"
 _check "impress"           "${PY}" -c "import impress; print('ok')"
 _check "torch"             "${PY}" -c "import torch; print(torch.__version__)"
-_check "jax"               "${PY}" -c "import jax; print(jax.__version__)"
-_check "colabfold"         "${PY}" -c "import colabfold; print(colabfold.__version__)"
-_check "alphafold"         "${PY}" -c "import alphafold; print('ok')"
+_check "boltz"             "${PY}" -c "import boltz; print('ok')"
 _check "gemmi"             "${PY}" -c "import gemmi; print(gemmi.__version__)"
 _check "pyrosetta"         "${PY}" -c "import pyrosetta; print('ok')"
 _check "ProDy"             "${PY}" -c "import prody; print(prody.__version__)"
 _check "LigandMPNN"        test -d "${MPNN_DIR}" && echo "present"
-_check "colabfold weights" test -d "${COLABFOLD_CACHE_DIR}/params" && echo "present"
+_check "boltz weights"     test -f "${BOLTZ_CACHE}/boltz2_conf.ckpt" && echo "present"
 
 echo ""
 echo "================================================================="
