@@ -49,14 +49,6 @@ fi
 
 mkdir -p "${output_dir}"
 
-# Prevent PyTorch Lightning from installing SLURM auto-requeue signal handlers.
-# PL's SLURMEnvironment.detect() checks for SLURM_JOB_ID *or* SLURM_NTASKS;
-# unsetting only one is insufficient.  When PL detects SLURM it registers
-# SIGTERM/SIGUSR handlers that keep the process group alive after Boltz
-# finishes, causing Dragon to report task failure despite correct output.
-unset SLURM_JOB_ID SLURM_NTASKS SLURM_NODEID SLURM_LOCALID \
-      SLURM_PROCID SLURM_STEP_ID SLURM_STEP_NUM_TASKS SLURM_NODELIST
-
 boltz predict \
     "${fasta_path}" \
     --out_dir "${output_dir}" \

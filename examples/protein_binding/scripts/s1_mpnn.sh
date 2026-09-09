@@ -14,11 +14,6 @@ chain="$6"
 # Re-activate the IMPRESS venv if running inside a subprocess (VIRTUAL_ENV is exported by sbatch).
 [ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
-# Prevent any SLURM-aware library from installing signal handlers that keep the
-# process group alive after MPNN exits (same class of issue fixed in s4_boltz.sh).
-unset SLURM_JOB_ID SLURM_NTASKS SLURM_NODEID SLURM_LOCALID \
-      SLURM_PROCID SLURM_STEP_ID SLURM_STEP_NUM_TASKS SLURM_NODELIST
-
 python3 "$mpnn_script" \
     -pdb="$input_path" \
     -out="$output_dir" \
