@@ -66,7 +66,4 @@ boltz predict \
     --write_full_pae \
     --no_kernels \
     --devices 1 \
-    --override \
-    2>&1 | tee "${output_dir}/boltz_run.log"
-# tee exits 0; check the actual boltz exit code via PIPESTATUS
-test "${PIPESTATUS[0]}" -eq 0
+    --override

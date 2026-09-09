@@ -25,7 +25,7 @@ else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
 TEST_MODE = os.getenv("IMPRESS_TEST_MODE", "0") == "1"
-N_PIPELINES = 4      if TEST_MODE else 4
+N_PIPELINES = 4      if TEST_MODE else 16
 MAX_PASSES  = 10      if TEST_MODE else 10
 MAX_SUB_PIPELINES_OVERRIDE = 3 if TEST_MODE else None  # None = use inline default
 
@@ -68,9 +68,7 @@ ChildPipelineSpawned = define_event(
 # ---------------------------------------------------------------------------
 
 def _on_task_event(event) -> None:
-    if event.event_type == "TaskFailed":
-        wid = getattr(event, "workflow_id", None)
-        print(f"[TELEMETRY] TaskFailed  task={event.task_id}  workflow={wid}")
+    pass
 
 
 # ---------------------------------------------------------------------------
