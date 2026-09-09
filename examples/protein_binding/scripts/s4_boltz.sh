@@ -2,12 +2,11 @@
 set -e
 
 # Step 4: Structure prediction via Boltz
-# Args: $1=fasta_path $2=output_dir
+# Args: $1=fasta_path $2=output_dir $3=gpu_id (optional)
 
 fasta_path="$1"
 output_dir="$2"
-# Optional: caller passes the assigned GPU index as $3 so tasks spread
-# across GPUs 0-3 rather than all piling on device 0.
+# Optional GPU assignment passed by the caller so tasks spread across GPUs.
 if [ -n "${3:-}" ]; then
     export CUDA_VISIBLE_DEVICES="$3"
 fi
@@ -49,14 +48,6 @@ fi
 
 mkdir -p "${output_dir}"
 
-# Prevent PyTorch Lightning from installing SLURM auto-requeue signal handlers.
-# PL's SLURMEnvironment.detect() checks for SLURM_JOB_ID *or* SLURM_NTASKS;
-# unsetting only one is insufficient.  When PL detects SLURM it registers
-# SIGTERM/SIGUSR handlers that keep the process group alive after Boltz
-# finishes, causing Dragon to report task failure despite correct output.
-unset SLURM_JOB_ID SLURM_NTASKS SLURM_NODEID SLURM_LOCALID \
-      SLURM_PROCID SLURM_STEP_ID SLURM_STEP_NUM_TASKS SLURM_NODELIST
-
 boltz predict \
     "${fasta_path}" \
     --out_dir "${output_dir}" \
@@ -66,7 +57,4 @@ boltz predict \
     --write_full_pae \
     --no_kernels \
     --devices 1 \
-    --override \
-    2>&1 | tee "${output_dir}/boltz_run.log"
-# tee exits 0; check the actual boltz exit code via PIPESTATUS
-test "${PIPESTATUS[0]}" -eq 0
+    --override

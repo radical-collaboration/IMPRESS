@@ -20,7 +20,7 @@ diffusion_batch_size="$4"
 unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE
 export PYTHONNOUSERSITE=1
 
-apptainer exec --nv --writable-tmpfs --bind /scratch:/scratch "$foundry_sif_path" rfd3 design \
+apptainer exec --nv --writable-tmpfs ${SCRATCH:+--bind "${SCRATCH}:${SCRATCH}"} "$foundry_sif_path" rfd3 design \
     out_dir="$output_dir" \
     inputs="$inputs" \
     skip_existing=False \

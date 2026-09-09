@@ -36,6 +36,9 @@
 ##SBATCH --error=logs/impress_%j.err
 # NOTE: logs/ must exist before sbatch is called.  Create it once with:
 #   mkdir -p <small_molecule_binding_dir>/logs
+# NOTE: IMPRESS log output (including errors) goes to .out, not .err.
+#   On failure, check logs/impress_<jobid>.out — the .err file will only
+#   contain Python interpreter crashes or output from non-IMPRESS processes.
 
 set -e
 
