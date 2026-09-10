@@ -223,9 +223,11 @@ def check_boltz_output_shape(base_path: str, pipeline_name: str):
 
 def check_guided_json_correctness(base_path: str, pipeline_name: str, pipeline_inputs: str):
     """Every */_rfd3/in/guided_binder_design.json must parse, its partial.input
-    must point at a file that exists, and partial.ligand/length/select_exposed/
+    must point at a file that exists, partial.ligand/select_exposed/
     select_buried must match the base ALR_binder_design.json verbatim (only
-    input/partial_t may legitimately differ) -- mirrors _write_guided_rfd3_json."""
+    input/partial_t may legitimately differ), and partial.length must be
+    absent (RFD3 rejects it during partial diffusion; it's only valid for
+    the base spec's from-scratch diffusion) -- mirrors _write_guided_rfd3_json."""
     pipeline_dir = os.path.join(base_path, pipeline_name)
     guided_jsons = sorted(
         glob.glob(os.path.join(pipeline_dir, "*_rfd3", "in", "guided_binder_design.json"))
@@ -273,7 +275,13 @@ def check_guided_json_correctness(base_path: str, pipeline_name: str, pipeline_i
                     f"(resolved: {resolved})"
                 )
 
-        for field in ("ligand", "length", "select_exposed", "select_buried"):
+        if "length" in partial:
+            failures.append(
+                f"{gj}: partial.length={partial['length']!r} must not be present -- "
+                f"RFD3 rejects 'length' during partial diffusion"
+            )
+
+        for field in ("ligand", "select_exposed", "select_buried"):
             expected = base_partial.get(field)
             actual = partial.get(field)
             if actual != expected:

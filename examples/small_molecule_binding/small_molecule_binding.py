@@ -500,9 +500,16 @@ def _normalize_ligand_atom_names(pdb_path: str, params_path: str, base_json_path
 def _write_guided_rfd3_json(base_json_path: str, guided_pdb_path: str, partial_t: float,
                              out_json_path: str) -> bool:
     """Loads the base per-pipeline RFD3 InputSpecification JSON, copies its
-    ligand/length/select_exposed/select_buried fields verbatim, replaces 'input'
-    with guided_pdb_path, adds partial_t, and writes the result to
-    out_json_path. Only 'input'/'partial_t' differ from the base file.
+    ligand/select_exposed/select_buried fields verbatim, drops 'length',
+    replaces 'input' with guided_pdb_path, adds partial_t, and writes the
+    result to out_json_path. Only 'input'/'partial_t' differ from the base
+    file (besides the dropped 'length').
+
+    'length' is dropped because RFD3's DesignInputSpecification validator
+    rejects it outright when partial.input/partial_t (partial diffusion) are
+    set -- length is inferred from the input structure in that mode. The
+    base file's 'length' is only valid for from-scratch (non-partial)
+    diffusion.
 
     Before writing, verifies every atom name referenced by select_exposed/
     select_buried is actually present in guided_pdb_path's ligand residue --
@@ -512,6 +519,7 @@ def _write_guided_rfd3_json(base_json_path: str, guided_pdb_path: str, partial_t
     with open(base_json_path) as fh:
         base = json.load(fh)
     partial = dict(base.get('partial', {}))
+    partial.pop('length', None)
 
     ligand_key = partial.get('ligand')
     expected_names = set()
