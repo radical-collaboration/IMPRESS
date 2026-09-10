@@ -709,15 +709,29 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             for jf in json_files:
                 with open(f"{out_dir}/{jf}") as fh:
                     data = json.load(fh)
-                m       = data.get('metrics', {})
-                clashes = m.get('n_clashing.ligand_clashes', float('inf'))
-                dev     = m.get('max_ca_deviation', float('inf'))
-                ss      = m.get('helix_fraction', 0) + m.get('sheet_fraction', 0)
+                m = data.get('metrics', {})
+                # RFD3's partial-diffusion (guided-backbone-feedback) mode never
+                # computes ligand-clash or secondary-structure metrics -- the
+                # 'n_clashing.ligand_clashes' key is absent entirely and
+                # helix_fraction/sheet_fraction come back as literal JSON NaN
+                # (so ss = NaN + NaN, and NaN > threshold is always False in
+                # Python) -- only max_ca_deviation and the interresidue clash
+                # counts are populated there. Unguided mode has all of these.
+                guided = 'n_clashing.ligand_clashes' not in m
+                if guided:
+                    clashes = (
+                        m.get('n_clashing.interresidue_clashes_w_sidechain', float('inf'))
+                        + m.get('n_clashing.interresidue_clashes_w_backbone', float('inf'))
+                    )
+                else:
+                    clashes = m.get('n_clashing.ligand_clashes', float('inf'))
+                dev = m.get('max_ca_deviation', float('inf'))
+                ss  = m.get('helix_fraction', 0) + m.get('sheet_fraction', 0)
 
                 if best is None or clashes < best['clashes'] or (
                     clashes == best['clashes'] and dev < best['dev']
                 ):
-                    best = {'file': jf, 'clashes': clashes, 'dev': dev, 'ss': ss}
+                    best = {'file': jf, 'clashes': clashes, 'dev': dev, 'ss': ss, 'guided': guided}
 
             if best is None:
                 self.state.update({
@@ -734,13 +748,16 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             passed = (
                 best['clashes'] == 0
                 and best['dev'] < self.backbone_max_ca_deviation
-                and best['ss']  > self.backbone_min_ss_fraction
+                # SS fraction isn't computable in guided mode (see above) --
+                # skip that check there rather than fail unconditionally.
+                and (best['guided'] or best['ss'] > self.backbone_min_ss_fraction)
             )
             self.state.update({
                 'last_analysis_step': 'backbone',
                 'last_analysis_metrics': {
                     'pass':             passed,
                     'best_model':       best['file'],
+                    'guided':           best['guided'],
                     'ligand_clashes':   best['clashes'],
                     'max_ca_deviation': best['dev'],
                     'ss_fraction':      best['ss'],
@@ -1216,6 +1233,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state.setdefault('last_seq_fasta', None)
         self.state.setdefault('fastrelax_prev_metrics', None)
         self.state.setdefault('interface_prev_metrics', None)
+        self.state.setdefault('backbone_guided_fail_count', 0)
         self.logger.pipeline_log("SmallMoleculeBindingPipeline starting (state machine)")
 
         while self.next_step != STEP_DONE:

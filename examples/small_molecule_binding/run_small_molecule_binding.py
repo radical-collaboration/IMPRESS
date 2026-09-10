@@ -102,12 +102,25 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
     if step == 'backbone':
         if not passed:
+            # Safety net: a guided (partial-diffusion) backbone that keeps
+            # failing QC -- whether for real structural reasons or an
+            # unforeseen RFD3 metrics-schema gap -- would otherwise loop on
+            # the same rfd3_input_pdb forever, since only a *successful* fold
+            # ever clears it. Fall back to unguided regeneration after a few
+            # consecutive guided-mode failures instead of deadlocking.
+            if pipeline.state.get('rfd3_input_pdb') is not None:
+                count = pipeline.state.get('backbone_guided_fail_count', 0) + 1
+                pipeline.state['backbone_guided_fail_count'] = count
+                if count >= 3:
+                    pipeline.state['rfd3_input_pdb'] = None
+                    pipeline.state['backbone_guided_fail_count'] = 0
             pipeline.next_step = STEP_RFD3
         else:
             current, prior = _prior(ETYPE_BACKBONE)
             # Reset on any new backbone -- these are per-backbone retry state,
             # not per-pipeline, and must not leak into the next backbone's
             # first fastrelax/interface attempt (see _stage_metrics_improving).
+            pipeline.state['backbone_guided_fail_count'] = 0
             pipeline.state['seq_retry_count']       = 0
             pipeline.state['fastrelax_prev_metrics'] = None
             pipeline.state['interface_prev_metrics'] = None
