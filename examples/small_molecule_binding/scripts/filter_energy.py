@@ -42,8 +42,6 @@ for pdb_file in files_to_analyze:
                 parts = line.split()
                 ligand_energy = float(parts[-1])  # The last element is the total energy
 
-                print(f"Processed: {pdb_file}, Ligand Energy ({ligand_name}): {ligand_energy}")
-                
                 # Check if the ligand energy is negative
                 if ligand_energy < 0:
                     with open(output_file, 'a') as of:
