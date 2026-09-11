@@ -59,8 +59,7 @@ Writes one paired FASTA file per structure for the structure predictor:
 ### `s4` — Structure Prediction
 Predicts the dimer structure for each (designed sequence, peptide) FASTA. All per-structure tasks are launched in parallel with `asyncio.gather`.
 
-- **Default tool**: Boltz (`scripts/s4_boltz.sh`) using MSA server
-- **Alternative**: ColabFold/AF2 (`scripts/s4_alphafold.sh`) — commented out in code
+- **Tool**: Boltz-2 (`scripts/s4_boltz.sh`). MSA search via the Boltz MSA server is opt-in (`BOLTZ_USE_MSA_SERVER=1`); by default the step uses the MSA cache pre-computed by `delta_env_setup.sh`, since compute nodes have no internet access.
 - **Output**: `af/prediction/dimer_models/<name>/boltz_results_<name>/predictions/<name>/` (PDB + PAE files)
 - **HPC**: 1 GPU per rank
 
