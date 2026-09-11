@@ -36,6 +36,7 @@ class RunConfig:
     # diffusion / refinement
     diffusion_batch_size: int
     num_refine_cycles: int
+    mpnn_ensemble_size: int            # cycle-0 MPNN sequence candidates per backbone
     rfd3_partial_t: float             # RFD3 partial-diffusion noise (A) for guided backbone feedback
 
 
@@ -56,6 +57,7 @@ PROD = RunConfig(
     fold_min_ligand_iptm      = None,
     diffusion_batch_size      = 4,
     num_refine_cycles         = 2,
+    mpnn_ensemble_size        = 10,
     rfd3_partial_t            = 10.0,
 )
 
@@ -73,6 +75,7 @@ TEST = RunConfig(
     fold_min_ligand_iptm      = None,
     diffusion_batch_size      = 1,
     num_refine_cycles         = 1,
+    mpnn_ensemble_size        = 2,
     # Not a pass/fail threshold like the fields above — a diffusion-noise
     # parameter, so kept at a sane real value rather than an inert extreme.
     rfd3_partial_t            = 10.0,
@@ -102,12 +105,30 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
 
     if step == 'backbone':
         if not passed:
+            # Safety net: a guided (partial-diffusion) backbone that keeps
+            # failing QC -- whether for real structural reasons or an
+            # unforeseen RFD3 metrics-schema gap -- would otherwise loop on
+            # the same rfd3_input_pdb forever, since only a *successful* fold
+            # ever clears it. Fall back to unguided regeneration after a few
+            # consecutive guided-mode failures instead of deadlocking.
+            if pipeline.state.get('rfd3_input_pdb') is not None:
+                count = pipeline.state.get('backbone_guided_fail_count', 0) + 1
+                pipeline.state['backbone_guided_fail_count'] = count
+                if count >= 3:
+                    pipeline.state['rfd3_input_pdb'] = None
+                    pipeline.state['backbone_guided_fail_count'] = 0
+                    pipeline.logger.pipeline_log(
+                        "[adaptive/backbone] guided backbone QC failed 3x in a "
+                        "row -- abandoning guided mode, reverting to unguided "
+                        "(scratch) RFD3 generation"
+                    )
             pipeline.next_step = STEP_RFD3
         else:
             current, prior = _prior(ETYPE_BACKBONE)
             # Reset on any new backbone -- these are per-backbone retry state,
             # not per-pipeline, and must not leak into the next backbone's
             # first fastrelax/interface attempt (see _stage_metrics_improving).
+            pipeline.state['backbone_guided_fail_count'] = 0
             pipeline.state['seq_retry_count']       = 0
             pipeline.state['fastrelax_prev_metrics'] = None
             pipeline.state['interface_prev_metrics'] = None
@@ -138,14 +159,36 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
                 pipeline.state['seq_retry_count'] = count
                 if count >= 3:
                     pipeline.state['seq_retry_count'] = 0
+                    # A guided backbone that fails downstream of backbone-QC
+                    # gets only this one shot -- otherwise rfd3_input_pdb stays
+                    # pinned to the same seed indefinitely (only 'backbone' QC
+                    # failures and 'fold' decisions used to clear it), causing
+                    # RFD3 to regenerate near-duplicate doomed backbones for
+                    # dozens of cycles in a row (confirmed via job 21945304:
+                    # 17 consecutive p2 rfd3 generations produced byte-identical
+                    # guided_scaffold.pdb output from one stuck seed).
+                    pipeline.state['rfd3_input_pdb'] = None
                     pipeline.next_step = STEP_RFD3
+                    pipeline.logger.pipeline_log(
+                        "[adaptive/sequence] sequence-similarity gate failed "
+                        "3x in a row on this backbone -- escalating to a new, "
+                        "unguided backbone (STEP_RFD3) instead of another "
+                        "resequencing retry"
+                    )
                 else:
                     pipeline.next_step = STEP_RETRY_SEQ
 
     elif step == 'packmin':
         total_score = metrics.get('total_score')
         if total_score is not None and total_score > 0:
+            # See the sequence-stage comment above: any STEP_RFD3 escalation
+            # must clear a stuck guided seed, not just backbone-QC failures.
+            pipeline.state['rfd3_input_pdb'] = None
             pipeline.next_step = STEP_RFD3   # badly packed — restart backbone
+            pipeline.logger.pipeline_log(
+                f"[adaptive/packmin] total_score={total_score} > 0 -- badly "
+                "packed, escalating to a new, unguided backbone (STEP_RFD3)"
+            )
         else:
             pipeline.next_step = STEP_MPNN
 
@@ -178,9 +221,17 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
             pipeline.state['fastrelax_fail_count'] = count
 
             if (prev is not None and not improving) or count >= 5:
+                reason = "safety cap (5 attempts)" if count >= 5 else "non-improving metrics"
                 pipeline.state['fastrelax_fail_count']   = 0
                 pipeline.state['fastrelax_prev_metrics'] = None
+                # See the sequence-stage comment above: any STEP_RFD3 escalation
+                # must clear a stuck guided seed, not just backbone-QC failures.
+                pipeline.state['rfd3_input_pdb'] = None
                 pipeline.next_step = STEP_RFD3
+                pipeline.logger.pipeline_log(
+                    f"[adaptive/fastrelax] escalating to a new, unguided "
+                    f"backbone (STEP_RFD3) ({reason}); attempt={count} metrics={metrics}"
+                )
             else:
                 pipeline.next_step = STEP_MPNN
 
@@ -204,9 +255,17 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
             pipeline.state['interface_fail_count'] = count
 
             if (prev is not None and not improving) or count >= 5:
+                reason = "safety cap (5 attempts)" if count >= 5 else "non-improving metrics"
                 pipeline.state['interface_fail_count']   = 0
                 pipeline.state['interface_prev_metrics'] = None
+                # See the sequence-stage comment above: any STEP_RFD3 escalation
+                # must clear a stuck guided seed, not just backbone-QC failures.
+                pipeline.state['rfd3_input_pdb'] = None
                 pipeline.next_step = STEP_RFD3
+                pipeline.logger.pipeline_log(
+                    f"[adaptive/interface] escalating to a new, unguided "
+                    f"backbone (STEP_RFD3) ({reason}); attempt={count} metrics={metrics}"
+                )
             else:
                 pipeline.next_step = STEP_MPNN
 
@@ -215,16 +274,32 @@ async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
         if not passed:
             # Failed fold — don't use this model as a backbone guide
             pipeline.state['rfd3_input_pdb'] = None
+            pipeline.logger.pipeline_log(
+                "[adaptive/fold] fold failed -- next backbone will be unguided (scratch)"
+            )
         else:
             if not prior:
                 pipeline.state['rfd3_input_pdb'] = None
+                pipeline.logger.pipeline_log(
+                    "[adaptive/fold] fold passed but no prior fold history yet -- "
+                    "next backbone will be unguided (scratch)"
+                )
             else:
                 overall, selective, has_data = _ensemble_selective_avg(
                     current[3], prior, _ca_rmsd, similar_if_low=True)
                 if has_data and selective is not None and selective > overall:
                     pipeline.state['rfd3_input_pdb'] = current[3]  # guided backbone
+                    pipeline.logger.pipeline_log(
+                        f"[adaptive/fold] similar-cluster avg ({selective:.2f}) > "
+                        f"overall avg ({overall:.2f}) -- next backbone guided from {current[3]}"
+                    )
                 else:
                     pipeline.state['rfd3_input_pdb'] = None         # scratch
+                    pipeline.logger.pipeline_log(
+                        f"[adaptive/fold] guided-feedback condition not met "
+                        f"(has_data={has_data}, selective={selective}, overall={overall}) "
+                        "-- next backbone will be unguided (scratch)"
+                    )
         pipeline.next_step = STEP_RFD3
 
     else:
@@ -246,8 +321,8 @@ async def impress_smallmol_bind() -> None:
     )
     os.makedirs(work_dir, exist_ok=True)
     # Input data lives in the source tree; pass as absolute so it resolves
-    # correctly regardless of what base_path / work_dir is set to.
-    input_dir = os.path.join(examples_dir, "p1_in")
+    # correctly regardless of what base_path / work_dir is set to. Each
+    # pipeline reads its own p{i}_in/ directory rather than sharing one.
 
     if BACKEND == "dragon":
         backend = await DragonExecutionBackend()
@@ -265,7 +340,7 @@ async def impress_smallmol_bind() -> None:
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),
-                "input_dir":                 input_dir,
+                "input_dir":                 os.path.join(examples_dir, f"p{i}_in"),
                 "backbone_max_ca_deviation": cfg.backbone_max_ca_deviation,
                 "backbone_min_ss_fraction":  cfg.backbone_min_ss_fraction,
                 "fastrelax_max_fa_rep":      cfg.fastrelax_max_fa_rep,
@@ -276,6 +351,7 @@ async def impress_smallmol_bind() -> None:
                 "fold_min_ligand_iptm":      cfg.fold_min_ligand_iptm,
                 "diffusion_batch_size":      cfg.diffusion_batch_size,
                 "num_refine_cycles":         cfg.num_refine_cycles,
+                "mpnn_ensemble_size":        cfg.mpnn_ensemble_size,
                 "rfd3_partial_t":            cfg.rfd3_partial_t,
                 "max_tasks":                 cfg.max_tasks,
                 **({"gpu_id": all_gpus[(i - 1) % len(all_gpus)]} if all_gpus else {}),
