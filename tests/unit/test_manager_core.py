@@ -3,8 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 # Import the classes we're testing
-from impress import ImpressBasePipeline, PipelineSetup
-from impress import ImpressManager
+from impress import ImpressBasePipeline, ImpressManager, PipelineSetup
 
 
 class MockPipeline(ImpressBasePipeline):

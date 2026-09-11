@@ -1,9 +1,10 @@
 # tests/conftest.py
-import pytest
 import shutil
 from pathlib import Path
-
 from unittest.mock import Mock
+
+import pytest
+
 from impress import ImpressManager
 
 

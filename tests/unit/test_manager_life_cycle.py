@@ -12,8 +12,11 @@ class MockWorkflowEngine:
     """Mock workflow engine"""
 
     @classmethod
-    async def create(cls, backend=None):
+    async def create(cls, backend=None, **kwargs):
         return cls()
+
+    async def shutdown(self):
+        pass
 
 
 class TestManagerLifecycle:
@@ -113,3 +116,18 @@ class TestManagerLifecycle:
 
         # Should take at least 0.15 seconds due to slow adaptive function
         assert end_time - start_time >= 0.15
+
+    @pytest.mark.asyncio
+    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
+    async def test_start_exception_still_shuts_down_engine(self, impress_manager):
+        """WorkflowEngine.shutdown() is called even when a pipeline raises mid-run"""
+
+        class ExplodingPipeline(MockPipeline):
+            async def run(self):
+                raise RuntimeError("pipeline exploded")
+
+        await impress_manager.start(
+            [{"name": "boom", "type": ExplodingPipeline, "config": {}, "kwargs": {}}]
+        )
+        # If shutdown() raises AttributeError, the try/finally fix is broken
+        assert len(impress_manager.pipeline_tasks) == 0
