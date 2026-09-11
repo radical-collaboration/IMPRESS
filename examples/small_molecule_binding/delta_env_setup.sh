@@ -200,18 +200,39 @@ echo ""
 echo "── Step 9: gemmi ──"
 "${PIP}" install -q "gemmi==0.6.5"
 
-# ── 10. Additional dependencies ───────────────────────────────────────────────
+# ── 10. rdkit — ligand atom-name graph-isomorphism mapping for guided RFD3 ────
+#
+# Used by rfd3()'s guided-backbone-feedback path (_infer_ligand_atom_mapping
+# in small_molecule_binding.py) to reconcile Boltz-2's arbitrary ligand atom
+# names against the canonical names in the ligand's .params file, via
+# element+connectivity graph isomorphism (rdDetermineBonds.DetermineConnectivity
+# + GetSubstructMatches) with a Kabsch-RMSD tie-break. Without this, RFD3's
+# input validator rejects every guided run (ComponentValidationError) --
+# confirmed as the root cause of 4/4 pipeline crashes in a real production
+# run (job 21916521).
+#
+# Pinned to 2024.9.6, the same version already used by the offline
+# scripts/derive_ligand_smiles.py tool in this repo (rdkit has no
+# dependency on numpy/gemmi's own pins, so it should not disturb Step 7's
+# numpy<2.0/gemmi==0.6.5 resolution -- `pip check` after this step should
+# stay clean; re-investigate only if it doesn't).
+#
 echo ""
-echo "── Step 10: pandas + biopandas ──"
+echo "── Step 10: rdkit ──"
+"${PIP}" install -q "rdkit==2024.9.6"
+
+# ── 11. Additional dependencies ───────────────────────────────────────────────
+echo ""
+echo "── Step 11: pandas + biopandas ──"
 "${PIP}" install -q pandas biopandas
 
-# ── 11. PyRosetta ─────────────────────────────────────────────────────────────
+# ── 12. PyRosetta ─────────────────────────────────────────────────────────────
 echo ""
-echo "── Step 11: PyRosetta ──"
+echo "── Step 12: PyRosetta ──"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
-# ── 12. Boltz-2 model weights ─────────────────────────────────────────────────
+# ── 13. Boltz-2 model weights ─────────────────────────────────────────────────
 #
 # Boltz has no dedicated "download weights" subcommand — weights auto-download
 # on first `boltz predict` call.  Warm the cache with a trivial CPU prediction
@@ -219,7 +240,7 @@ echo "── Step 11: PyRosetta ──"
 # BOLTZ_CACHE.
 #
 echo ""
-echo "── Step 12: Boltz-2 model weights (cache warm-up) ──"
+echo "── Step 13: Boltz-2 model weights (cache warm-up) ──"
 BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 _WARM_DIR=$(mktemp -d)
@@ -237,9 +258,9 @@ YAML
     || echo "WARNING: boltz cache warm-up failed — check login-node internet access"
 rm -rf "${_WARM_DIR}"
 
-# ── 13. Verify ────────────────────────────────────────────────────────────────
+# ── 14. Verify ────────────────────────────────────────────────────────────────
 echo ""
-echo "── Step 13: Verifying installation ──"
+echo "── Step 14: Verifying installation ──"
 _check() {
     local label="$1"; shift
     if out=$("$@" 2>&1); then
@@ -256,6 +277,7 @@ _check "impress"           "${PY}" -c "import impress; print('ok')"
 _check "torch"             "${PY}" -c "import torch; print(torch.__version__)"
 _check "boltz"             "${PY}" -c "import boltz; print('ok')"
 _check "gemmi"             "${PY}" -c "import gemmi; print(gemmi.__version__)"
+_check "rdkit"             "${PY}" -c "import rdkit; print(rdkit.__version__)"
 _check "pyrosetta"         "${PY}" -c "import pyrosetta; print('ok')"
 _check "ProDy"             "${PY}" -c "import prody; print(prody.__version__)"
 _check "LigandMPNN"        test -d "${MPNN_DIR}" && echo "present"
