@@ -1,7 +1,7 @@
 import asyncio
 from typing import List
 
-from rhapsody.backends import DragonExecutionBackendV3
+from rhapsody.backends import DragonExecutionBackend
 from rhapsody.telemetry import define_event
 
 from impress import PipelineSetup
@@ -9,7 +9,7 @@ from impress import ImpressManager
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
-rhapsody.enable_logging(level=logging.DEBUG)
+rhapsody.enable_logging(level=logging.INFO)
 
 
 def _on_task_event(event) -> None:
@@ -19,7 +19,7 @@ def _on_task_event(event) -> None:
 
 
 async def impress_protein_bind_nonadaptive() -> None:
-    backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackend()
 
     manager: ImpressManager = ImpressManager(
         execution_backend=backend,
