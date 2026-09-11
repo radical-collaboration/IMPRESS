@@ -7,31 +7,12 @@ from pyrosetta.rosetta import *
 from pyrosetta.teaching import *
 
 #Core Includes
-from rosetta.core.kinematics import MoveMap
-from rosetta.core.kinematics import FoldTree
-from rosetta.core.pack.task import TaskFactory
-from rosetta.core.pack.task import operation
-from rosetta.core.simple_metrics import metrics
-from rosetta.core.select import residue_selector as selections
-from rosetta.core import select
-from rosetta.core.select.movemap import *
+from pyrosetta.rosetta.core.pack.task import operation
+from pyrosetta.rosetta.core.select.movemap import *
 
 #Protocol Includes
-from rosetta.protocols import minimization_packing as pack_min
-from rosetta.protocols import relax as rel
-from rosetta.protocols.antibody.residue_selector import CDRResidueSelector
-from rosetta.protocols.antibody import *
-from rosetta.protocols.loops import *
-'''
-When downloading a new PDB file, do a pack_min minimization with coordinate constraints and a ligand.
+from pyrosetta.rosetta.protocols import minimization_packing as pack_min
 
-Requires a PDB file input.
-
-Options:
-Name (-n, string): change the output PDB name from [original_name]_relaxed.pdb
-Score function (-sf, string): change the score function from the default of ref2015_cst
-Catalytic residues (-cat, int, multiple accepted): list residues that should not be moved 
-'''
 
 def parse_args():
 	parser = argparse.ArgumentParser()
@@ -93,18 +74,12 @@ def main(args):
 
 	# Packer tasks with -ex1 and -ex2
 	tf = ut.make_task_factory()
-        #From pack_min tutorial from jupyter notebooks
-        ###tf = TaskFactory()
 
 	tf.push_back(operation.InitializeFromCommandline())
 	tf.push_back(operation.RestrictToRepacking())
 	packer = pack_min.PackRotamersMover()
 	packer.task_factory(tf)
 
-        #This line is from khare lab relax code, not sure if this will be necessary:
-        #pp = Pose(pose)
-
-        #Run the packer. (Note this may take a few minutes)
 	packer.apply(pose)
 
         # Write Rosetta score JSON alongside the output PDB
@@ -115,12 +90,11 @@ def main(args):
 
         #Dump the PDB
 	pose.dump_pdb(out_name)
-        ##pose.dump_pdb('/outputs/2r0l_all_repack.pdb')
 
 if __name__ == '__main__':
 	args = parse_args()
 
-	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false'
+	opts = '-ex1 -ex2 -use_input_sc -flip_HNQ -no_optH false -mute all'
 	if args.constraints:
 		opts += ' -enzdes::cstfile {}'.format(args.constraints)
 		opts += ' -run:preserve_header'
