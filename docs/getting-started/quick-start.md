@@ -28,7 +28,8 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from impress.utils.session import session_work_dir
 ```
 
 
@@ -114,17 +115,20 @@ We now create a function that starts N pipelines at once.
 
 ```python
 async def run():
-    manager = ImpressManager(
-        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
-    )
+    backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    manager = ImpressManager(flow)
     
     # start 3 pipelines in parallel and wait for them to finish
-    await manager.start(
-        pipeline_setups = [
-            PipelineSetup(name='p1', type=ProteinPipeline),
-            PipelineSetup(name='p2', type=ProteinPipeline),
-            PipelineSetup(name='p3', type=ProteinPipeline)]
-    )
+    try:
+        await manager.start(
+            pipeline_setups = [
+                PipelineSetup(name='p1', type=ProteinPipeline),
+                PipelineSetup(name='p2', type=ProteinPipeline),
+                PipelineSetup(name='p3', type=ProteinPipeline)]
+        )
+    finally:
+        await flow.shutdown()
 ```
 
 Here:
@@ -155,7 +159,8 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from impress.utils.session import session_work_dir
 
 
 class ProteinPipeline(ImpressBasePipeline):
@@ -185,16 +190,19 @@ class ProteinPipeline(ImpressBasePipeline):
         s3_res = await self.s3()
 
 async def run_pipeline():
-    manager = ImpressManager(
-        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
-    )
+    backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    manager = ImpressManager(flow)
 
-    await manager.start(
-        pipeline_setups = [
-            PipelineSetup(name='p1', type=ProteinPipeline),
-            PipelineSetup(name='p2', type=ProteinPipeline),
-            PipelineSetup(name='p3', type=ProteinPipeline)]
-    )
+    try:
+        await manager.start(
+            pipeline_setups = [
+                PipelineSetup(name='p1', type=ProteinPipeline),
+                PipelineSetup(name='p2', type=ProteinPipeline),
+                PipelineSetup(name='p3', type=ProteinPipeline)]
+        )
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

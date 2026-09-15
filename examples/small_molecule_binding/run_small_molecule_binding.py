@@ -3,10 +3,11 @@ import os
 from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
+from impress.utils.session import session_work_dir
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -141,7 +142,8 @@ async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackendV3()
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -163,8 +165,10 @@ async def impress_smallmol_bind() -> None:
         for i in range(1,9)
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":
