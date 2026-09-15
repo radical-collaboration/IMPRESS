@@ -3,10 +3,17 @@ import subprocess
 
 
 def find_gpus() -> list[int]:
-    """Return GPU IDs available to this process.
+    """Return GPU IDs visible to this process.
 
     Checks CUDA_VISIBLE_DEVICES first, then nvidia-smi.
     Falls back to an empty list when neither yields results.
+
+    Standalone diagnostic helper only. GPU placement is the execution
+    backend's responsibility; this is not a supported way to pin work to
+    devices. It was previously used to hand-assign a `gpu_id` per pipeline
+    as an application-level workaround for a backend that ignored GPU
+    placement hints. That backend has since been fixed, so nothing in the
+    framework calls this.
     """
     val = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     ids = [int(g) for g in val.split(",") if g.strip().isdigit()]
