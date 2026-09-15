@@ -83,14 +83,20 @@ The pipeline manager is configured to support adaptive behavior:
 ```python
 async def run() -> None:
     execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend)
+    flow = await WorkflowEngine.create(
+        backend=execution_backend, work_dir=session_work_dir()
+    )
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups = [PipelineSetup(name=f'p{i}',
                                      type=DummyProteinPipeline,
                                      adaptive_fn=adaptive_optimization_strategy)  # Adaptive function registered
                        for i in range(1, 4)]
 
-    await manager.start(pipeline_setups=pipeline_setups)
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 ```
 
 **Critical setup element:**

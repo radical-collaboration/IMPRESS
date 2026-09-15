@@ -7,8 +7,11 @@ from rhapsody.backends import DragonExecutionBackendV3
 from rhapsody.telemetry import define_event
 from rhapsody.telemetry.events import make_event
 
+from radical.asyncflow import WorkflowEngine
+
 from impress import PipelineSetup
 from impress import ImpressManager
+from impress.utils.session import session_work_dir
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
@@ -68,8 +71,10 @@ async def adaptive_criteria(current_score: float, previous_score: float) -> bool
 async def impress_protein_bind() -> None:
     backend = await DragonExecutionBackendV3()
 
+    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+
     manager: ImpressManager = ImpressManager(
-        execution_backend=backend,
+        flow,
         telemetry_config={
             "checkpoint_path": "./telemetry/",
             "resource_poll_interval": 5.0,
@@ -193,16 +198,19 @@ async def impress_protein_bind() -> None:
         for i in range(1, 17)
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
 
-    if manager.telemetry:
-        summary = manager.telemetry.summary()
-        print(f"[TELEMETRY] tasks={summary.get('tasks', {})}")
-        dur = summary.get("duration")
-        if dur:
-            print(f"[TELEMETRY] mean task time: {dur['mean_seconds'] * 1000:.1f} ms")
-
-    await manager.flow.shutdown()
+        if manager.telemetry:
+            summary = manager.telemetry.summary()
+            print(f"[TELEMETRY] tasks={summary.get('tasks', {})}")
+            dur = summary.get("duration")
+            if dur:
+                print(
+                    f"[TELEMETRY] mean task time: {dur['mean_seconds'] * 1000:.1f} ms"
+                )
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

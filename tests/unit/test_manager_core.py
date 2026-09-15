@@ -43,15 +43,9 @@ class MockPipeline(ImpressBasePipeline):
 
 
 @pytest.fixture
-def mock_execution_backend():
-    """Mock execution backend"""
-    return Mock()
-
-
-@pytest.fixture
-def impress_manager(mock_execution_backend):
+def impress_manager(mock_flow):
     """Create an ImpressManager instance for testing"""
-    manager = ImpressManager(mock_execution_backend, use_colors=False)
+    manager = ImpressManager(mock_flow, use_colors=False)
     manager.logger = Mock()  # Mock the logger
     return manager
 
@@ -69,11 +63,11 @@ def sample_pipeline_setup():
 
 
 class TestImpressManagerCore:
-    def test_init(self, mock_execution_backend):
+    def test_init(self, mock_flow):
         """Test ImpressManager initialization"""
-        manager = ImpressManager(mock_execution_backend, use_colors=True)
+        manager = ImpressManager(mock_flow, use_colors=True)
 
-        assert manager.execution_backend == mock_execution_backend
+        assert manager.flow is mock_flow
         assert isinstance(manager.pipeline_tasks, dict)
         assert isinstance(manager.adaptive_tasks, dict)
         assert isinstance(manager.new_pipeline_buffer, list)

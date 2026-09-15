@@ -6,10 +6,11 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
+from impress.utils.session import session_work_dir
 from discontinuous_scaffolds import (
     DiscontinuousScaffoldsPipeline,
     STEP_BACKBONE_GEN,
@@ -441,7 +442,8 @@ async def run_discontinuous_scaffolds() -> None:
     # For HPC execution use:
     backend = await DragonExecutionBackendV3()
 
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -473,8 +475,10 @@ async def run_discontinuous_scaffolds() -> None:
         for i in range(24,29)
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":
