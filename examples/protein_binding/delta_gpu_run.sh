@@ -2,29 +2,32 @@
 #
 # Protein Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
 #
-# Example:
+# Set WORK_DIR to your personal work directory before calling sbatch:
+#
+#   export WORK_DIR=/path/to/your/workdir
 #   sbatch delta_gpu_run.sh
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
-#SBATCH --tasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
-#SBATCH --mem=220G
-#SBATCH --time=02:00:00
+#SBATCH --mem=192g
+#SBATCH --time=00:30:00
+#SBATCH --exclusive
 #SBATCH --job-name=impress_protein
-#SBATCH --mail-user=mg2347@soe.rutgers.edu
-#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=mgoliyad@gmail.com
+#SBATCH --mail-type=ALL
 #SBATCH --output=logs/impress_%j.out
 #SBATCH --error=logs/impress_%j.err
 # NOTE: logs/ must exist before sbatch is called.  Create it once with:
 #   mkdir -p <protein_binding_dir>/logs
+# NOTE: IMPRESS log output (including errors) goes to .out, not .err.
+#   On failure, check logs/impress_<jobid>.out — the .err file will only
+#   contain Python interpreter crashes or output from non-IMPRESS processes.
 
 set -e
 
@@ -34,56 +37,54 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
-    exit 1
-fi
-
-# ── System library paths (Delta-specific, required by Dragon) ─────────────────
-export CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8
-export MPI_LIB=/opt/cray/pe/mpich/8.1.32/ofi/gnu/11.2/lib-abi-mpich
-export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
-export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
+# ── Work directory ────────────────────────────────────────────────────────────
+: "${WORK_DIR:?Set WORK_DIR before calling sbatch, e.g.: export WORK_DIR=/path/to/your/workdir}"
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress_A}"
-unset SLURM_EXPORT_ENV
-source "${IMPRESS_VENV}/bin/activate"
-dragon-config add --ofi-runtime-lib="${FAB_LIB}"
+IMPRESS_VENV="${WORK_DIR}/ve/impress"
 
-# ── Tool paths (adjust for your allocation) ───────────────────────────────────
-export MPNN_PATH="${MPNN_PATH:-${SCRATCH}/${USER}/ProteinMPNN}"
-export AF2_DATABASE="${AF2_DATABASE:-${SCRATCH}/${USER}/alphafold_database}"
-export AF2_SIF="${AF2_SIF:-${SCRATCH}/${USER}/alphafold.sif}"
-# Boltz lives in a separate Python 3.12 conda env (boltz 2.x requires numpy<2.0,
-# scipy==1.13.1 etc. which have no Python 3.13 wheels).
-export BOLTZ_VENV="${BOLTZ_VENV:-${HOME}/ve/boltz}"
-# Boltz model weight cache — kept in home dir; scratch inode quota can't hold
-# the 45K CCD molecule files that boltz extracts from mols.tar on first run.
-export BOLTZ_CACHE_DIR="${BOLTZ_CACHE_DIR:-${HOME}/boltz}"
+module load cray-python
+module load cray-mpich-abi
+
+source "${IMPRESS_VENV}/bin/activate"
+
+# ── Tool paths ────────────────────────────────────────────────────────────────
+export MPNN_PATH="${WORK_DIR}/ProteinMPNN"
+if [ ! -x "${MPNN_PATH}/protein_mpnn_run.py" ]; then
+    echo "WARNING: ProteinMPNN not found at ${MPNN_PATH}"
+    echo "         Clone it manually: git clone https://github.com/dauparas/ProteinMPNN ${MPNN_PATH}"
+    echo "         Or run delta_env_setup.sh first"
+fi
+# Boltz venv — separate venv with boltz[cuda] + rhapsody-py[dragon].
+export BOLTZ_VENV="${WORK_DIR}/ve/boltz"
+# Boltz model weight cache (45K CCD files).
+export BOLTZ_CACHE_DIR="${WORK_DIR}/boltz"
 mkdir -p "${BOLTZ_CACHE_DIR}"
 
 # ── IMPRESS paths ─────────────────────────────────────────────────────────────
-export IMPRESS_SCRIPTS_DIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/protein_binding}"
+export IMPRESS_SCRIPTS_DIR="${WORK_DIR}/IMPRESS/examples/protein_binding"
 # IMPRESS_BASE_DIR: parent of prod_in/ — pipeline builds prod_in/<name>_in from here
-export IMPRESS_BASE_DIR="${IMPRESS_BASE_DIR:-${SCRATCH}/${USER}/IMPRESS_inputs}"
-export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${SCRATCH}/${USER}/IMPRESS_outputs}"
+export IMPRESS_BASE_DIR="${WORK_DIR}/IMPRESS_inputs"
+export IMPRESS_OUTPUT_DIR="${WORK_DIR}/IMPRESS_outputs"
 
-# IMPRESS_TEST_MODE=1: 2 pipelines, max_passes=1, no child pipelines.
-# Runs a single MPNN → score → AF2 cycle to verify end-to-end path.
-# Set before sbatch:  IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
-export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"
-echo "TEST_MODE:         ${IMPRESS_TEST_MODE}"
+# IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
+# ProcessPoolExecutor — useful for development / non-Dragon clusters).
+# Set before sbatch:  IMPRESS_BACKEND=local sbatch delta_gpu_run.sh
+export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
+echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
 
 # ── Working directory ─────────────────────────────────────────────────────────
 WORKDIR="${IMPRESS_SCRIPTS_DIR}"
 cd "${WORKDIR}"
 mkdir -p logs
 
+# IMPRESS_SESSION_DIR: asyncflow session dir — runinfo, captured task
+# stdout/stderr (.stdout/.stderr per task UID).  Must be on Lustre so files
+# survive the job and can be reviewed after failures.
+export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${WORKDIR}/logs/sessions}"
+mkdir -p "${IMPRESS_SESSION_DIR}"
+
 # ── Run ───────────────────────────────────────────────────────────────────────
-# asyncflow session dirs now go to /tmp (node-local, no quota) via
-# IMPRESS_SESSION_DIR; no need to clean them from cwd.
 
 # -s = single-node Dragon runtime; -m = multi-node (uses MPI/OFI fabric).
 if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
@@ -92,9 +93,27 @@ else
     DRAGON_MODE="-s"
 fi
 
-rm -f ddict_orc*
+#rm  -rf "${WORK_DIR}/IMPRESS_outputs/"*
 
-echo "Running: dragon ${DRAGON_MODE} run_protein_binding.py  (nodes=${SLURM_NNODES:-1})"
-dragon ${DRAGON_MODE} run_protein_binding.py
+if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
+    # ── System library paths (Delta-specific, required by Dragon) ─────────────────
+    export CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8
+    export MPI_LIB=/opt/cray/pe/mpich/8.1.32/ofi/gnu/11.2/lib-abi-mpich
+    export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
+    export FAB_BUILD_LIB=/opt/cray/libfabric/2.3.1/lib64
+    export FAB_INCLUDE=/opt/cray/libfabric/2.3.1/include
+    export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
+
+    dragon-config add --ofi-runtime-lib="${FAB_LIB}"
+    dragon-config add --ofi-build-lib="${FAB_BUILD_LIB}"
+    dragon-config add --ofi-include="${FAB_INCLUDE}"
+    export OPENBLAS_NUM_THREADS=1
+
+    echo "Running: dragon ${DRAGON_MODE} run_protein_binding.py  (nodes=${SLURM_NNODES:-1})"
+    dragon ${DRAGON_MODE} boltz_test.py   #run_protein_binding.py
+else
+    echo "Running: python3 run_protein_binding.py  (backend=${IMPRESS_BACKEND})"
+    python3 run_protein_binding.py
+fi
 
 echo "=== Protein Binding pipeline done: $(date) ==="

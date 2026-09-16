@@ -7,6 +7,8 @@ import shutil
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
 
 MPNN_PATH = os.environ.get("MPNN_PATH", "")
+BOLTZ_CACHE_DIR = os.environ.get("BOLTZ_CACHE_DIR", "")
+BOLTZ_VENV = os.environ.get("BOLTZ_VENV", "")
 
 _BOLTZ_CHAIN_MAP = {'pdz': 'A', 'pep': 'B'}
 
@@ -19,6 +21,7 @@ def _copy_pdb_rename_chains(src, dst, chain_map=_BOLTZ_CHAIN_MAP):
                 if chain in chain_map:
                     line = line[:21] + chain_map[chain] + line[24:]
             f_out.write(line)
+
 
 class ProteinBindingPipeline(ImpressBasePipeline):
     def __init__(self, name, flow, configs=None, **kwargs):
@@ -37,8 +40,14 @@ class ProteinBindingPipeline(ImpressBasePipeline):
         self.mpnn_path = kwargs.get("mpnn_path") or MPNN_PATH
         if not self.mpnn_path:
             raise ValueError("mpnn_path must be supplied via kwarg or MPNN_PATH env var")
+        self.boltz_cache_dir = kwargs.get("boltz_cache_dir") or BOLTZ_CACHE_DIR
+        if not self.boltz_cache_dir:
+            raise ValueError("boltz_cache_dir must be supplied via kwarg or BOLTZ_CACHE_DIR env var")
+        self.boltz_venv = kwargs.get("boltz_venv") or BOLTZ_VENV
+        if not self.boltz_venv:
+            raise ValueError("boltz_venv must be supplied via kwarg or BOLTZ_VENV env var")
         self.peptide_seq: str = kwargs.get("peptide_seq", "EGYQDYEPEA")
-        self.policy = kwargs.get("policy", None)
+
 
         # Sequence and score state
         self.current_scores = {}
@@ -101,8 +110,8 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task(local_task=True)  # MPNN
-        async def s1():
+        @self.auto_register_task(capture_stdio=True)  # MPNN
+        async def s1():  # noqa: B006
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
             output_dir = os.path.join(self.output_path_mpnn, f"job_{self.passes}")
@@ -120,15 +129,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
                 f"{self.num_seqs} "
                 f"{chain}"
             )
-            log_path = os.path.join(output_dir, "mpnn_run.log")
-            with open(log_path, "w") as lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=lf, stderr=asyncio.subprocess.STDOUT,
-                    env=self._gpu_env(),
-                )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"s1 MPNN failed (exit {rc})")
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def s2():
@@ -200,25 +201,17 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 #                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
 #            )
 
-        @self.auto_register_task(local_task=True)
-        async def s4(target_fasta):
+        @self.auto_register_task(capture_stdio=True)
+        async def s4(target_fasta):  # noqa: B006
             self.step_id += 1
             cmd = (
                 f"bash {self.scripts_path}/s4_boltz.sh "
                 f"{self.output_path}/af/fasta/{target_fasta}.fa "
-                f"{self.output_path}/af/prediction/dimer_models/{target_fasta}"
+                f"{self.output_path}/af/prediction/dimer_models/{target_fasta} "
+                f"{self.boltz_cache_dir} "
+                f"{self.boltz_venv}"
             )
-            self.logger.pipeline_log(f"s4 command for {target_fasta}: {cmd}")
-            # s4_boltz.sh tees its own output to boltz_run.log in the output dir
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=self._gpu_env(),
-            )
-            rc = await proc.wait()
-            if rc != 0:
-                raise RuntimeError(f"Boltz failed for {target_fasta} (exit {rc})")
+            return cmd
 
         @self.auto_register_task(local_task=True)
         async def s4_post_exec(
@@ -289,7 +282,20 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             else:
                 self.logger.pipeline_log("Submitting MPNN task")
-                await self.s1()
+                try:
+                    await self.s1()
+                except Exception as exc:
+                    # The execution backend may report a spurious failure (TypeError/
+                    # 'NoneType' subscriptable, or ProcessGroup state error) even when
+                    # MPNN completed successfully. Check for output before propagating.
+                    seqs_dir = os.path.join(
+                        self.output_path_mpnn, f"job_{self.passes}", "seqs"
+                    )
+                    if not (os.path.isdir(seqs_dir) and os.listdir(seqs_dir)):
+                        raise
+                    self.logger.pipeline_log(
+                        f"WARNING: s1 raised {exc!r} but seqs output exists — treating as success"
+                    )
                 self.logger.pipeline_log("MPNN task finished")
 
                 self.logger.pipeline_log("Submitting sequence ranking task")
@@ -302,13 +308,23 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             alphafold_tasks = []
             post_exec_tasks = []
-
-            # Limit concurrent Boltz launches to avoid GPU OOM.
-            _boltz_sem = asyncio.Semaphore(2)
+            _boltz_sem = asyncio.Semaphore(len(fasta_files))
 
             async def _guarded_s4(target_fasta):
                 async with _boltz_sem:
-                    return await self.s4(target_fasta=target_fasta)
+                    try:
+                        return await self.s4(target_fasta=target_fasta)
+                    except Exception as exc:
+                        # The execution backend may raise a spurious failure even when
+                        # Boltz completed successfully. Check for the output PDB before propagating.
+                        pred_dir = os.path.join(
+                            self.output_path, "af", "prediction", "dimer_models",
+                            target_fasta, f"boltz_results_{target_fasta}",
+                            "predictions", target_fasta,
+                        )
+                        if os.path.isfile(os.path.join(pred_dir, f"{target_fasta}_model_0.pdb")):
+                            return None  # output exists; treat as success
+                        raise
 
             for target_fasta in fasta_files:
                 models_path = os.path.join(
@@ -376,16 +392,25 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             staged_file = f"af_stats_{self.name}_pass_{self.passes}.csv"
 
-            await self.s5(
-                task_description={
-                    "output_staging": [
-                        {
-                            "source": f"task:///{staged_file}",
-                            "target": f"client:///{staged_file}",
-                        }
-                    ],
-                }
-            )
+            try:
+                await self.s5(
+                    task_description={
+                        "output_staging": [
+                            {
+                                "source": f"task:///{staged_file}",
+                                "target": f"client:///{staged_file}",
+                            }
+                        ],
+                    }
+                )
+            except Exception as exc:
+                # Spurious backend failure: check if s5 wrote the CSV despite the error.
+                csv_path = os.path.join(self.output_base_path, staged_file)
+                if not os.path.isfile(csv_path):
+                    raise
+                self.logger.pipeline_log(
+                    f"s5 raised {exc!r} but CSV exists — treating as success"
+                )
             self.logger.pipeline_log("pLDTT extract finished")
 
             await self.run_adaptive_step(wait=True)

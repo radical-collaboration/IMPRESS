@@ -7,7 +7,7 @@ set -euo pipefail
 fasta_path="$1"
 output_dir="$2"
 
-# Re-activate the IMPRESS venv inside Dragon tasks (VIRTUAL_ENV is exported by sbatch).
+# Re-activate the IMPRESS venv if running inside a subprocess (VIRTUAL_ENV is exported by sbatch).
 [ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
 # ── Test-mode stub (IMPRESS_TEST_MODE=1) ──────────────────────────────────

@@ -11,7 +11,7 @@ mpnn_path="$4"
 num_seqs="$5"
 chain="$6"
 
-# Re-activate the IMPRESS venv inside Dragon tasks (VIRTUAL_ENV is exported by sbatch).
+# Re-activate the IMPRESS venv if running inside a subprocess (VIRTUAL_ENV is exported by sbatch).
 [ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
 
 python3 "$mpnn_script" \
