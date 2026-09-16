@@ -2,18 +2,19 @@
 #
 # Small Molecule Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch (only SBATCH_ACCOUNT and WORK_DIR are required;
+# the rest default to standard locations under WORK_DIR):
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/path/to/your/workdir
 #
-# Optional overrides (all have defaults based on SCRATCH/$USER):
-#   export MPNN_DIR=/path/to/LigandMPNN
-#   export BOLTZ_CACHE=/path/to/boltz_cache
+# Optional overrides (all have defaults based on WORK_DIR):
+#   export IMPRESS_VENV=/path/to/venv          (default: $WORK_DIR/ve/small_mol)
+#   export MPNN_DIR=/path/to/LigandMPNN        (default: $WORK_DIR/LigandMPNN)
+#   export BOLTZ_CACHE=/path/to/boltz_cache    (default: $WORK_DIR/.cache/boltz)
 #
 # Foundry container (RFD3):
-#   The foundry sandbox is stored as a .tar.gz on scratch (built by pull_foundry.sh).
-#   This script extracts it to /tmp at job start (no scratch quota cost) and removes
+#   The foundry sandbox is stored as a .tar.gz under WORK_DIR (built by pull_foundry.sh).
+#   This script extracts it to /tmp at job start (no storage quota cost) and removes
 #   it on exit.  Override FOUNDRY_TAR to point to a different archive, or set
 #   FOUNDRY_SIF_PATH directly to skip extraction entirely (e.g. a pre-extracted dir).
 #
@@ -48,11 +49,7 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
-    exit 1
-fi
+: "${WORK_DIR:?Set WORK_DIR before running, e.g.: export WORK_DIR=/path/to/your/workdir}"
 
 # ── System library paths (Delta-specific, required by Dragon) ─────────────────
 export CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8
@@ -61,32 +58,29 @@ export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress}"
+IMPRESS_VENV="${IMPRESS_VENV:-${WORK_DIR}/ve/small_mol}"
 unset SLURM_EXPORT_ENV
 source "${IMPRESS_VENV}/bin/activate"
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by SmallMoleculeBindingPipeline via env vars) ─────────────
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
-export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
+export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
 
-# Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
+# Boltz-2 model weights cache — kept on WORK_DIR to avoid home quota exhaustion.
 # Pre-warm once on a login node via delta_env_setup.sh's Step 13 (boltz has no
 # dedicated "download weights" subcommand; weights auto-download on first
 # `boltz predict` call).
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
-# Extracting to /tmp avoids the scratch quota. Compute nodes have ample /tmp
+# Extracting to /tmp avoids the storage quota. Compute nodes have ample /tmp
 # space that is not quota-counted.  If FOUNDRY_SIF_PATH is already set (e.g.
 # a pre-built .sif or a persistent sandbox on a large allocation), extraction
 # is skipped entirely.
-if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
-    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
-fi
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/${USER}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${WORK_DIR}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it first: sbatch pull_foundry.sh"
@@ -114,21 +108,20 @@ if [ ! -d "${MPNN_DIR}" ]; then
 fi
 
 # ── Working directory ─────────────────────────────────────────────────────────
-#WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
-WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/IMPRESS/examples/small_molecule_binding}"
+WORKDIR="${IMPRESS_SCRIPTS_DIR:-$(dirname "$(realpath "$0")")}"
 cd "${WORKDIR}"
-mkdir -p logs
 
-# IMPRESS_WORK_DIR: where pipeline task dirs (p1/, p2/, …) are written.
-# Defaults to logs/ so all run artifacts stay out of the source tree and are
-# covered by .gitignore.  Override to write outputs elsewhere.
-export IMPRESS_WORK_DIR="${IMPRESS_WORK_DIR:-${WORKDIR}/logs}"
-mkdir -p "${IMPRESS_WORK_DIR}"
+# IMPRESS_OUTPUT_DIR: where pipeline task dirs (p1/, p2/, …) are written.
+# Defaults to IMPRESS_outputs/ inside the example dir so outputs stay out of
+# the source tree root and are covered by .gitignore.  Override to write
+# outputs elsewhere, e.g.: export IMPRESS_OUTPUT_DIR=${WORK_DIR}/smb_outputs
+export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${WORKDIR}/IMPRESS_outputs}"
+mkdir -p "${IMPRESS_OUTPUT_DIR}"
 
 # IMPRESS_SESSION_DIR: asyncflow session dir — runinfo, captured task
 # stdout/stderr (.stdout/.stderr per task UID).  Must be on Lustre so files
 # survive the job and can be reviewed after failures.
-export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${IMPRESS_WORK_DIR}/sessions}"
+export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${IMPRESS_OUTPUT_DIR}/sessions}"
 mkdir -p "${IMPRESS_SESSION_DIR}"
 
 # IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
@@ -138,7 +131,7 @@ export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
 echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
 
 # IMPRESS_TEST_MODE=1: 2 pipelines, inert thresholds, max_tasks=10.
-# Runs one full rfd3→mpnn→fastrelax→filter_shape→af2 cycle to verify the
+# Runs one full rfd3→mpnn→fastrelax→filter_shape→boltz cycle to verify the
 # end-to-end path without looping.  Set before sbatch:
 #   IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
 export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"

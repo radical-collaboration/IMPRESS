@@ -4,38 +4,48 @@
 #
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
-# Usage:
-#   export SCRATCH=/scratch/<allocation>
-#   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
+# Set WORK_DIR to your personal work directory before running:
 #
-# Defaults:
-#   ENV_DIR     = /u/$USER/ve/impress
-#   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
-#   python      = auto-detected (python/3.11, cray-python/3.11.7, anaconda3)
+#   export WORK_DIR=/path/to/your/workdir
+#   bash delta_env_setup.sh
 #
-# Tool directories (cloned by this script if absent):
-#   MPNN_DIR           = $SCRATCH/$USER/LigandMPNN
-#   BOLTZ_CACHE        = $SCRATCH/$USER/.cache/boltz  (model weights cache)
+# Prerequisites:
+#   - IMPRESS source tree already cloned under $WORK_DIR/IMPRESS
+#   - Internet access (login nodes have it; compute nodes do not)
 #
-# Foundry container (RFD3 backbone diffusion) is managed separately:
-#   Run pull_foundry.sh to build the sandbox tarball; delta_gpu_run.sh unpacks
-#   it to /tmp at job start.
+# What this script does:
+#   1. Creates a Python venv at $WORK_DIR/ve/small_mol and installs deps
+#   2. Clones LigandMPNN into $WORK_DIR/LigandMPNN if not already present
+#   3. Warms the Boltz-2 model weights cache at $WORK_DIR/.cache/boltz
+#
+# Optional overrides (CLI args):
+#   --env-dir     DIR   venv location       (default: $WORK_DIR/ve/small_mol)
+#   --impress-dir DIR   IMPRESS source tree  (default: $WORK_DIR/IMPRESS)
+#   --python      PATH  Python interpreter   (default: auto-detected, 3.11+)
+#
+# After this script completes, submit the pipeline with:
+#   export SBATCH_ACCOUNT=<your-project>-delta-gpu
+#   cd $WORK_DIR/IMPRESS/examples/small_molecule_binding
+#   sbatch delta_gpu_run.sh
+#
+# Note: Foundry container (RFD3) is managed separately.
+#   Build once with:  sbatch pull_foundry.sh
 # =============================================================================
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
 fi
 
-# ── Require SCRATCH ───────────────────────────────────────────────────────────
-if [[ -z "${SCRATCH:-}" ]]; then
-    echo "ERROR: set the SCRATCH env var to your allocation scratch root, e.g.:"
-    echo "  export SCRATCH=/scratch/<allocation>"
-    echo "  bash delta_env_setup.sh"
-    exit 1
+if ! declare -f module &>/dev/null; then
+    _lmod_init=/usr/share/lmod/lmod/init/bash
+    [ -f "${_lmod_init}" ] && source "${_lmod_init}"
 fi
 
+# ── Work directory ────────────────────────────────────────────────────────────
+: "${WORK_DIR:?Set WORK_DIR before running, e.g.: export WORK_DIR=/path/to/your/workdir}"
+
 # ── Defaults / arg parsing ────────────────────────────────────────────────────
-ENV_DIR="${ENV_DIR:-/u/${USER}/ve/impress}"
-IMPRESS_DIR="${IMPRESS_DIR:-${SCRATCH}/${USER}/IMPRESS}"
+ENV_DIR="${ENV_DIR:-${WORK_DIR}/ve/small_mol}"
+IMPRESS_DIR="${IMPRESS_DIR:-${WORK_DIR}/IMPRESS}"
 BASE_PY_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -50,10 +60,11 @@ done
 PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
-MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 
 echo "================================================================="
+echo "  WORK_DIR           = ${WORK_DIR}"
 echo "  ENV_DIR            = ${ENV_DIR}"
 echo "  IMPRESS_DIR        = ${IMPRESS_DIR}"
 echo "  MPNN_DIR           = ${MPNN_DIR}"
@@ -98,6 +109,7 @@ fi
 echo "Using Python: ${BASE_PY} ($(${BASE_PY} --version))"
 
 if [ ! -x "${PY}" ]; then
+    mkdir -p "$(dirname "${ENV_DIR}")"
     "${BASE_PY}" -m venv "${ENV_DIR}"
 else
     echo "venv already exists at ${ENV_DIR}"
@@ -120,6 +132,10 @@ echo "── Step 3: radical-asyncflow (PyPI) ──"
 echo ""
 echo "── Step 4: rhapsody-py[dragon] (PyPI) ──"
 "${PIP}" install -q "rhapsody-py[dragon,telemetry]"
+# Pin dragonhpc to 0.14.1 — 0.14.2 added waitForKeys to DDRegisterClientResponse
+# but the Delta system Dragon runtime has not been updated to match; 0.14.2 fails
+# with AttributeError on every DDict operation on this cluster.
+"${PIP}" install -q "dragonhpc==0.14.1"
 
 # ── 5. IMPRESS (local editable) ───────────────────────────────────────────────
 echo ""
@@ -133,37 +149,25 @@ echo "── Step 6: PyTorch (cu121) ──"
 
 # ── 7. Boltz-2 ────────────────────────────────────────────────────────────────
 #
-# EMPIRICALLY CONFIRMED: `pip install "boltz[cuda]"` (with or without `-U`)
-# thrashes pip's resolver for a very long time (observed: 28GB+ pip cache,
-# 60-75+ pip-metadata/pip-unpack temp dirs, no completion after ~1hr each
-# attempt) -- boltz pins several dependencies (`numpy<2.0`, `gemmi==0.6.5`,
-# `pytorch-lightning==2.5.0`, etc.) that genuinely conflict with what's
-# already installed in this venv (numpy 2.x from other packages, gemmi 0.7.5,
-# etc. -- see this repo's other steps). Resolving a real, deep conflict like
-# this is inherently slow/combinatorial for pip's resolver, `-U` or not.
-#
-# WORKING APPROACH (installs cleanly in seconds instead of hanging):
-# install boltz with --no-deps, then install its actually-imported runtime
-# dependencies individually, also with --no-deps, accepting the versions
-# already present rather than forcing boltz's exact pins. Verified working:
-# boltz 2.2.1 imports and `boltz predict --help` runs correctly against
-# numpy 1.26.4 (downgraded from whatever was there before -- re-verify
-# pyrosetta/ProDy/impress/asyncflow/rhapsody still import after this step,
-# they were confirmed OK against numpy 1.26.4 during initial validation) and
-# gemmi 0.6.5 (downgraded from 0.7.5). `pip check` will still report several
-# cosmetic mismatches (pytorch-lightning, cuequivariance-ops-torch-cu12,
-# colabfold/ml-dtypes leftovers from before ColabFold was removed, torch's
-# own sympy/triton/nvidia-cublas sub-pins) -- none of these broke any actual
-# import in testing; only re-investigate if a real runtime failure surfaces.
+# Install boltz itself with --no-deps to avoid pip's resolver hanging for hours
+# on boltz's conflicting pins (numpy<2.0, gemmi==0.6.5, etc.) against packages
+# already in this venv (PyRosetta needs numpy 2.x; gemmi 0.6.5 is installed
+# later in Step 9). Then install boltz's runtime deps without --no-deps so
+# their own sub-deps (e.g. lightning_utilities for pytorch_lightning) are
+# pulled in automatically. No version pins here — pip picks versions compatible
+# with the numpy already present. `pip check` will still report boltz's declared
+# version mismatches as cosmetic warnings; none affect actual predict runs.
 #
 echo ""
 echo "── Step 7: Boltz-2 ──"
 "${PIP}" install -q --no-deps "boltz[cuda]"
-"${PIP}" install -q --no-deps \
-    pytorch_lightning torchmetrics fairscale einops einx mashumaro modelcif \
-    wandb dm-tree chembl_structure_pipeline \
+"${PIP}" install -q \
+    pytorch_lightning torchmetrics lightning_utilities fairscale \
+    einops "einx" frozendict mashumaro modelcif \
+    wandb "dm-tree" chembl_structure_pipeline \
+    "hydra-core" numba scikit-learn trifast types-requests absl-py attrs wrapt \
     cuequivariance_ops_cu12 cuequivariance_ops_torch_cu12
-"${PY}" -c "import boltz; import torch; print('boltz', boltz.__version__ if hasattr(boltz, '__version__') else '(no __version__)', '+ torch', torch.__version__, 'import OK')"
+"${PY}" -c "import boltz; import torch; print('boltz', getattr(boltz, '__version__', '?'), '+ torch', torch.__version__, 'import OK')"
 
 # ── 8. LigandMPNN ─────────────────────────────────────────────────────────────
 #
@@ -187,14 +191,11 @@ fi
 
 # ── 9. gemmi — CIF.GZ parsing for backbone conversion ────────────────────────
 #
-# Pinned to 0.6.5, NOT latest: Step 7 installs boltz, which pins gemmi==0.6.5
-# exactly. An unpinned `pip install gemmi` here would silently upgrade to
-# latest and re-break that pin (this happened during initial validation).
-# Verified empirically that 0.6.5 has everything this pipeline's gemmi usage
-# needs: mpnn()'s CIF.GZ->PDB conversion (gemmi.cif.read_string,
-# make_structure_from_block, write_pdb) and rfd3()'s ligand-normalization
-# helper (read_structure, res.het_flag, mutable res.name, write_pdb) both
-# round-trip correctly against 0.6.5.
+# Pinned to 0.6.5 — boltz declares this exact version as a requirement.
+# An unpinned install would pull latest and break boltz at runtime.
+# 0.6.5 covers all pipeline uses: mpnn()'s CIF.GZ->PDB conversion
+# (gemmi.cif.read_string, make_structure_from_block, write_pdb) and rfd3()'s
+# ligand-normalization helper (read_structure, res.het_flag, write_pdb).
 #
 echo ""
 echo "── Step 9: gemmi ──"
@@ -212,10 +213,7 @@ echo "── Step 9: gemmi ──"
 # run (job 21916521).
 #
 # Pinned to 2024.9.6, the same version already used by the offline
-# scripts/derive_ligand_smiles.py tool in this repo (rdkit has no
-# dependency on numpy/gemmi's own pins, so it should not disturb Step 7's
-# numpy<2.0/gemmi==0.6.5 resolution -- `pip check` after this step should
-# stay clean; re-investigate only if it doesn't).
+# scripts/derive_ligand_smiles.py tool in this repo.
 #
 echo ""
 echo "── Step 10: rdkit ──"
@@ -229,10 +227,12 @@ echo "── Step 11: pandas + biopandas ──"
 # ── 12. PyRosetta ─────────────────────────────────────────────────────────────
 echo ""
 echo "── Step 12: PyRosetta ──"
+export VIRTUAL_ENV="${ENV_DIR}"
+export PATH="${ENV_DIR}/bin:${PATH}"
 "${PIP}" install -q pyrosetta-installer
 "${PY}" -c "import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()"
 
-# ── 13. Boltz-2 model weights ─────────────────────────────────────────────────
+# ── 13. Boltz-2 model weights (cache warm-up) ─────────────────────────────────
 #
 # Boltz has no dedicated "download weights" subcommand — weights auto-download
 # on first `boltz predict` call.  Warm the cache with a trivial CPU prediction
@@ -241,7 +241,6 @@ echo "── Step 12: PyRosetta ──"
 #
 echo ""
 echo "── Step 13: Boltz-2 model weights (cache warm-up) ──"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 _WARM_DIR=$(mktemp -d)
 cat > "${_WARM_DIR}/warm.yaml" <<'YAML'
@@ -264,13 +263,12 @@ echo "── Step 14: Verifying installation ──"
 _check() {
     local label="$1"; shift
     if out=$("$@" 2>&1); then
-        echo "  ${label}: OK  (${out})"
+        echo "  [OK] ${label}: ${out}"
     else
-        echo "  WARNING: ${label} failed"
+        echo "  [WARN] ${label} failed:"
         echo "    ${out}" | head -3
     fi
 }
-
 _check "radical.asyncflow" "${PY}" -c "import radical.asyncflow; print(radical.asyncflow.__version__)"
 _check "rhapsody-py"       "${PY}" -c "import rhapsody; print('ok')"
 _check "impress"           "${PY}" -c "import impress; print('ok')"
@@ -287,15 +285,8 @@ echo ""
 echo "================================================================="
 echo "Setup complete."
 echo ""
-echo "Activate with:"
-echo "  source ${ENV_DIR}/bin/activate"
-echo ""
-echo "Run the pipeline:"
-echo "  export SCRATCH=${SCRATCH}"
-echo "  export SBATCH_ACCOUNT=bblj-delta-gpu"
+echo "Submit the pipeline:"
+echo "  export SBATCH_ACCOUNT=<your-project>-delta-gpu"
 echo "  cd ${IMPRESS_DIR}/examples/small_molecule_binding"
 echo "  sbatch delta_gpu_run.sh"
-echo ""
-echo "Note: Foundry container (RFD3) is managed separately."
-echo "  Build once with:  sbatch pull_foundry.sh"
 echo "================================================================="

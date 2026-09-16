@@ -316,13 +316,14 @@ async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     # Resolve paths before launching Dragon (os.getcwd() is the examples dir).
     examples_dir = os.path.dirname(os.path.abspath(__file__))
-    work_dir = os.environ.get(
-        "IMPRESS_WORK_DIR", os.path.join(examples_dir, "logs")
+    output_dir = os.environ.get(
+        "IMPRESS_OUTPUT_DIR",
+        os.path.join(examples_dir, "IMPRESS_outputs"),
     )
-    os.makedirs(work_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     # Input data lives in the source tree; pass as absolute so it resolves
-    # correctly regardless of what base_path / work_dir is set to. Each
-    # pipeline reads its own p{i}_in/ directory rather than sharing one.
+    # correctly regardless of what output_dir is set to. Each pipeline reads
+    # its own p{i}_in/ directory rather than sharing one.
 
     if BACKEND == "dragon":
         backend = await DragonExecutionBackend()
@@ -338,7 +339,7 @@ async def impress_smallmol_bind() -> None:
             type=SmallMoleculeBindingPipeline,
             adaptive_fn=adaptive_decision,
             kwargs={
-                "base_path":                 work_dir,
+                "base_path":                 output_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),
                 "input_dir":                 os.path.join(examples_dir, f"p{i}_in"),
                 "backbone_max_ca_deviation": cfg.backbone_max_ca_deviation,
