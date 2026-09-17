@@ -6,7 +6,6 @@ from concurrent.futures import ProcessPoolExecutor
 from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
-from impress.utils.session import session_work_dir
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -56,7 +55,7 @@ async def impress_smallmol_nonadaptive() -> None:
     """Execute the small-molecule binding pipeline without adaptive routing."""
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackendV3()
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [

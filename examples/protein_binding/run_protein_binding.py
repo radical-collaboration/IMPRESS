@@ -11,7 +11,6 @@ from radical.asyncflow import WorkflowEngine
 
 from impress import PipelineSetup
 from impress import ImpressManager
-from impress.utils.session import session_work_dir
 from protein_binding import ProteinBindingPipeline
 
 import rhapsody, logging
@@ -71,7 +70,7 @@ async def adaptive_criteria(current_score: float, previous_score: float) -> bool
 async def impress_protein_bind() -> None:
     backend = await DragonExecutionBackendV3()
 
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    flow = await WorkflowEngine.create(backend=backend)
 
     manager: ImpressManager = ImpressManager(
         flow,

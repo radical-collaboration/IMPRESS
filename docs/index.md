@@ -16,10 +16,12 @@ IMPRESS is an asynchronous framework for managing complex protein design pipelin
 
 ## Quick Example
 ```python
-from radical.asyncflow import WorkflowEngine
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 from impress import ImpressBasePipeline, ImpressManager
-from impress.utils.session import session_work_dir
 
 class MyPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
@@ -33,8 +35,8 @@ class MyPipeline(ImpressBasePipeline):
 
 async def run_dummy_pipelines():
 
-    backend = ThreadExecutionBackend({})
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
     manager = ImpressManager(flow)
 
     try:

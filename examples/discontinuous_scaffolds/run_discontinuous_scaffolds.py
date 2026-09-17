@@ -10,7 +10,6 @@ from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from rhapsody.backends import DragonExecutionBackendV3
 
 from impress import ImpressManager, PipelineSetup
-from impress.utils.session import session_work_dir
 from discontinuous_scaffolds import (
     DiscontinuousScaffoldsPipeline,
     STEP_BACKBONE_GEN,
@@ -442,7 +441,7 @@ async def run_discontinuous_scaffolds() -> None:
     # For HPC execution use:
     backend = await DragonExecutionBackendV3()
 
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [

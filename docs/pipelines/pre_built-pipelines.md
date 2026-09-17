@@ -141,7 +141,7 @@ async def impress_protein_bind() -> None:
         'runtime': 13 * 60,                  # 13 hours maximum runtime
         'resource': 'purdue.anvil_gpu'       # HPC cluster specification
     })
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    flow = await WorkflowEngine.create(backend=backend)
 
     manager: ImpressManager = ImpressManager(flow)
 

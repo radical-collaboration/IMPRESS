@@ -82,10 +82,8 @@ The pipeline manager is configured to support adaptive behavior:
 
 ```python
 async def run() -> None:
-    execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(
-        backend=execution_backend, work_dir=session_work_dir()
-    )
+    execution_backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=execution_backend)
     manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups = [PipelineSetup(name=f'p{i}',

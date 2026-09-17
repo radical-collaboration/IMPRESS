@@ -20,11 +20,11 @@ pip install .
 import asyncio
 from typing import Dict, Any, Optional, List
 
-from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
+from rhapsody.backends import RadicalExecutionBackend
 
 from impress import PipelineSetup
 from impress import ImpressManager
-from impress.utils.session import session_work_dir
 from impress.pipelines.protein_binding import ProteinBindingPipeline
 
 
@@ -42,7 +42,7 @@ async def impress_protein_bind() -> None:
          'runtime': 13 * 60,
          'resource': 'purdue.anvil_gpu'
          })
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    flow = await WorkflowEngine.create(backend=backend)
 
     manager: ImpressManager = ImpressManager(flow)
 

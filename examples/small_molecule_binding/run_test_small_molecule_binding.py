@@ -16,10 +16,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 from impress import ImpressManager, PipelineSetup
-from impress.utils.session import session_work_dir
 from small_molecule_binding import SmallMoleculeBindingPipeline
 from run_small_molecule_binding import adaptive_decision
 
@@ -66,8 +65,8 @@ async def run_mock_test() -> None:
     pipeline_name = "p1"
     setup_mock_inputs(pipeline_name)
 
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend, work_dir=session_work_dir())
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
