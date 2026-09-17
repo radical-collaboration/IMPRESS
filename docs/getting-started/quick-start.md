@@ -28,7 +28,8 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from rhapsody.backends import RadicalExecutionBackend
 ```
 
 
@@ -36,7 +37,7 @@ We use:
 
 asyncio — Python’s built-in asynchronous library.
 
-await RadicalExecutionBackend — runs tasks in parallel.
+RadicalExecutionBackend — runs tasks in parallel.
 
 ImpressBasePipeline — base class for defining a pipeline.
 
@@ -114,22 +115,25 @@ We now create a function that starts N pipelines at once.
 
 ```python
 async def run():
-    manager = ImpressManager(
-        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
-    )
+    backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    flow = await WorkflowEngine.create(backend=backend)
+    manager = ImpressManager(flow)
     
     # start 3 pipelines in parallel and wait for them to finish
-    await manager.start(
-        pipeline_setups = [
-            PipelineSetup(name='p1', type=ProteinPipeline),
-            PipelineSetup(name='p2', type=ProteinPipeline),
-            PipelineSetup(name='p3', type=ProteinPipeline)]
-    )
+    try:
+        await manager.start(
+            pipeline_setups = [
+                PipelineSetup(name='p1', type=ProteinPipeline),
+                PipelineSetup(name='p2', type=ProteinPipeline),
+                PipelineSetup(name='p3', type=ProteinPipeline)]
+        )
+    finally:
+        await flow.shutdown()
 ```
 
 Here:
 
-We initialize an ImpressManager with a await RadicalExecutionBackend to enable parallel task execution.
+We initialize an ImpressManager with a RadicalExecutionBackend to enable parallel task execution.
 
 We call start() and provide a list of pipeline setups, each with a unique name (p1, p2, p3) and our ProteinPipeline class.
 
@@ -155,7 +159,8 @@ from impress import PipelineSetup
 from impress import ImpressBasePipeline
 from impress import ImpressManager
 
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from rhapsody.backends import RadicalExecutionBackend
 
 
 class ProteinPipeline(ImpressBasePipeline):
@@ -185,16 +190,19 @@ class ProteinPipeline(ImpressBasePipeline):
         s3_res = await self.s3()
 
 async def run_pipeline():
-    manager = ImpressManager(
-        execution_backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
-    )
+    backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    flow = await WorkflowEngine.create(backend=backend)
+    manager = ImpressManager(flow)
 
-    await manager.start(
-        pipeline_setups = [
-            PipelineSetup(name='p1', type=ProteinPipeline),
-            PipelineSetup(name='p2', type=ProteinPipeline),
-            PipelineSetup(name='p3', type=ProteinPipeline)]
-    )
+    try:
+        await manager.start(
+            pipeline_setups = [
+                PipelineSetup(name='p1', type=ProteinPipeline),
+                PipelineSetup(name='p2', type=ProteinPipeline),
+                PipelineSetup(name='p3', type=ProteinPipeline)]
+        )
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

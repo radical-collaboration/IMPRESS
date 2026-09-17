@@ -300,4 +300,6 @@ The following values are embedded in the code and not exposed as constructor kwa
 
 ### Execution backend
 
-`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs (`IMPRESS_BACKEND=dragon`, the default). Set `IMPRESS_BACKEND=local` before running to use `ConcurrentExecutionBackend(ProcessPoolExecutor())` instead for single-node/non-Dragon development.
+`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs (`IMPRESS_BACKEND=dragon`, the default). Set `IMPRESS_BACKEND=local` before running to use `ConcurrentExecutionBackend.create(ProcessPoolExecutor())` (from `rhapsody.backends`) instead for single-node/non-Dragon development.
+
+The caller owns the `WorkflowEngine`: the runner creates the backend, creates the engine, passes it to `ImpressManager`, and shuts it down in a `finally`. GPU placement is the backend's responsibility -- the example does no explicit pinning.

@@ -293,17 +293,14 @@ def check_rfd3_no_op(base_path: str, pipeline_name: str):
     '_model_' in f). Best-effort: if any captured task stdout/stderr log is
     discoverable, grep it for TypeError/RFD3InferenceConfig crash signatures.
 
-    NOTE on the log-discovery part (see report for detail): capture_stdio=True
-    task logs are written by the asyncflow/dragon execution backend to a
-    per-*session* work_dir (IMPRESS_SESSION_DIR env var, else
-    tempfile.gettempdir()), under a randomly-generated
-    'asyncflow.session.<uuid>' subdirectory that is unrelated to base_path,
-    and filenames use an internal task uid ('task.NNNNNN') that has no
-    relationship to this pipeline's '{taskcount}_{taskname}' directory
-    convention. There is therefore no reliable static way to tie a captured
-    log file back to one specific rfd3 taskdir. This check does a best-effort
-    scan of the taskdir itself (in case a future version copies logs there)
-    plus IMPRESS_SESSION_DIR if set, and flags a crash signature generically
+    NOTE on the log-discovery part: capture_stdio=True task logs are written
+    by the execution backend into asyncflow's own session directory under the
+    process cwd ('asyncflow.session.<uuid>'), which is unrelated to base_path,
+    and their filenames use an internal task uid ('task.NNNNNN') with no
+    relationship to this pipeline's '{taskcount}_{taskname}' convention. There
+    is therefore no reliable static way to tie a captured log file back to one
+    specific rfd3 taskdir. This check scans the taskdir itself (in case a
+    future version copies logs there) and flags a crash signature generically
     if found, without claiming it belongs to any particular rfd3 invocation.
     """
     pipeline_dir = os.path.join(base_path, pipeline_name)
@@ -326,13 +323,6 @@ def check_rfd3_no_op(base_path: str, pipeline_name: str):
         for pattern in ("*.stdout", "*.stderr", "*.log"):
             log_files.extend(glob.glob(os.path.join(taskdir, pattern)))
             log_files.extend(glob.glob(os.path.join(taskdir, "*", pattern)))
-
-    session_dir = os.environ.get("IMPRESS_SESSION_DIR")
-    if session_dir and os.path.isdir(session_dir):
-        for pattern in ("*.stdout", "*.stderr"):
-            log_files.extend(
-                glob.glob(os.path.join(session_dir, "**", pattern), recursive=True)
-            )
 
     seen = set()
     for lf in log_files:
@@ -359,8 +349,8 @@ def check_rfd3_no_op(base_path: str, pipeline_name: str):
 # ── Check 5: state-key regression guard ─────────────────────────────────────
 
 def check_no_rejected_state_key(base_path: str, pipeline_name: str):
-    """Grep all files under base_path/pipeline_name (and IMPRESS_SESSION_DIR
-    logs, if discoverable) for the literal 'rfd3_guide_ligand_pdb' -- a state
+    """Grep all files under base_path/pipeline_name for the literal
+    'rfd3_guide_ligand_pdb' -- a state
     key that was designed then explicitly rejected in favor of Boltz's joint
     co-folding. Its reappearance anywhere means the rejected
     Kabsch-superposition ligand-grafting approach crept back in."""
@@ -392,10 +382,6 @@ def check_no_rejected_state_key(base_path: str, pipeline_name: str):
                     )
 
     _grep_tree(pipeline_dir)
-
-    session_dir = os.environ.get("IMPRESS_SESSION_DIR")
-    if session_dir and os.path.isdir(session_dir):
-        _grep_tree(session_dir)
 
     return failures
 

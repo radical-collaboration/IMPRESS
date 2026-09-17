@@ -125,11 +125,8 @@ mkdir -p logs
 export IMPRESS_WORK_DIR="${IMPRESS_WORK_DIR:-${WORKDIR}/logs}"
 mkdir -p "${IMPRESS_WORK_DIR}"
 
-# IMPRESS_SESSION_DIR: asyncflow session dir — runinfo, captured task
-# stdout/stderr (.stdout/.stderr per task UID).  Must be on Lustre so files
-# survive the job and can be reviewed after failures.
-export IMPRESS_SESSION_DIR="${IMPRESS_SESSION_DIR:-${IMPRESS_WORK_DIR}/sessions}"
-mkdir -p "${IMPRESS_SESSION_DIR}"
+# asyncflow writes its session dir (runinfo, captured task stdout/stderr) under
+# the process cwd, which is WORKDIR above -- on Lustre, so it survives the job.
 
 # IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
 # ProcessPoolExecutor — useful for development / non-Dragon clusters).

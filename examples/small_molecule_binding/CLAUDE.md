@@ -36,7 +36,7 @@ Before running on HPC, edit the path constants at the top of `run_small_molecule
 
 - **`small_molecule_binding.py`** — defines `SmallMoleculeBindingPipeline(ImpressBasePipeline)`, all step constants, ensemble utility functions (`_ca_rmsd`, `_seq_identity`, `_ensemble_selective_avg`), and the inner `_run_refine_cycle()` loop. All pipeline tasks (HPC and local analysis) are registered via `@self.auto_register_task()` inside `_register_real_tasks()`. The `run()` method drives a state-machine loop; `_run_refine_cycle()` handles the MPNN+PackMin inner loop with per-cycle sequence retry support.
 
-- **`run_small_molecule_binding.py`** — entry point. Defines the `RunConfig` dataclass and two named instances (`PROD`, `TEST`); selects between them via `IMPRESS_TEST_MODE`; defines the `adaptive_decision()` callback; creates an `ImpressManager` and launches via `manager.start(pipeline_setups=[...])`.
+- **`run_small_molecule_binding.py`** — entry point. Defines the `RunConfig` dataclass and two named instances (`PROD`, `TEST`); selects between them via `IMPRESS_TEST_MODE`; defines the `adaptive_decision()` callback; creates the execution backend and the `WorkflowEngine`, injects the engine into an `ImpressManager`, and launches via `manager.start(pipeline_setups=[...])` inside a `try`/`finally` that calls `await flow.shutdown()`. The caller owns the engine end to end -- `ImpressManager` never creates or shuts it down.
 
 ### Step constants (state-machine constants in `small_molecule_binding.py`)
 
@@ -198,7 +198,9 @@ Steps communicate via `self.state`:
 
 ### Execution backends
 
-`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs. `LocalExecutionBackend(ProcessPoolExecutor())` can be swapped in for local testing.
+`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs (`IMPRESS_BACKEND=dragon`, the default). Set `IMPRESS_BACKEND=local` to use `rhapsody.backends.ConcurrentExecutionBackend.create(ProcessPoolExecutor())` instead, for single-node/non-Dragon development.
+
+GPU placement is the execution backend's responsibility, reached through asyncflow. This example does no explicit pinning of its own.
 
 ### Pipeline inputs
 
