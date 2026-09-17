@@ -135,14 +135,15 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[s
 
 ```python
 async def impress_protein_bind() -> None:
-    manager: ImpressManager = ImpressManager(
-        execution_backend = await RadicalExecutionBackend({
-            'gpus': 2,                           # GPU allocation per pipeline
-            'cores': 32,                         # CPU cores per pipeline
-            'runtime': 13 * 60,                  # 13 hours maximum runtime
-            'resource': 'purdue.anvil_gpu'       # HPC cluster specification
-        })
-    )
+    backend = await RadicalExecutionBackend({
+        'gpus': 2,                           # GPU allocation per pipeline
+        'cores': 32,                         # CPU cores per pipeline
+        'runtime': 13 * 60,                  # 13 hours maximum runtime
+        'resource': 'purdue.anvil_gpu'       # HPC cluster specification
+    })
+    flow = await WorkflowEngine.create(backend=backend)
+
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -152,7 +153,10 @@ async def impress_protein_bind() -> None:
         )
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 ```
 
 **HPC Integration:**

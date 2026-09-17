@@ -1,6 +1,6 @@
 import asyncio
-from collections.abc import Awaitable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Awaitable, Callable
+from typing import Any, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
 
@@ -19,7 +19,7 @@ class ImpressManager:
 
     def __init__(
         self,
-        execution_backend: Any,
+        flow: WorkflowEngine,
         use_colors: bool = True,
         telemetry_config: Optional[dict[str, Any]] = None,
         telemetry_subscribers: Optional[list[Callable]] = None,
@@ -27,15 +27,18 @@ class ImpressManager:
         """
         Initialize the ImpressManager.
 
+        The caller owns the engine: create it, pass it here, and shut it
+        down when done. The manager never creates or shuts down the flow.
+
         Args:
-            execution_backend: Backend for workflow execution
+            flow: WorkflowEngine the pipelines run on
             use_colors: Whether to use colors in logging output
             telemetry_config: kwargs forwarded to flow.start_telemetry() (e.g.
                 checkpoint_path, resource_poll_interval). Pass None to disable.
             telemetry_subscribers: Callables registered via telemetry.subscribe()
                 immediately after telemetry starts.
         """
-        self.execution_backend: Any = execution_backend
+        self.flow: WorkflowEngine = flow
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
         self.adaptive_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
         self.new_pipeline_buffer: list[PipelineSetup] = []
@@ -136,10 +139,6 @@ class ImpressManager:
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
 
-        self.flow: WorkflowEngine = await WorkflowEngine.create(
-            backend=self.execution_backend
-        )
-
         if self._telemetry_config:
             self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
             for fn in self._telemetry_subscribers:
@@ -151,10 +150,10 @@ class ImpressManager:
 
         while True:
             any_activity: bool = False
-            completed_pipelines: list[ImpressBasePipeline] = []
+            completed_pipelines: list[tuple] = []
 
             for pipeline, pipeline_future in list(self.pipeline_tasks.items()):
-                # Check if pipeline needs adaptive step and isn't already running one
+                # Check if pipeline needs adaptive step and isn't running one yet
                 if (
                     getattr(pipeline, "invoke_adaptive_step", False)
                     and pipeline not in self.adaptive_tasks
@@ -179,24 +178,24 @@ class ImpressManager:
                 if getattr(pipeline, "kill_parent", False):
                     self.logger.pipeline_killed(pipeline.name)
                     pipeline_future.cancel()
-                    completed_pipelines.append(pipeline)
+                    completed_pipelines.append((pipeline, pipeline_future))
                     continue
 
                 # Check if pipeline is done - but only mark as completed
                 # if adaptive task is also done
                 if pipeline_future.done():
-                    # If there's an adaptive task running, don't mark as completed yet
+                    # Adaptive task still running — wait before marking completed
                     if pipeline in self.adaptive_tasks:
                         adaptive_task = self.adaptive_tasks[pipeline]
                         if not adaptive_task.done():
                             continue
 
-                    completed_pipelines.append(pipeline)
+                    completed_pipelines.append((pipeline, pipeline_future))
 
             # Clean up completed pipelines - but only if their
             # adaptive tasks are also done
             actually_completed: list[ImpressBasePipeline] = []
-            for pipeline in completed_pipelines:
+            for pipeline, future in completed_pipelines:
                 # Double-check: only clean up if adaptive task is
                 # done or doesn't exist
                 if pipeline in self.adaptive_tasks:
@@ -206,7 +205,16 @@ class ImpressManager:
                     self.adaptive_tasks.pop(pipeline)
 
                 self.pipeline_tasks.pop(pipeline, None)
-                self.logger.pipeline_completed(pipeline.name)
+                exc = None
+                if future.done() and not future.cancelled():
+                    try:
+                        exc = future.exception()
+                    except Exception:
+                        pass
+                if exc is not None:
+                    self.logger.pipeline_failed(pipeline.name, exc)
+                else:
+                    self.logger.pipeline_completed(pipeline.name)
                 actually_completed.append(pipeline)
 
             completed_pipelines = actually_completed
@@ -220,18 +228,22 @@ class ImpressManager:
             for pipeline in completed_adaptive:
                 self.adaptive_tasks.pop(pipeline, None)
 
-            # Submit new pipelines
+            # Submit new pipelines; capture count before clearing so
+            # activity_summary reports the real number submitted.
             if self.new_pipeline_buffer:
+                buffered_count = len(self.new_pipeline_buffer)
                 self.submit_new_pipelines(self.new_pipeline_buffer)
                 self.new_pipeline_buffer.clear()
                 any_activity = True
+            else:
+                buffered_count = 0
 
             # Log activity summary periodically
             if any_activity:
                 self.logger.activity_summary(
                     len(self.pipeline_tasks),
                     len(self.adaptive_tasks),
-                    len(self.new_pipeline_buffer),
+                    buffered_count,
                 )
 
             # Exit condition

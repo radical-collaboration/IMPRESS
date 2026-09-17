@@ -1,7 +1,7 @@
 import asyncio
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from concurrent.futures import ProcessPoolExecutor
 from rhapsody.backends import DragonExecutionBackendV3
 
@@ -55,7 +55,8 @@ async def impress_smallmol_nonadaptive() -> None:
     """Execute the small-molecule binding pipeline without adaptive routing."""
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     backend = await DragonExecutionBackendV3()
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -77,8 +78,10 @@ async def impress_smallmol_nonadaptive() -> None:
         for i in [1,2,4,6,7,8,10,11,12,13,14,15,16,18,19,20,23,26,27,30,32]
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

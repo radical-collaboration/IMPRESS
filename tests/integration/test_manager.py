@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,12 +8,10 @@ from impress import PipelineSetup
 from ..unit.test_manager_core import (
     MockPipeline,
 )
-from ..unit.test_manager_life_cycle import MockWorkflowEngine
 
 
 class TestIntegration:
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_start_with_adaptive_function(self, impress_manager):
         """Test starting with pipeline that has adaptive function"""
         adaptive_fn = AsyncMock()
@@ -50,7 +48,6 @@ class TestIntegration:
         adaptive_fn.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_complex_pipeline_workflow(self, impress_manager):
         """Test complex workflow with adaptive functions and child pipelines"""
         adaptive_calls = []

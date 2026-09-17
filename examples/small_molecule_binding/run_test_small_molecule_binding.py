@@ -16,7 +16,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import SmallMoleculeBindingPipeline
@@ -65,8 +65,9 @@ async def run_mock_test() -> None:
     pipeline_name = "p1"
     setup_mock_inputs(pipeline_name)
 
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -83,8 +84,10 @@ async def run_mock_test() -> None:
         )
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":
