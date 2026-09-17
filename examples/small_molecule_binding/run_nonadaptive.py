@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import List
 
+from radical.asyncflow import WorkflowEngine
 from rhapsody.backends import DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
@@ -65,7 +66,8 @@ async def impress_smallmol_nonadaptive() -> None:
     input_dir = os.path.join(examples_dir, "p1_in")
 
     backend = await DragonExecutionBackend()
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -90,8 +92,10 @@ async def impress_smallmol_nonadaptive() -> None:
         for i in PIPELINE_INDICES
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

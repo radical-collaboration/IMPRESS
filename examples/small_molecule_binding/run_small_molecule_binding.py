@@ -3,7 +3,9 @@ import os
 from dataclasses import dataclass
 from typing import List
 
-from impress import find_gpus, ImpressManager, PipelineSetup
+from radical.asyncflow import WorkflowEngine
+
+from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import (
     SmallMoleculeBindingPipeline,
     STEP_DONE, STEP_RFD3, STEP_MPNN, STEP_FASTRELAX, STEP_INTERFACE, STEP_AF2,
@@ -328,9 +330,8 @@ async def impress_smallmol_bind() -> None:
         backend = await DragonExecutionBackend()
     else:
         backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
-
-    all_gpus = find_gpus()
+    flow = await WorkflowEngine.create(backend=backend)
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -354,13 +355,15 @@ async def impress_smallmol_bind() -> None:
                 "mpnn_ensemble_size":        cfg.mpnn_ensemble_size,
                 "rfd3_partial_t":            cfg.rfd3_partial_t,
                 "max_tasks":                 cfg.max_tasks,
-                **({"gpu_id": all_gpus[(i - 1) % len(all_gpus)]} if all_gpus else {}),
             }
         )
         for i in range(1, cfg.n_pipelines + 1)
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":

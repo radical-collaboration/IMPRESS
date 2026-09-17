@@ -1,7 +1,5 @@
 from unittest.mock import Mock, patch
 
-import pytest
-
 # Import the classes we're testing
 from impress import PipelineSetup
 
@@ -66,10 +64,3 @@ class TestPipelineSubmission:
 
         assert len(impress_manager.pipeline_tasks) == 2
         assert mock_create_task.call_count == 2
-
-    def test_submit_before_start_raises(self, impress_manager):
-        """submit_new_pipelines raises RuntimeError when called before start()"""
-        with pytest.raises(RuntimeError, match="start\\(\\) must be called"):
-            impress_manager.submit_new_pipelines(
-                [{"name": "p", "type": MockPipeline, "config": {}, "kwargs": {}}]
-            )

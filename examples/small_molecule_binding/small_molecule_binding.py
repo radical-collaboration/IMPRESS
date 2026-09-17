@@ -620,7 +620,6 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
         self.fold_min_ligand_iptm      = kwargs.get("fold_min_ligand_iptm",      None)
         self.max_tasks                 = kwargs.get("max_tasks",                 300)
-        self.gpu_id                    = kwargs.get("gpu_id",                    None)
 
         # Output paths (legacy)
         self.output_path         = os.path.join(self.base_path, "myoutputs", self.name)
@@ -635,12 +634,6 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state            = {}   # written by analysis tasks, read by adaptive_fn
         self.next_step        = STEP_RFD3
         self._current_cycle_i = 0   # set by run() before each mpnn call
-
-    def _gpu_env(self) -> dict:
-        env = {**os.environ}
-        if self.gpu_id is not None:
-            env["CUDA_VISIBLE_DEVICES"] = str(self.gpu_id)
-        return env
 
     # ── Task registration ──────────────────────────────────────────────────
 
@@ -826,7 +819,6 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     cmd,
                     stdout=_lf,
                     stderr=asyncio.subprocess.STDOUT,
-                    env=self._gpu_env(),
                 )
                 await proc.wait()
             if proc.returncode != 0:
@@ -923,7 +915,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             log_file = f"{taskdir}/packmin.log"
             with open(log_file, "wb") as _lf:
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
                 )
                 await proc.wait()
             if proc.returncode != 0:
@@ -964,7 +956,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             log_file = f"{taskdir}/fastrelax.log"
             with open(log_file, "wb") as _lf:
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
                 )
                 await proc.wait()
             if proc.returncode != 0:
@@ -1017,7 +1009,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             log_file = f"{taskdir}/filter_shape.log"
             with open(log_file, "wb") as _lf:
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
                 )
                 await proc.wait()
             if proc.returncode != 0:
@@ -1164,7 +1156,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             log_file = f"{taskdir}/filter_energy.log"
             with open(log_file, "wb") as _lf:
                 proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT, env=self._gpu_env(),
+                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
                 )
                 await proc.wait()
             if proc.returncode != 0:
