@@ -44,7 +44,7 @@ Designs amino acid sequences for the input PDZ structures using ProteinMPNN.
 - **Pass 1**: designs Chain A from PDB files in `<name>_in/`
 - **Pass 2+**: redesigns Chain B from best-model PDBs output by the previous pass
 - **Script**: `scripts/s1_mpnn.sh` → `mpnn_wrapper.py`
-- **HPC**: 1 GPU per rank
+- **HPC**: GPU step; device placement is left to the execution backend
 
 ### `s2` — Sequence Ranking (local)
 Parses the MPNN FASTA output from `s1`, ranks sequences by MPNN score (lower = better), and stores them in `pipeline.iter_seqs` keyed by structure name.
@@ -59,10 +59,9 @@ Writes one paired FASTA file per structure for the structure predictor:
 ### `s4` — Structure Prediction
 Predicts the dimer structure for each (designed sequence, peptide) FASTA. All per-structure tasks are launched in parallel with `asyncio.gather`.
 
-- **Default tool**: Boltz (`scripts/s4_boltz.sh`) using MSA server
-- **Alternative**: ColabFold/AF2 (`scripts/s4_alphafold.sh`) — commented out in code
+- **Tool**: Boltz-2 (`scripts/s4_boltz.sh`). MSA search via the Boltz MSA server is opt-in (`BOLTZ_USE_MSA_SERVER=1`); by default the step uses the MSA cache pre-computed by `delta_env_setup.sh`, since compute nodes have no internet access.
 - **Output**: `af/prediction/dimer_models/<name>/boltz_results_<name>/predictions/<name>/` (PDB + PAE files)
-- **HPC**: 1 GPU per rank
+- **HPC**: GPU step; device placement is left to the execution backend
 
 ### `s4_post_exec` — File Staging (HPC)
 Copies the best-model outputs from the Boltz prediction directory into the canonical locations consumed by `s5`. Runs in parallel alongside each `s4` task via a second `asyncio.gather`.
@@ -174,7 +173,9 @@ Key variables to set before running:
 
 ### Execution backend
 
-`run_protein_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.
+`run_protein_binding.py` selects its backend from `IMPRESS_BACKEND`: `dragon` (the default) uses `rhapsody.backends.DragonExecutionBackend` for multi-node HPC runs, and `local` uses `ConcurrentExecutionBackend(ProcessPoolExecutor())` for single-node development on non-Dragon machines. The runner creates the `WorkflowEngine`, passes it to `ImpressManager`, and shuts it down in a `finally` block.
+
+GPU placement is left to the execution backend — the workflow does not pin tasks to devices.
 
 ### LLM-adaptive runner
 

@@ -11,8 +11,8 @@ import anthropic
 import numpy as np
 import pandas as pd
 
-# from rhapsody.backends import DragonExecutionBackendV3
-from radical.asyncflow import LocalExecutionBackend
+# from rhapsody.backends import DragonExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 import rhapsody
 rhapsody.enable_logging(level=logging.DEBUG)
 
@@ -326,10 +326,12 @@ async def adaptive_decision(pipeline: ProteinBindingPipeline) -> None:
 
 async def impress_protein_bind() -> None:
     """Execute protein binding analysis with LLM-driven adaptive optimization."""
-#    backend = await DragonExecutionBackendV3()
+#    backend = await DragonExecutionBackend()
     backend = await LocalExecutionBackend(ProcessPoolExecutor())
 
-    manager: ImpressManager = ImpressManager(execution_backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
+
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -339,8 +341,10 @@ async def impress_protein_bind() -> None:
         )
     ]
 
-    await manager.start(pipeline_setups=pipeline_setups)
-    await manager.flow.shutdown()
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":
