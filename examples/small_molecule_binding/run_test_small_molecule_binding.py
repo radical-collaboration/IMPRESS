@@ -43,22 +43,105 @@ def setup_mock_inputs(pipeline_name: str) -> None:
                 fh.write(f"# mock placeholder: {fname}\n")
 
 
-def check_af2_filename_derivation() -> None:
-    """Regression check for analysis_fold()'s scores.json -> unrelaxed.pdb
-    filename derivation, against real ColabFold (colabfold_batch) naming."""
+def check_boltz_filename_derivation() -> None:
+    """Regression check for analysis_fold()'s confidence_*.json -> *.pdb
+    filename derivation, against real Boltz-2 (`boltz predict`) naming."""
     cases = [
         (
-            "binder_scores_rank_001_alphafold2_model_3_seed_999.json",
-            "binder_unrelaxed_rank_001_alphafold2_model_3_seed_999.pdb",
+            "confidence_boltz_input_model_0.json",
+            "boltz_input_model_0.pdb",
         ),
         (
-            "binder_scores_rank_005_alphafold2_ptm_model_1_seed_000.json",
-            "binder_unrelaxed_rank_005_alphafold2_ptm_model_1_seed_000.pdb",
+            "confidence_boltz_input_model_4.json",
+            "boltz_input_model_4.pdb",
         ),
     ]
-    for sf, expected in cases:
-        derived = sf.replace('_scores_', '_unrelaxed_').replace('.json', '.pdb')
-        assert derived == expected, f"{sf!r} -> {derived!r}, expected {expected!r}"
+    for cf, expected in cases:
+        derived = cf.replace('confidence_', '', 1).replace('.json', '.pdb')
+        assert derived == expected, f"{cf!r} -> {derived!r}, expected {expected!r}"
+
+
+def check_mpnn_candidate_selection() -> None:
+    """Regression check for analysis_sequence()'s candidate-selection logic
+    against real LigandMPNN's actual output shape: ONE file per input
+    structure containing a template record (no 'id=') followed by several
+    designed candidate records ('id=1'..'id=N', each with overall_confidence).
+    A prior version of this logic only ever read a file's first line (the
+    template), so it silently always "selected" the template's defaulted
+    0.0 confidence and never compared real candidates -- this asserts the
+    fix actually distinguishes and picks the highest-confidence candidate,
+    not the template and not simply the first candidate in the file."""
+    fixture = (
+        ">binder, T=0.1, seed=111, num_res=94, num_ligand_res=39\n"
+        "TEMPLATESEQUENCE\n"
+        ">binder, id=1, T=0.1, seed=111, overall_confidence=0.4167, "
+        "ligand_confidence=0.4290, seq_rec=0.5000\n"
+        "CANDIDATEONE\n"
+        ">binder, id=2, T=0.1, seed=111, overall_confidence=0.4092, "
+        "ligand_confidence=0.4448, seq_rec=0.4574\n"
+        "CANDIDATETWO\n"
+        ">binder, id=3, T=0.1, seed=111, overall_confidence=0.4048, "
+        "ligand_confidence=0.4235, seq_rec=0.4574\n"
+        "CANDIDATETHREE\n"
+        ">binder, id=4, T=0.1, seed=111, overall_confidence=0.4257, "
+        "ligand_confidence=0.4414, seq_rec=0.5319\n"
+        "CANDIDATEFOUR\n"
+    )
+    # Mirrors analysis_sequence()'s parsing exactly (small_molecule_binding.py).
+    best_conf, best_id, best_seq = -1.0, None, None
+    for record in fixture.split('>')[1:]:
+        lines = record.splitlines()
+        header, seq = lines[0], ''.join(lines[1:]).strip()
+        parts = {
+            kv.split('=')[0].strip(): kv.split('=')[1].strip()
+            for kv in header.split(',') if '=' in kv
+        }
+        if 'id' not in parts:
+            continue
+        conf = float(parts.get('overall_confidence', 0))
+        if conf > best_conf:
+            best_conf, best_id, best_seq = conf, parts['id'], seq
+
+    assert best_id == '4', f"expected id=4 (highest overall_confidence), got id={best_id!r}"
+    assert best_seq == 'CANDIDATEFOUR', f"expected candidate 4's sequence, got {best_seq!r}"
+    assert abs(best_conf - 0.4257) < 1e-6, f"expected conf=0.4257, got {best_conf}"
+
+
+def check_fastrelax_interface_shortcircuit() -> None:
+    """Regression check for _stage_metrics_improving(), the metric-agnostic
+    fastrelax/interface short-circuit (see plan-shortcircuit-farep-loop.md).
+    Validated against real HPC data (job 21913252, all three of p3's
+    backbones) before landing -- these fixtures are that same real data."""
+    from small_molecule_binding import _stage_metrics_improving
+
+    fastrelax_specs = [
+        ('interact',    True, -8.0),
+        ('total_score', True, -250.0),
+        ('fa_rep',      True, 100.0),
+    ]
+
+    # First attempt on a backbone: nothing to compare against yet -- always retry.
+    assert _stage_metrics_improving({'interact': -7.5, 'total_score': -200.0, 'fa_rep': 56.0}, None, fastrelax_specs) is True
+
+    # fa_rep-only failure, flat across attempts (real data: p3 backbone 3,
+    # attempts 1->2) -- must be detected as NOT improving.
+    prev = {'interact': -20.17, 'total_score': -413.98, 'fa_rep': 103.81}
+    cur  = {'interact': -17.94, 'total_score': -409.12, 'fa_rep': 104.03}
+    assert _stage_metrics_improving(cur, prev, fastrelax_specs) is False, \
+        "flat fa_rep-only failure should not be read as improving"
+
+    # A real, meaningful improvement should still be allowed to retry: fa_rep
+    # starts above threshold (failing, 110.0 > 100.0) and drops well under it.
+    prev = {'interact': -20.0, 'total_score': -400.0, 'fa_rep': 110.0}
+    cur  = {'interact': -20.0, 'total_score': -400.0, 'fa_rep': 60.0}  # fa_rep way down
+    assert _stage_metrics_improving(cur, prev, fastrelax_specs) is True, \
+        "a real fa_rep improvement should be read as improving"
+
+    # interface (higher-is-better) uses the same function with lower_is_better=False.
+    interface_specs = [('max_sc', False, 0.55)]
+    prev = {'max_sc': 0.5179}
+    cur  = {'max_sc': 0.5148}  # real data: p3 backbone 2, attempts 3->5 direction
+    assert _stage_metrics_improving(cur, prev, interface_specs) is False
 
 
 async def run_mock_test() -> None:
@@ -91,5 +174,7 @@ async def run_mock_test() -> None:
 
 
 if __name__ == "__main__":
-    check_af2_filename_derivation()
+    check_boltz_filename_derivation()
+    check_mpnn_candidate_selection()
+    check_fastrelax_interface_shortcircuit()
     asyncio.run(run_mock_test())

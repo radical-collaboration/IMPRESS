@@ -1,9 +1,9 @@
 import asyncio
+import os
 from typing import List
 
-from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
-from concurrent.futures import ProcessPoolExecutor
-from rhapsody.backends import DragonExecutionBackendV3
+from radical.asyncflow import WorkflowEngine
+from rhapsody.backends import DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import (
@@ -13,7 +13,7 @@ from small_molecule_binding import (
 
 import logging
 import rhapsody
-rhapsody.enable_logging(level=logging.DEBUG)
+rhapsody.enable_logging(level=logging.INFO)
 
 # ── Per-step quality thresholds ────────────────────────────────────────────
 # These are passed to pipeline analysis tasks for metric logging but are not
@@ -51,10 +51,21 @@ async def nonadaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
     )
 
 
+# Indices of pipelines to run — corresponds to the protein IDs selected for
+# this campaign (non-contiguous because some were dropped after earlier runs).
+PIPELINE_INDICES = [1, 2, 4, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 23, 26, 27, 30, 32]
+
+
 async def impress_smallmol_nonadaptive() -> None:
     """Execute the small-molecule binding pipeline without adaptive routing."""
-    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
-    backend = await DragonExecutionBackendV3()
+    examples_dir = os.path.dirname(os.path.abspath(__file__))
+    work_dir = os.environ.get(
+        "IMPRESS_WORK_DIR", os.path.join(examples_dir, "logs")
+    )
+    os.makedirs(work_dir, exist_ok=True)
+    input_dir = os.path.join(examples_dir, "p1_in")
+
+    backend = await DragonExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)
 
@@ -64,6 +75,9 @@ async def impress_smallmol_nonadaptive() -> None:
             type=SmallMoleculeBindingPipeline,
             adaptive_fn=nonadaptive_decision,
             kwargs={
+                "base_path":                 work_dir,
+                "scripts_path":              os.path.join(examples_dir, "scripts"),
+                "input_dir":                 input_dir,
                 "backbone_max_ca_deviation": BACKBONE_MAX_CA_DEVIATION,
                 "backbone_min_ss_fraction":  BACKBONE_MIN_SS_FRACTION,
                 "fastrelax_max_fa_rep":      FASTRELAX_MAX_FA_REP,
@@ -75,7 +89,7 @@ async def impress_smallmol_nonadaptive() -> None:
                 "num_refine_cycles":         2,
             }
         )
-        for i in [1,2,4,6,7,8,10,11,12,13,14,15,16,18,19,20,23,26,27,30,32]
+        for i in PIPELINE_INDICES
     ]
 
     try:
