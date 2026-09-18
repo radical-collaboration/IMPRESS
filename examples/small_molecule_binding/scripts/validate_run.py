@@ -70,7 +70,7 @@ _REGRESSION_RESNAME = "ALR"
 _REJECTED_STATE_KEY = "rfd3_guide_ligand_pdb"
 
 # At least one of these must exist somewhere under $BOLTZ_CACHE for the cache
-# to be considered "warmed" (see plan's delta_env_setup.sh Step 12/13).
+# to be considered "warmed" (see plan's delta_env_setup.sh Step 13/14).
 _BOLTZ_CACHE_MARKERS = ("boltz2_conf.ckpt", "boltz2_aff.ckpt", "mols.tar", "ccd.pkl")
 
 # Skip these extensions when grepping run output for the rejected state key --
@@ -223,9 +223,11 @@ def check_boltz_output_shape(base_path: str, pipeline_name: str):
 
 def check_guided_json_correctness(base_path: str, pipeline_name: str, pipeline_inputs: str):
     """Every */_rfd3/in/guided_binder_design.json must parse, its partial.input
-    must point at a file that exists, and partial.ligand/length/select_exposed/
+    must point at a file that exists, partial.ligand/select_exposed/
     select_buried must match the base ALR_binder_design.json verbatim (only
-    input/partial_t may legitimately differ) -- mirrors _write_guided_rfd3_json."""
+    input/partial_t may legitimately differ), and partial.length must be
+    absent (RFD3 rejects it during partial diffusion; it's only valid for
+    the base spec's from-scratch diffusion) -- mirrors _write_guided_rfd3_json."""
     pipeline_dir = os.path.join(base_path, pipeline_name)
     guided_jsons = sorted(
         glob.glob(os.path.join(pipeline_dir, "*_rfd3", "in", "guided_binder_design.json"))
@@ -273,7 +275,13 @@ def check_guided_json_correctness(base_path: str, pipeline_name: str, pipeline_i
                     f"(resolved: {resolved})"
                 )
 
-        for field in ("ligand", "length", "select_exposed", "select_buried"):
+        if "length" in partial:
+            failures.append(
+                f"{gj}: partial.length={partial['length']!r} must not be present -- "
+                f"RFD3 rejects 'length' during partial diffusion"
+            )
+
+        for field in ("ligand", "select_exposed", "select_buried"):
             expected = base_partial.get(field)
             actual = partial.get(field)
             if actual != expected:
@@ -450,6 +458,63 @@ def check_env_sanity(python_exe: str):
     return failures
 
 
+# ── Check 8: guided ligand atom names cover select_exposed/select_buried ───
+
+def check_guided_ligand_atom_names(base_path: str, pipeline_name: str, pipeline_inputs: str):
+    """Every */_rfd3/in/guided_scaffold.pdb's ligand HETATM atom names must be
+    a superset of its sibling guided_binder_design.json's select_exposed +
+    select_buried atom-name lists -- this is exactly the invariant RFD3's
+    input validator itself enforces (rejecting the guided spec with
+    'ComponentValidationError: Number of atoms must be a multiple of the
+    requested names' when it doesn't hold). Regression test for the
+    guided-input ligand atom-name mapping fix; see
+    scripts/check_ligand_atom_mapping.py for the deeper unit-level check of
+    the mapping logic itself against real fixtures."""
+    pipeline_dir = os.path.join(base_path, pipeline_name)
+    pairs = []
+    for guided_pdb in sorted(glob.glob(os.path.join(pipeline_dir, "*_rfd3", "in", "guided_scaffold.pdb"))):
+        guided_json = os.path.join(os.path.dirname(guided_pdb), "guided_binder_design.json")
+        if os.path.isfile(guided_json):
+            pairs.append((guided_pdb, guided_json))
+    if not pairs:
+        # No guided rfd3 runs have happened yet -- not a failure by itself.
+        return []
+
+    failures = []
+    for guided_pdb, guided_json in pairs:
+        try:
+            with open(guided_json) as fh:
+                guided = json.load(fh)
+        except (OSError, json.JSONDecodeError) as e:
+            failures.append(f"{guided_json}: failed to parse as JSON: {e}")
+            continue
+
+        partial = guided.get("partial", {})
+        ligand_key = partial.get("ligand")
+        expected_names = set()
+        for field in ("select_exposed", "select_buried"):
+            names_csv = partial.get(field, {}).get(ligand_key, "")
+            expected_names.update(n for n in names_csv.split(",") if n)
+        if not expected_names:
+            failures.append(f"{guided_json}: no select_exposed/select_buried atom names found for ligand {ligand_key!r}")
+            continue
+
+        present_names = set()
+        with open(guided_pdb, errors="replace") as fh:
+            for line in fh:
+                if line.startswith("HETATM") and line[17:20].strip() == ligand_key:
+                    present_names.add(line[12:16].strip())
+
+        missing = expected_names - present_names
+        if missing:
+            failures.append(
+                f"{guided_pdb}: missing {sorted(missing)} from select_exposed/select_buried "
+                f"(this is exactly what RFD3's own validator would reject with "
+                f"ComponentValidationError)"
+            )
+    return failures
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -511,6 +576,8 @@ def main(argv=None) -> int:
          lambda: check_ensemble_sanity(base_path, pipeline_name)),
         ("7. Env sanity (BOLTZ_CACHE / import boltz)",
          lambda: check_env_sanity(args.python)),
+        ("8. Guided ligand atom names cover select_exposed/select_buried",
+         lambda: check_guided_ligand_atom_names(base_path, pipeline_name, pipeline_inputs)),
     ]
 
     print("=" * 72)
