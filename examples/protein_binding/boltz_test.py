@@ -6,7 +6,6 @@ import os
 import rhapsody
 from rhapsody.api import ComputeTask
 from rhapsody.api import Session
-from radical.asyncflow import WorkflowEngine
 from rhapsody.backends import DragonExecutionBackend
 
 from rhapsody.telemetry import define_event

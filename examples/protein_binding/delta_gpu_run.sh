@@ -46,7 +46,7 @@ IMPRESS_VENV="${WORK_DIR}/ve/impress"
 module load cray-python
 module load cray-mpich-abi
 
-source "${IMPRESS_VENV}/bin/activate"
+#source "${IMPRESS_VENV}/bin/activate"
 
 # ── Tool paths ────────────────────────────────────────────────────────────────
 export MPNN_PATH="${WORK_DIR}/ProteinMPNN"
@@ -60,6 +60,8 @@ export BOLTZ_VENV="${WORK_DIR}/ve/boltz"
 # Boltz model weight cache (45K CCD files).
 export BOLTZ_CACHE_DIR="${WORK_DIR}/boltz"
 mkdir -p "${BOLTZ_CACHE_DIR}"
+
+source "${BOLTZ_VENV}/bin/activate"
 
 # ── IMPRESS paths ─────────────────────────────────────────────────────────────
 export IMPRESS_SCRIPTS_DIR="${WORK_DIR}/IMPRESS/examples/protein_binding"
