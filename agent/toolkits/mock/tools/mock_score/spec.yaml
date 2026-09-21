@@ -1,0 +1,16 @@
+id: mock_score
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.mock_agents.ScoreAgent
+resources: {cores: 8, walltime_s: 120}
+inputs:
+  complex: {type: Complex}
+outputs:
+  metrics: {type: MetricSet}
+parameters:
+  nstruct: {type: int, default: 4, min: 1, max: 64, trades: "sampling vs CPU-hours"}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: clashscore, max: 25.0}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.5}}

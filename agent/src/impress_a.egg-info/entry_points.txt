@@ -1,0 +1,2 @@
+[console_scripts]
+impress-a = impress_a.cli:main

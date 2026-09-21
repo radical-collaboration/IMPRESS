@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# asyncflow writes one of these into CWD per WorkflowEngine run
+asyncflow.session.*
+# campaign outputs (provenance, artifacts, trust ledger)
+campaigns/_runs/

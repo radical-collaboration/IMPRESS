@@ -1,0 +1,18 @@
+id: mock_design
+toolkit: mock
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.mock_agents.DesignAgent
+resources: {gpus: 1, cores: 2, walltime_s: 15}
+gpu_portability: {cuda: proven, hip: plausible, sycl_xpu: plausible}
+inputs:
+  backbone: {type: Backbone}
+outputs:
+  sequences: {type: ProteinSequence}
+parameters:
+  temperature: {type: float, default: 0.1, min: 0.0, max: 1.0, trades: "diversity vs recovery"}
+  num_seqs: {type: int, default: 4, min: 1, max: 32}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: seq_recovery, min: 0.15}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.005}}
