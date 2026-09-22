@@ -18,6 +18,7 @@ failure are all facts about state the executor alone holds.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,9 @@ class RunRecord:
     #: Absorptions visible when this run was admitted. What separates a run that had a
     #: chance to act on the last result from one already in flight when it landed.
     informed_by: int = 0
+
+
+log = logging.getLogger(__name__)
 
 
 class CampaignExecutor:
@@ -411,6 +415,9 @@ class CampaignExecutor:
                          signature=rec.signature, cycle=self.cycle,
                          estimate=self.validator.estimate(rec.graph))
         rec.handle = self.dispatcher.submit(rec.graph, run_id=run_label)
+        log.info("submitted %s: %s (trusted=%s, estimate=%s)", run_label,
+                 {tid: n.tool for tid, n in rec.graph.nodes.items()},
+                 rec.scrutiny.trusted, self.validator.estimate(rec.graph))
         self._activity.set()
         return run_label
 
@@ -496,6 +503,8 @@ class CampaignExecutor:
 
     def request_stop(self, reason: str) -> None:
         """Record the first reason the campaign ended. Later ones are consequences."""
+        if not self._halt.is_set():
+            log.info("stop requested: %s", reason)
         if self._stop_reason is None:
             self._stop_reason = reason
         self._halt.set()
@@ -521,10 +530,14 @@ class CampaignExecutor:
         self._log("executions", {"cycle": rec.turn, "graph": rec.graph.id,
                                  "run": run_id, "cost": results.cost,
                                  "failures": results.failures})
+        log.info("reaped %s: %d/%d tasks ok, cost=%s%s", run_id,
+                 len(results.per_task), len(rec.graph.nodes), results.cost,
+                 f", failures={results.failures}" if results.failures else "")
         return self._absorb(results, rec.graph, rec.intent.parent_node,
                             rec.scrutiny, run_id, turn=rec.turn)
 
     def _abandon(self, run_id: str, rec: RunRecord, err: BaseException) -> None:
+        log.warning("abandoned %s: %r", run_id, err)
         self.budget.release(run_id)          # never ran; never charge for it
         self._untrusted_inflight.discard(rec.signature)
         self.jobs.record(job_id=run_id,
@@ -622,8 +635,15 @@ class CampaignExecutor:
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
         from ..exec.backend import make_engine
+        # Logged either side because this call is the only stretch of a campaign that
+        # precedes its own provenance: rhapsody's Dragon backend builds `Batch()` - the
+        # results DDict, the worker pool, telemetry - synchronously in its constructor, so
+        # a stall there leaves no campaign.jsonl and no other trace at all.
+        log.info("engine: constructing %s backend (config=%s)",
+                 self.spec.backend, self.spec.backend_config or {})
         self.flow, self._backend = await make_engine(self.spec.backend,
                                                      self.spec.backend_config)
+        log.info("engine: %s backend ready", self.spec.backend)
         self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend)
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,

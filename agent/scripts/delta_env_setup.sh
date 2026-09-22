@@ -14,8 +14,10 @@
 #
 # Defaults:
 #   ENV_DIR   = <repo>/.venv
-#   MPNN_DIR  = $SCRATCH/$USER/LigandMPNN
-#   BOLTZ_CACHE = $SCRATCH/$USER/.cache/boltz
+#   MPNN_DIR    = $SCRATCH_BASE/LigandMPNN
+#   BOLTZ_CACHE = $SCRATCH_BASE/.cache/boltz
+#   ($SCRATCH_BASE is $SCRATCH plus /$USER, appended only when $SCRATCH is not already
+#    the per-user directory - see scripts/_scratch_base.sh)
 #
 # Foundry container (RFD3 backbone diffusion) is NOT built by this script - it is managed
 # the same way the original IMPRESS examples do (see their pull_foundry.sh). Point
@@ -51,11 +53,15 @@ done
 PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
-MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+# Shared with delta_gpu_run.sh: the run MUST derive the same paths this setup creates.
+source "${IMPRESS_A_DIR}/scripts/_scratch_base.sh"
+
+MPNN_DIR="${MPNN_DIR:-${SCRATCH_BASE}/LigandMPNN}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH_BASE}/.cache/boltz}"
 
 echo "================================================================="
 echo "  IMPRESS_A_DIR      = ${IMPRESS_A_DIR}"
+echo "  SCRATCH_BASE       = ${SCRATCH_BASE}"
 echo "  ENV_DIR            = ${ENV_DIR}"
 echo "  MPNN_DIR           = ${MPNN_DIR}"
 echo "  BOLTZ_CACHE        = ${BOLTZ_CACHE}"

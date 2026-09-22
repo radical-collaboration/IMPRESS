@@ -7,7 +7,8 @@
 #
 # Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required):
 #   export SBATCH_ACCOUNT=<project>-delta-gpu     # <project>-delta-gpu or <project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export SCRATCH=/work/hdd/<project>           # or /work/hdd/<project>/$USER - either
+#                                                # form works, see scripts/_scratch_base.sh
 #
 # Optional overrides:
 #   export MPNN_DIR=/path/to/LigandMPNN
@@ -43,11 +44,16 @@ echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
 if [ -z "${SCRATCH:-}" ]; then
     echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch scripts/delta_gpu_run.sh"
+    echo "       export SCRATCH=/work/hdd/<project> && sbatch scripts/delta_gpu_run.sh"
     exit 1
 fi
 
 IMPRESS_A_DIR="${IMPRESS_A_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# SCRATCH_BASE, not ${SCRATCH}/${USER}: $SCRATCH may already BE the per-user directory.
+# Shared with delta_env_setup.sh so setup and run cannot disagree about where the tool
+# trees live.
+source "${IMPRESS_A_DIR}/scripts/_scratch_base.sh"
 
 # ── System library paths (Delta-specific, required by Dragon) ─────────────────
 export CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8
@@ -62,16 +68,18 @@ source "${IMPRESS_A_VENV}/bin/activate"
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by the rfd3/ligandmpnn/rosetta/boltz task agents) ────────
-export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+export MPNN_DIR="${MPNN_DIR:-${SCRATCH_BASE}/LigandMPNN}"
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH_BASE}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
-if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
-    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
-fi
+for _sif in "${SCRATCH_BASE}/foundry.sif" "${SCRATCH}/foundry.sif"; do
+    if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${_sif}" ]; then
+        export FOUNDRY_SIF_PATH="${_sif}"
+    fi
+done
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/${USER}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH_BASE}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it the way the original IMPRESS examples' pull_foundry.sh does,"
@@ -87,6 +95,7 @@ if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     trap "echo 'Removing ${_FOUNDRY_TMP}'; rm -rf '${_FOUNDRY_TMP}'" EXIT
 fi
 
+echo "SCRATCH_BASE:      ${SCRATCH_BASE}"
 echo "MPNN_DIR:          ${MPNN_DIR}"
 echo "FOUNDRY_SIF_PATH:  ${FOUNDRY_SIF_PATH}"
 echo "BOLTZ_CACHE:       ${BOLTZ_CACHE}"
@@ -103,7 +112,7 @@ fi
 # impress_a's CampaignSpec.root and asyncflow's own session dir both resolve relative to
 # the process CWD (see CLAUDE.md's asyncflow-writes-into-CWD gotcha), so `cd`ing into a
 # per-job scratch directory before launch is sufficient.
-WORKDIR="${IMPRESS_A_WORKDIR:-${SCRATCH}/${USER}/impress_a_runs/${SLURM_JOB_ID:-manual}}"
+WORKDIR="${IMPRESS_A_WORKDIR:-${SCRATCH_BASE}/impress_a_runs/${SLURM_JOB_ID:-manual}}"
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
 

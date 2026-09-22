@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,11 @@ from ..policy.external import ExternalPolicy
 from ..policy.oracle import OraclePolicy
 from ..policy.wrappers import LoggingPolicy, NullPolicy, RuleCorrectionsPolicy
 from ..tools.registry import Registry
+
+# Module logger, never configured here: a library that calls basicConfig steals the
+# root handler from whoever embedded it. `scripts/delta_run_campaign.py` configures it,
+# and everything below is silent by default - including under pytest.
+log = logging.getLogger(__name__)
 
 POLICIES = {"D": ThresholdPolicy, "B": OraclePolicy, "A": FourNodePolicy,
             "C": ExternalPolicy, "null": NullPolicy, "replay": ReplayPolicy}
@@ -69,12 +77,76 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True):
     return pol
 
 
-async def run_campaign(spec_path: str, model: str = "D", guard: bool = True) -> int:
+def _hms(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
+
+
+def _prov_heartbeat(campaign: str, kind: str, record: dict[str, Any]) -> None:
+    """Mirror every provenance record to the log as it is written.
+
+    `prov_sink` exists for the control plane; pointing it at a logger turns the campaign's
+    own append-only record into a live progress feed, so a batch run reports what it is
+    doing without the package printing anything of its own.
+    """
+    body = json.dumps({k: v for k, v in record.items() if k != "ts"}, default=str)
+    log.info("prov %-12s %s", kind, body if len(body) <= 600 else body[:600] + "...")
+
+
+async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
+    """Prove liveness while work is outstanding.
+
+    Nothing between submission and completion produces output, and the longest real task
+    is capped at 900s (rfd3's `walltime_s`), so a campaign doing exactly what it should
+    and one deadlocked in the backend are indistinguishable from outside for a quarter of
+    an hour. This is the line that tells them apart: `inflight=` with run ids means the
+    executor is waiting on Dragon, `inflight=0` means it is waiting on the reasoner.
+
+    Reads only the executor's synchronous snapshot API. Its mutating blocks are await-free
+    by invariant, so a heartbeat scheduled between them can never see a torn state.
+    """
+    ex = mgr.executor
+    while True:
+        await asyncio.sleep(period)
+        try:
+            running = ex.inflight()
+        except Exception as e:                     # noqa: BLE001 - diagnostics only
+            log.warning("heartbeat: could not snapshot executor: %r", e)
+            continue
+        log.info("heartbeat +%s cycle=%d dispatched=%d nodes=%d inflight=%d%s",
+                 _hms(time.monotonic() - t0), ex.cycle, ex.dispatched, len(ex.tree),
+                 len(running),
+                 "".join(f" [{r.run_id} {r.state.value} {r.graph_id}"
+                         f"{'' if r.trusted else ' untrusted'}]" for r in running))
+
+
+async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
+                       heartbeat_s: float | None = None) -> int:
+    t0 = time.monotonic()
+    log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
     spec.campaign_id = f"{spec.campaign_id}-{model}"
     policy = build_policy(model, spec, guard)
-    mgr = CampaignManager(spec, policy, Registry().load())
-    res = await mgr.run()
+    reg = Registry().load()
+    log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
+             f" ERRORS: {reg.errors}" if reg.errors else "")
+    mgr = CampaignManager(spec, policy, reg)
+    mgr.prov_sink = _prov_heartbeat
+    if heartbeat_s is None:
+        heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
+    log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",
+             spec.campaign_id, model, spec.backend, mgr.root,
+             ",".join(spec.stages) or "<policy default>", spec.replicas)
+    hb = (asyncio.create_task(_heartbeat(mgr, heartbeat_s, t0))
+          if heartbeat_s > 0 else None)
+    try:
+        res = await mgr.run()
+    finally:
+        if hb is not None:
+            hb.cancel()
+            await asyncio.gather(hb, return_exceptions=True)
+        log.info("campaign returned after %s", _hms(time.monotonic() - t0))
     print(f"\n  campaign : {res.campaign_id}")
     print(f"  policy   : {getattr(policy,'name','?')}")
     print(f"  cycles   : {res.cycles}")
@@ -149,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("spec")
     r.add_argument("--model", default="D", choices=sorted(POLICIES))
     r.add_argument("--no-guard", action="store_true")
+    r.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS",
+                   help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
+                        "0 disables). Only visible once logging is configured - see "
+                        "scripts/delta_run_campaign.py")
     t = sub.add_parser("tools", help="list registered tools")
     t.add_argument("--toolkits", default=None)
     pf = sub.add_parser("preflight",
@@ -156,7 +232,8 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("spec", nargs="?", default=None)
     a = ap.parse_args(argv)
     if a.cmd == "run":
-        return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard))
+        return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
+                                        a.heartbeat))
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec).stages if a.spec else None)
     reg = Registry().load(a.toolkits)
