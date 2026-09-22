@@ -98,6 +98,32 @@ class FoldAgent(TaskAgent):
 `run()` returns a plain dict with `outputs`, `metrics`, and whatever keys the gates inspect. Do not
 override `execute()`.
 
+### Outputs are typed handles, not strings
+
+Return a **`pathlib.Path`** for anything written to disk, and a plain value for anything small enough
+to carry inline. `post_process` turns both into `ArtifactRef`s, taking the **type from the spec's
+declared output port** — so a handle can never disagree with the contract the composer type-checked
+the graph against, and an adapter never has to repeat itself.
+
+```python
+return {"result": "backbone",                       # what `output_present` looks for
+        "outputs": {"backbone": work / "design.pdb"},   # a Path: a file
+        "metrics": {"ss_fraction": 0.62}}
+```
+
+Returning a `Path` is how an adapter *declares* a file; returning `str(path)` makes it an inline
+value instead. Files get their size and a content digest recorded, which is what lets a reasoner in
+another process tell whether the bytes behind a path are still the ones the campaign reasoned about.
+
+An output your spec does not declare is a **load-bearing error**, not something to drop quietly:
+nothing downstream could consume it and the composer never type-checked it, so `post_process` raises
+rather than let a spec bug surface later as a missing input.
+
+To consume an upstream artifact, `_subprocess.first_dep_output(req.inputs, port)` returns the thing
+to open. Write files under `_subprocess.workdir_for(req, prefix)` — which defaults to the process
+CWD, where the launcher has already put you — never `tempfile.mkdtemp()`, whose result is local to
+one node and unreachable from wherever the next task runs.
+
 ## Skill documents
 
 `SKILL.md` is agent-facing guidance, not an API reference — the spec is the reference. Required sections:

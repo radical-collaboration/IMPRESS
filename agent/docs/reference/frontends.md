@@ -107,8 +107,18 @@ consume the identical observation and return the identical `Decision`. "Informed
 | Adapter | Status | Fits |
 |---|---|---|
 | in-process | implemented | HITL agents co-located in the job; tests; the reference implementation |
-| HTTP + SSE | not yet built | Pipelining-as-a-service |
+| HTTP + SSE | implemented (`control/http.py`) | A reasoner outside the allocation; pipelining-as-a-service |
 | MCP | not yet built | An external agent driving a campaign, submit-and-poll |
+
+The HTTP adapter is exercised end to end by `tests/test_http_adapter.py` on loopback, deliberately:
+a transport nothing runs looks finished while rotting. It is built on `asyncio.start_server` rather
+than a web framework, speaks JSON plus one SSE stream, and is **not public-facing** — no auth, no TLS,
+bind it to localhost or a private interface.
+
+Run operations are part of the **core** protocol, not something a transport adds: `submit_run`,
+`list_runs`, `run_result`, `cancel_run`. Admission is synchronous — `202` with a run id, or `409` with
+the `ValidationFailure` that refused it — because a rejection severed from the request that caused it
+leaves nothing to bound retries against.
 
 ### Steering carries no privilege
 

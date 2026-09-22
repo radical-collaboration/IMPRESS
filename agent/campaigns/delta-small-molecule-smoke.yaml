@@ -7,11 +7,26 @@ goal: "Design a small-molecule-binding protein around the configured ligand"
 backend: dragon
 backend_config: {}
 max_cycles: 1
-stagnation_limit: 1
+stagnation_limit: 2
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+# Sized against the INTERLOCK, not just the chain. A novel composition pattern is
+# capped at 10% of available budget until it earns trust, and one pass of this chain
+# costs 0.5 gpu-h / 0.75 cpu-h - so anything under 5.0/7.5 rejects its own first run.
 budget:
-  gpu_hours: 2.0
-  cpu_hours: 8.0
+  gpu_hours: 6.0
+  cpu_hours: 10.0
+stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]
+# Boltz is LAST on purpose: an independent prediction run AFTER the Rosetta physics
+# gates, so agreement between the two is the campaign's strongest signal
+# (toolkits/boltz/SKILL.md). Running Rosetta on a Boltz output inverts that logic.
+params:
+  rfd3_design:
+    contig: "A1-100"          # the designed chain; edit per target
+    ligand_resname: "LIG"     # must match the residue name the foundry container uses
+  boltz_predict:
+    ligand_smiles: ""         # REQUIRED: the actual ligand. Empty = no ligand modelled.
+replicas: 1
+concurrency: 1
 objectives:
   - {name: total_score,            direction: minimize}
   - {name: shape_complementarity,  direction: maximize, min: 0.55}

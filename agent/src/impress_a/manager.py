@@ -1,267 +1,115 @@
-"""The campaign manager - the outer loop.
+"""The campaign manager - now a facade over an executor and a reasoner.
 
-  observe -> decide -> compose -> validate -> execute -> analyze -> update -> terminate?
+  observe -> DECIDE -> compose -> validate -> execute -> analyze -> update -> terminate?
 
-Only `decide` differs between control models, which is what makes them interchangeable.
-The loop is OURS: Phase 3 established that ceding it to a framework forces the validation
-gates, dry-run and interlock into awkward places (decisions 0003, and Phase 3 doc 04).
+The loop is still ours, and every step above still happens in that order for any one
+experiment. What changed is who drives it. The manager used to BE the loop, calling the
+policy once per cycle and then blocking on the graph it asked for, so a reasoner could
+never be consulted while work was running. Now:
+
+  * `runtime.executor.CampaignExecutor` owns all campaign state and the engine, and
+    reaps runs as they finish;
+  * the reasoner runs as its own coroutine and reaches the executor through
+    `core.session.CampaignSession`;
+  * `policy.driver.SequentialPolicyDriver` makes a `decide`-style policy look like a
+    reasoner, so control models A-D are unchanged.
+
+`CampaignManager` remains the public entry point and the thing the control plane
+registers. It builds the executor in `__init__` - not in `run()` - because callers
+legitimately inspect `mgr.tree`, `mgr.budget` and `mgr.observe()` before and after a
+campaign, and a facade that only existed mid-run would break every one of them.
 """
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-from .compose.composer import Composer
-from .compose.interlock import Scrutiny, TrustLedger
-from .compose.validate import SiteCaps, Validator
-from .core.artifacts import Property, PropertySource
-from .core.budget import BudgetLedger
-from .core.decision import (Backtrack, CampaignObservation, ComposeAndRun,
-                            PopulationStats, RequestHuman, Stop, ValidationFailure)
-from .core.pareto import Objective, pareto_front
-from .core.provenance import ProvenanceLog
-from .core.qc import QCVerdict
-from .core.tree import CampaignTree, DesignNode, NodeStatus
-from .exec.dispatch import Dispatcher, ExecutionResults
-from .exec.ledger import JobLedger
+from .core.pareto import pareto_front
+from .core.session import CampaignStopped
+from .policy.driver import SequentialPolicyDriver
+from .runtime.executor import (
+    CampaignAborted,
+    CampaignExecutor,
+    CampaignResult,
+    CampaignSpec,
+    RunRecord,
+)
+from .runtime.runservice import RunService
+from .runtime.session import InProcessSession
 from .tools.registry import Registry
 
+__all__ = ["CampaignAborted", "CampaignManager", "CampaignResult", "CampaignSpec",
+           "RunRecord"]
 
-class CampaignAborted(RuntimeError):
-    """Transient infrastructure failure, not a goal or a programming error.
-
-    Adopted from campaign_manager (Phase 3): callers can alert on this differently from
-    an unexpected crash.
-    """
-
-
-@dataclass
-class CampaignSpec:
-    campaign_id: str
-    goal: str
-    objectives: list[Objective]
-    budget: dict[str, float] = field(default_factory=dict)
-    max_cycles: int = 10
-    stagnation_limit: int = 3
-    max_failed_cycles: int = 3
-    max_attempts: int = 4
-    site: SiteCaps = field(default_factory=SiteCaps)
-    backend: str = "concurrent"
-    backend_config: dict[str, Any] = field(default_factory=dict)
-    root: str = "campaigns/_runs"
-
-
-@dataclass
-class CampaignResult:
-    campaign_id: str
-    cycles: int
-    stop_reason: str
-    front: list[DesignNode]
-    tree: CampaignTree
-    corrections: list[str] = field(default_factory=list)
+_DELEGATED = ("tree", "budget", "prov", "jobs", "trust", "reg", "root", "cycle",
+              "run_seq", "dispatched", "observe", "composer", "validator",
+              "pending_human")
 
 
 class CampaignManager:
     def __init__(self, spec: CampaignSpec, policy: Any, registry: Registry | None = None):
         self.spec, self.policy = spec, policy
-        self.reg = registry or Registry().load()
-        self.tree = CampaignTree()
-        self.budget = BudgetLedger(limits=dict(spec.budget))
-        self.root = Path(spec.root) / spec.campaign_id
-        self.prov = ProvenanceLog(self.root / "provenance")
-        self.jobs = JobLedger(self.root / "jobs" / "ledger.jsonl")
-        self.trust = TrustLedger.load(Path(spec.root) / "_trust" / f"{spec.site.gpu_api}.json")
-        self.composer = Composer(self.reg)
-        self.validator = Validator(self.reg, spec.site, self.budget)
-        self.cycle = 0
-        self.max_attempts = spec.max_attempts
-        self.pending_human: RequestHuman | None = None
-        self._stagnant = 0
-        self._failed_cycles = 0
-        self._last_front_ids: set[str] = set()
+        self.executor = CampaignExecutor(spec, policy, registry)
+        self.session = InProcessSession(self.executor)
+        self.runs = RunService(self.executor)
 
-    # -- observe -------------------------------------------------------------
-    def observe(self, last_rejection: ValidationFailure | None = None) -> CampaignObservation:
-        live = self.tree.live()
-        front = pareto_front(live, self.spec.objectives)
-        allnodes = list(self.tree)
-        stats = PopulationStats(
-            size=len(allnodes), live=len(live),
-            failed=sum(1 for n in allnodes if n.qc.verdict is QCVerdict.FAIL),
-            suspect=sum(1 for n in allnodes if n.qc.verdict is QCVerdict.SUSPECT),
-            metric_means={
-                o.name: round(sum(v for n in live if (v := n.metric(o.name)) is not None)
-                              / max(1, sum(1 for n in live if n.metric(o.name) is not None)), 3)
-                for o in self.spec.objectives},
-        )
-        return CampaignObservation(
-            campaign_id=self.spec.campaign_id, cycle=self.cycle, goal=self.spec.goal,
-            objectives=self.spec.objectives, pareto_front=front, population=stats,
-            recent=[n for n in allnodes if n.cycle == self.cycle - 1],
-            budget=self.budget, available_tools=self.reg.ids(),
-            last_rejection=last_rejection)
+    # -- delegation ----------------------------------------------------------
+    # The executor owns campaign state; these keep the long-standing surface working for
+    # the control plane, the CLI and the tests.
+    def __getattr__(self, name: str) -> Any:
+        if name in _DELEGATED:
+            return getattr(self.executor, name)
+        raise AttributeError(name)
 
-    # -- update --------------------------------------------------------------
-    def _absorb(self, results: ExecutionResults, graph, parent: str | None,
-                scrutiny: Scrutiny, decision_id: str) -> list[DesignNode]:
-        """One DesignNode per replica lineage - N replicas are N candidates, not one."""
-        made: list[DesignNode] = []
-        for lineage, task_ids in sorted(results.lineages(graph).items()):
-            node = DesignNode(parent=parent, cycle=self.cycle,
-                              produced_by=graph.id, decision=decision_id)
-            qc = results.qc_for(task_ids)
-            if scrutiny.mark_suspect and qc.verdict is not QCVerdict.FAIL:
-                qc.mark_suspect("provisional composition pattern - not yet trusted")
-            node.qc = qc
-            for k, v in results.metrics_for(task_ids).items():
-                node.properties[k] = Property(
-                    name=k, value=v,
-                    source=PropertySource(name="mock_toolkit", authority=10))
-            if any(t in results.failures for t in task_ids):
-                node.status = NodeStatus.FAILED
-            self.tree.add(node)
-            made.append(node)
-            self.prov.append("results", {"node": node.id, "cycle": self.cycle,
-                                         "lineage": lineage, "qc": qc.verdict.value,
-                                         "metrics": results.metrics_for(task_ids)})
-        return made
+    @property
+    def prov_sink(self) -> Any:
+        return self.executor.prov_sink
 
-    # -- the loop ------------------------------------------------------------
+    @prov_sink.setter
+    def prov_sink(self, sink: Any) -> None:
+        self.executor.prov_sink = sink
+
+    # -- the campaign --------------------------------------------------------
+    def _reasoner(self) -> Any:
+        """A policy that implements `conduct` drives itself; anything else is driven."""
+        target = getattr(self.policy, "inner", self.policy)
+        if hasattr(self.policy, "conduct") or hasattr(target, "conduct"):
+            return self.policy if hasattr(self.policy, "conduct") else target
+        return SequentialPolicyDriver(
+            self.policy, max_turns=self.spec.max_cycles,
+            max_attempts=self.spec.max_attempts, concurrency=self.spec.concurrency)
+
     async def run(self) -> CampaignResult:
-        from .exec.backend import make_engine
-        flow, backend = await make_engine(self.spec.backend, self.spec.backend_config)
-        dispatcher = Dispatcher(flow, self.reg, self.spec.backend)
-        self.prov.append("campaign", {"spec": self.spec.campaign_id, "goal": self.spec.goal,
-                                      "policy": getattr(self.policy, "name", "?"),
-                                      "objectives": [o.model_dump() for o in self.spec.objectives],
-                                      "budget": self.spec.budget})
-        stop_reason, rejection, last_results = "completed", None, None
+        ex = self.executor
+        await ex.start()
+        aborted: BaseException | None = None
+        pump = asyncio.create_task(ex.pump())
+        reasoner = asyncio.create_task(self._reasoner().conduct(self.session))
         try:
-            while self.cycle < self.spec.max_cycles:
-                obs = self.observe(rejection)
-                rejection = None
-                decision = await self.policy.decide(obs)
-
-                if isinstance(decision, Stop):
-                    stop_reason = decision.reason
-                    break
-                if isinstance(decision, RequestHuman):
-                    self.pending_human = decision
-                    self.prov.append("transitions", {"event": "request_human",
-                                                     "question": decision.question})
-                    stop_reason = f"awaiting human: {decision.question}"
-                    break
-                if isinstance(decision, Backtrack):
-                    branch = self.tree.branch_from(decision.node_id)
-                    branch.cycle = self.cycle
-                    self.tree.add(branch)
-                    self.prov.append("decisions", {"cycle": self.cycle, "kind": "backtrack",
-                                                   "from": decision.node_id,
-                                                   "new": branch.id,
-                                                   "rationale": decision.rationale})
-                    self.cycle += 1
-                    continue
-
-                # compose -> validate -> (interlock) -> dry-run -> execute,
-                # with BOUNDED retry inside the cycle: a rejection hands the policy a
-                # reason and another attempt, rather than silently costing a cycle.
-                assert isinstance(decision, ComposeAndRun)
-                graph = sig = scrutiny = results = None
-                for attempt in range(self.max_attempts):
-                    graph = self.composer.compose(decision.intent)
-                    sig = graph.pattern_signature()
-                    self.trust.record_for(sig, [n.tool for n in graph.nodes.values()])
-                    scrutiny = Scrutiny.for_pattern(self.trust, sig)
-
-                    failure = self.validator.validate(graph)
-                    if failure is None and scrutiny.cost_cap_fraction is not None:
-                        est = self.validator.estimate(graph)
-                        for dim, c in est.items():
-                            cap = self.budget.remaining(dim) * scrutiny.cost_cap_fraction
-                            if self.budget.limits.get(dim) and c > cap:
-                                failure = ValidationFailure(
-                                    gate="interlock",
-                                    reason=f"provisional pattern capped at "
-                                           f"{scrutiny.cost_cap_fraction:.0%} of remaining "
-                                           f"{dim} ({c:.3f} > {cap:.3f})")
-                                break
-                    if failure is None and scrutiny.force_dry_run:
-                        failure = await self.validator.dry_run(graph)
-
-                    self.prov.append("graphs", {
-                        "cycle": self.cycle, "attempt": attempt, "graph": graph.id,
-                        "signature": sig, "trusted": scrutiny.trusted,
-                        "nodes": {k: v.tool for k, v in graph.nodes.items()},
-                        "estimate": self.validator.estimate(graph),
-                        "rejected": failure.model_dump() if failure else None})
-
-                    if failure is None:
-                        break
-                    rejection = failure
-                    retry = await self.policy.on_rejected(decision, failure)
-                    if isinstance(retry, Stop):
-                        stop_reason = retry.reason
-                        graph = None
-                        break
-                    if not isinstance(retry, ComposeAndRun):
-                        graph = None
-                        stop_reason = "policy returned a non-runnable decision on rejection"
-                        break
-                    decision = retry
-                else:
-                    graph = None
-                    stop_reason = f"{self.max_attempts} attempts all rejected in cycle {self.cycle}"
-
-                if graph is None:
-                    break
-
-                results = await dispatcher.run(graph, invocation=f"c{self.cycle}")
-                last_results = results
-                self.budget.charge(results.cost)
-                self.prov.append("executions", {"cycle": self.cycle, "graph": graph.id,
-                                                "cost": results.cost,
-                                                "failures": results.failures})
-
-                self._absorb(results, graph, decision.intent.parent_node,
-                             scrutiny, f"c{self.cycle}")
-                await self.policy.interpret(results, obs)
-
-                # interlock bookkeeping
-                if results.all_gates_passed and not results.failures:
-                    if self.trust.on_clean_run(sig):
-                        self.prov.append("transitions", {"event": "pattern_promoted",
-                                                         "signature": sig})
-                    self._failed_cycles = 0
-                else:
-                    if self.trust.on_failure(sig):
-                        self.prov.append("transitions", {"event": "pattern_demoted",
-                                                         "signature": sig})
-                    self._failed_cycles += 1
-                    if self._failed_cycles >= self.spec.max_failed_cycles:
-                        raise CampaignAborted(
-                            f"{self._failed_cycles} consecutive all-failed cycles")
-
-                # stagnation
-                ids = {n.id for n in pareto_front(self.tree.live(), self.spec.objectives)}
-                self._stagnant = 0 if ids != self._last_front_ids else self._stagnant + 1
-                self._last_front_ids = ids
-                if self._stagnant >= self.spec.stagnation_limit:
-                    stop_reason = f"stagnation: front unchanged for {self._stagnant} cycles"
-                    break
-                if blown := self.budget.exhausted():
-                    stop_reason = f"budget exhausted: {blown}"
-                    break
-                self.cycle += 1
-            else:
-                stop_reason = f"max_cycles={self.spec.max_cycles} reached"
+            # Whichever finishes first ends the campaign: the reasoner running out of
+            # things to do, or the executor deciding it is over. The executor's reasons
+            # - budget, stagnation, repeated failure - are facts about state the reasoner
+            # cannot see, so termination is not the reasoner's to declare.
+            done, _ = await asyncio.wait({pump, reasoner},
+                                         return_when=asyncio.FIRST_COMPLETED)
+            for t in done:
+                if not t.cancelled() and (err := t.exception()) is not None:
+                    aborted = err
         finally:
-            await flow.shutdown()
+            ex.request_stop(ex.stop_reason)
+            for t in (reasoner, pump):
+                t.cancel()
+            await asyncio.gather(reasoner, pump, return_exceptions=True)
+            await ex.shutdown(aborted)
 
-        front = pareto_front(self.tree.live(), self.spec.objectives)
-        self.prov.append("transitions", {"event": "terminated", "reason": stop_reason,
-                                         "cycles": self.cycle, "front": [n.id for n in front]})
-        return CampaignResult(campaign_id=self.spec.campaign_id, cycles=self.cycle,
-                              stop_reason=stop_reason, front=front, tree=self.tree,
-                              corrections=getattr(self.policy, "corrections", []))
+        if aborted is not None and not isinstance(aborted, CampaignStopped):
+            raise aborted
+
+        front = pareto_front(ex.tree.live(), self.spec.objectives)
+        ex._log("transitions", {"event": "terminated", "reason": ex.stop_reason,
+                                "cycles": ex.cycle,
+                                "front": [n.id for n in front]})
+        return CampaignResult(campaign_id=self.spec.campaign_id, cycles=ex.cycle,
+                              stop_reason=ex.stop_reason, front=front, tree=ex.tree,
+                              corrections=getattr(self.policy, "corrections", []),
+                              runs=ex.dispatched)

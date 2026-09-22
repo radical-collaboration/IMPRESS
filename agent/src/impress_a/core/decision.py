@@ -6,20 +6,16 @@ special case (Part B doc 06).
 """
 from __future__ import annotations
 
-import itertools
 from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
 from .budget import BudgetLedger
+from .ids import counter
 from .pareto import Objective
 from .tree import DesignNode
 
-_dids = itertools.count(1)
-
-
-def new_decision_id() -> str:
-    return f"d{next(_dids):06d}"
+new_decision_id = counter("d")
 
 
 class ExperimentIntent(BaseModel):
@@ -65,6 +61,12 @@ class ValidationFailure(BaseModel):
     node: str | None = None
     reason: str
     detail: dict[str, Any] = Field(default_factory=dict)
+    #: True when the graph is fine and only the moment is wrong - resources are
+    #: contended right now. Gates 1-4 are deterministic properties of the graph and are
+    #: never transient. Without this a policy answers contention by mutilating its
+    #: intent (dropping replicas, truncating stages) in response to what OTHER runs are
+    #: consuming, which reads as the policy quietly degrading.
+    transient: bool = False
 
 
 class PopulationStats(BaseModel):
@@ -78,7 +80,11 @@ class PopulationStats(BaseModel):
 
 class CampaignObservation(BaseModel):
     campaign_id: str
-    cycle: int
+    cycle: int                 # turn of the loop
+    #: Watermark into absorption order. `recent` holds what landed after the consumer's
+    #: previous watermark, which is what "recent" has to mean once more than one
+    #: experiment can be in flight.
+    seq: int = 0
     goal: str
     objectives: list[Objective] = Field(default_factory=list)
     pareto_front: list[DesignNode] = Field(default_factory=list)

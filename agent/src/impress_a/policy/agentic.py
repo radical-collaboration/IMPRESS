@@ -112,7 +112,7 @@ class FourNodePolicy(BasePolicy):
         if results is None:
             return None
         gates_ok = results.all_gates_passed
-        note = (f"cycle {obs.cycle}: {len(results.per_task)} tasks, "
+        note = (f"cycle {obs.cycle}: {len(results.tasks)} tasks, "
                 f"{'clean' if gates_ok else 'QC issues'}; "
                 f"metrics {sorted(results.merged_metrics())}")
         self.notes.append(note)

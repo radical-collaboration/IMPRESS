@@ -14,19 +14,32 @@ workflows each cycle from a registry of tools.
 
 ## Architecture
 
-### One loop, one variable step
+### One experiment, one variable step
 
 ```
 observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
-           (policy)   (typed     (5 gates    (asyncflow) (QC        (tree,
+         (reasoner)   (typed     (5 gates    (asyncflow) (QC        (tree,
                        DAG)       + dry-run)             gates)     Pareto,
                                       │                             provenance)
                                       └── reject ──→ back to DECIDE (bounded retry)
 ```
 
-**Only `decide` differs between control models.** Everything below the policy layer — composition,
-validation, execution, state, provenance — is shared. That is the whole design: a campaign run by a
-hand-written rule cascade exercises identical machinery to one steered by a frontier LLM.
+Those steps happen in that order for **any one experiment** — but the reasoner is not the loop body,
+so several experiments sit at different steps at once. The executor owns all campaign state and is
+its only writer; it reaps runs as they finish and decides termination, because budget, stagnation and
+repeated failure are facts about state a reasoner cannot see.
+
+**Only the reasoner differs between control models.** Everything below it — composition, validation,
+execution, state, provenance — is shared. That is the whole design: a campaign run by a hand-written
+rule cascade exercises identical machinery to one steered by a frontier LLM.
+
+There are two ways to be a reasoner:
+
+- **`decide(obs) -> Decision`** — answer one question at a time. Models A-D do this, and a driver
+  plays the part the old loop played: observe, ask, submit, wait, repeat.
+- **`conduct(session)`** — drive yourself. Submit as many experiments as you like, then collect them
+  with `as_completed` in the order they *finish*. This is what makes a federation of task agents
+  generating an ensemble in parallel expressible at all.
 
 ### Pluggable frontends
 
@@ -44,8 +57,8 @@ occupies.
         └───────────────┬───────────────┘
                         │  ControlPolicy — decide() → ComposeAndRun | Backtrack | RequestHuman | Stop
         ═════════════════════════════════       shared engine
-           manager · compose · validate
-           tools · exec · rhapsody backends
+           runtime executor · CampaignSession
+           compose · validate · tools · exec
 ```
 
 **Decision frontend — four control models**, exactly one active per campaign, fixed at launch:
@@ -64,8 +77,10 @@ never a concrete DAG, which is what keeps them swappable. They compose: wrap any
 **Interface frontend — control-plane adapters.** One transport-agnostic protocol (`observe`, `events`,
 `steer`, `artifacts`, `provenance`, `ingest_measurement`, lifecycle). `observe()` returns the **same
 observation object a policy's `decide` receives** — informed monitoring means parity of evidence, not a
-progress bar. The in-process adapter ships; HTTP+SSE and MCP are the same protocol behind a different
-transport.
+progress bar. The protocol also carries runs by id — `submit_run`, `list_runs`, `run_result`,
+`cancel_run` — with **synchronous admission**: accepted with an id, or refused with the gate and the
+reason that refused it. In-process and HTTP+SSE adapters ship; MCP is the same protocol behind a
+different transport.
 
 **The substrate is pluggable too.** Execution backends are selected *by name* from site configuration —
 `concurrent` on a laptop, `dragon` or `radical` on HPC — so no backend class is named outside one module.
@@ -84,6 +99,15 @@ transport.
   non-destructive backtracking and a complete provenance log.
 - **Predicted and measured values are one type.** An objective is declared against a property *name*, so
   a surrogate today and a wet-lab assay tomorrow are interchangeable with no change to the campaign spec.
+- **Concurrency that does not lie about evidence.** An *untrusted* workflow shape may have only one
+  instance in flight, because promotion counts consecutive clean runs and concurrent instances are one
+  draw sampled N times. Stagnation counts *informed* attempts for the same reason — a wave of runs
+  launched before any of them reported is one attempt, not N.
+- **Typed, serializable artifacts.** A tool hands on an `ArtifactRef` — declared type, path or inline
+  value, size and content digest — never a bare string. That is what lets a reasoner in another process
+  hold a result, compare it, and pass it back without the file crossing the wire.
+- **Durable runs.** Every submission and outcome is written to an append-only ledger, so a finished
+  run's result is recoverable by id from a process that did not produce it.
 
 ---
 
@@ -93,7 +117,7 @@ transport.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest tests -q                                           # 29 tests, ~7s, no allocation needed
+pytest tests -q                                           # 70 tests, ~10s, no allocation needed
 impress-a tools                                           # list registered tools
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```
@@ -157,7 +181,58 @@ documentation, and is not part of the published package.
 
 ## Status
 
-Reference implementation: engine, all four control models, and a runnable mock campaign. Real tool
-adapters, the HTTP and MCP adapters, checkpoint resume, and the network-service governor are not yet
-built — see [`docs/limitations.md`](docs/limitations.md), which also records cancellation as the known
-open risk.
+Reference implementation, exercised end to end on a laptop and not yet on real hardware.
+
+| | |
+|---|---|
+| Engine — compose, five gates, interlock, Pareto tree, provenance | works |
+| Four control models (A/B/C/D), plus `conduct` reasoners | works |
+| Concurrent experiments, durable runs, reattach after restart | works |
+| Control plane — in-process and HTTP+SSE adapters | works |
+| Mock toolkit campaign | works |
+| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | wired, **never executed** |
+
+`pytest tests -q` — 70 tests, ~10s, no allocation. A complete campaign runs on a laptop with stubbed
+science, which is deliberate: HPC iteration is slow and expensive, so almost everything is verifiable
+locally. The corollary is that everything *only* verifiable on HPC is unverified.
+
+## Known issues
+
+**No real campaign has ever run.** The four real toolkits register, validate, type-check as a chain
+and dry-run, and their adapters invoke real binaries — but no line of RFdiffusion, LigandMPNN,
+PyRosetta or Boltz code has executed through this system. Treat the real path as untested.
+
+**`ligand_smiles` is empty** in both Delta campaign specs, and is marked `REQUIRED` there. Left blank,
+Boltz models no ligand and the campaign optimises the wrong thing without complaining.
+
+**Three tool arguments are unverified** and marked at their call sites: the seed flags for LigandMPNN
+and Boltz, RFD3's `seed` key, and whether `--number_of_batches` is the right knob for `num_seqs`.
+Run `impress-a preflight` on a login node first.
+
+**QC for the real toolkits is thin where it matters most.** The specs lean almost entirely on
+`metric_in_range` against each tool's *own* self-reported confidence — which is exactly what a
+confidently-wrong tool passes. There are no structural gates (is the ligand actually in the output
+complex, are there chain breaks, does sequence length match the contig), and no toolkit carries the
+known-bad fixtures `docs/reference/authoring-tools.md` asks for.
+
+**Cancellation is advisory.** Measured, not assumed: the concurrent backend's `Future.cancel()`
+returns `False` once a callable has started and asyncflow discards that answer, so queued work is
+reclaimed and running work is not. A run's terminal state always comes from collecting it. Reclaiming
+a GPU from an abandoned run is unsolved.
+
+**Cost models are unmeasured.** Gate 5 and the interlock's 10% provisional cap refuse graphs against
+literature figures, not measurements. This already bites: a campaign budget can be too small to admit
+its own first run.
+
+**`sites/*.yaml` is read by no code.** Its `tool_delivery: {real|mock}` switch is inert.
+
+## Plans
+
+`plans/` holds the working plans: [`plans/backlog.md`](plans/backlog.md) is the live list of
+outstanding work with a recommended order, `plans/*.md` are stubs for the next tracks, and
+`plans/done/` records completed work and the decisions behind it — the rulings are the part worth
+keeping, not the task lists.
+
+Nearest term: structural QC gates and known-bad fixtures, then the first real Delta run. Further out:
+the MCP adapter, checkpoint/restart resume (the ledger and `reattach` exist; nothing resumes from
+them yet), registry hardening, and the P5 network-service governor.

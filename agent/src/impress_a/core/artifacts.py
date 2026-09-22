@@ -22,19 +22,43 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: Above this, hashing costs more than the provenance is worth; size is recorded either
+#: way so a missing digest is visibly a decision rather than an omission.
+MAX_HASH_BYTES = 64 * 1024 * 1024
+
+
 class ArtifactRef(BaseModel):
-    """A typed handle to data on disk. Large binaries are never inlined."""
+    """A typed handle to data on disk. Large binaries are never inlined.
+
+    This is what a tool hands the next tool, and it is deliberately serializable: a
+    reasoner that lives in another process - the point of the whole decoupling - can
+    hold one, compare it, and pass it back without the file ever crossing the wire. The
+    digest is what makes that safe, since a path alone says nothing about whether the
+    bytes behind it are still the ones the campaign reasoned about.
+    """
 
     type: ArtifactType
     path: str | None = None
     value: Any = None  # only for small in-memory artifacts (metrics)
     sha256: str | None = None
+    bytes: int | None = None
 
     def hash_file(self) -> "ArtifactRef":
-        if self.path and Path(self.path).is_file():
-            h = hashlib.sha256(Path(self.path).read_bytes()).hexdigest()
-            self.sha256 = h
+        """Record size, and content digest for anything small enough to be worth it."""
+        if not self.path:
+            return self
+        f = Path(self.path)
+        if not f.is_file():
+            return self
+        self.bytes = f.stat().st_size
+        if self.bytes <= MAX_HASH_BYTES:
+            self.sha256 = hashlib.sha256(f.read_bytes()).hexdigest()
         return self
+
+    @property
+    def located(self) -> str | None:
+        """Whatever a consumer should actually open or use."""
+        return self.path if self.path is not None else self.value
 
 
 class SourceKind(str, Enum):

@@ -11,18 +11,27 @@ from __future__ import annotations
 
 import json
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
-from ._subprocess import first_dep_output, run_cmd
 
 _PACKMIN_WORKER = r"""
 import json, sys
 import pyrosetta
-pyrosetta.init("-mute all")
-in_pdb, out_pdb, cycles, result_json = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+
+# A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
+# replicas of a deterministic protocol are just the same run repeated N times.
+def _init(seed_arg):
+    flags = "-mute all"
+    if seed_arg != "none":
+        flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
+    pyrosetta.init(flags)
+
+in_pdb, out_pdb, cycles, seed, result_json = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5])
+_init(seed)
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 sfxn = pyrosetta.get_fa_scorefxn()
@@ -41,17 +50,38 @@ json.dump({"total_score": sfxn(pose)}, open(result_json, "w"))
 _FASTRELAX_WORKER = r"""
 import json, sys
 import pyrosetta
-pyrosetta.init("-mute all")
-in_pdb, out_pdb, cycles, result_json = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 
-pose = pyrosetta.pose_from_pdb(in_pdb)
+# A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
+# replicas of a deterministic protocol are just the same run repeated N times.
+def _init(seed_arg):
+    flags = "-mute all"
+    if seed_arg != "none":
+        flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
+    pyrosetta.init(flags)
+
+in_pdb, out_pdb, cycles, nstruct, seed, result_json = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6])
+_init(seed)
+
+start = pyrosetta.pose_from_pdb(in_pdb)
 sfxn = pyrosetta.get_fa_scorefxn()
 relax = pyrosetta.rosetta.protocols.relax.FastRelax(sfxn, cycles)
-relax.apply(pose)
-pose.dump_pdb(out_pdb)
-scores = pose.scores
+
+# `nstruct` independent trajectories from the same start, keeping the best. It used to
+# be accepted, range-checked and budgeted, and then never passed here at all - while the
+# agent reported `count: nstruct` for the single structure it actually produced.
+best, best_score = None, None
+for _ in range(max(1, nstruct)):
+    pose = start.clone()
+    relax.apply(pose)
+    score = sfxn(pose)
+    if best_score is None or score < best_score:
+        best, best_score = pose, score
+
+best.dump_pdb(out_pdb)
+scores = best.scores
 json.dump({
-    "total_score": sfxn(pose),
+    "total_score": best_score,
     "fa_rep": scores.get("fa_rep", 0.0) if hasattr(scores, "get") else 0.0,
 }, open(result_json, "w"))
 """
@@ -71,13 +101,41 @@ json.dump({"shape_complementarity": value}, open(result_json, "w"))
 """
 
 
-async def _run_worker(script: str, args: list[str], timeout_s: float) -> Path:
-    script_path = Path(tempfile.mkstemp(suffix=".py")[1])
+async def _run_worker(script: str, args: list[str], timeout_s: float,
+                      work: Path) -> Path:
+    """Run a PyRosetta worker in its own interpreter, inside the task's work directory.
+
+    Was `mkstemp(...)[1]`, which discarded the open descriptor and leaked one per call,
+    plus `mktemp` for the outputs - the deprecated, racy variant. Both are unnecessary
+    once the task has a directory of its own.
+    """
+    script_path = work / "worker.py"
     script_path.write_text(script)
-    result_json = Path(tempfile.mktemp(suffix=".json"))
+    result_json = work / "result.json"
     await run_cmd([sys.executable, str(script_path), *args, str(result_json)],
                   timeout_s=timeout_s)
     return result_json
+
+
+def _read_metrics(result_json: Path) -> dict[str, Any] | None:
+    """The worker's metrics, or None if it produced nothing usable.
+
+    A worker can exit 0 and still leave no readable JSON - PyRosetta dying after its own
+    cleanup, or a truncated write. Reading unconditionally turned that into a
+    FileNotFoundError escaping `run()`, which the campaign records as an infrastructure
+    crash. It is a QC failure: the tool ran and did not produce a result.
+    """
+    try:
+        return json.loads(result_json.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+_NO_RESULT = {"result": None, "count": 0, "outputs": {}, "metrics": {}}
+
+
+def _seed_arg(params: dict[str, Any]) -> str:
+    return "none" if params.get("seed") is None else str(params["seed"])
 
 
 class PackMinAgent(TaskAgent):
@@ -85,11 +143,15 @@ class PackMinAgent(TaskAgent):
         structure = first_dep_output(req.inputs, "structure")
         if not structure:
             raise RuntimeError("packmin: no upstream 'structure' output found")
-        out_pdb = tempfile.mktemp(suffix=".pdb", prefix="packmin_")
+        work = workdir_for(req, "packmin")
+        out_pdb = work / "packmin.pdb"
         result_json = await _run_worker(
-            _PACKMIN_WORKER, [structure, out_pdb, str(params["cycles"])],
-            timeout_s=float(self.spec.resources.walltime_s))
-        metrics = json.loads(Path(result_json).read_text())
+            _PACKMIN_WORKER,
+            [structure, str(out_pdb), str(params["cycles"]), _seed_arg(params)],
+            timeout_s=float(self.spec.resources.walltime_s), work=work)
+        metrics = _read_metrics(result_json)
+        if metrics is None:
+            return dict(_NO_RESULT)
         return {"result": "structure", "count": 1,
                 "outputs": {"structure": out_pdb}, "metrics": metrics}
 
@@ -99,12 +161,19 @@ class FastRelaxAgent(TaskAgent):
         structure = first_dep_output(req.inputs, "structure")
         if not structure:
             raise RuntimeError("fastrelax: no upstream 'structure' output found")
-        out_pdb = tempfile.mktemp(suffix=".pdb", prefix="fastrelax_")
+        work = workdir_for(req, "fastrelax")
+        out_pdb = work / "fastrelax.pdb"
         result_json = await _run_worker(
-            _FASTRELAX_WORKER, [structure, out_pdb, str(params["relax_cycles"])],
-            timeout_s=float(self.spec.resources.walltime_s))
-        metrics = json.loads(Path(result_json).read_text())
-        return {"result": "structure", "count": params["nstruct"],
+            _FASTRELAX_WORKER,
+            [structure, str(out_pdb), str(params["relax_cycles"]),
+             str(params["nstruct"]), _seed_arg(params)],
+            timeout_s=float(self.spec.resources.walltime_s), work=work)
+        metrics = _read_metrics(result_json)
+        if metrics is None:
+            return dict(_NO_RESULT)
+        # One structure is written - the best of `nstruct` trajectories - so that is
+        # what `count` reports.
+        return {"result": "structure", "count": 1,
                 "outputs": {"structure": out_pdb}, "metrics": metrics}
 
 
@@ -113,9 +182,12 @@ class FilterShapeAgent(TaskAgent):
         structure = first_dep_output(req.inputs, "structure")
         if not structure:
             raise RuntimeError("filter_shape: no upstream 'structure' output found")
+        work = workdir_for(req, "filter_shape")
         result_json = await _run_worker(
             _FILTER_SHAPE_WORKER, [structure],
-            timeout_s=float(self.spec.resources.walltime_s))
-        metrics = json.loads(Path(result_json).read_text())
+            timeout_s=float(self.spec.resources.walltime_s), work=work)
+        metrics = _read_metrics(result_json)
+        if metrics is None:
+            return dict(_NO_RESULT)
         return {"result": "structure", "count": 1,
-                "outputs": {"structure": structure}, "metrics": metrics}
+                "outputs": {"structure": Path(structure)}, "metrics": metrics}

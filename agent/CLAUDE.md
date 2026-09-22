@@ -11,12 +11,13 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # 29 tests, ~4s, no allocation
+pytest tests -q                                      # 70 tests, ~10s, no allocation
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
 
 impress-a tools                                      # list registered tools
+impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
 ```
@@ -33,10 +34,11 @@ tests against it produces confusing API errors.
 
 | Path | Role |
 |---|---|
-| `src/impress_a/` | The package |
+| `src/impress_a/` | The package. `runtime/` owns the executor, session and run service; `manager.py` is a facade over them |
 | `toolkits/` | Declarative tool specs + skill docs, discovered at runtime — not package data |
 | `campaigns/`, `sites/` | Campaign specs and per-machine configuration |
 | `docs/` | **Shipping reference.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` |
+| `plans/` | **Working plans.** `backlog.md` is the live outstanding list; `done/` records completed work *for the rulings it contains*, not the task lists |
 | `planning/` | **Process history, not reference.** The design record; superseded in places. Where it disagrees with `docs/` or the code, the code is right |
 
 ## Invariants — do not break these
@@ -45,16 +47,19 @@ Each exists because of a specific failure mode. Details in `docs/reference/archi
 
 | Invariant | Enforced in | Why |
 |---|---|---|
-| **`policy` must not import `tools` or `exec`** | review | Policies emit abstract `ExperimentIntent`. If a policy can reach a tool adapter, control models stop being swappable |
+| **`policy` must not import `tools`, `exec` or `runtime`** | review | Policies emit abstract `ExperimentIntent`. If a policy can reach a tool adapter, control models stop being swappable |
 | **`compose` must not import `exec`** | review | Keeps the whole validation path testable with no backend — the entire laptop test tier |
 | A QC `FAIL` node is **never** eligible for the Pareto front | `core/qc.py`, `core/pareto.py` | These tools fail *silently*; exit code is never sufficient evidence |
 | **P6 tools are inlined, never scheduled** | `compose/validate.py` gate 4 | Scheduling overhead would exceed the work. A scheduled P6 node is a composer bug |
-| `replicas: N` means **N independent lineages**, one `DesignNode` each | `compose/composer.py`, `manager._absorb` | Fanning out then funnelling back collapses N candidates into one |
+| `replicas: N` means **N independent lineages**, one `DesignNode` each | `compose/composer.py`, `runtime/executor._absorb` | Fanning out then funnelling back collapses N candidates into one |
 | Pattern signatures ignore **parameter values** — shape only | `compose/graph.py` | Otherwise every parameter tweak resets a pattern's accumulated trust |
 | A measurement **supersedes but never deletes** a prediction | `core/tree.ingest_measurement` | The predicted-vs-measured gap is the surrogate-calibration signal |
 | The Pareto front is **not monotonic** once measurements arrive | `core/pareto.py` | A node promoted on an optimistic prediction can be demoted by its own assay |
-| Rejection triggers **bounded in-cycle retry**, not a discarded cycle | `manager.run` | `on_rejected` hands the policy a reason and another attempt |
+| Rejection triggers **bounded retry per experiment**, not a discarded cycle | `policy/driver.py` *and* an independent cap in `runtime/executor.py` | `on_rejected` hands the policy a reason and another attempt. The executor caps admissions separately, because a `conduct` reasoner is under no obligation to honour `max_attempts` |
 | `execute()` is not overridden by tool adapters | `tools/agent.py` | Pattern dispatch belongs to the exec layer; overriding bypasses P6-inline and P4-ledger rules |
+| A tool's `outputs` are **typed `ArtifactRef`s**, never bare strings | `tools/agent.py::_as_artifacts` | The type comes from the spec's declared port, so a handle cannot disagree with what the composer type-checked. Return a `Path` for a file |
+| An **untrusted** pattern has at most one instance in flight | `runtime/executor.py::_admit_once` | Promotion counts *consecutive* clean runs; concurrent instances are one draw sampled N times |
+| The **executor is the only writer** of campaign state, and decides termination | `runtime/executor.py` | Every mutating block is `await`-free, so an observation is never taken mid-absorb. Adding an `await` inside `observe`/`_absorb` reintroduces torn reads |
 | QC gates are deterministic **even for LLM-driven task agents** | `tools/agent.py` | An LLM may author a protocol; it does not judge whether the result passed its clash check |
 
 ## Middleware gotchas
@@ -90,16 +95,33 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 ## Testing
 
 `tests/test_core.py` (pure logic) · `test_validation.py` (the five gates + interlock) ·
-`test_campaign.py` (full campaigns on `ConcurrentExecutionBackend` with mock tools).
+`test_campaign.py` (full campaigns on `ConcurrentExecutionBackend` with mock tools) ·
+`test_real_toolkits.py` (the real specs, without executing any real binary) ·
+`test_http_adapter.py` (a campaign driven end to end over a loopback socket).
+
+**A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
+tests before anyone noticed the defect was in the executor, not the test setup. If a test needs an
+engine parameter pushed to an absurd value to be meaningful, suspect the engine first.
 
 The bundled `mock_noodle` tool **lies**: it completes successfully, reports a confident `designability`,
 and produces a structure with no secondary structure. It exists so the QC layer is tested at campaign
 scale. When adding mocks, let some of them return plausible-but-wrong output — silent failure is the
 dominant hazard, so the suite has to manufacture some.
 
-## Known open risk
+## Known open risks
 
-**Cancellation.** Backtracking works by *branching the tree*, which avoids cancelling in-flight work — so
-the risk is deferred, not solved. Anything needing true cancellation (aborting a running graph on `Stop`,
-reclaiming resources from an abandoned lineage) should be spiked against the installed asyncflow before
-being designed around. Other gaps: `docs/limitations.md`.
+**The real toolkits have never executed.** RFdiffusion3, LigandMPNN, PyRosetta and Boltz register,
+validate, type-check as a chain and dry-run — and no line of their code has run through this system.
+Treat anything about the real path as untested. `impress-a preflight` first; see `plans/first-real-run.md`.
+
+**Cancellation is advisory.** Measured rather than assumed: the concurrent backend's `Future.cancel()`
+returns `False` once a callable has started, and asyncflow discards that answer — so queued work is
+reclaimed, running work is not, and you cannot learn which happened. A run's terminal state must always
+come from collecting it, never from the fact that cancel was called. Backtracking sidesteps this by
+*branching the tree*. Reclaiming a GPU from an abandoned run remains unsolved.
+
+**QC for the real toolkits leans on self-reported confidence.** Their gates are almost entirely
+`metric_in_range` against a number the tool chose to report about itself, which is precisely what a
+confidently-wrong tool passes. No structural gates, and no known-bad fixtures anywhere.
+
+Full list: `plans/backlog.md`. Shipping-facing summary: `docs/limitations.md`.

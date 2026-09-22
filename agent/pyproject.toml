@@ -22,7 +22,8 @@ dependencies = [
 # flowgentic is 0.1.0 with no PyPI release; pin to a commit, never a branch.
 agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.git@dd27bd8b7e6edb2995038c9c1cc9b2fec3b7c7e9"]
 oracle = ["litellm"]
-dev = ["pytest", "pytest-asyncio", "ruff"]
+http = ["httpx"]          # the HTTP control-plane adapter
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx"]
 
 [project.scripts]
 impress-a = "impress_a.cli:main"

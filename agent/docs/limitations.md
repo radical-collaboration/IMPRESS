@@ -53,13 +53,39 @@ tool and recalibrate; until then the gate should carry a safety margin rather th
 
 ## Cancellation
 
-**The known open risk.** Backtracking currently works by *branching the tree*, which avoids needing to
-cancel in-flight work — so the risk is deferred rather than solved. Anything requiring true cancellation
-(aborting a running graph on a `Stop`, reclaiming resources from an abandoned lineage) should be spiked
-against the installed asyncflow before being designed around.
+**Still the open risk, but now measured.** Backtracking works by *branching the tree*, which avoids
+needing to cancel in-flight work. The spike has since been done against the installed asyncflow, and the
+answer is: cancellation exists and is **advisory only**.
+
+`ConcurrentExecutionBackend.cancel_task` calls `Future.cancel()`, which returns `False` once a callable
+has started — so **queued work is reclaimed and running work is not** — and asyncflow's own cancel hook
+discards that boolean, so a caller never learns which happened. `Dispatcher.cancel` and the control
+plane's `cancel_run` therefore say so in their return value, and a run's terminal state always comes
+from collecting it, never from the fact that cancel was called.
+
+What this leaves unsolved: reclaiming a GPU from a long-running task that should have been abandoned.
+That needs cooperative cancellation inside the task agents, or a backend that can kill a process.
 
 ## Not yet implemented
 
-Real scientific tool adapters (the bundled toolkit is mock), HTTP+SSE and MCP control-plane adapters,
-checkpoint/restart **resume** (the provenance log and job ledger exist; the resume path does not), and
-the P5 network-service governor (caching, per-service concurrency caps, `Retry-After` backoff).
+The **MCP** control-plane adapter, checkpoint/restart **resume** (the job ledger now records run state
+and outcomes, and `RunService.reattach` reconciles what a previous process left open — but nothing
+resumes a campaign from it yet), and the P5 network-service governor (caching, per-service concurrency
+caps, `Retry-After` backoff).
+
+## Built, but unexercised against real science
+
+Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
+binaries, and the Delta HPC launch path is complete. **No campaign has yet run them on real hardware.**
+Everything below the adapters is exercised by the laptop tier; the adapters themselves are covered only
+for registration, validation and dry-run, because executing them needs the science stack installed.
+
+Two things in particular are unverified and are marked at their call sites: the **seed flag names** for
+LigandMPNN and Boltz, and whether LigandMPNN's `--number_of_batches` is the right knob for `num_seqs`.
+Run `impress-a preflight` on a login node before committing an allocation.
+
+Related: the QC gates the real toolkits declare lean almost entirely on `metric_in_range` against a
+tool's **own** self-reported confidence — which is exactly what a confidently-wrong tool passes. There
+are no structural gates yet (is the ligand actually in the output complex, are there chain breaks, does
+the sequence length match the contig), and no toolkit carries the known-bad fixtures under `tests/` that
+this document's authoring guide asks for.

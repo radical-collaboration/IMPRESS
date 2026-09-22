@@ -58,7 +58,10 @@ def _metric_in_range(out: dict, p: dict) -> GateResult:
     ok = v is not None and (lo is None or v >= lo) and (hi is None or v <= hi)
     return GateResult(gate=f"metric_in_range[{name}]",
                       outcome=GateOutcome.PASS if ok else GateOutcome.FAIL,
-                      observed=v, threshold=(lo, hi),
+                      # A list, not a tuple: JSON has no tuple, so a round-tripped
+                      # report would otherwise never compare equal to the original -
+                      # and these reports now travel to a reasoner in another process.
+                      observed=v, threshold=[lo, hi],
                       detail="" if ok else f"{name}={v} outside [{lo},{hi}]")
 
 

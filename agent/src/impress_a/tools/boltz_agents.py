@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from pathlib import Path
 from typing import Any
 
+import yaml
+
+from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
-from ._subprocess import first_dep_output, run_cmd
 
 _THREE_TO_ONE = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q", "GLU": "E",
@@ -42,13 +42,23 @@ class BoltzPredictAgent(TaskAgent):
             raise RuntimeError("boltz_predict: no upstream 'structure' output found")
         sequence = _extract_sequence(structure)
 
-        work = Path(tempfile.mkdtemp(prefix=f"boltz_{req.node_id or 'node'}_"))
-        seqs: list[str] = [f"  - protein:\n      id: [A]\n      sequence: {sequence}\n"
-                            f"        msa: {'auto' if params['use_msa_server'] else 'empty'}"]
+        work = workdir_for(req, "boltz")
+        # Built as data and dumped, never assembled as text. The hand-indented version
+        # this replaces put `msa:` one level too deep, under the `sequence:` scalar, so
+        # `boltz predict` aborted on spec parse before any model loaded.
+        sequences: list[dict[str, Any]] = [{
+            "protein": {
+                "id": ["A"],
+                "sequence": sequence,
+                "msa": "auto" if params["use_msa_server"] else "empty",
+            }
+        }]
         if params["ligand_smiles"]:
-            seqs.append(f"  - ligand:\n      id: [B]\n      smiles: '{params['ligand_smiles']}'")
+            sequences.append({"ligand": {"id": ["B"],
+                                         "smiles": params["ligand_smiles"]}})
         spec_path = work / "boltz_input.yaml"
-        spec_path.write_text("version: 1\nsequences:\n" + "\n".join(seqs) + "\n")
+        spec_path.write_text(
+            yaml.safe_dump({"version": 1, "sequences": sequences}, sort_keys=False))
 
         cmd = [
             "boltz", "predict", str(spec_path),
@@ -58,6 +68,8 @@ class BoltzPredictAgent(TaskAgent):
             "--diffusion_samples", str(params["diffusion_samples"]),
             "--output_format", "pdb",
         ]
+        if params.get("seed") is not None:
+            cmd += ["--seed", str(params["seed"])]
         if params["use_msa_server"]:
             cmd.append("--use_msa_server")
         await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))
@@ -71,7 +83,7 @@ class BoltzPredictAgent(TaskAgent):
         return {
             "result": "complex",
             "count": len(pdb_files),
-            "outputs": {"complex": str(pdb_files[0])},
+            "outputs": {"complex": pdb_files[0]},
             "metrics": {
                 "complex_plddt": round(conf.get("complex_plddt", 0.0), 3),
                 "ligand_iptm": round(conf.get("ligand_iptm", conf.get("iptm", 0.0)), 3),

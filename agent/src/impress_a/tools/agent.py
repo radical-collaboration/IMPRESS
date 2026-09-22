@@ -11,8 +11,10 @@ and P4-ledger rules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from ..core.artifacts import ArtifactRef
 from ..core.qc import QCReport
 from . import gates
 from .spec import ToolSpec
@@ -24,12 +26,20 @@ class TaskRequest:
     params: dict[str, Any] = field(default_factory=dict)
     inputs: dict[str, Any] = field(default_factory=dict)
     node_id: str | None = None
+    seed: int | None = None
+    #: Where this task may write. Defaults to the process CWD - see
+    #: `_subprocess.workdir_for`, which is what every real adapter uses.
+    workdir: str | None = None
 
 
 @dataclass
 class TaskResult:
     tool: str
-    outputs: dict[str, Any] = field(default_factory=dict)
+    #: Typed, serializable handles - never raw payloads and never bare path strings.
+    #: A bare string said nothing about what it was or whether the bytes behind it were
+    #: still the ones the campaign reasoned about, and it could not cross a process
+    #: boundary meaningfully. See `core.artifacts.ArtifactRef`.
+    outputs: dict[str, ArtifactRef] = field(default_factory=dict)
     metrics: dict[str, float] = field(default_factory=dict)
     qc: QCReport = field(default_factory=QCReport)
     cost: dict[str, float] = field(default_factory=dict)
@@ -58,10 +68,44 @@ class TaskAgent:
             if err := self.spec.parameters[k].validate_value(v):
                 raise ValueError(f"{self.spec.id}.{k}: {err}")
             resolved[k] = v
+        # A tool that declares a seed gets this lineage's draw unless the policy named
+        # one explicitly. This is what makes `replicas: N` N independent samples for a
+        # real stochastic tool rather than N copies of one design.
+        if req.seed is not None and "seed" in self.spec.parameters \
+                and "seed" not in req.params:
+            resolved["seed"] = req.seed % (2 ** 31)
         return resolved
 
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
+
+    def _as_artifacts(self, outputs: dict[str, Any]) -> dict[str, ArtifactRef]:
+        """Turn what `run()` returned into typed handles.
+
+        The TYPE comes from the spec's declared output port, never from the adapter, so
+        a ref cannot disagree with the contract the composer type-checked the graph
+        against. An adapter returning a `Path` is declaring a file - that is the signal,
+        rather than guessing from whether a string happens to exist on disk.
+        """
+        refs: dict[str, ArtifactRef] = {}
+        for name, produced in (outputs or {}).items():
+            if isinstance(produced, ArtifactRef):
+                refs[name] = produced
+                continue
+            port = self.spec.outputs.get(name)
+            if port is None:
+                # Undeclared output: the composer never type-checked it and nothing
+                # downstream can consume it, so dropping it silently would hide a spec
+                # bug. Carry it as an untyped value instead.
+                raise ValueError(
+                    f"{self.spec.id}: produced undeclared output {name!r}; "
+                    f"declared: {sorted(self.spec.outputs)}")
+            if isinstance(produced, Path):
+                refs[name] = ArtifactRef(type=port.type,
+                                         path=str(produced)).hash_file()
+            else:
+                refs[name] = ArtifactRef(type=port.type, value=produced)
+        return refs
 
     async def post_process(self, req: TaskRequest, raw: dict[str, Any]) -> TaskResult:
         """Extract metrics and ENFORCE QC gates. Never skippable."""
@@ -69,7 +113,7 @@ class TaskAgent:
         for g in self.spec.qc_gates:
             qc.add(gates.get(g.id)(raw, g.params))
         return TaskResult(tool=self.spec.id,
-                          outputs=raw.get("outputs", {}),
+                          outputs=self._as_artifacts(raw.get("outputs", {})),
                           metrics=raw.get("metrics", {}),
                           qc=qc,
                           cost=dict(self.spec.cost_model.cost))

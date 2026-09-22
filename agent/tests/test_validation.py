@@ -99,3 +99,41 @@ def test_interlock_promotes_then_demotes():
     assert not Scrutiny.for_pattern(L, "sig").mark_suspect
     assert L.on_failure("sig"), "failure demotes"
     assert Scrutiny.for_pattern(L, "sig").mark_suspect
+
+
+def test_trust_ledger_survives_concurrent_writers(tmp_path):
+    """The trust file is shared across campaigns by design, so two campaigns must not
+    overwrite each other's evidence.
+
+    The ledger used to rewrite the whole file on every update. Two campaigns holding it
+    open would each persist only their own view, and whichever saved last silently
+    discarded the other's clean runs - the interlock quietly losing the evidence it
+    exists to accumulate.
+    """
+    path = tmp_path / "_trust" / "cuda.jsonl"
+    a = TrustLedger.load(path, promote_after=3)
+    b = TrustLedger.load(path, promote_after=3)
+
+    a.record_for("sig", ["x"])
+    b.record_for("sig", ["x"])
+    a.on_clean_run("sig")          # campaign A observes one clean run
+    b.on_clean_run("sig")          # campaign B observes another, concurrently
+    a.on_clean_run("sig")
+
+    fresh = TrustLedger.load(path, promote_after=3)
+    assert fresh.patterns["sig"].clean_runs == 3, \
+        "every writer's evidence must survive; a lost update would show fewer"
+    assert fresh.is_trusted("sig"), "three clean runs promote the pattern"
+
+    b.on_failure("sig")
+    assert not TrustLedger.load(path, promote_after=3).is_trusted("sig"), \
+        "demotion is evidence too and must persist"
+
+
+def test_trust_ledger_without_a_path_persists_nothing():
+    """The in-memory form is what the validation tier uses; it must not touch disk."""
+    L = TrustLedger(promote_after=2)
+    L.record_for("sig", ["x"])
+    assert L.on_clean_run("sig") is False
+    assert L.on_clean_run("sig") is True
+    assert L.path is None

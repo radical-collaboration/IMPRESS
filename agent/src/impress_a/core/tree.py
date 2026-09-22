@@ -6,7 +6,6 @@ terminated campaign keep receiving assay results (doc 09).
 """
 from __future__ import annotations
 
-import itertools
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Iterator
@@ -14,6 +13,7 @@ from typing import Iterator
 from pydantic import BaseModel, Field
 
 from .artifacts import ArtifactRef, Property
+from .ids import counter
 from .qc import QCReport
 
 
@@ -24,11 +24,7 @@ class NodeStatus(str, Enum):
     PROMOTED = "promoted"
 
 
-_ids = itertools.count(1)
-
-
-def new_node_id() -> str:
-    return f"n{next(_ids):06d}"
+new_node_id = counter("n")
 
 
 class DesignNode(BaseModel):

@@ -10,9 +10,12 @@ inputs:
 outputs:
   complex: {type: Complex}
 parameters:
-  diffusion_samples: {type: int, default: 5, min: 1, max: 25, trades: "sampling vs GPU-hours"}
+  # Default 1: see rfd3_design.num_designs - breadth is `replicas`, not internal N.
+  diffusion_samples: {type: int, default: 1, min: 1, max: 25, trades: "sampling vs GPU-hours"}
   use_msa_server: {type: bool, default: true}
   ligand_smiles: {type: str, default: ""}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: complex_plddt, min: 0.5, max: 1.0}}

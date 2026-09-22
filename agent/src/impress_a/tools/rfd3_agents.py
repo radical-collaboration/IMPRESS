@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
-from pathlib import Path
 from typing import Any
 
+from ._subprocess import run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
-from ._subprocess import run_cmd
 
 
 class RFD3DesignAgent(TaskAgent):
@@ -29,14 +27,17 @@ class RFD3DesignAgent(TaskAgent):
                 "FOUNDRY_SIF_PATH is not set - see scripts/delta_env_setup.sh / "
                 "the original IMPRESS pull_foundry.sh")
 
-        work = Path(tempfile.mkdtemp(prefix=f"rfd3_{req.node_id or 'node'}_"))
+        work = workdir_for(req, "rfd3")
         spec_path = work / "rfd3_input.json"
-        spec_path.write_text(json.dumps({
+        rfd3_spec: dict[str, Any] = {
             "contig": params["contig"],
             "ligand_resname": params["ligand_resname"],
             "num_designs": params["num_designs"],
             "diffusion_steps": params["diffusion_steps"],
-        }))
+        }
+        if params.get("seed") is not None:
+            rfd3_spec["seed"] = params["seed"]
+        spec_path.write_text(json.dumps(rfd3_spec))
 
         await run_cmd([
             "apptainer", "exec", "--nv", foundry,
@@ -59,6 +60,6 @@ class RFD3DesignAgent(TaskAgent):
         return {
             "result": "backbone",
             "count": len(cif_models),
-            "outputs": {"backbone": str(best_pdb)},
+            "outputs": {"backbone": best_pdb},
             "metrics": {"ss_fraction": ss_fraction, "num_models": len(cif_models)},
         }

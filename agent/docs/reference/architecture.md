@@ -2,7 +2,9 @@
 
 ## The outer loop
 
-One cycle, driven by `impress_a.manager.CampaignManager`:
+One experiment, driven by `impress_a.runtime.executor.CampaignExecutor`. The steps below happen in
+this order for any one experiment — but the reasoner is no longer the loop body, so several
+experiments can be at different steps at once:
 
 ```
 observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
@@ -12,8 +14,22 @@ observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analy
                                       └── reject ──→ back to DECIDE (bounded retry)
 ```
 
-**Only `decide` differs between control models.** Everything below the policy layer is shared, which is
-what makes frontends pluggable rather than parallel implementations.
+**Only the reasoner differs between control models.** Everything below the policy layer is shared,
+which is what makes frontends pluggable rather than parallel implementations.
+
+There are two ways to be a reasoner, and the second is the reason the first still works unchanged:
+
+- **`decide(obs) -> Decision`** — answer one question at a time. Models A, B, C and D all do this, and
+  `policy.driver.SequentialPolicyDriver` plays the part the manager's loop used to play: observe, ask,
+  submit, wait, repeat.
+- **`conduct(session)`** — drive yourself. The reasoner runs as its own coroutine and reaches the
+  executor through `core.session.CampaignSession`: submit as many experiments as it wants, then collect
+  them with `as_completed` in the order they finish. This is what makes a federation of task agents
+  generating an ensemble in parallel expressible at all.
+
+The executor owns all campaign state and is its **only writer**; it also decides termination, because
+budget, stagnation and repeated failure are facts about state a reasoner cannot see. A reasoner may
+*request* a stop.
 
 | Step | Owner | Notes |
 |---|---|---|
@@ -42,14 +58,21 @@ exec/       backend factory · resource normalization · dispatcher · job ledge
 Enforced by review (and CI, where configured):
 
 ```
-control  → manager, core
-policy   → core                    (NOT tools, NOT exec)
-manager  → policy, compose, exec, tools, core
+control  → manager, runtime, core
+policy   → core                    (NOT tools, NOT exec, NOT runtime)
+manager  → runtime, policy, core   (a facade; the executor owns the work)
+runtime   → policy, compose, exec, tools, core
 compose  → tools, core             (NOT exec)
 tools    → exec, core
-exec     → core
+exec     → compose, tools, core
 core     → (nothing internal)
 ```
+
+Two notes on accuracy. `exec → compose, tools` has been true since the first prototype
+(`exec/dispatch.py` imports `TaskGraph` and `TaskAgent`); this line records what the code does rather
+than what an earlier version of this document claimed. And `policy → core` is what forced
+`core/session.py` and `core/results.py` to exist: a reasoner may hold a `RunOutcome`, so `RunOutcome`
+cannot live in `exec/` beside the `ExecutionResults` it projects from.
 
 Two rules carry real weight:
 

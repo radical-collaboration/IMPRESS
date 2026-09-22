@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -33,17 +34,34 @@ def load_spec(path: str | Path) -> CampaignSpec:
         site=SiteCaps(**d.get("site", {})),
         backend=d.get("backend", "concurrent"),
         backend_config=d.get("backend_config", {}),
-        root=d.get("root", "campaigns/_runs"))
+        root=d.get("root", "campaigns/_runs"),
+        stages=d.get("stages", []) or [],
+        params=d.get("params", {}) or {},
+        # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
+        # narrow every campaign that never mentioned it.
+        replicas=int(d.get("replicas", 0)),
+        concurrency=int(d.get("concurrency", 1)),
+        max_runs=int(d.get("max_runs", 0)))
 
 
 def build_policy(model: str, spec: CampaignSpec, guard: bool = True):
+    """Construct the campaign's control model, pointed at the campaign's own chain.
+
+    `stages` has to reach the policy or every model falls back to its built-in default,
+    which is the mock chain - so a real campaign would validate the real toolkits and
+    then execute mocks.
+    """
     cls = POLICIES[model]
+    stages = list(spec.stages) or None
     if model == "C":
-        pol = cls(timeout_s=5.0, on_timeout="fallback", fallback=ThresholdPolicy())
+        pol = cls(timeout_s=5.0, on_timeout="fallback",
+                  fallback=ThresholdPolicy(stages=stages))
     elif model == "B":
         # A declared fallback is mandatory for the oracle: an API outage must degrade
         # explicitly, never stall a multi-GPU allocation (Part A risk R7).
-        pol = cls(fallback=ThresholdPolicy())
+        pol = cls(fallback=ThresholdPolicy(stages=stages))
+    elif model in ("A", "D"):
+        pol = cls(stages=stages)
     else:
         pol = cls()
     if guard:
@@ -70,6 +88,60 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True) -> 
     return 0
 
 
+def preflight(stages: list[str] | None = None) -> int:
+    """Check a real toolkit's environment BEFORE anything is queued.
+
+    Every real adapter raises on a missing env var - but only once a task is running,
+    which on HPC means inside the allocation, after the queue wait. Run this on the
+    login node instead.
+    """
+    import shutil
+    import subprocess
+
+    checks: list[tuple[str, bool, str]] = []
+
+    for var, what in (("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
+                      ("MPNN_DIR", "ligandmpnn_design (checkout + checkpoints)"),
+                      ("BOLTZ_CACHE", "boltz_predict (pre-warmed weights)")):
+        val = os.environ.get(var)
+        if not val:
+            checks.append((f"${var}", False, f"unset - needed by {what}"))
+        elif not Path(val).exists():
+            checks.append((f"${var}", False, f"set but does not exist: {val}"))
+        else:
+            checks.append((f"${var}", True, val))
+
+    for exe, what in (("apptainer", "rfd3_design"), ("boltz", "boltz_predict")):
+        found = shutil.which(exe)
+        checks.append((exe, bool(found), found or f"not on PATH - needed by {what}"))
+
+    # PyRosetta in a subprocess: importing it here would initialise a process-global
+    # singleton in the very interpreter that has to stay clean for P2 fan-out.
+    try:
+        out = subprocess.run([sys.executable, "-c", "import pyrosetta"],
+                             capture_output=True, timeout=120, check=False)
+        ok = out.returncode == 0
+        checks.append(("pyrosetta", ok,
+                       "importable" if ok
+                       else out.stderr.decode().strip().splitlines()[-1:][0]
+                       if out.stderr else "import failed"))
+    except (OSError, subprocess.SubprocessError) as e:
+        checks.append(("pyrosetta", False, f"could not check: {e}"))
+
+    reg = Registry().load()
+    checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
+
+    print("\n  preflight\n")
+    for name, ok, detail in checks:
+        print(f"    [{'ok ' if ok else 'FAIL'}] {name:20s} {detail}")
+    failed = [n for n, ok, _ in checks if not ok]
+    print(f"\n  {len(checks) - len(failed)}/{len(checks)} ok"
+          + (f" - missing: {', '.join(failed)}" if failed else ""))
+    if stages:
+        print(f"  (a campaign using {', '.join(stages)} needs the entries above)")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="impress-a")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -79,9 +151,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-guard", action="store_true")
     t = sub.add_parser("tools", help="list registered tools")
     t.add_argument("--toolkits", default=None)
+    pf = sub.add_parser("preflight",
+                        help="check the real-toolkit environment before submitting")
+    pf.add_argument("spec", nargs="?", default=None)
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard))
+    if a.cmd == "preflight":
+        return preflight(load_spec(a.spec).stages if a.spec else None)
     reg = Registry().load(a.toolkits)
     for tid in reg.ids():
         s = reg.get(tid)

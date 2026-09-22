@@ -20,6 +20,15 @@ class Event(dict):
 
 
 class CampaignControlPlane(Protocol):
+    """One protocol; MCP / HTTP+SSE / in-process are adapters over it.
+
+    The run operations are part of the CORE protocol rather than something a transport
+    adds, which is what keeps ADR 0007's rule intact: no adapter may offer an operation
+    the others do not. They are also the same operations `CampaignSession` exposes to a
+    reasoner - deliberately, because an external caller steering a campaign and an
+    in-process reasoner driving one are the same activity seen from different sides.
+    """
+
     async def submit(self, spec: Any) -> str: ...
     async def observe(self, campaign_id: str) -> CampaignObservation: ...
     async def events(self, campaign_id: str, since: int = 0) -> AsyncIterator[Event]: ...
@@ -32,6 +41,15 @@ class CampaignControlPlane(Protocol):
     async def ingest_measurement(self, campaign_id: str, node_id: str,
                                  prop: Property) -> dict[str, Any]: ...
 
+    # -- runs ----------------------------------------------------------------
+    async def submit_run(self, campaign_id: str,
+                         intent: dict[str, Any]) -> dict[str, Any]: ...
+    async def list_runs(self, campaign_id: str,
+                        state: str | None = None) -> list[dict[str, Any]]: ...
+    async def run_result(self, campaign_id: str,
+                         run_id: str) -> dict[str, Any] | None: ...
+    async def cancel_run(self, campaign_id: str, run_id: str) -> dict[str, Any]: ...
+
 
 class InProcessControlPlane:
     """Reference adapter. Drives a CampaignManager in the same process.
@@ -40,27 +58,44 @@ class InProcessControlPlane:
     adapters translate transport only.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, policy_factory: Any = None) -> None:
         self.managers: dict[str, Any] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self._events: dict[str, list[Event]] = {}
-        self._paused: dict[str, asyncio.Event] = {}
+        # `policy_factory(spec) -> policy`, injected rather than imported: the control
+        # layer may reach `manager` and `core`, and building a policy here directly
+        # would quietly widen that.
+        self.policy_factory = policy_factory
 
     def register(self, manager) -> str:
         cid = manager.spec.campaign_id
         self.managers[cid] = manager
         self._events.setdefault(cid, [])
-        ev = asyncio.Event(); ev.set()
-        self._paused[cid] = ev
         manager.prov_sink = self.emit
         return cid
 
     def emit(self, cid: str, kind: str, payload: dict[str, Any]) -> None:
-        self._events.setdefault(cid, []).append(Event(seq=len(self._events[cid]),
-                                                      kind=kind, **payload))
+        evts = self._events.setdefault(cid, [])
+        # Payload keys are flattened onto the event for convenience, but the payload is
+        # now campaign provenance rather than only this adapter's own calls, and some
+        # records carry their own `kind` (a backtrack decision, for one). Splatting them
+        # blindly is a TypeError, so envelope keys win and a collision is renamed rather
+        # than dropped - losing a field silently would be worse than an ugly one.
+        flat = {(f"record_{k}" if k in ("seq", "kind") else k): v
+                for k, v in payload.items()}
+        evts.append(Event(seq=len(evts), kind=kind, **flat))
 
     async def submit(self, spec: Any) -> str:
-        raise NotImplementedError("construct a CampaignManager and register() it")
+        """Start a campaign and return its id, without waiting for it to finish."""
+        if self.policy_factory is None:
+            raise NotImplementedError(
+                "no policy_factory configured; construct a CampaignManager "
+                "and register() it instead")
+        from ..manager import CampaignManager
+        mgr = CampaignManager(spec, self.policy_factory(spec))
+        cid = self.register(mgr)
+        self.tasks[cid] = asyncio.create_task(mgr.run())
+        return cid
 
     async def observe(self, campaign_id: str) -> CampaignObservation:
         return self.managers[campaign_id].observe()
@@ -80,18 +115,25 @@ class InProcessControlPlane:
         return {"accepted": True}
 
     async def pause(self, campaign_id: str) -> None:
-        self._paused[campaign_id].clear()
+        self.managers[campaign_id].executor.pause()
         self.emit(campaign_id, "paused", {})
 
     async def resume(self, campaign_id: str) -> None:
-        self._paused[campaign_id].set()
+        self.managers[campaign_id].executor.resume()
         self.emit(campaign_id, "resumed", {})
 
     async def stop(self, campaign_id: str, reason: str) -> None:
-        pol = self.managers[campaign_id].policy
-        target = getattr(pol, "inner", pol)
-        if hasattr(target, "steer"):
-            target.steer({"kind": "stop", "reason": reason})
+        """Ends any campaign, not only an externally steered one.
+
+        This used to work by poking `ExternalPolicy.steer`, so it silently did nothing
+        for models A, B and D - the only policies with no caller to poke. Termination
+        belongs to the executor, which owns the state the decision rests on.
+        """
+        mgr = self.managers[campaign_id]
+        pol = getattr(mgr.policy, "inner", mgr.policy)
+        if hasattr(pol, "steer"):
+            pol.steer({"kind": "stop", "reason": reason})   # unblock a waiting caller
+        mgr.executor.request_stop(reason)
         self.emit(campaign_id, "stop_requested", {"reason": reason})
 
     async def artifacts(self, campaign_id: str, selector: str = "front") -> list[dict[str, Any]]:
@@ -103,6 +145,51 @@ class InProcessControlPlane:
 
     async def provenance(self, campaign_id: str, kind: str) -> list[dict[str, Any]]:
         return list(self.managers[campaign_id].prov.read(kind))
+
+    # -- runs ----------------------------------------------------------------
+    async def submit_run(self, campaign_id: str,
+                         intent: dict[str, Any]) -> dict[str, Any]:
+        """Admit one experiment. Answers accepted-with-an-id, or refused-with-a-reason.
+
+        Synchronous on purpose. Accepting everything and reporting rejections later on
+        the event stream would sever a rejection from the request that caused it, and
+        there would be nothing left to bound retries against.
+        """
+        from ..core.decision import ExperimentIntent
+        from ..core.session import CampaignStopped, SubmissionRejected
+        mgr = self.managers[campaign_id]
+        try:
+            run_id = await mgr.runs.submit(ExperimentIntent(**intent))
+        except SubmissionRejected as rejected:
+            self.emit(campaign_id, "run_rejected",
+                      {"gate": rejected.failure.gate,
+                       "reason": rejected.failure.reason,
+                       "transient": rejected.failure.transient})
+            return {"accepted": False, "failure": rejected.failure.model_dump()}
+        except CampaignStopped as stopped:
+            return {"accepted": False, "reason": str(stopped)}
+        self.emit(campaign_id, "run_submitted", {"run": run_id})
+        return {"accepted": True, "run_id": run_id}
+
+    async def list_runs(self, campaign_id: str,
+                        state: str | None = None) -> list[dict[str, Any]]:
+        from ..core.results import RunState
+        runs = self.managers[campaign_id].runs.list_runs(
+            RunState(state) if state else None)
+        return [r.model_dump(mode="json") for r in runs]
+
+    async def run_result(self, campaign_id: str,
+                         run_id: str) -> dict[str, Any] | None:
+        """A finished run's result - from memory, or from the durable log."""
+        outcome = self.managers[campaign_id].runs.outcome(run_id)
+        return outcome.model_dump(mode="json") if outcome else None
+
+    async def cancel_run(self, campaign_id: str, run_id: str) -> dict[str, Any]:
+        self.managers[campaign_id].runs.cancel(run_id)
+        self.emit(campaign_id, "run_cancel_requested", {"run": run_id})
+        # Advisory, and says so: queued work is reclaimed, running work is not, and the
+        # backend does not report which happened.
+        return {"requested": True, "advisory": True}
 
     async def ingest_measurement(self, campaign_id: str, node_id: str,
                                  prop: Property) -> dict[str, Any]:

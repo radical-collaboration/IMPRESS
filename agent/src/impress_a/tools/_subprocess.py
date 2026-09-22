@@ -12,7 +12,10 @@ pyrosetta, the LigandMPNN/RFD3 checkoutss) is installed.
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
+from pathlib import Path
+from typing import Any
 
 
 class SubprocessError(RuntimeError):
@@ -46,6 +49,33 @@ def first_dep_output(inputs: dict, port: str):
     agent here has exactly one upstream dep, so scan for the first dict that has `port`
     under its `outputs`."""
     for v in inputs.values():
-        if isinstance(v, dict) and port in v.get("outputs", {}):
-            return v["outputs"][port]
+        if isinstance(v, dict) and port in (v.get("outputs") or {}):
+            produced = v["outputs"][port]
+            # Upstream now hands over a typed handle rather than a bare string; what an
+            # adapter wants is the thing to open.
+            return getattr(produced, "located", produced)
     return None
+
+
+def workdir_for(req: Any, prefix: str) -> Path:
+    """A per-task directory for a real tool to work in.
+
+    Defaults to the CURRENT WORKING DIRECTORY, because that is where the launcher has
+    already put us and the launcher is what knows the machine: `delta_gpu_run.sh` cds
+    into `$SCRATCH/$USER/impress_a_runs/$SLURM_JOB_ID` - a shared filesystem, scoped per
+    job so concurrent campaigns cannot collide. It is also where asyncflow already
+    writes its own session files.
+
+    The adapters previously called `tempfile.mkdtemp()`, which put every artifact in the
+    system temp dir - NODE-LOCAL. Under Dragon multi-node a downstream task can be
+    scheduled on a different node from the one that produced its input, where that path
+    simply does not exist; the failure then surfaces from inside a science tool as a
+    missing file rather than as anything the campaign could reason about.
+
+    Artifacts are not cleaned up: they are the campaign's results and its provenance.
+    """
+    root = Path(getattr(req, "workdir", None) or Path.cwd())
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", str(getattr(req, "node_id", None) or "task"))
+    work = root / "work" / f"{prefix}_{name}"
+    work.mkdir(parents=True, exist_ok=True)
+    return work

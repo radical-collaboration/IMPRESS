@@ -62,6 +62,52 @@ def test_budget_blocks_and_reports_dimension():
     assert b.fraction_used("gpu_hours") == 0.95
 
 
+def test_budget_reservation_prevents_concurrent_double_spend():
+    """Two submissions in flight must not both be admitted against one budget.
+
+    Gate 5 checks an estimate; the charge only lands when the graph finishes. Serially
+    those coincide. Concurrently they do not, and without a reservation both graphs see
+    the same untouched remaining budget and the campaign overspends.
+    """
+    b = BudgetLedger(limits={"gpu_hours": 10.0})
+    assert b.reserve({"gpu_hours": 6.0}, "r0001") == []
+    # Nothing is spent yet - the first run has not finished.
+    assert b.remaining("gpu_hours") == 10.0
+    assert b.available("gpu_hours") == 4.0
+
+    assert b.reserve({"gpu_hours": 6.0}, "r0002") == ["gpu_hours"], \
+        "second submission must be refused while the first holds the budget"
+    assert "r0002" not in b.holds, "a refused reservation must claim nothing"
+
+    # A smaller one still fits.
+    assert b.reserve({"gpu_hours": 3.0}, "r0003") == []
+
+    # Settling charges what it actually cost, not what was estimated.
+    b.settle("r0001", {"gpu_hours": 5.0})
+    assert b.remaining("gpu_hours") == 5.0
+    assert b.available("gpu_hours") == 2.0      # r0003 still holds 3.0
+
+    # Work that never ran releases its hold and is charged nothing.
+    b.release("r0003")
+    assert b.available("gpu_hours") == 5.0 and b.remaining("gpu_hours") == 5.0
+    assert not b.holds
+
+
+def test_budget_exhaustion_ignores_in_flight_reservations():
+    """A campaign with everything in flight is busy, not exhausted.
+
+    `exhausted()` terminates the campaign, and policies read it to decide whether to
+    stop. If reservations counted, a healthy campaign would kill itself the moment it
+    had committed its budget to work that had not yet reported.
+    """
+    b = BudgetLedger(limits={"gpu_hours": 10.0})
+    b.reserve({"gpu_hours": 10.0}, "r0001")
+    assert b.available("gpu_hours") == 0.0, "nothing more may be admitted"
+    assert b.exhausted() == [], "but the campaign is not over"
+    b.settle("r0001", {"gpu_hours": 10.0})
+    assert b.exhausted() == ["gpu_hours"]
+
+
 def test_measurement_supersedes_prediction_and_retains_it():
     t = CampaignTree()
     nid = t.add(_node(solubility=0.4))
@@ -95,3 +141,26 @@ def test_backtracking_is_non_destructive():
     assert child in [n.id for n in [t.get(child)]] or True
     assert t.get(child) is not None, "abandoned branch must survive"
     assert branch.parent == root and len(t) == 3
+
+
+def test_artifact_ref_records_size_and_digest(tmp_path):
+    """A path alone says nothing about whether the bytes behind it are still the ones
+    the campaign reasoned about - which is the whole risk once the reasoner is remote."""
+    from impress_a.core.artifacts import ArtifactRef
+    from impress_a.core.types import ArtifactType
+
+    f = tmp_path / "backbone.pdb"
+    f.write_text("ATOM\n")
+    ref = ArtifactRef(type=ArtifactType.BACKBONE, path=str(f)).hash_file()
+    assert ref.bytes == 5 and ref.sha256 and ref.located == str(f)
+
+    f.write_text("ATOM ATOM\n")
+    assert ArtifactRef(type=ArtifactType.BACKBONE,
+                       path=str(f)).hash_file().sha256 != ref.sha256, \
+        "a changed file must be a different artifact"
+
+    missing = ArtifactRef(type=ArtifactType.BACKBONE, path=str(tmp_path / "gone.pdb"))
+    assert missing.hash_file().sha256 is None, "an absent file is not silently digested"
+
+    inline = ArtifactRef(type=ArtifactType.METRIC_SET, value="M")
+    assert inline.located == "M" and inline.hash_file().sha256 is None

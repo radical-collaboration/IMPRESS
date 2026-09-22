@@ -11,8 +11,11 @@ outputs:
   structure: {type: Complex}
 parameters:
   temperature: {type: float, default: 0.2, min: 0.0, max: 1.0, trades: "diversity vs recovery"}
-  num_seqs: {type: int, default: 8, min: 1, max: 64}
+  # Default 1: see rfd3_design.num_designs - breadth is `replicas`, not internal N.
+  num_seqs: {type: int, default: 1, min: 1, max: 64}
   pack_side_chains: {type: bool, default: true}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: overall_confidence, min: 0.4}}

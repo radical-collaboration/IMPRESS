@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-_gids = itertools.count(1)
+from ..core.ids import counter
 
-
-def new_graph_id() -> str:
-    return f"g{next(_gids):06d}"
+new_graph_id = counter("g")
 
 
 class TaskNode(BaseModel):
@@ -22,6 +19,7 @@ class TaskNode(BaseModel):
     inputs: dict[str, str] = Field(default_factory=dict)  # port -> "dep_id.out_port"
     node_id: str | None = None  # design-tree parent this task belongs to
     lineage: int = 0            # replica index: one independent chain per lineage
+    seed: int | None = None     # per-lineage draw; see composer._replica_seed
 
 
 class TaskGraph(BaseModel):

@@ -6,3 +6,6 @@ __pycache__/
 asyncflow.session.*
 # campaign outputs (provenance, artifacts, trust ledger)
 campaigns/_runs/
+# real tools work in <cwd>/work/<task>; on a laptop cwd is this checkout
+work/
+slides/

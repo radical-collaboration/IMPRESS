@@ -10,8 +10,15 @@ How IMPRESS-A sits on `radical.asyncflow` and `rhapsody`, and the behaviours tha
         └──── typed results, QC ────  rhapsody backend (Dragon / Concurrent / …)
 ```
 
-The agent owns the `WorkflowEngine` directly and drives one cycle at a time. Backends are constructed by
-`exec/backend.py` and named only in site configuration.
+The agent owns the `WorkflowEngine` directly, and keeps several graphs in flight on it at once.
+`Dispatcher.submit` registers a graph and returns a handle without awaiting it; `collect` awaits one.
+Backends are constructed by `exec/backend.py` and named only in site configuration.
+
+Two things make concurrent graphs safe on one engine, both verified against 0.5.1. Task **names** come
+from `fn.__name__` and collide across graphs, but they are only labels: components are keyed by a unique
+uid and dependencies resolve by future *identity*, never by name. And `workflow_id=` tags every task of
+a run, which is what keeps a log readable when two identical chains are running — though asyncflow
+exposes no way to look tasks up by that tag, so the run table stays the index.
 
 ## Runtime-composed DAGs
 

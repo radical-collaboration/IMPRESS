@@ -8,10 +8,14 @@ gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
 outputs:
   backbone: {type: Backbone}
 parameters:
-  num_designs: {type: int, default: 4, min: 1, max: 64, trades: "coverage vs GPU-hours"}
+  # Default 1: breadth comes from `replicas` (N independent lineages, N DesignNodes),
+  # not from internal sampling the adapter would discard all but the first of.
+  num_designs: {type: int, default: 1, min: 1, max: 64, trades: "coverage vs GPU-hours"}
   diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs wall-clock"}
   contig: {type: str, default: "A1-100"}
   ligand_resname: {type: str, default: "LIG"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}

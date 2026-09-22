@@ -10,6 +10,8 @@ outputs:
   structure: {type: Complex}
 parameters:
   cycles: {type: int, default: 1, min: 1, max: 5, trades: "convergence vs cpu-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: total_score, max: 0.0}}

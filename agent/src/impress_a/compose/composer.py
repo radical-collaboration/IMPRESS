@@ -5,17 +5,35 @@ intent; the composer emits graphs. That separation is what keeps policies swappa
 """
 from __future__ import annotations
 
+import hashlib
+
 from ..core.decision import ExperimentIntent
 from ..core.types import Pattern
 from ..tools.registry import Registry
 from .graph import TaskGraph, TaskNode
 
 
+def _replica_seed(run_label: str, lineage: int) -> int:
+    """A distinct, reproducible draw per replica lineage.
+
+    `replicas: N` means N INDEPENDENT lineages, but the composer gives every chain the
+    same parameters - so independence has to come from somewhere else. Until now it came
+    from nothing: it was an accident of the mock tools seeding on a task id that happened
+    to differ. A real tool taking an explicit seed would have produced N identical
+    designs, collapsing N lineages into one.
+
+    Derived from the run label rather than a random source so that two concurrent
+    submissions of the same intent differ, while a replayed campaign reproduces exactly.
+    """
+    h = hashlib.sha256(f"{run_label}/{lineage}".encode()).hexdigest()
+    return int(h[:8], 16)
+
+
 class Composer:
     def __init__(self, reg: Registry):
         self.reg = reg
 
-    def compose(self, intent: ExperimentIntent) -> TaskGraph:
+    def compose(self, intent: ExperimentIntent, run_label: str = "") -> TaskGraph:
         """Build `intent.replicas` INDEPENDENT chains through the declared stages.
 
         A replica is a whole lineage, not a fan-out at stage 0 that funnels back into a
@@ -44,6 +62,7 @@ class Composer:
                 g.add(TaskNode(id=tid, tool=tool_id,
                                params=dict(intent.params.get(tool_id, {})),
                                deps=deps, inputs=inputs,
-                               node_id=intent.parent_node, lineage=r))
+                               node_id=intent.parent_node, lineage=r,
+                               seed=_replica_seed(run_label or g.id, r)))
                 prev = tid
         return g
