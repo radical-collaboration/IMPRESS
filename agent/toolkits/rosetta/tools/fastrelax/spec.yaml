@@ -1,0 +1,18 @@
+id: fastrelax
+toolkit: rosetta
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.rosetta_agents.FastRelaxAgent
+resources: {cores: 8, walltime_s: 900}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  nstruct: {type: int, default: 1, min: 1, max: 8, trades: "sampling vs cpu-hours"}
+  relax_cycles: {type: int, default: 3, min: 1, max: 8, trades: "convergence vs cpu-hours"}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
+  - {id: metric_in_range, params: {metric: fa_rep, max: 500.0}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.5}}

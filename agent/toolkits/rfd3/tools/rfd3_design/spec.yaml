@@ -1,0 +1,18 @@
+id: rfd3_design
+toolkit: rfd3
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.rfd3_agents.RFD3DesignAgent
+resources: {gpus: 1, cores: 8, walltime_s: 900}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+outputs:
+  backbone: {type: Backbone}
+parameters:
+  num_designs: {type: int, default: 4, min: 1, max: 64, trades: "coverage vs GPU-hours"}
+  diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs wall-clock"}
+  contig: {type: str, default: "A1-100"}
+  ligand_resname: {type: str, default: "LIG"}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.25}}

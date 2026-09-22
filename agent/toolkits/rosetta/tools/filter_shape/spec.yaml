@@ -1,0 +1,14 @@
+id: filter_shape
+toolkit: rosetta
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.rosetta_agents.FilterShapeAgent
+resources: {cores: 2, walltime_s: 120}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.05}}

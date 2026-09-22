@@ -1,0 +1,20 @@
+id: boltz_predict
+toolkit: boltz
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.boltz_agents.BoltzPredictAgent
+resources: {gpus: 1, cores: 4, walltime_s: 600}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  structure: {type: Complex}
+outputs:
+  complex: {type: Complex}
+parameters:
+  diffusion_samples: {type: int, default: 5, min: 1, max: 25, trades: "sampling vs GPU-hours"}
+  use_msa_server: {type: bool, default: true}
+  ligand_smiles: {type: str, default: ""}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: complex_plddt, min: 0.5, max: 1.0}}
+  - {id: metric_in_range, params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.15}}

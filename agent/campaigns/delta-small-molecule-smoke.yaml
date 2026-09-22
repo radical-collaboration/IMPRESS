@@ -1,0 +1,19 @@
+# Smallest possible real run of the rfd3/ligandmpnn/rosetta/boltz chain - stands in for
+# the old IMPRESS project's IMPRESS_TEST_MODE=1 (impress_a has no equivalent env var; use
+# a smaller campaign spec instead). Intended for the FIRST live compute-node test, before
+# trusting campaigns/delta-small-molecule.yaml's full budget.
+campaign_id: delta-small-molecule-smoke
+goal: "Design a small-molecule-binding protein around the configured ligand"
+backend: dragon
+backend_config: {}
+max_cycles: 1
+stagnation_limit: 1
+site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 2.0
+  cpu_hours: 8.0
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.5}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

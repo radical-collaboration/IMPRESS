@@ -1,0 +1,20 @@
+id: ligandmpnn_design
+toolkit: ligandmpnn
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.ligandmpnn_agents.LigandMPNNDesignAgent
+resources: {gpus: 1, cores: 4, walltime_s: 300}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  backbone: {type: Backbone}
+outputs:
+  structure: {type: Complex}
+parameters:
+  temperature: {type: float, default: 0.2, min: 0.0, max: 1.0, trades: "diversity vs recovery"}
+  num_seqs: {type: int, default: 8, min: 1, max: 64}
+  pack_side_chains: {type: bool, default: true}
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metric_in_range, params: {metric: overall_confidence, min: 0.4}}
+  - {id: metric_in_range, params: {metric: ligand_confidence, min: 0.4}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.1}}

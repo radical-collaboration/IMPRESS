@@ -1,0 +1,12 @@
+# Delta HPC (NCSA) site profile. Documentation/reference only, same role as local.yaml -
+# nothing in src/impress_a reads sites/*.yaml today (confirmed: no code references this
+# directory). The campaign YAML's own `backend`/`backend_config`/`site` keys are what
+# actually take effect; this file exists for parity with local.yaml and as the source you
+# copy those fields from when writing a Delta campaign.
+name: delta
+scheduler: slurm
+backend: {kind: dragon, config: {}}
+gpu: {vendor: nvidia, api: cuda, per_node: 4}
+filesystems: {shared: "$SCRATCH/$USER/impress_a_runs", scratch: "$SCRATCH"}
+tool_delivery: {default: real}
+p5_governor: {max_concurrency: {}}
