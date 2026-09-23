@@ -117,7 +117,7 @@ different transport.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest tests -q                                           # 70 tests, ~10s, no allocation needed
+pytest tests -q                                           # 77 tests, ~10s, no allocation needed
 impress-a tools                                           # list registered tools
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```
@@ -190,9 +190,9 @@ Reference implementation, exercised end to end on a laptop and not yet on real h
 | Concurrent experiments, durable runs, reattach after restart | works |
 | Control plane — in-process and HTTP+SSE adapters | works |
 | Mock toolkit campaign | works |
-| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | wired, **never executed** |
+| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | wired, CLI contracts verified against real installs, **never executed** |
 
-`pytest tests -q` — 70 tests, ~10s, no allocation. A complete campaign runs on a laptop with stubbed
+`pytest tests -q` — 77 tests, ~10s, no allocation. A complete campaign runs on a laptop with stubbed
 science, which is deliberate: HPC iteration is slow and expensive, so almost everything is verifiable
 locally. The corollary is that everything *only* verifiable on HPC is unverified.
 
@@ -202,12 +202,23 @@ locally. The corollary is that everything *only* verifiable on HPC is unverified
 and dry-run, and their adapters invoke real binaries — but no line of RFdiffusion, LigandMPNN,
 PyRosetta or Boltz code has executed through this system. Treat the real path as untested.
 
-**`ligand_smiles` is empty** in both Delta campaign specs, and is marked `REQUIRED` there. Left blank,
-Boltz models no ligand and the campaign optimises the wrong thing without complaining.
+**The Dragon backend can hang silently during construction.** `Batch()` is built synchronously with
+no `await` points, so a stall there blocks the event loop entirely — no heartbeat, no timeout, until
+whatever wall-clock limit kills the job. Measured, not theoretical: job 22318678 spent its full
+2-hour allocation this way. Bounded now by `backend_startup_timeout_s`/`backend_startup_heartbeat_s`
+on `CampaignSpec` (both Delta campaigns set 600s); see `docs/limitations.md`.
 
-**Three tool arguments are unverified** and marked at their call sites: the seed flags for LigandMPNN
-and Boltz, RFD3's `seed` key, and whether `--number_of_batches` is the right knob for `num_seqs`.
-Run `impress-a preflight` on a login node first.
+**`ligand_smiles` was empty** in both Delta campaign specs. Resolved for the ALR benchmark target
+(`campaigns/data/alr/`, borrowed from the original IMPRESS project) — both campaigns now set it to
+the real ligand's SMILES, and a fail-fast check catches any future target that leaves it blank
+instead of silently modeling no ligand.
+
+**Three tool arguments were unverified** and are now checked directly against the installed real
+toolkits on Delta: LigandMPNN's and Boltz's seed/batch flags were confirmed correct as written.
+RFD3's contract was not merely unverified but **wrong** — it invoked flags (`--config`/`--out`) the
+real Hydra-based CLI doesn't have — and has been rewritten to the real contract. `boltz_predict` was
+also found to be missing a required `--no_kernels` flag along the way. Run `impress-a preflight` on
+a login node first regardless — it now also checks `ligand_smiles`.
 
 **QC for the real toolkits is thin where it matters most.** The specs lean almost entirely on
 `metric_in_range` against each tool's *own* self-reported confidence — which is exactly what a

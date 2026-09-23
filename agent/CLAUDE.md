@@ -11,7 +11,7 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # 70 tests, ~10s, no allocation
+pytest tests -q                                      # 77 tests, ~10s, no allocation
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
@@ -97,6 +97,8 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 `tests/test_core.py` (pure logic) · `test_validation.py` (the five gates + interlock) ·
 `test_campaign.py` (full campaigns on `ConcurrentExecutionBackend` with mock tools) ·
 `test_real_toolkits.py` (the real specs, without executing any real binary) ·
+`test_backend_bound.py` (backend-construction timeout/heartbeat, against a fake backend
+that blocks its own thread's event loop the way Dragon's `Batch()` does) ·
 `test_http_adapter.py` (a campaign driven end to end over a loopback socket).
 
 **A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
@@ -112,7 +114,17 @@ dominant hazard, so the suite has to manufacture some.
 
 **The real toolkits have never executed.** RFdiffusion3, LigandMPNN, PyRosetta and Boltz register,
 validate, type-check as a chain and dry-run — and no line of their code has run through this system.
-Treat anything about the real path as untested. `impress-a preflight` first; see `plans/first-real-run.md`.
+Their CLI contracts have since been checked directly against the installed binaries on Delta (not
+just read from old scripts), which found and fixed genuine bugs — `rfd3_design` was invoking flags
+the real Hydra-based CLI doesn't have at all — but "checked" is not "executed." Treat the real path
+as untested. `impress-a preflight` first; see `plans/first-real-run.md`.
+
+**Dragon backend construction is synchronous and can hang the event loop.** `Batch()` builds with no
+`await` points, so a stall there is invisible — no heartbeat, no campaign log, nothing — until
+whatever wall-clock limit kills the job (measured: job 22318678 spent its full 2-hour allocation this
+way). Bounded now by `CampaignSpec.backend_startup_timeout_s`/`backend_startup_heartbeat_s`
+(`exec/backend.make_engine_bounded` runs construction on a daemon thread so the bound stays
+effective); 0 disables it, the default for every non-Delta campaign. See `docs/limitations.md`.
 
 **Cancellation is advisory.** Measured rather than assumed: the concurrent backend's `Future.cancel()`
 returns `False` once a callable has started, and asyncflow discards that answer — so queued work is
