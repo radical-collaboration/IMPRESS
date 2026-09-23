@@ -67,6 +67,13 @@ class BoltzPredictAgent(TaskAgent):
             "--devices", "1", "--accelerator", "gpu",
             "--diffusion_samples", str(params["diffusion_samples"]),
             "--output_format", "pdb",
+            # Required, not optional: cuequivariance_ops_torch's fused kernel needs
+            # cublasGemmGroupedBatchedEx, absent from the nvidia-cublas-cu12 version
+            # torch==2.5.1+cu121 pins and loads first (present only from 12.5.3.2+), so
+            # the kernel import fails every time until that's reconciled. Verified in
+            # IMPRESS/examples/small_molecule_binding/scripts/boltz.sh - don't drop this
+            # without re-checking the installed torch/cuequivariance-ops-cu12 versions.
+            "--no_kernels",
         ]
         if params.get("seed") is not None:
             cmd += ["--seed", str(params["seed"])]

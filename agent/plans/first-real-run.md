@@ -1,6 +1,9 @@
 # Stub — the first real campaign on Delta
 
-**Status:** blocked on a person. Backlog items A1, A2, A3.
+**Status:** blocked on a person actually submitting the job. Steps 1-3 below are DONE for the ALR
+target as of this session (verified directly against the installed toolkits on Delta - see backlog
+A2, A3, A5). Backlog items A1 (no campaign has executed) and A4 (rfd3 output parsing needs
+confirming on a real run) remain.
 
 ## Problem
 
@@ -10,20 +13,32 @@ fail loudly when their environment is absent, but no scientific code has run thr
 
 ## What has to happen first, in order
 
-1. **Fill in `ligand_smiles`** in `campaigns/delta-small-molecule-smoke.yaml` (and the full campaign).
-   It is marked `REQUIRED` and defaults to `""`, which means Boltz models no ligand and nothing
-   complains. Set `contig` and `ligand_resname` to match the target while there.
+1. **DONE for ALR.** `ligand_smiles`, `contig`/`input_spec_path`, and the LigandMPNN
+   `fixed_residues`/Rosetta `ligand_params_path` targets are all filled in on both Delta campaigns,
+   borrowed from the original IMPRESS project's small-molecule-binding benchmark (see
+   `campaigns/data/alr/`). `_check_ligand_smiles` (`cli/__init__.py`) now fails fast for any *future*
+   target that leaves `ligand_smiles` blank, instead of silently modeling no ligand.
 2. **`impress-a preflight`** on a login node. Checks `FOUNDRY_SIF_PATH`, `MPNN_DIR`, `BOLTZ_CACHE`,
-   `apptainer` and `boltz` on PATH, and `import pyrosetta` in a subprocess.
-3. **Confirm three arguments** against the installed CLIs — the seed flags for LigandMPNN and Boltz,
-   RFD3's `seed` config key, and whether `--number_of_batches` is the right knob for `num_seqs`. All
-   are marked at their call sites. Getting a seed flag wrong is silent: replicas stop being
-   independent draws and nothing reports it.
+   `apptainer` and `boltz` on PATH, `import pyrosetta` in a subprocess, and (as of this session)
+   `ligand_smiles`. Confirmed passing (except the pre-existing, unrelated `pyrosetta` subprocess
+   check, which times out on this login node) for `campaigns/delta-small-molecule-smoke.yaml`.
+3. **DONE.** Three arguments were confirmed directly against the installed CLIs this session:
+   LigandMPNN's `--seed`/`--number_of_batches` (correct as originally written), Boltz's `--seed`
+   (correct), and RFD3's contract (was **wrong**, not just unverified - the whole invocation has
+   been rewritten to the real Hydra `key=value` contract; see backlog A3 and `toolkits/rfd3/SKILL.md`).
+   Also found in the same pass and fixed: `boltz_predict` was missing the required `--no_kernels`
+   flag.
 4. **Smoke first** — `sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml`.
-   One cycle, one lineage.
+   One cycle, one lineage. Both Delta campaign YAMLs now also set
+   `backend_startup_timeout_s: 600` so a Dragon-backend-construction hang (job 22318678; see
+   `docs/limitations.md`) fails within minutes instead of consuming the whole allocation.
 
 ## What to check on the first run
 
+- `rfd3_design`'s output filenames under `out_dir` match what `RFD3DesignAgent` globs for
+  (`*.cif.gz`) - the Hydra contract rewrite is verified against the real CLI's source, but the exact
+  output shape (`dump_prediction_metadata_json`/`output_full_json`) was not re-verified against a
+  real run (backlog A4).
 - The `graphs` provenance names the real tools, not `mock_*`. This is the bug that made the smoke
   test necessary in the first place.
 - `jobs/ledger.jsonl` shows one submitted → done run with an outcome payload.

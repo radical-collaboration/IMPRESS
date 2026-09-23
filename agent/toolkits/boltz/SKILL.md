@@ -37,3 +37,14 @@ and this agent inherits that same fallback behavior.
 - Boltz-2 predicts independently of the Rosetta-refined coordinates it was handed; a low
   score here after `filter_shape` passed is a genuine disagreement worth investigating, not
   necessarily a Boltz-2 failure.
+- `--no_kernels` is required, not optional, with the currently-pinned dependency
+  versions: `cuequivariance_ops_torch`'s fused kernel needs
+  `cublasGemmGroupedBatchedEx`, absent from the `nvidia-cublas-cu12` version
+  `torch==2.5.1+cu121` pins and loads first (present only from `12.5.3.2+`) - the kernel
+  import fails every time until that's reconciled (verified, reproduced with no GPU
+  present, in old IMPRESS's `scripts/boltz.sh`). Don't drop this flag on a dependency
+  bump without re-checking the installed torch/cuequivariance-ops-cu12 versions.
+- `ligand_smiles` is a plain string, no atom-name mapping needed for it to reach Boltz
+  correctly - the atom-mapping machinery this project's history mentions is about
+  feeding a Boltz *output* back into RFD3's guided/partial-diffusion *input*, not about
+  Boltz consuming a SMILES string.

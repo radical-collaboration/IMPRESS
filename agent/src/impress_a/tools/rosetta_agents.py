@@ -23,15 +23,17 @@ import pyrosetta
 
 # A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
 # replicas of a deterministic protocol are just the same run repeated N times.
-def _init(seed_arg):
+def _init(seed_arg, ligand_params_arg):
     flags = "-mute all"
     if seed_arg != "none":
         flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
+    if ligand_params_arg != "none":
+        flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params_arg
     pyrosetta.init(flags)
 
-in_pdb, out_pdb, cycles, seed, result_json = (
-    sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5])
-_init(seed)
+in_pdb, out_pdb, cycles, seed, ligand_params, result_json = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6])
+_init(seed, ligand_params)
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 sfxn = pyrosetta.get_fa_scorefxn()
@@ -53,15 +55,18 @@ import pyrosetta
 
 # A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
 # replicas of a deterministic protocol are just the same run repeated N times.
-def _init(seed_arg):
+def _init(seed_arg, ligand_params_arg):
     flags = "-mute all"
     if seed_arg != "none":
         flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
+    if ligand_params_arg != "none":
+        flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params_arg
     pyrosetta.init(flags)
 
-in_pdb, out_pdb, cycles, nstruct, seed, result_json = (
-    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6])
-_init(seed)
+in_pdb, out_pdb, cycles, nstruct, seed, ligand_params, result_json = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6],
+    sys.argv[7])
+_init(seed, ligand_params)
 
 start = pyrosetta.pose_from_pdb(in_pdb)
 sfxn = pyrosetta.get_fa_scorefxn()
@@ -89,8 +94,11 @@ json.dump({
 _FILTER_SHAPE_WORKER = r"""
 import json, sys
 import pyrosetta
-pyrosetta.init("-mute all")
-in_pdb, result_json = sys.argv[1], sys.argv[2]
+in_pdb, ligand_params, result_json = sys.argv[1], sys.argv[2], sys.argv[3]
+flags = "-mute all"
+if ligand_params != "none":
+    flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params
+pyrosetta.init(flags)
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 xml = '<SCOREFXNS/><RESIDUE_SELECTORS/><FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>'
@@ -138,6 +146,10 @@ def _seed_arg(params: dict[str, Any]) -> str:
     return "none" if params.get("seed") is None else str(params["seed"])
 
 
+def _ligand_params_arg(params: dict[str, Any]) -> str:
+    return params.get("ligand_params_path") or "none"
+
+
 class PackMinAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
         structure = first_dep_output(req.inputs, "structure")
@@ -147,7 +159,8 @@ class PackMinAgent(TaskAgent):
         out_pdb = work / "packmin.pdb"
         result_json = await _run_worker(
             _PACKMIN_WORKER,
-            [structure, str(out_pdb), str(params["cycles"]), _seed_arg(params)],
+            [structure, str(out_pdb), str(params["cycles"]), _seed_arg(params),
+             _ligand_params_arg(params)],
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:
@@ -166,7 +179,7 @@ class FastRelaxAgent(TaskAgent):
         result_json = await _run_worker(
             _FASTRELAX_WORKER,
             [structure, str(out_pdb), str(params["relax_cycles"]),
-             str(params["nstruct"]), _seed_arg(params)],
+             str(params["nstruct"]), _seed_arg(params), _ligand_params_arg(params)],
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:
@@ -184,7 +197,7 @@ class FilterShapeAgent(TaskAgent):
             raise RuntimeError("filter_shape: no upstream 'structure' output found")
         work = workdir_for(req, "filter_shape")
         result_json = await _run_worker(
-            _FILTER_SHAPE_WORKER, [structure],
+            _FILTER_SHAPE_WORKER, [structure, _ligand_params_arg(params)],
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:

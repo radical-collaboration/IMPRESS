@@ -42,6 +42,8 @@ def load_spec(path: str | Path) -> CampaignSpec:
         site=SiteCaps(**d.get("site", {})),
         backend=d.get("backend", "concurrent"),
         backend_config=d.get("backend_config", {}),
+        backend_startup_timeout_s=float(d.get("backend_startup_timeout_s", 0) or 0),
+        backend_startup_heartbeat_s=float(d.get("backend_startup_heartbeat_s", 30) or 30),
         root=d.get("root", "campaigns/_runs"),
         stages=d.get("stages", []) or [],
         params=d.get("params", {}) or {},
@@ -50,6 +52,18 @@ def load_spec(path: str | Path) -> CampaignSpec:
         replicas=int(d.get("replicas", 0)),
         concurrency=int(d.get("concurrency", 1)),
         max_runs=int(d.get("max_runs", 0)))
+
+
+def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
+    """`boltz_predict` with an empty `ligand_smiles` doesn't fail - it silently models no
+    ligand, so the campaign's Pareto front optimizes the wrong objective. Backlog A2.
+    """
+    if "boltz_predict" not in spec.stages:
+        return None
+    if (spec.params.get("boltz_predict") or {}).get("ligand_smiles"):
+        return None
+    return ("boltz_predict is a stage but params.boltz_predict.ligand_smiles is empty - "
+            "Boltz will silently model no ligand. Set it to the real target's SMILES.")
 
 
 def build_policy(model: str, spec: CampaignSpec, guard: bool = True):
@@ -126,6 +140,9 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
+    if err := _check_ligand_smiles(spec):
+        log.error("%s", err)
+        return 1
     spec.campaign_id = f"{spec.campaign_id}-{model}"
     policy = build_policy(model, spec, guard)
     reg = Registry().load()
@@ -160,7 +177,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     return 0
 
 
-def preflight(stages: list[str] | None = None) -> int:
+def preflight(spec: CampaignSpec | None = None) -> int:
     """Check a real toolkit's environment BEFORE anything is queued.
 
     Every real adapter raises on a missing env var - but only once a task is running,
@@ -170,7 +187,10 @@ def preflight(stages: list[str] | None = None) -> int:
     import shutil
     import subprocess
 
+    stages = spec.stages if spec else None
     checks: list[tuple[str, bool, str]] = []
+    if spec is not None and (err := _check_ligand_smiles(spec)):
+        checks.append(("ligand_smiles", False, err))
 
     for var, what in (("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
                       ("MPNN_DIR", "ligandmpnn_design (checkout + checkpoints)"),
@@ -235,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat))
     if a.cmd == "preflight":
-        return preflight(load_spec(a.spec).stages if a.spec else None)
+        return preflight(load_spec(a.spec) if a.spec else None)
     reg = Registry().load(a.toolkits)
     for tid in reg.ids():
         s = reg.get(tid)

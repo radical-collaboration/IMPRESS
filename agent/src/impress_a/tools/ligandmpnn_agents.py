@@ -47,6 +47,8 @@ class LigandMPNNDesignAgent(TaskAgent):
             cmd += ["--seed", str(params["seed"])]
         if params["pack_side_chains"]:
             cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1"]
+        if params.get("fixed_residues"):
+            cmd += ["--fixed_residues", params["fixed_residues"]]
         await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))
 
         fastas = sorted(out.glob("seqs/*.fa")) or sorted(out.glob("**/*.fa"))

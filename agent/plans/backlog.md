@@ -3,8 +3,9 @@
 Everything outstanding, as of the stagnation fix. Nothing here is started. Each item says why it
 matters so the list can be triaged rather than worked through top to bottom.
 
-State it is measured against: 70 tests passing, lint 41, import contract clean, all control models
-run, the real Delta chain composes but has never executed.
+State it is measured against: 77 tests passing, lint 41, import contract clean, all control models
+run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
+on Delta - but no line of the real toolkits has executed yet (A1).
 
 ---
 
@@ -13,12 +14,47 @@ run, the real Delta chain composes but has never executed.
 **A1. No real campaign has ever run.** Every claim about the real toolkits is validation, dry-run and
 unit-level. `campaigns/_runs/` holds only mock runs.
 
-**A2. `ligand_smiles` is empty** in both Delta campaigns, marked `REQUIRED` in the YAML. Blank means
-Boltz models no ligand and the campaign silently optimises the wrong thing.
+**A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
+campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
+benchmark (`campaigns/data/alr/ALR.smiles`), and `_check_ligand_smiles` (`cli/__init__.py`, wired
+into both `run_campaign()` and `preflight()`) fails fast for any *future* target that leaves it
+blank, instead of silently modeling no ligand. Verified on Delta: `impress-a preflight` on the
+smoke campaign shows no `ligand_smiles` failure row.
 
-**A3. Three unverified arguments**, checkable only where the software is installed: seed flags for
-LigandMPNN and Boltz, RFD3's `seed` key, and `--number_of_batches` vs `num_seqs`. All marked at their
-call sites. `impress-a preflight` first.
+**A3. Three unverified arguments — RESOLVED**, checked directly against the installed real
+toolkits on Delta this session: LigandMPNN's `--seed`/`--number_of_batches` (confirmed correct as
+originally written — `--batch_size` defaults to `1`, so `--number_of_batches <num_seqs>` alone gives
+exactly `num_seqs` sequences), and Boltz's `--seed`. RFD3's contract, however, was **wrong**, not
+merely unverified: `rfd3_agents.py` invoked `rfd3 design --config <json> --out <dir>`, but the real
+CLI (`rfd3.cli:design`, a Typer app forwarding every arg as a Hydra `key=value` override) has no
+`--flag` options at all - that invocation would have failed immediately. Rewritten to the real
+`out_dir=`/`inputs=`/`diffusion_batch_size=`/`inference_sampler.num_timesteps=`/`seed=` contract; see
+`toolkits/rfd3/SKILL.md`. Also found and fixed in the same pass: `boltz_predict` was missing the
+required `--no_kernels` flag (a verified CUDA ABI mismatch, not optional); `ligandmpnn_design` had
+no way to express a fixed-residue constraint (`--fixed_residues` is a real flag); none of the three
+Rosetta toolkits had a way to pass a ligand `.params` file (`-extra_res_fa`), so a real ALR-ligand
+PDB would likely raise in `pose_from_pdb()`. All four fixed; see each toolkit's `SKILL.md`.
+
+**A5. The Dragon backend construction hang is bounded, not diagnosed.** Job 22318678 ran the full
+2-hour allocation and was killed on the time limit after producing only Dragon's own infra-connect
+log lines - no campaign log, no ledger entry, nothing else, for the whole run. Traced to
+`rhapsody.DragonExecutionBackend.__init__` building Dragon's `Batch()` (results DDict, GPU-affinity
+worker pool, telemetry) synchronously with no `await` points, blocking the event loop entirely -
+the codebase's own heartbeat never fired once in 2 hours because of it. Now bounded by
+`backend_startup_timeout_s`/`backend_startup_heartbeat_s` on `CampaignSpec` (see
+`exec/backend.make_engine_bounded`, `docs/limitations.md`): a future stall fails loudly within
+minutes instead of consuming the whole allocation silently. What remains open: *why* `Batch()`/
+`Pool()` didn't complete inside 2 hours in the first place (most likely GPU-affinity worker
+rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
+needs a person on a real allocation, with the bounded timeout now giving a fast, clear failure to
+iterate against instead of another silent multi-hour loss.
+
+**A4. The rfd3_design rewrite needs a real smoke-run confirmation.** The Hydra contract and
+`DesignInputSpecification` JSON shape are verified against the installed `rfd3` CLI's own source,
+but the output-parsing half of `RFD3DesignAgent` (glob for `*.cif.gz`, convert via `cif_gz_to_pdb`)
+was not re-verified against a real `out_dir` listing - confirm the exact output filenames on the
+first real smoke run (`dump_prediction_metadata_json`/`output_full_json` are both `True` by
+default, so this should be visible immediately).
 
 ## B. Silent-failure defences — unmet for the real toolkits
 
@@ -112,7 +148,7 @@ but no lookup API does.
 
 ## Verification that applies to any item
 
-`pytest tests -q` — 70 tests green, no allocation. `ruff check src tests` must not exceed 41.
+`pytest tests -q` — 77 tests green, no allocation. `ruff check src tests` must not exceed 41.
 Import contract: `policy` must not reach `tools`/`exec`/`runtime`; `compose` must not reach `exec`;
 `core` imports nothing internal. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and

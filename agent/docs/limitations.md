@@ -73,6 +73,26 @@ and outcomes, and `RunService.reattach` reconciles what a previous process left 
 resumes a campaign from it yet), and the P5 network-service governor (caching, per-service concurrency
 caps, `Retry-After` backoff).
 
+## The Dragon backend can hang silently during construction
+
+`rhapsody`'s Dragon execution backend builds `Batch()` (the results DDict, a GPU-affinity worker
+pool, telemetry) **synchronously** inside its own constructor, with no `await` points. A stall there
+blocks the event loop entirely: not the campaign's own heartbeat, not the process, nothing gets a
+chance to run until `Batch()` returns - so a genuinely hung construction is indistinguishable from a
+process still starting up, right up until whatever wall-clock limit kills the job. This is exactly
+what happened to job 22318678: the process ran for its full 2-hour SLURM allocation and was killed
+on the time limit having produced only Dragon's own internal infra-connect log lines - no campaign
+log, no ledger entry, no heartbeat, nothing else, the entire time.
+
+Bounded now by `CampaignSpec.backend_startup_timeout_s` (0 = disabled, the default - every existing
+campaign is unaffected) and `backend_startup_heartbeat_s`: the construction runs on a dedicated
+daemon thread so the calling event loop stays free to heartbeat-log and enforce the timeout, and a
+stall past the bound raises `BackendConstructionTimeout` with a clear diagnostic instead of silently
+consuming the rest of the allocation. Both Delta campaign YAMLs set a 600s bound. What this does
+**not** solve: *why* a real construction might stall inside Dragon's own `Batch()`/`Pool()` (most
+likely GPU-affinity worker rendezvous or OFI/libfabric negotiation) is still unknown - see backlog
+A5.
+
 ## Built, but unexercised against real science
 
 Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
@@ -80,9 +100,20 @@ binaries, and the Delta HPC launch path is complete. **No campaign has yet run t
 Everything below the adapters is exercised by the laptop tier; the adapters themselves are covered only
 for registration, validation and dry-run, because executing them needs the science stack installed.
 
-Two things in particular are unverified and are marked at their call sites: the **seed flag names** for
-LigandMPNN and Boltz, and whether LigandMPNN's `--number_of_batches` is the right knob for `num_seqs`.
-Run `impress-a preflight` on a login node before committing an allocation.
+A verification pass against the actual installed toolkits on Delta (not just old scripts) found and
+fixed real contract bugs rather than merely confirming guesses: `rfd3_design` was invoking `rfd3`
+with flags (`--config`/`--out`) that do not exist on the real Hydra-based CLI at all and would have
+failed immediately - rewritten to the real `out_dir=`/`inputs=`/`diffusion_batch_size=`/
+`inference_sampler.num_timesteps=`/`seed=` contract. `boltz_predict` was missing the required
+`--no_kernels` flag (a verified CUDA ABI mismatch between the pinned torch and
+cuequivariance-ops-cu12 versions, not an optional flag). `ligandmpnn_design` had no way to express a
+fixed-residue constraint. None of the three Rosetta toolkits (`packmin`, `fastrelax`, `filter_shape`)
+had a way to pass a ligand `.params` file, so a real ligand-bearing PDB would likely raise in
+`pose_from_pdb()` rather than silently mis-score. All four are now fixed (see each toolkit's
+`SKILL.md`); LigandMPNN's own seed/batch flags were checked and confirmed correct as originally
+written. `impress-a preflight` still runs cleanly for the ALR benchmark target on a Delta login node,
+but this list is checked contracts, not an executed run - see "no campaign has yet run them on real
+hardware," above.
 
 Related: the QC gates the real toolkits declare lean almost entirely on `metric_in_range` against a
 tool's **own** self-reported confidence — which is exactly what a confidently-wrong tool passes. There

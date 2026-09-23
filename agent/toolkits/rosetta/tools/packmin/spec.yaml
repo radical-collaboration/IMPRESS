@@ -12,6 +12,10 @@ parameters:
   cycles: {type: int, default: 1, min: 1, max: 5, trades: "convergence vs cpu-hours"}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  # Path to a Rosetta ligand .params file, passed to pyrosetta.init() as -extra_res_fa.
+  # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
+  # will raise (confirmed: old IMPRESS's packmin.py always passes this).
+  ligand_params_path: {type: str, default: ""}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: total_score, max: 0.0}}

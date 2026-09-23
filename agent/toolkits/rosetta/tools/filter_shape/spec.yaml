@@ -8,6 +8,12 @@ inputs:
   structure: {type: Complex}
 outputs:
   structure: {type: Complex}
+parameters:
+  # Path to a Rosetta ligand .params file, passed to pyrosetta.init() as -extra_res_fa.
+  # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
+  # will raise (confirmed: old IMPRESS's filter_shape.py always passes this, plus
+  # -ignore_unrecognized_res -ignore_zero_occupancy).
+  ligand_params_path: {type: str, default: ""}
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: shape_complementarity, min: 0.55, max: 1.0}}

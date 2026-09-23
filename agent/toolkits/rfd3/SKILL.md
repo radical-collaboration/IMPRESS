@@ -35,6 +35,20 @@ later stage that would have consumed them.
 - `rfd3_design` requires `$FOUNDRY_SIF_PATH` to point at an extracted or built foundry
   sandbox (see `scripts/delta_env_setup.sh` / `pull_foundry.sh` in the original IMPRESS
   examples) - it is not installed by `pip install -e ".[dev]"`.
-- `contig` and `ligand_resname` are exposed as tunable string parameters, but RFD3's real
-  input spec is a much richer JSON (fixed atoms, motif selection, guided/partial-diffusion
-  mode). This toolkit only exposes the de novo path initially.
+- The real `rfd3` CLI (verified against the installed `rfd3.cli:design`) is a Typer app
+  with `allow_extra_args=True, ignore_unknown_options=True` that forwards every arg as a
+  Hydra config override - `key=value`, never `--flag`. `--config`/`--out` are not real
+  flags and would fail Hydra's override parsing immediately; the real invocation is
+  `rfd3 design out_dir=... inputs=... skip_existing=False dump_trajectories=True
+  prevalidate_inputs=True diffusion_batch_size=... inference_sampler.num_timesteps=...
+  [seed=...]` (confirmed identical in `foundry/run_rfd.slurm` and old IMPRESS's
+  `scripts/rfd3.sh`).
+- `input_spec_path` points at a real `DesignInputSpecification` JSON (`input`, `contig`,
+  `unindex`, `length`, `ligand`, `select_fixed_atoms`, `select_buried`, `select_exposed`,
+  `partial_t`) - RFD3 has no scaffold/guidance CLI override, so guided vs. unguided
+  diffusion is selected entirely by WHICH file this points at, never by a flag. See
+  `campaigns/data/alr/ALR_binder_design.json` for a real example.
+- The `.params` file's `NAME`/`IO_STRING` record for a ligand may not match its bare
+  3-letter code: ALR's real value is the literal `A:R`, not `ALR` (a deliberate,
+  verified workaround for RFD3 misresolving the bare `"ALR"` literal). Always read this
+  from the `.params` file, never hardcode or "clean up" a colon out of it.

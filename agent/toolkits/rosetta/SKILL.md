@@ -34,3 +34,9 @@ linearly); `packmin` and `filter_shape` are comparatively cheap. Do not raise `n
 - Each tool subprocess calls `pyrosetta.init()` independently; do not try to reuse a
   PyRosetta session across calls to save init time - that is what the old pipeline's
   packmin/fastrelax/filter_shape being separate scripts already encodes.
+- `ligand_params_path` (all three tools) is required whenever the input structure
+  contains a non-standard ligand HETATM residue - without `-extra_res_fa <path>`,
+  `pose_from_pdb()` will most likely raise on the unrecognized residue rather than
+  silently mis-score it. Confirmed: old IMPRESS's `packmin.py`/`fastrelax.py`/
+  `filter_shape.py` all pass this unconditionally (the latter also adds
+  `-ignore_unrecognized_res -ignore_zero_occupancy`, which these agents mirror).

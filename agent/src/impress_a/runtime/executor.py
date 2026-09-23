@@ -72,6 +72,12 @@ class CampaignSpec:
     backend: str = "concurrent"
     backend_config: dict[str, Any] = field(default_factory=dict)
     root: str = "campaigns/_runs"
+    # 0 disables: rhapsody's Dragon backend builds `Batch()` synchronously in its own
+    # constructor (worker pool, GPU-affinity policies, telemetry) with no `await` points,
+    # so a stall there blocks the event loop entirely - no heartbeat, no timeout, nothing
+    # - until the whole allocation's walltime is spent. See `exec.backend.make_engine_bounded`.
+    backend_startup_timeout_s: float = 0.0
+    backend_startup_heartbeat_s: float = 30.0
     # WHICH tools this campaign is about. Without it every policy falls back to its own
     # default chain - which is the mock one - so a campaign naming real toolkits would
     # load them, validate them, and then run mocks.
@@ -634,15 +640,18 @@ class CampaignExecutor:
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
-        from ..exec.backend import make_engine
+        from ..exec.backend import make_engine_bounded
         # Logged either side because this call is the only stretch of a campaign that
         # precedes its own provenance: rhapsody's Dragon backend builds `Batch()` - the
         # results DDict, the worker pool, telemetry - synchronously in its constructor, so
-        # a stall there leaves no campaign.jsonl and no other trace at all.
+        # a stall there leaves no campaign.jsonl and no other trace at all. Bounded by
+        # `backend_startup_timeout_s` (0 = unbounded, the default) precisely because of
+        # that: see `exec.backend.make_engine_bounded`.
         log.info("engine: constructing %s backend (config=%s)",
                  self.spec.backend, self.spec.backend_config or {})
-        self.flow, self._backend = await make_engine(self.spec.backend,
-                                                     self.spec.backend_config)
+        self.flow, self._backend = await make_engine_bounded(
+            self.spec.backend, self.spec.backend_config,
+            self.spec.backend_startup_timeout_s, self.spec.backend_startup_heartbeat_s)
         log.info("engine: %s backend ready", self.spec.backend)
         self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend)
         self.jobs.record(event="campaign_started",

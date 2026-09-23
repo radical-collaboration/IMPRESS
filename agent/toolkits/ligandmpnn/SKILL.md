@@ -34,3 +34,11 @@ disordered backbone wastes the call.
 - `temperature` trades sequence diversity against confidence exactly like inverse-folding
   temperature elsewhere: push it high and `ligandmpnn_design` designs are less likely to
   clear `filter_shape` downstream.
+- `fixed_residues` (a real flag, confirmed: `run.py --help`) is a space-separated string
+  of residue indices, e.g. `"A16"` - held fixed during sequence design. Empty (the
+  default) omits the flag entirely rather than passing an empty selection.
+- `--number_of_batches` (what `num_seqs` maps to) is batches, not sequences directly -
+  with `--batch_size` left at its default of `1`, one batch is one sequence, so
+  `num_seqs` sequences come out. Confirmed against `run.py --help`; re-check before
+  raising `num_seqs` past where this stops holding (i.e. before ever passing
+  `--batch_size` explicitly).

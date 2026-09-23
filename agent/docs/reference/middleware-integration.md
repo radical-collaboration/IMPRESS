@@ -66,6 +66,16 @@ translation from `ToolSpec.resources`. Treat site-level resource defaults as req
 **asyncflow provides no retry primitive and no durable job state.** Engine state is in-process and cleared
 at shutdown. Retry policy and the external-job ledger (`exec/ledger.py`) are ours.
 
+**Dragon backend construction is fully synchronous and can block the event loop indefinitely.**
+`DragonExecutionBackend.__init__` builds Dragon's own `Batch()` (results DDict, GPU-affinity worker
+pool, telemetry) with no `await` points - a stall there blocks the calling thread's event loop
+entirely, so nothing else on that loop (a heartbeat task, an `asyncio.wait_for` deadline) gets a
+chance to run until `Batch()` returns. Measured, not theoretical: job 22318678 ran its full 2-hour
+SLURM allocation this way, producing only Dragon's own internal infra-connect log lines the whole
+time - the campaign's own heartbeat never fired once. `exec/backend.make_engine_bounded` works
+around this by running the construction on a dedicated OS thread, so a timeout and heartbeat on the
+calling loop stay effective regardless of what the backend's own constructor does.
+
 **Version drift is real.** Check the installed version before trusting any API note here; this integration
 targets `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0.
 

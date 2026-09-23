@@ -1,15 +1,19 @@
 """RFD3 (RFdiffusion3) task agent - backbone generation inside the `foundry` container.
 
-Adapted from `IMPRESS/examples/small_molecule_binding/small_molecule_binding.py`'s
-`rfd3()` step: an Apptainer/Singularity `rfd3 design` invocation against a JSON input
-spec, producing `.cif.gz` backbone models plus a per-model metrics JSON.
+Adapted from `IMPRESS/examples/small_molecule_binding/scripts/rfd3.sh`'s real, working
+invocation (cross-checked directly against the installed `rfd3` CLI's source,
+`rfd3.cli:design` - a Typer app with `allow_extra_args=True, ignore_unknown_options=True`
+that forwards every arg as a Hydra config override into `hydra.compose(...)`). There are
+NO `--flag` options: `rfd3 design out_dir=... inputs=... key=value ...`, never
+`--config`/`--out`. Guided vs. unguided diffusion is selected entirely by which
+`inputs=` JSON file is pointed at (a `DesignInputSpecification`: input PDB, contig,
+ligand, select_exposed/select_buried, ...) - RFD3 has no scaffold/guidance CLI override.
 
 All heavy/optional imports (gemmi, Biopython) happen inside `run()`, never at module
 scope - `Registry.load()` and `Validator.dry_run()` must work with none of them installed.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
@@ -26,24 +30,27 @@ class RFD3DesignAgent(TaskAgent):
             raise RuntimeError(
                 "FOUNDRY_SIF_PATH is not set - see scripts/delta_env_setup.sh / "
                 "the original IMPRESS pull_foundry.sh")
+        if not params["input_spec_path"]:
+            raise RuntimeError(
+                "rfd3_design: input_spec_path is empty - set it to a real "
+                "DesignInputSpecification JSON (see campaigns/data/alr/ALR_binder_design.json)")
 
         work = workdir_for(req, "rfd3")
-        spec_path = work / "rfd3_input.json"
-        rfd3_spec: dict[str, Any] = {
-            "contig": params["contig"],
-            "ligand_resname": params["ligand_resname"],
-            "num_designs": params["num_designs"],
-            "diffusion_steps": params["diffusion_steps"],
-        }
+        overrides = [
+            f"out_dir={work}",
+            f"inputs={params['input_spec_path']}",
+            "skip_existing=False",
+            "dump_trajectories=True",
+            "prevalidate_inputs=True",
+            f"diffusion_batch_size={params['num_designs']}",
+            f"inference_sampler.num_timesteps={params['diffusion_steps']}",
+        ]
         if params.get("seed") is not None:
-            rfd3_spec["seed"] = params["seed"]
-        spec_path.write_text(json.dumps(rfd3_spec))
+            overrides.append(f"seed={params['seed']}")
 
         await run_cmd([
             "apptainer", "exec", "--nv", foundry,
-            "rfd3", "design",
-            "--config", str(spec_path),
-            "--out", str(work),
+            "rfd3", "design", *overrides,
         ], timeout_s=float(self.spec.resources.walltime_s))
 
         cif_models = sorted(work.glob("*.cif.gz"))

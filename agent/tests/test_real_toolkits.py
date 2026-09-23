@@ -87,7 +87,7 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
 
     spec = load_spec("campaigns/delta-small-molecule-smoke.yaml")
     assert spec.stages, "the campaign must declare its chain"
-    assert spec.params.get("rfd3_design", {}).get("contig"), \
+    assert spec.params.get("rfd3_design", {}).get("input_spec_path"), \
         "the campaign must be able to configure the design target"
 
     spec.root = str(tmp_path)
@@ -97,7 +97,8 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
     intent = ExperimentIntent(goal=spec.goal)          # a policy that asks for nothing
     merged = mgr.executor._apply_campaign_defaults(intent)
     assert merged.stages == spec.stages
-    assert merged.params["rfd3_design"]["ligand_resname"] == "LIG", \
+    assert merged.params["rfd3_design"]["input_spec_path"] == \
+        spec.params["rfd3_design"]["input_spec_path"], \
         "campaign params must reach the tool without any policy knowing its names"
     assert not any(s.startswith("mock_") for s in merged.stages)
 
@@ -113,10 +114,12 @@ def test_campaign_params_defer_to_the_policy_and_replicas_is_a_cap(reg, tmp_path
     ex = CampaignManager(spec, ThresholdPolicy(stages=spec.stages), reg).executor
 
     asked = ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=9,
-                             params={"rfd3_design": {"contig": "A1-50"}})
+                             params={"rfd3_design": {"input_spec_path": "/tmp/other.json"}})
     merged = ex._apply_campaign_defaults(asked)
-    assert merged.params["rfd3_design"]["contig"] == "A1-50", "the policy wins on keys it set"
-    assert merged.params["rfd3_design"]["ligand_resname"] == "LIG", "campaign fills the rest"
+    assert merged.params["rfd3_design"]["input_spec_path"] == "/tmp/other.json", \
+        "the policy wins on keys it set"
+    assert merged.params["rfd3_design"]["num_designs"] == \
+        spec.params["rfd3_design"]["num_designs"], "campaign fills the rest"
     assert merged.replicas == 2, "campaign replicas is a cap on breadth"
     assert ex._apply_campaign_defaults(
         ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=1)).replicas == 1, \
@@ -225,3 +228,126 @@ def test_a_campaign_that_never_mentions_replicas_is_not_capped():
 
     smoke = load_spec("campaigns/delta-small-molecule-smoke.yaml")
     assert smoke.replicas == 1, "an explicit 1 must still bind"
+
+
+async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatch):
+    """rfd3's real CLI (verified against the installed rfd3.cli:design) takes Hydra
+    `key=value` overrides, never `--flag` options - `--config`/`--out` are not real and
+    would fail Hydra's override parsing immediately."""
+    from impress_a.tools import rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run_cmd(cmd, timeout_s=None):
+        captured["cmd"] = cmd
+        return "", ""
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
+    params = agent.parameterize(TaskRequest(
+        tool="rfd3_design", node_id=req.node_id,
+        params={"input_spec_path": "/fake/inputs.json", "num_designs": 3,
+                "diffusion_steps": 42, "seed": 7}))
+    await agent.run(req, params)
+
+    cmd = captured["cmd"]
+    assert cmd[:5] == ["apptainer", "exec", "--nv", "/fake/foundry.sif", "rfd3"]
+    assert cmd[5] == "design"
+    overrides = cmd[6:]
+    assert not any(o.startswith(("--config", "--out")) for o in overrides), \
+        "these flags do not exist on the real CLI"
+    assert "inputs=/fake/inputs.json" in overrides
+    assert "skip_existing=False" in overrides
+    assert "dump_trajectories=True" in overrides
+    assert "prevalidate_inputs=True" in overrides
+    assert "diffusion_batch_size=3" in overrides
+    assert "inference_sampler.num_timesteps=42" in overrides
+    assert "seed=7" in overrides
+    assert any(o.startswith("out_dir=") for o in overrides)
+
+
+def test_ligandmpnn_passes_fixed_residues_through(reg):
+    """`--fixed_residues` is a real LigandMPNN flag (confirmed: `run.py --help`) - it must
+    only be added when the campaign actually sets one, since an empty string is not a
+    valid residue selection."""
+    from impress_a.tools.agent import TaskRequest
+
+    agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    with_residues = agent.parameterize(TaskRequest(
+        tool="ligandmpnn_design", params={"fixed_residues": "A16"}))
+    assert with_residues["fixed_residues"] == "A16"
+
+    without = agent.parameterize(TaskRequest(tool="ligandmpnn_design", params={}))
+    assert without.get("fixed_residues", "") == ""
+
+
+def test_rosetta_toolkits_accept_a_ligand_params_path(reg):
+    """A real ALR-ligand PDB needs `-extra_res_fa <ligand>.params` or pose_from_pdb()
+    raises on the unrecognized HETATM residue (confirmed: old IMPRESS's packmin.py,
+    fastrelax.py, filter_shape.py all pass this unconditionally)."""
+    from impress_a.tools.agent import TaskRequest
+
+    for tool in ("packmin", "fastrelax", "filter_shape"):
+        agent = reg.agent_for(tool)(reg.get(tool))
+        resolved = agent.parameterize(TaskRequest(
+            tool=tool, params={"ligand_params_path": "/fake/ALR.params"}))
+        assert resolved["ligand_params_path"] == "/fake/ALR.params"
+
+
+async def test_boltz_agent_passes_no_kernels(reg, tmp_path, monkeypatch):
+    """cuequivariance_ops_torch's fused kernel needs cublasGemmGroupedBatchedEx, absent
+    from the nvidia-cublas-cu12 version torch pins - the import fails every time without
+    `--no_kernels` (verified, reproduced with no GPU present, in old IMPRESS's boltz.sh)."""
+    from impress_a.tools import boltz_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("BOLTZ_CACHE", str(tmp_path / "cache"))
+    monkeypatch.chdir(tmp_path)
+
+    pdb = tmp_path / "in.pdb"
+    pdb.write_text("ATOM      1  N   ALA A   1      11.104  13.207   2.100  1.00 20.00           N\n"
+                    "END\n")
+
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run_cmd(cmd, timeout_s=None):
+        captured["cmd"] = cmd
+        return "", ""
+
+    monkeypatch.setattr(boltz_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("boltz_predict")(reg.get("boltz_predict"))
+    req = TaskRequest(tool="boltz_predict",
+                      inputs={"dep0": {"outputs": {"structure": str(pdb)}}})
+    params = agent.parameterize(TaskRequest(
+        tool="boltz_predict", params={"ligand_smiles": "CC(=O)Oc1ccccc1C(=O)O"}))
+    await agent.run(req, params)
+
+    assert "--no_kernels" in captured["cmd"]
+
+
+def test_check_ligand_smiles_catches_the_silent_wrong_answer():
+    """An empty ligand_smiles doesn't fail - it silently models no ligand. Backlog A2."""
+    from impress_a.cli import _check_ligand_smiles
+    from impress_a.core.pareto import Direction, Objective
+    from impress_a.manager import CampaignSpec
+
+    base = {"campaign_id": "c", "goal": "g",
+           "objectives": [Objective(name="x", direction=Direction.MIN)]}
+
+    blank = CampaignSpec(**base, stages=["boltz_predict"],
+                         params={"boltz_predict": {"ligand_smiles": ""}})
+    assert _check_ligand_smiles(blank) is not None
+
+    filled = CampaignSpec(**base, stages=["boltz_predict"],
+                          params={"boltz_predict": {"ligand_smiles": "CCO"}})
+    assert _check_ligand_smiles(filled) is None
+
+    no_boltz = CampaignSpec(**base, stages=["rfd3_design"], params={})
+    assert _check_ligand_smiles(no_boltz) is None
