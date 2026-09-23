@@ -85,13 +85,40 @@ on the time limit having produced only Dragon's own internal infra-connect log l
 log, no ledger entry, no heartbeat, nothing else, the entire time.
 
 Bounded now by `CampaignSpec.backend_startup_timeout_s` (0 = disabled, the default - every existing
-campaign is unaffected) and `backend_startup_heartbeat_s`: the construction runs on a dedicated
-daemon thread so the calling event loop stays free to heartbeat-log and enforce the timeout, and a
-stall past the bound raises `BackendConstructionTimeout` with a clear diagnostic instead of silently
-consuming the rest of the allocation. Both Delta campaign YAMLs set a 600s bound. What this does
-**not** solve: *why* a real construction might stall inside Dragon's own `Batch()`/`Pool()` (most
-likely GPU-affinity worker rendezvous or OFI/libfabric negotiation) is still unknown - see backlog
-A5.
+campaign is unaffected) and `backend_startup_heartbeat_s`: the backend's *synchronous* construction
+runs on a dedicated daemon thread so the calling event loop stays free to heartbeat-log and enforce
+the timeout, and a stall past the bound raises `BackendConstructionTimeout` with a clear diagnostic
+instead of silently consuming the rest of the allocation. Both Delta campaign YAMLs set a 600s bound.
+
+**The bound is not purely protective, and getting it wrong costs whole allocations.** Only the
+synchronous construction may be offloaded. A `WorkflowEngine` captures the running loop in
+`__init__` and puts its `run-component` dispatch task on it, and a rhapsody backend captures its own
+loop during async init - so both must be built on the loop that will submit to them. The first
+version of this bound ran all of `make_engine` on the daemon thread under `asyncio.run(...)`; that
+call's exit cancelled `run-component` and closed the loop, and the caller received an engine that
+looked healthy and dispatched nothing. Jobs 22328172 and 22328262 - the only two campaigns that had
+`backend_startup_timeout_s > 0` - each logged `r0001 submitted` and then sat silent for their full
+walltime. Fixed in `exec/backend.py`; `tests/test_backend_bound.py` now runs a real task through a
+bounded engine, because a dead engine is indistinguishable from a live one until you do.
+
+What this does **not** solve: *why* a real construction might stall inside Dragon's own
+`Batch()`/`Pool()` (most likely GPU-affinity worker rendezvous or OFI/libfabric negotiation) is
+still unknown - see backlog A5.
+
+## Dragon removes the root logger's handlers
+
+`dragon.native.Pool.__init__` and `ProcessGroup.__init__` call `setup_BE_logging`, which begins with
+`_clear_root_log_handlers()` - every handler on the **root** logger is closed and removed, and
+handlers are re-added only where `DRAGON_LOG_DEVICE_{STDERR,DRAGON_FILE,ACTOR_FILE}` asks for them.
+rhapsody builds `Batch()` inside the Dragon backend constructor, so on the Delta path this happens
+during engine bring-up and everything logged afterwards is discarded. This is the second reason jobs
+22328172/22328262 produced no diagnostics: even once the hang is fixed, a batch run configured only
+through `logging.basicConfig` goes mute the moment the backend comes up.
+
+`scripts/delta_run_campaign.py` now keeps its handlers (stderr plus a `campaign.log` transcript in
+the job working directory) on the `impress_a`/`rhapsody`/`radical`/`dragon` loggers with
+`propagate = False`, out of root's reach, and logs a one-off WARNING naming `setup_BE_logging` when
+it notices root has been emptied. Anything that logs to the root logger directly is still lost.
 
 ## Built, but unexercised against real science
 

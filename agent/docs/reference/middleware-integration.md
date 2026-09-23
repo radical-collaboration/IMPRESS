@@ -76,6 +76,25 @@ time - the campaign's own heartbeat never fired once. `exec/backend.make_engine_
 around this by running the construction on a dedicated OS thread, so a timeout and heartbeat on the
 calling loop stay effective regardless of what the backend's own constructor does.
 
+**The engine and a backend's async init belong to the loop they are built on.** `WorkflowEngine`
+captures `self.loop = get_event_loop_or_raise(...)` in `__init__` and `_start_async_components`
+schedules its `run-component` dispatch task on exactly that loop; a rhapsody backend likewise
+captures its own loop for cross-thread result delivery. So an engine built on a *different* loop
+from the one that will submit to it is already dead when you get it - and it does not look dead:
+construction returns normally, `flow.function_task` decorates normally, and the first task future
+simply never completes. This is how the bound above went wrong: `make_engine_bounded` originally ran
+all of `make_engine` on the daemon thread under `asyncio.run(...)`, whose exit cancelled
+`run-component` and closed the loop. Jobs 22328172 and 22328262 both wrote `r0001 submitted` to the
+ledger and then burned their walltime in silence. Only the synchronous
+`_construct_backend_sync()` may be offloaded; `await backend` and `WorkflowEngine.create()` run on
+the caller's loop. `tests/test_backend_bound.py` guards this the only way it can be guarded - by
+putting a real task through the engine.
+
+```python
+flow, be = await make_engine_bounded("dragon", cfg, 600, 60)
+assert flow.loop is asyncio.get_running_loop()   # false => every submit hangs forever
+```
+
 **Version drift is real.** Check the installed version before trusting any API note here; this integration
 targets `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0.
 

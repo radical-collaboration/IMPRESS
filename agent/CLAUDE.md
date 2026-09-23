@@ -11,7 +11,7 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # 77 tests, ~10s, no allocation
+pytest tests -q                                      # 79 tests, ~80s on a Delta login node, no allocation
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
@@ -69,6 +69,16 @@ Full notes in `docs/reference/middleware-integration.md`. The ones that cost the
 - **Rhapsody backends are awaitable and must be awaited.** `__await__` triggers state registration.
   Constructing synchronously appears to work, then fails later with
   `Backend 'x' not registered. Available backends: []`.
+- **The `WorkflowEngine` and a backend's async init must be built on the loop that will use them.**
+  `WorkflowEngine.__init__` captures the running loop and puts its `run-component` dispatch task on
+  it. Build one on a throwaway loop (e.g. `asyncio.run(...)` on a helper thread) and you get an
+  engine that looks fine and dispatches nothing — every submitted task hangs, silently. Only
+  `exec/backend._construct_backend_sync` may be offloaded to a thread. Cost of learning this: two
+  full Delta allocations (jobs 22328172, 22328262).
+- **Dragon empties the root logger.** `Pool()`/`ProcessGroup()` call `setup_BE_logging`, which calls
+  `_clear_root_log_handlers()` — so a run configured with `logging.basicConfig` alone goes mute the
+  moment the Dragon backend comes up. Keep handlers on your own logger with `propagate = False`
+  (`scripts/delta_run_campaign.py`).
 - **`ConcurrentExecutionBackend` is in rhapsody, not asyncflow.** asyncflow exports only
   `NoopExecutionBackend` and `LocalExecutionBackend`. Real backends resolve *by name* via
   `rhapsody.backends.get_backend()`; keep rhapsody unnamed outside `exec/backend.py`.
@@ -123,8 +133,10 @@ as untested. `impress-a preflight` first; see `plans/first-real-run.md`.
 `await` points, so a stall there is invisible — no heartbeat, no campaign log, nothing — until
 whatever wall-clock limit kills the job (measured: job 22318678 spent its full 2-hour allocation this
 way). Bounded now by `CampaignSpec.backend_startup_timeout_s`/`backend_startup_heartbeat_s`
-(`exec/backend.make_engine_bounded` runs construction on a daemon thread so the bound stays
-effective); 0 disables it, the default for every non-Delta campaign. See `docs/limitations.md`.
+(`exec/backend.make_engine_bounded` runs the *synchronous* construction on a daemon thread so the
+bound stays effective, and builds the backend's async init and the engine on the caller's own loop —
+see the loop-ownership gotcha above); 0 disables it, the default for every non-Delta campaign. See
+`docs/limitations.md`.
 
 **Cancellation is advisory.** Measured rather than assumed: the concurrent backend's `Future.cancel()`
 returns `False` once a callable has started, and asyncflow discards that answer — so queued work is
