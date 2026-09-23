@@ -26,7 +26,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=220G
-#SBATCH --time=04:00:00
+#SBATCH --time=06:00:00
 #SBATCH --job-name=impress_a_sm_binding
 #SBATCH --mail-user=<your email>
 #SBATCH --mail-type=ALL
@@ -107,6 +107,16 @@ if [ ! -d "${MPNN_DIR}" ]; then
     exit 1
 fi
 
+# ── Campaign spec ──────────────────────────────────────────────────────────────
+# Resolve before cd'ing into WORKDIR - a relative path (as in the smoke-test example
+# above) would otherwise be looked up inside the per-job scratch dir, not the repo.
+CAMPAIGN="${1:-${IMPRESS_A_DIR}/campaigns/delta-small-molecule.yaml}"
+if [ ! -f "${CAMPAIGN}" ]; then
+    echo "ERROR: campaign spec not found: ${CAMPAIGN} (relative to $(pwd))"
+    exit 1
+fi
+CAMPAIGN="$(realpath "${CAMPAIGN}")"
+
 # ── Working directory ─────────────────────────────────────────────────────────
 # No IMPRESS_WORK_DIR/IMPRESS_SESSION_DIR indirection here (unlike the old scripts) -
 # impress_a's CampaignSpec.root and asyncflow's own session dir both resolve relative to
@@ -116,8 +126,7 @@ WORKDIR="${IMPRESS_A_WORKDIR:-${SCRATCH_BASE}/impress_a_runs/${SLURM_JOB_ID:-man
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
 
-# ── Campaign + model ────────────────────────────────────────────────────────────
-CAMPAIGN="${1:-${IMPRESS_A_DIR}/campaigns/delta-small-molecule.yaml}"
+# ── Model ────────────────────────────────────────────────────────────
 MODEL="${IMPRESS_A_MODEL:-D}"
 echo "Campaign:          ${CAMPAIGN}"
 echo "Model:             ${MODEL}"
