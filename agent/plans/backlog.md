@@ -3,7 +3,7 @@
 Everything outstanding, as of the stagnation fix. Nothing here is started. Each item says why it
 matters so the list can be triaged rather than worked through top to bottom.
 
-State it is measured against: 77 tests passing, lint 41, import contract clean, all control models
+State it is measured against: 89 tests passing, lint 41, import contract clean, all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
 on Delta - but no line of the real toolkits has executed yet (A1).
 
@@ -75,16 +75,40 @@ until recently, fabricating exactly the count such a gate would have caught.
 ## C. Unbuilt from the roadmap
 
 **C1. MCP adapter.** The protocol and the HTTP adapter exist, so this is a second transport over a
-settled interface.
+settled interface. `RemoteSession` (`control/session.py`) is written against a duck-typed client and
+imports `core` only, so an MCP client satisfies it without further work on this side.
 
 **C2. Checkpoint/restart resume.** The ledger records run state and outcomes and `RunService.reattach()`
-reconciles what a previous process left open — but nothing *resumes* a campaign from it.
+reconciles what a previous process left open — but nothing *resumes* a campaign from it. Now also the
+reasoner's problem: with C5 the reasoner is a separate process that can die and come back, and
+`RemoteSession.as_completed` holds a stream cursor it cannot currently persist.
 
 **C3. P5 network-service governor** — caching, per-service concurrency caps, `Retry-After` backoff.
 
 **C4. Cancellation cannot reclaim a running GPU.** Measured, not unknown: queued work is reclaimed,
 running work is not, and the backend does not report which happened. Closing this needs cooperative
 cancellation inside task agents, or a backend that can kill a process.
+
+**C5. The out-of-process reasoner has no entry points.** `RemoteSession` and the routes it needs
+exist and are covered end to end, but only `tests/` ever constructs a `ControlPlaneServer` — there is
+no `impress-a serve` (executor side, inside the allocation, holding the plane open) and no
+`impress-a reason` (reasoner side, outside it, driving a `RemoteSession`). The split is reachable
+from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
+already describes as "implemented".
+
+**C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
+`on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
+every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
+(`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
+as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
+
+**C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
+offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
+single trusted client, no auth, no TLS. Planning question M6
+(`planning/phase1-partB-architecture/06-headless-control-protocol.md:115-117`) — where the adapter
+process runs relative to the job — was sidestepped rather than answered, and a real split on Delta
+needs it settled: the compute node's private interface, or a tunnel, and what the security boundary
+then is. Blocked on C5.
 
 ## D. Registry and spec-contract gaps
 
@@ -126,11 +150,21 @@ run. Early campaigns should record actual-vs-estimated per tool.
 
 **F1. No ADR records the decoupling** — the largest architectural change in the repo, including the
 `on_rejected` scope change (per-cycle → per-experiment, now enforced in two places) and the rebuttal
-to `planning/phase3-prior-art/04-patterns-for-phase4.md:41`.
+to `planning/phase3-prior-art/04-patterns-for-phase4.md:41`. Now also owes the process boundary: that
+`CampaignSession` is the split, that a second `WorkflowEngine` or a second event loop is *not* (an
+engine is bound to its creating loop), and that `interpret` belongs to whoever collects the outcome —
+it moved from `CampaignExecutor._reap` to `SequentialPolicyDriver._collect`, which removed the
+executor's only call into the reasoner.
 
 **F2. ADRs 0003, 0005, 0007 unamended** — the interlock's per-signature concurrency rule; ADR 0005's
 "fixed at launch" now needing the reattach policy-identity check that `RunService` provides but
-nothing enforces; ADR 0007's per-client cursor.
+nothing enforces; ADR 0007's per-client cursor. ADR 0007 also now owes the five operations added to
+`CampaignControlPlane` for the remote session (`status`, `inflight`, `backtrack`, `request_human`,
+`await_run_result`) and the two widened signatures (`observe(since=)`, `events(stream=)`).
+
+**F4. `docs/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
+it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` does not mention that a
+`conduct` policy collecting for itself must now call `interpret` for itself.
 
 **F3. `planning/phase2-middleware/05-integration-map.md:60`** still claims there is no way to
 enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
@@ -153,13 +187,15 @@ policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 1. **B1/B2 QC hardening** — the central claim of the project is currently unbacked for real tools.
 2. **A1-A3 the first real run** — needs a person, and everything else is speculation until it happens.
 3. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
-4. **F1-F3 docs** — cheap, and the absent ADR is the one a future reader will most want.
-5. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
-6. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. It is latent until then.
+4. **F1-F4 docs** — cheap, and the absent ADR is the one a future reader will most want.
+5. **C5-C7 the reasoner's entry points** — the transport is built and tested; without these
+   it can only be reached from `tests/`, and `--model C` keeps reporting a model-D campaign.
+6. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
+7. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. It is latent until then.
 
 ## Verification that applies to any item
 
-`pytest tests -q` — 77 tests green, no allocation. `ruff check src tests` must not exceed 41.
+`pytest tests -q` — 89 tests green, no allocation. `ruff check src tests` must not exceed 41.
 Import contract: `policy` must not reach `tools`/`exec`/`runtime`; `compose` must not reach `exec`;
 `core` imports nothing internal. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
