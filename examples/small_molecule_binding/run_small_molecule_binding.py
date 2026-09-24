@@ -63,27 +63,7 @@ PROD = RunConfig(
     rfd3_partial_t            = 10.0,
 )
 
-# Inert thresholds — everything passes; low task budget for one full cycle.
-TEST = RunConfig(
-    n_pipelines               = 2,
-    max_tasks                 = 10,
-    backbone_max_ca_deviation = 9999.0,
-    backbone_min_ss_fraction  = 0.0,
-    fastrelax_max_fa_rep      = 9999.0,
-    fastrelax_max_score       = 9999.0,
-    fastrelax_max_interact    = 9999.0,
-    interface_min_sc          = 0.0,
-    fold_min_plddt            = -1.0,
-    fold_min_ligand_iptm      = None,
-    diffusion_batch_size      = 1,
-    num_refine_cycles         = 1,
-    mpnn_ensemble_size        = 2,
-    # Not a pass/fail threshold like the fields above — a diffusion-noise
-    # parameter, so kept at a sane real value rather than an inert extreme.
-    rfd3_partial_t            = 10.0,
-)
-
-BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
+BACKEND = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
@@ -91,7 +71,7 @@ else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
 
-cfg = TEST if os.getenv("IMPRESS_TEST_MODE", "0") == "1" else PROD
+cfg = PROD
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
