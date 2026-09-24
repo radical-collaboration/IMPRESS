@@ -2,8 +2,8 @@
 """Post-HPC-run validation for the small_molecule_binding example pipeline.
 
 Standalone CLI (not a pipeline task): checks a completed or in-progress
-`IMPRESS_TEST_MODE=1` (or production) HPC run's output tree against the
-invariants the Boltz-2 / RFD3-guided-scaffold rewrite depends on, so a
+HPC run's output tree against the invariants the Boltz-2 / RFD3-guided-scaffold
+rewrite depends on, so a
 successful-looking run is actually verified rather than assumed. See the
 "Post-HPC-run validation" section of the design plan for the full rationale
 behind each check.
