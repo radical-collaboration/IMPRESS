@@ -136,6 +136,16 @@ nothing enforces; ADR 0007's per-client cursor.
 enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
 but no lookup API does.
 
+## G. Engine semantics
+
+**G1. Exploration cannot move the front, so it counts toward stagnation.** Nodes from the explore
+chain (`rfd3 → ligandmpnn → boltz`) have no Rosetta metrics, so `pareto.feasible` rejects them against
+`shape_complementarity ≥ 0.55`. Every informed explore landing then increments the stagnation
+counter. With the shipped `stagnation_limit: 4`, a modeled campaign stops at t≈135 min, before the
+first exploit run lands (`slides/timeline_model.py --limit 4`). This is latent, because no shipped
+policy emits that chain yet. Raising the limit is the wrong fix. Stub:
+[`exploration-vs-stagnation.md`](exploration-vs-stagnation.md).
+
 ---
 
 ## Recommended order
@@ -145,6 +155,7 @@ but no lookup API does.
 3. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
 4. **F1-F3 docs** — cheap, and the absent ADR is the one a future reader will most want.
 5. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
+6. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. It is latent until then.
 
 ## Verification that applies to any item
 
