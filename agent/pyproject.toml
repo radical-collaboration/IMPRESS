@@ -16,6 +16,9 @@ dependencies = [
   "pyyaml",
   "paretoset>=1.2.5",
   "numpy",
+  # PDB parsing in the real toolkit adapters (tools/_pdbtools.py, boltz_agents.py). Imported
+  # lazily, but in the agent process itself - not inside a tool's subprocess or container.
+  "biopython",
 ]
 
 [project.optional-dependencies]
