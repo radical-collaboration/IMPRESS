@@ -779,3 +779,35 @@ async def test_polling_alone_never_advances_stagnation(reg, tmp_path):
     assert mgr.executor._stagnant == 0
     assert res.stop_reason == "watched, submitted nothing", \
         "polling must not be mistaken for a campaign that has run out of ideas"
+
+
+class _RecordsInterpret(ThresholdPolicy):
+    """A model-D policy that writes down every outcome `interpret` is handed."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.interpreted: list[str] = []
+
+    async def interpret(self, results, obs):
+        self.interpreted.append(results.run_id)
+        return await super().interpret(results, obs)
+
+
+async def test_interpret_fires_once_per_collected_run(reg, tmp_path):
+    """The `interpret` hook belongs to whoever collects the outcome - exactly once.
+
+    It used to be called by the executor, on the executor's own reference to the policy.
+    That worked only while the reasoner shared its process; it is now the driver's, at
+    `SequentialPolicyDriver._collect`. This pins BOTH halves of that move: a duplicate
+    means someone restored the executor's call without removing the driver's, and a
+    policy that accumulates across runs would then double-count.
+    """
+    s = spec("t-interpret", max_cycles=3)
+    s.root = str(tmp_path)
+    pol = _RecordsInterpret()
+    res = await CampaignManager(s, pol, reg).run()
+
+    assert pol.interpreted, "interpret was never called - the hook is unwired"
+    assert len(pol.interpreted) == len(set(pol.interpreted)), \
+        f"interpret called twice for the same run: {pol.interpreted}"
+    assert res.stop_reason

@@ -14,6 +14,13 @@ Admission is SYNCHRONOUS: `POST /runs` answers `202` with a run id or `409` with
 on the event stream would sever a rejection from the request that caused it, and leave
 nothing to bound retries against.
 
+WAITING is a LONG POLL: `GET /runs/<id>/result?wait=<seconds>` holds the request open
+until the run finishes (`200` with the outcome), the campaign ends (`410`, because the
+answer is never coming), or the deadline expires (`204`, meaning "ask again"). A socket
+cannot be held open for a twelve-hour folding job, so the deadline is the transport's
+concern and the re-issue is the client's; neither is visible to the reasoner, which just
+calls `result()` and blocks.
+
 Deliberately built on `asyncio.start_server` rather than a web framework. The dependency
 list is already heavy, and this speaks a small, fixed dialect: JSON request/response plus
 one event stream, on loopback, for a single trusted client. It is NOT a public-facing
@@ -30,15 +37,21 @@ from urllib.parse import parse_qs, urlparse
 
 from ..core.artifacts import Property
 from ..core.decision import CampaignObservation
+from ..core.results import RunStatus
 from .plane import Event
 
 #: Requests larger than this are refused rather than buffered. An intent is a few
 #: hundred bytes; anything approaching this is a mistake or an attack.
 MAX_BODY_BYTES = 1 << 20
 
-_STATUS = {200: "OK", 202: "Accepted", 400: "Bad Request", 404: "Not Found",
-           405: "Method Not Allowed", 409: "Conflict", 413: "Payload Too Large",
-           500: "Internal Server Error"}
+_STATUS = {200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request",
+           404: "Not Found", 405: "Method Not Allowed", 409: "Conflict",
+           410: "Gone", 413: "Payload Too Large", 500: "Internal Server Error"}
+
+#: Cap on how long one long-poll may hold a connection. A client asking for more is
+#: served a shorter wait and re-issues; a client asking for nothing still gets a bounded
+#: block rather than a busy loop.
+MAX_WAIT_S = 60.0
 
 
 class _Request:
@@ -122,7 +135,9 @@ class ControlPlaneServer:
 
     async def _send(self, writer: asyncio.StreamWriter, status: int,
                     payload: Any) -> None:
-        body = json.dumps(payload, default=str).encode()
+        # 204 is the long poll's "nothing yet"; a body on it is a protocol error, and
+        # some clients will read the next response's bytes as this one's.
+        body = b"" if status == 204 else json.dumps(payload, default=str).encode()
         writer.write(
             f"HTTP/1.1 {status} {_STATUS.get(status, 'OK')}\r\n"
             f"Content-Type: application/json\r\n"
@@ -183,8 +198,20 @@ class ControlPlaneServer:
         head = rest[0]
 
         if head == "observe":
-            obs: CampaignObservation = await p.observe(cid)
+            since = req.query.get("since")
+            obs: CampaignObservation = await p.observe(
+                cid, None if since is None else int(since))
             return 200, obs.model_dump(mode="json")
+        if head == "inflight":
+            return 200, [r.model_dump(mode="json") for r in await p.inflight(cid)]
+        if head == "backtrack":
+            body = req.json()
+            return 200, {"node_id": await p.backtrack(
+                cid, body["node_id"], body.get("rationale", ""))}
+        if head == "human":
+            body = req.json()
+            await p.request_human(cid, body["question"], body.get("context"))
+            return 200, {"requested": True}
         if head == "steer":
             return 200, await p.steer(cid, req.json())
         if head in ("pause", "resume"):
@@ -210,8 +237,28 @@ class ControlPlaneServer:
                     return (202, out) if out.get("accepted") else (409, out)
                 return 200, await p.list_runs(cid, req.query.get("state"))
             run_id = rest[1]
-            if len(rest) > 2 and rest[2] == "cancel":
+            tail = rest[2] if len(rest) > 2 else ""
+            if tail == "cancel":
                 return 200, await p.cancel_run(cid, run_id)
+            if tail == "status":
+                return 200, (await p.status(cid, run_id)).model_dump(mode="json")
+            if tail == "result":
+                # The blocking variant. Four answers, one per thing that can be true of
+                # a run a caller is waiting on - and the deadline is the only one this
+                # layer invents, because a socket cannot be held open indefinitely.
+                wait = min(float(req.query.get("wait", "30")), MAX_WAIT_S)
+                answer = await p.await_run_result(cid, run_id, wait)
+                state = answer.get("state")
+                if state == "ready":
+                    return 200, answer["outcome"]
+                if state == "pending":
+                    return 204, None
+                if state == "stopped":
+                    # Gone, not 404: the run exists, and no amount of asking again will
+                    # produce its result now the campaign has ended.
+                    return 410, {"stopped": True,
+                                 "reason": answer.get("reason", "campaign ended")}
+                return 404, {"error": f"unknown run {run_id}"}
             result = await p.run_result(cid, run_id)
             if result is None:
                 return 404, {"error": f"no result for {run_id}"}
@@ -245,15 +292,35 @@ class ControlPlaneClient:
         r = await self._c.post("/campaigns", json=spec)
         return r.json()["campaign_id"]
 
-    async def observe(self, campaign_id: str) -> CampaignObservation:
-        r = await self._c.get(f"/campaigns/{campaign_id}/observe")
+    async def observe(self, campaign_id: str,
+                      since: int | None = None) -> CampaignObservation:
+        r = await self._c.get(f"/campaigns/{campaign_id}/observe",
+                              params=None if since is None else {"since": since})
         return CampaignObservation(**r.json())
 
-    async def events(self, campaign_id: str, since: int = 0) -> AsyncIterator[Event]:
-        r = await self._c.get(f"/campaigns/{campaign_id}/events",
-                              params={"since": since})
-        for e in r.json():
-            yield Event(**e)
+    async def events(self, campaign_id: str, since: int = 0, stream: bool = False,
+                     timeout: float = 30.0) -> AsyncIterator[Event]:
+        """One operation, two representations - the same two the server offers.
+
+        `stream=True` is the SSE form: it stays open, yielding records as they are
+        appended, and ends when the server's idle timeout closes the connection. That is
+        not a second operation; it is `events` with the connection held, which is what
+        `RemoteSession.as_completed` needs so it is not reduced to polling.
+        """
+        if not stream:
+            r = await self._c.get(f"/campaigns/{campaign_id}/events",
+                                  params={"since": since})
+            for e in r.json():
+                yield Event(**e)
+            return
+        async with self._c.stream(
+                "GET", f"/campaigns/{campaign_id}/events",
+                params={"since": since, "timeout": timeout},
+                headers={"accept": "text/event-stream"},
+                timeout=timeout + 15.0) as resp:
+            async for line in resp.aiter_lines():
+                if line.startswith("data:"):
+                    yield Event(**json.loads(line[5:].strip()))
 
     async def steer(self, campaign_id: str, directive: dict[str, Any]) -> dict[str, Any]:
         return (await self._c.post(f"/campaigns/{campaign_id}/steer",
@@ -300,6 +367,47 @@ class ControlPlaneClient:
         r = await self._c.get(f"/campaigns/{campaign_id}/runs/{run_id}")
         return None if r.status_code == 404 else r.json()
 
+    async def await_run_result(self, campaign_id: str, run_id: str,
+                               wait_s: float = 30.0) -> dict[str, Any]:
+        """Block on the far side rather than poll from this one.
+
+        The request timeout is derived from the deadline, not from the client's default:
+        a long poll that the transport gives up on before the server does would look
+        exactly like a lost result.
+        """
+        r = await self._c.get(f"/campaigns/{campaign_id}/runs/{run_id}/result",
+                              params={"wait": wait_s}, timeout=wait_s + 15.0)
+        if r.status_code == 204:
+            return {"state": "pending"}
+        if r.status_code == 410:
+            return {"state": "stopped",
+                    "reason": r.json().get("reason", "campaign ended")}
+        if r.status_code == 404:
+            return {"state": "unknown"}
+        return {"state": "ready", "outcome": r.json()}
+
+    async def status(self, campaign_id: str, run_id: str) -> RunStatus:
+        r = await self._c.get(f"/campaigns/{campaign_id}/runs/{run_id}/status")
+        if r.status_code == 404:
+            raise KeyError(run_id)
+        return RunStatus(**r.json())
+
+    async def inflight(self, campaign_id: str) -> list[RunStatus]:
+        r = await self._c.get(f"/campaigns/{campaign_id}/inflight")
+        return [RunStatus(**s) for s in r.json()]
+
     async def cancel_run(self, campaign_id: str, run_id: str) -> dict[str, Any]:
         return (await self._c.post(
             f"/campaigns/{campaign_id}/runs/{run_id}/cancel", json={})).json()
+
+    # -- the tree ------------------------------------------------------------
+    async def backtrack(self, campaign_id: str, node_id: str,
+                        rationale: str = "") -> str:
+        r = await self._c.post(f"/campaigns/{campaign_id}/backtrack",
+                               json={"node_id": node_id, "rationale": rationale})
+        return r.json()["node_id"]
+
+    async def request_human(self, campaign_id: str, question: str,
+                            context: dict[str, Any] | None = None) -> None:
+        await self._c.post(f"/campaigns/{campaign_id}/human",
+                           json={"question": question, "context": context or {}})

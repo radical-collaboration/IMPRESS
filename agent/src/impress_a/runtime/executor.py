@@ -592,8 +592,13 @@ class CampaignExecutor:
         outcome = results.to_outcome(run_id, rec.graph, state=rec.state,
                                      nodes=[n.id for n in nodes],
                                      signature=rec.signature)
-        if self.policy is not None and hasattr(self.policy, "interpret"):
-            await self.policy.interpret(outcome, self.observe())
+        # NOTE: `policy.interpret` is deliberately NOT called here. It used to be, which
+        # made this the only place the executor reached into the reasoner - and it worked
+        # only while the two shared a process. A reasoner driving the campaign through a
+        # remote session leaves a placeholder policy behind here, so the hook fired
+        # against the wrong object, or not at all. Collecting an outcome is the reasoner's
+        # half of the seam; `SequentialPolicyDriver._collect` owns the call, and a
+        # `conduct` policy that collects for itself calls it for itself.
 
         if self._record_evidence(rec, results):
             self._failed_runs += 1
@@ -625,6 +630,15 @@ class CampaignExecutor:
         fut = self._waiters.pop(run_id, None)
         if fut is not None and not fut.done():
             fut.set_result(outcome)
+        # The same notification, mirrored onto the event stream. `_completed` is an
+        # in-memory queue, so a reasoner in another process cannot see it; without this
+        # record `as_completed` has no remote equivalent and the far side is back to
+        # polling. It is emitted here rather than in `_settle` because this is the one
+        # point every finished run passes through - an ABANDONED run never settles, and
+        # in-process it still reaches the queue.
+        self._log("executions", {"event": "run_finished", "run": run_id,
+                                 "state": outcome.state.value,
+                                 "nodes": list(outcome.nodes)})
 
     def _fail_waiters(self, err: BaseException) -> None:
         """Nobody is left waiting on a campaign that has ended.
@@ -637,6 +651,12 @@ class CampaignExecutor:
                 fut.set_exception(err)
         self._waiters.clear()
         self._completed.put_nowait(None)          # unblock `as_completed`
+        # ... and its remote equivalent. This is the moment after which nothing further
+        # will ever be delivered - drain has already resolved everything still in
+        # flight - so it is the sentinel a remote `as_completed` stops on, exactly as
+        # the `None` above is the one an in-process caller stops on.
+        self._log("transitions", {"event": "campaign_ended",
+                                  "reason": self.stop_reason})
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:

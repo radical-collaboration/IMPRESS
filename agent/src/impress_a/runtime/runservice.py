@@ -68,6 +68,13 @@ class RunService:
         runs = [self._ex.status(rid) for rid in self._ex._runs]
         return [r for r in runs if state is None or r.state is state]
 
+    def status(self, run_id: str) -> RunStatus:
+        """Where one run has got to. Raises `KeyError` for a run nobody submitted."""
+        return self._ex.status(run_id)
+
+    def inflight(self) -> list[RunStatus]:
+        return self._ex.inflight()
+
     async def result(self, run_id: str) -> RunOutcome:
         return await self._ex.result(run_id)
 

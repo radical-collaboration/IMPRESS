@@ -13,6 +13,7 @@ from typing import Any, AsyncIterator, Protocol
 
 from ..core.artifacts import Property
 from ..core.decision import CampaignObservation
+from ..core.results import RunStatus
 
 
 class Event(dict):
@@ -30,8 +31,10 @@ class CampaignControlPlane(Protocol):
     """
 
     async def submit(self, spec: Any) -> str: ...
-    async def observe(self, campaign_id: str) -> CampaignObservation: ...
-    async def events(self, campaign_id: str, since: int = 0) -> AsyncIterator[Event]: ...
+    async def observe(self, campaign_id: str,
+                      since: int | None = None) -> CampaignObservation: ...
+    async def events(self, campaign_id: str, since: int = 0, stream: bool = False,
+                     timeout: float = 30.0) -> AsyncIterator[Event]: ...
     async def steer(self, campaign_id: str, directive: dict[str, Any]) -> dict[str, Any]: ...
     async def pause(self, campaign_id: str) -> None: ...
     async def resume(self, campaign_id: str) -> None: ...
@@ -48,7 +51,17 @@ class CampaignControlPlane(Protocol):
                         state: str | None = None) -> list[dict[str, Any]]: ...
     async def run_result(self, campaign_id: str,
                          run_id: str) -> dict[str, Any] | None: ...
+    async def await_run_result(self, campaign_id: str, run_id: str,
+                               wait_s: float = 30.0) -> dict[str, Any]: ...
+    async def status(self, campaign_id: str, run_id: str) -> RunStatus: ...
+    async def inflight(self, campaign_id: str) -> list[RunStatus]: ...
     async def cancel_run(self, campaign_id: str, run_id: str) -> dict[str, Any]: ...
+
+    # -- the tree ------------------------------------------------------------
+    async def backtrack(self, campaign_id: str, node_id: str,
+                        rationale: str = "") -> str: ...
+    async def request_human(self, campaign_id: str, question: str,
+                            context: dict[str, Any] | None = None) -> None: ...
 
 
 class InProcessControlPlane:
@@ -97,12 +110,39 @@ class InProcessControlPlane:
         self.tasks[cid] = asyncio.create_task(mgr.run())
         return cid
 
-    async def observe(self, campaign_id: str) -> CampaignObservation:
-        return self.managers[campaign_id].observe()
+    async def observe(self, campaign_id: str,
+                      since: int | None = None) -> CampaignObservation:
+        """Exactly what the reasoner sees - the session's own `observe`, not a
+        look-alike assembled here. ADR 0007 asks for parity of evidence, and going
+        through the session is what keeps `last_rejection` and the absorption watermark
+        on the monitoring side of the wire as well as the deciding side."""
+        return await self.managers[campaign_id].session.observe(since)
 
-    async def events(self, campaign_id: str, since: int = 0) -> AsyncIterator[Event]:
-        for e in self._events.get(campaign_id, [])[since:]:
-            yield e
+    async def events(self, campaign_id: str, since: int = 0, stream: bool = False,
+                     timeout: float = 30.0) -> AsyncIterator[Event]:
+        """One operation, two representations: a cursor-paged page, or a live tail.
+
+        The tail exists because the completion queue a reasoner consumes in-process is an
+        `asyncio.Queue` in the executor's memory. A consumer that is not in that memory
+        needs the same sequence from somewhere, and this is where it comes from - so the
+        streaming form is part of the operation rather than something the HTTP adapter
+        invented for itself.
+
+        Polls its own list, because provenance is appended to rather than published.
+        A push-based source would replace the body of this loop and nothing else.
+        """
+        if not stream:
+            for e in self._events.get(campaign_id, [])[since:]:
+                yield e
+            return
+        cursor, idle = since, 0.0
+        while idle < timeout:
+            sent = 0
+            for e in self._events.get(campaign_id, [])[cursor:]:
+                cursor, sent = int(e["seq"]) + 1, sent + 1
+                yield e
+            idle = 0.0 if sent else idle + 0.05
+            await asyncio.sleep(0.05)
 
     async def steer(self, campaign_id: str, directive: dict[str, Any]) -> dict[str, Any]:
         """A directive is validated exactly as any policy's decision would be."""
@@ -184,12 +224,67 @@ class InProcessControlPlane:
         outcome = self.managers[campaign_id].runs.outcome(run_id)
         return outcome.model_dump(mode="json") if outcome else None
 
+    async def await_run_result(self, campaign_id: str, run_id: str,
+                               wait_s: float = 30.0) -> dict[str, Any]:
+        """The BLOCKING variant: wait up to `wait_s` for a run to finish.
+
+        `run_result` alone forces every caller to poll, and polling is what an
+        out-of-process reasoner must not have to do - `CampaignSession.result` blocks,
+        so the operation behind it has to be able to block too.
+
+        No new mechanism is introduced here. `CampaignExecutor.result` already races the
+        run's future against the halt event and raises `CampaignStopped`; this is that
+        call with a deadline on it, so the three answers a waiter can get in-process -
+        the outcome, "the campaign ended", or nothing yet - are the three it gets here.
+        The deadline exists because the transport carrying this cannot hold a socket
+        open indefinitely; a caller that still wants the answer simply asks again.
+        """
+        from ..core.session import CampaignStopped
+        mgr = self.managers[campaign_id]
+        if (known := mgr.runs.outcome(run_id)) is not None:
+            return {"state": "ready", "outcome": known.model_dump(mode="json")}
+        try:
+            outcome = await asyncio.wait_for(mgr.runs.result(run_id), wait_s)
+        except asyncio.TimeoutError:
+            # `wait_for` cancels the wrapper, never the run's own future - the waiter
+            # table is untouched and the next call picks up where this one left off.
+            return {"state": "pending"}
+        except CampaignStopped as stopped:
+            return {"state": "stopped", "reason": str(stopped)}
+        except KeyError:
+            return {"state": "unknown"}
+        return {"state": "ready", "outcome": outcome.model_dump(mode="json")}
+
+    async def status(self, campaign_id: str, run_id: str) -> RunStatus:
+        return self.managers[campaign_id].runs.status(run_id)
+
+    async def inflight(self, campaign_id: str) -> list[RunStatus]:
+        return self.managers[campaign_id].runs.inflight()
+
     async def cancel_run(self, campaign_id: str, run_id: str) -> dict[str, Any]:
         self.managers[campaign_id].runs.cancel(run_id)
         self.emit(campaign_id, "run_cancel_requested", {"run": run_id})
         # Advisory, and says so: queued work is reclaimed, running work is not, and the
         # backend does not report which happened.
         return {"requested": True, "advisory": True}
+
+    # -- the tree ------------------------------------------------------------
+    async def backtrack(self, campaign_id: str, node_id: str,
+                        rationale: str = "") -> str:
+        """Branch a new lineage from an earlier node. Returns the new node id.
+
+        Non-destructive: the tree is append-only, so backtracking adds a sibling and
+        deletes nothing.
+        """
+        new_id = self.managers[campaign_id].executor.backtrack(node_id, rationale)
+        self.emit(campaign_id, "backtracked",
+                  {"from": node_id, "new": new_id, "rationale": rationale})
+        return new_id
+
+    async def request_human(self, campaign_id: str, question: str,
+                            context: dict[str, Any] | None = None) -> None:
+        self.managers[campaign_id].executor.request_human(question, context)
+        self.emit(campaign_id, "human_requested", {"question": question})
 
     async def ingest_measurement(self, campaign_id: str, node_id: str,
                                  prop: Property) -> dict[str, Any]:
