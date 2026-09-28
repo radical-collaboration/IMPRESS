@@ -3,7 +3,9 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 (4-node production, job `22491438`) **RUNNING and healthy** — 16/16 pipelines, ~83% scaling efficiency.
+**Status:** Stage 3 (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
+`max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
+teardown hangs (see below).
 **Last updated:** 2026-09-27
 
 ---
@@ -29,7 +31,7 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 1 | `dragon -m` bring-up (`IMPRESS_TEST_MODE=1`) | 2 | 2 | 0:30 | 4 | `22456499` | **FAILED** | srun `--nodelist` FQDN mismatch → hung to TIMEOUT. Root-caused below; launch method replaced |
 | 1b | ssh/TCP bring-up | 2 | 4 (PROD, see below) | 0:30 | 4 | `22466127` | **PASSED** | Ran on **both** nodes; full stack incl. boltz; no srun/ssh errors. Exposed the env-propagation blocker |
 | 2 | Remote-execution proof | — | — | — | — | — | **not needed** — 1b proved it via `TASK HOST` | gpub030 + gpub096 |
-| 3 | Production | 4 | 16 | 48:00 | ~92 projected | `22491438` | **RUNNING** | 16/16 pipelines, 5 managers, all 4 nodes loaded, 0 errors; ETA ~5.7 h |
+| 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
 
 Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
 Billing accrues on **elapsed**, not requested, time.
@@ -402,3 +404,61 @@ run **overwrites** the previous run's dirs in place. Two consequences:
 Fix: set a per-job `IMPRESS_WORK_DIR` (e.g. `${WORKDIR}/logs/${SLURM_JOB_ID}`) so each run gets
 its own tree, or clean `logs/p*` between runs. Not urgent for the running job, but it should
 land before the next one.
+
+
+---
+
+## Stage 3 final result (job `22491438`)
+
+### Outcome: the campaign succeeded
+
+| | |
+|---|---|
+| Pipelines | **16/16 hit the 300-entry `max_tasks` budget** |
+| Compute finished | **6h41m** (`22:23:11` — "All pipelines finished. Exiting.") |
+| Scaling | 3.9x job-wide for 4x pipelines = **98% per-pipeline efficiency** |
+| Folds | **552 passed / 25 failed** (95.7%) |
+| Tasks | 1109 rfd3, 3045 mpnn, 958 packmin, 841 fastrelax, 622 filter_shape, 575 boltz |
+| Health | 0 OOM, 0 tracebacks, 0 exceptions, 0 srun/ssh errors |
+
+It stopped on the task budget rather than the wall clock — the original goal, after three
+predecessor runs died at `TIMEOUT`.
+
+Throughput vs the 2-node baseline (`22466127`), mtime-filtered to each job:
+
+| | rfd3/h | boltz/h | rfd3/pipeline/h |
+|---|---|---|---|
+| 2-node, 4 pipelines | 46.8 | 8.1 | 11.69 |
+| 4-node, 16 pipelines | 183.4 | 91.9 | **11.46** |
+
+Per-node `CPULoad` stayed balanced at 26-40 of 64 with the primary no busier than the rest, so
+the "11 of 13 tasks pinned to the primary node" ceiling is real in principle but **not binding at
+16 pipelines**.
+
+### New defect: Dragon teardown hangs after a clean finish
+
+The job did **not** exit cleanly. Timeline:
+
+```
+22:23:11.462  [MANAGER] All pipelines finished. Exiting.
+22:23:11      ==================== IMPRESS MANAGER FINISHED ====================
+22:23:11.467  [rhapsody...dragon] Shutting down Dragon backend
+              ... 60 minutes of nothing ...
+23:23:02      CANCELLED by 68562 (manual scancel)
+```
+
+`sacct` records `State=CANCELLED`, `Elapsed=07:41:11`. All science was complete at 6h41m; the
+remaining **60 minutes were spent hung inside `flow.shutdown()`** and never resolved on their
+own. `=== Small Molecule Binding pipeline done ===` never printed.
+
+**Cost: ~64 GPU-hours burned on the hang** (60 min x 4 nodes x 4 GPU) — about 37% of the job's
+total billed 172 GPU-h, for zero output.
+
+Implications:
+- This is the **first** multi-node production teardown, and it hung on the first attempt. Treat
+  it as reproducible until shown otherwise.
+- At 8 nodes the burn rate doubles to 32 GPU-h per hung hour.
+- The SLURM wall limit is currently the **only** backstop — there is no watchdog and no resume.
+  A 48 h request means an unattended hang could bill the full remainder.
+- Mitigation is therefore two-part: **right-size `--time`** (12 h for the 8-node campaign), and
+  **bound the shutdown in code** so the job self-terminates once the work is provably done.
