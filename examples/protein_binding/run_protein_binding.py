@@ -16,7 +16,7 @@ import rhapsody, logging
 rhapsody.enable_logging(level=logging.DEBUG)
 
 
-# ── Backend / test mode ───────────────────────────────────────────────────
+# ── Backend ───────────────────────────────────────────────────────────────
 # IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
 # ProcessPoolExecutor — useful for development / non-Dragon clusters).
 BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
@@ -26,12 +26,12 @@ if BACKEND == "dragon":
 else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
-TEST_MODE = os.getenv("IMPRESS_TEST_MODE", "0") == "1"
-N_PIPELINES = 4      if TEST_MODE else 16
-MAX_PASSES  = 10      if TEST_MODE else 10
-MAX_SUB_PIPELINES_OVERRIDE = 3 if TEST_MODE else None  # None = use inline default
 
-print(f"[INFO] IMPRESS_BACKEND={BACKEND}  TEST_MODE={TEST_MODE}  N_PIPELINES={N_PIPELINES}  MAX_PASSES={MAX_PASSES}  MAX_SUB_PIPELINES_OVERRIDE={MAX_SUB_PIPELINES_OVERRIDE}")
+N_PIPELINES            = int(os.environ.get("IMPRESS_N_PIPELINES", "16"))
+MAX_PASSES             = int(os.environ.get("IMPRESS_MAX_PASSES", "10"))
+MAX_SUB_PIPELINES_OVERRIDE = None  # use inline default (3)
+
+print(f"[INFO] IMPRESS_BACKEND={BACKEND}  N_PIPELINES={N_PIPELINES}  MAX_PASSES={MAX_PASSES}")
 
 # ---------------------------------------------------------------------------
 # Custom application-level telemetry events

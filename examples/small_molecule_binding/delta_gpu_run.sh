@@ -134,13 +134,6 @@ mkdir -p "${IMPRESS_WORK_DIR}"
 export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
 echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
 
-# IMPRESS_TEST_MODE=1: 2 pipelines, inert thresholds, max_tasks=10.
-# Runs one full rfd3→mpnn→fastrelax→filter_shape→af2 cycle to verify the
-# end-to-end path without looping.  Set before sbatch:
-#   IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
-export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"
-echo "TEST_MODE:         ${IMPRESS_TEST_MODE}"
-
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 # -s = single-node Dragon runtime; -m = multi-node (uses MPI/OFI fabric).

@@ -79,12 +79,6 @@ export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${SCRATCH}/${USER}/IMPRESS_outp
 export IMPRESS_BACKEND="${IMPRESS_BACKEND:-dragon}"
 echo "IMPRESS_BACKEND:   ${IMPRESS_BACKEND}"
 
-# IMPRESS_TEST_MODE=1: 2 pipelines, max_passes=1, no child pipelines.
-# Runs a single MPNN → score → AF2 cycle to verify end-to-end path.
-# Set before sbatch:  IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
-export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"
-echo "TEST_MODE:         ${IMPRESS_TEST_MODE}"
-
 # ── Working directory ─────────────────────────────────────────────────────────
 WORKDIR="${IMPRESS_SCRIPTS_DIR}"
 cd "${WORKDIR}"
