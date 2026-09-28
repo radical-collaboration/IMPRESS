@@ -1,6 +1,7 @@
+import argparse
 import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List
 
 from radical.asyncflow import WorkflowEngine
@@ -91,7 +92,59 @@ else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
 
-cfg = TEST if os.getenv("IMPRESS_TEST_MODE", "0") == "1" else PROD
+# Run config is taken from the command line first, environment second.
+#
+# The CLI path exists because environment variables DO NOT reach this process on
+# a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
+# backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
+# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_TEST_MODE
+# / IMPRESS_N_PIPELINES set by delta_gpu_run.sh are silently dropped and the
+# defaults below would be used instead.  Confirmed on job 22466127, which ran the
+# PROD config despite IMPRESS_TEST_MODE=1.  (MPNN_DIR / BOLTZ_CACHE /
+# FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
+# and the ssh login shell sources it -- do not rely on that for new settings.)
+# Dragon passes everything after PROG straight through to us, so argv is the one
+# channel that always works.  parse_known_args so any extra argv is ignored.
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--n-pipelines", type=int, default=None)
+_ap.add_argument("--test-mode", action="store_true")
+_ap.add_argument("--work-dir", default=None)
+_args, _ = _ap.parse_known_args()
+
+cfg = TEST if (_args.test_mode or os.getenv("IMPRESS_TEST_MODE", "0") == "1") else PROD
+
+# Scale pipeline count with the allocation without editing PROD.  run() is a
+# sequential state machine, so n_pipelines IS the job's total concurrency and
+# each pipeline keeps roughly one GPU busy -- delta_gpu_run.sh sets this to the
+# allocated GPU count.  Requires a matching p{i}_in/ dir per pipeline (the
+# launcher caps it at however many exist).  replace() rather than mutating
+# PROD in place: it is a module-level singleton that run_nonadaptive.py and
+# run_test_small_molecule_binding.py also import.
+_n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
+if _n_pipelines and cfg is PROD:
+    cfg = replace(cfg, n_pipelines=int(_n_pipelines))
+
+# Thread caps, set here rather than in the batch script for the same reason:
+# OMP_NUM_THREADS exported by delta_gpu_run.sh never survives the ssh hop.
+# 11 of the 13 tasks are local_task=True and run as concurrent subprocesses of
+# this process, inheriting os.environ -- so setting it here is what actually
+# takes effect.  Without a cap each of them defaults to every core on the node.
+# Divide by 2x the pipeline count to leave room for Dragon tasks co-resident on
+# this node; PyRosetta (fastrelax/packmin/filter_shape) is single-threaded
+# regardless, so this budget really targets the PyTorch tasks.
+# sched_getaffinity respects the cgroup/CPU mask SLURM applies to the job;
+# os.cpu_count() reports the physical core count and would over-subscribe on any
+# allocation smaller than a whole node.
+try:
+    _ncpu = len(os.sched_getaffinity(0))
+except AttributeError:          # not Linux
+    _ncpu = os.cpu_count() or 64
+_omp = max(1, _ncpu // (cfg.n_pipelines * 2))
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, str(_omp))
+# PASSIVE is what actually stops idle OpenMP teams from spinning on cores.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
@@ -318,7 +371,11 @@ async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     # Resolve paths before launching Dragon (os.getcwd() is the examples dir).
     examples_dir = os.path.dirname(os.path.abspath(__file__))
-    work_dir = os.environ.get(
+    # --work-dir first for the same reason as --n-pipelines: IMPRESS_WORK_DIR is
+    # another variable that does not survive the `dragon -w ssh` hop, so on a
+    # multi-node run the env value set by delta_gpu_run.sh never arrives and we
+    # would silently fall back to examples_dir/logs.
+    work_dir = _args.work_dir or os.environ.get(
         "IMPRESS_WORK_DIR", os.path.join(examples_dir, "logs")
     )
     os.makedirs(work_dir, exist_ok=True)
