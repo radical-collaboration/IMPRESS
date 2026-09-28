@@ -3,7 +3,10 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
+**Status:** Stage 3 complete. Telemetry wired (`2039893`) and Stage 4 (8 nodes / 32 pipelines)
+prepared but **not yet submitted**. Earlier status line retained below.
+
+**Stage 3:** (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
 `max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
 teardown hangs (see below).
 **Last updated:** 2026-09-27
@@ -32,6 +35,7 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 1b | ssh/TCP bring-up | 2 | 4 (PROD, see below) | 0:30 | 4 | `22466127` | **PASSED** | Ran on **both** nodes; full stack incl. boltz; no srun/ssh errors. Exposed the env-propagation blocker |
 | 2 | Remote-execution proof | — | — | — | — | — | **not needed** — 1b proved it via `TASK HOST` | gpub030 + gpub096 |
 | 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
+| 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | — | **prepared, not submitted** | telemetry wired; trajectories off; walltime right-sized |
 
 Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
 Billing accrues on **elapsed**, not requested, time.
@@ -462,3 +466,87 @@ Implications:
   A 48 h request means an unattended hang could bill the full remainder.
 - Mitigation is therefore two-part: **right-size `--time`** (12 h for the 8-node campaign), and
   **bound the shutdown in code** so the job self-terminates once the work is provably done.
+
+
+---
+
+## Telemetry wiring (commit `2039893`, branch `telemetry-scaleup`)
+
+Enabling telemetry is three lines on `ImpressManager`, but the `protein_binding` reference
+wiring copied verbatim would produce a trace that cannot answer Stage 4's question. Two defects,
+both verified against that example's real 7.0 MB output:
+
+1. **Only 2 of 13 tasks would appear.** `auto_register_task(local_task=True)` returns the raw
+   coroutine and never reaches asyncflow, so only `rfd3` and `boltz` emit lifecycle events. The
+   other 11 — `mpnn`, `packmin`, `fastrelax`, `filter_shape`, `filter_energy` and the six
+   analysis stages — are exactly the ones that run on the primary node whose saturation Stage 4
+   is meant to measure.
+2. **Even those 2 are indistinguishable.** The label is `shlex.split(cmd)[0]`, i.e. always
+   `bash` — **3486 of 3486** `executable` attributes in the reference file.
+
+What landed, beyond enabling it:
+- `impress.LocalStage` custom event + a `_timed_local` decorator on all 11 local stages.
+  Additive instrumentation, not an execution change: converting them to `flow.function_task` is
+  not drop-in, since they mutate `self.state`/`self.taskcount` in-process and the
+  `OMP_NUM_THREADS` cap depends on them being subprocesses of the runner.
+- `workflow_id=f"{name}:rfd3"` / `:boltz` at the two Dragon call sites.
+- `checkpoint_path` derived from the resolved `work_dir` (a relative path resolves against
+  `$SCRATCH`, not the source tree, and this inherits per-job scoping);
+  `resource_poll_interval=15.0` (the reference's 5.0 made ResourceUpdate 69% of its file);
+  `checkpoint_interval=300.0` (the reference omits it, so a wall-clock kill loses the
+  128 KB-buffered file); `stop()` in `finally` before `flow.shutdown()` (the reference has it in
+  `try` and loses the file on any error).
+
+Verified off-HPC against the real stack: a live `WorkflowEngine.start_telemetry` session wrote
+the JSONL containing `fastrelax completed 0.020s` and `packmin failed`; the decorator preserves
+`__name__` (required by `auto_register_task`'s `setattr`), returns values and propagates
+exceptions.
+
+## Correction: the Dragon primary is not the batch node
+
+Stage 3's interim note said the primary node was at 29.5/64 and "no busier than the rest". That
+was wrong — it assumed the primary was the batch node `gpub015`. The `dragon-network-config`
+JSON in `impress_22491438.out` shows index `0`, `is_primary: true`, is **`gpub068`**, which was
+the busiest node in both readings:
+
+| node | early | steady | role |
+|---|---|---|---|
+| gpub015 | 28.8 | 29.5 | batch node (frontend only) |
+| gpub026 | 15.6 | 31.3 | |
+| gpub066 | 33.8 | 29.5 | |
+| **gpub068** | **38.4** | **39.7** | **Dragon primary — runs all 11 local stages** |
+
+So the primary sat at **62%** of 64 cores at 16 pipelines, ~10 cores above the others — the
+`local_task` load, exactly as the architecture predicts. A naive doubling to 32 pipelines
+projects to **~124%, i.e. oversubscribed**, and `OMP_NUM_THREADS` is already at its floor of 1
+so no headroom can be reclaimed by trimming threads.
+
+This does not invalidate the 98% efficiency figure, which is measured throughput. It does mean
+Stage 4 is likelier to land in the degraded regime than first stated. **Always check which node
+is `is_primary` before reading a load figure — it is not the batch node.**
+
+## Stage 4 preparation (not submitted)
+
+- `scripts/rfd3.sh`: `dump_trajectories=False`. The `*_noisy_*`/`*_denoised_*` files are
+  11.85 MB of each 11.92 MB rfd3 dir (99.4%). Safe: nothing reads them, and `analysis_backbone`
+  selects from `.json` files containing `_model_` then derives `.cif.gz` by extension swap —
+  trajectory files ship no `.json`, so they are unreachable by that selection. Campaign
+  footprint ~30 GB → ~3.8 GB.
+- `delta_gpu_run.sh`: `--time` 48:00:00 → **12:00:00**. The wall limit is the only backstop
+  against the teardown hang. 12 h = ~6.8 h expected compute + ~1 h teardown + slack to ~62%
+  throughput. Exposure if it hangs: 384 GPU-h vs 1536 at 48 h. Queue start estimate is identical
+  for 8/12/16/24/48 h, so shortening costs nothing.
+- `p17_in` … `p32_in` created (all 32 checksum-identical, gitignored). 8 nodes now yields 32
+  pipelines with **zero idle GPUs**; `OMP_NUM_THREADS` = 1.
+
+### Evidence to collect from the Stage 4 run
+
+`impress_<jobid>.out` **cannot** answer the `node_id` question — `impress_22491438.out` has 0
+occurrences of `node_id` and 0 of `telemetry`, since it predates the wiring. It carries only the
+`dragon-network-config` JSON (nodes discovered, and which is primary) and the `N managers` line.
+
+The file to keep is `logs/<SLURM_JOB_ID>/telemetry/<session>.<ts>.telemetry.jsonl` (~40-60 MB
+for a 7 h 8-node run). Pass conditions: **8 distinct `node_id`s** (fewer means
+`DragonTelemetryAdapter` silently no-opped — it is fail-soft at three points and only logs a
+warning), task labels reading `p*:rfd3`/`p*:boltz` rather than `bash`, and all 11 local stages
+present with durations.
