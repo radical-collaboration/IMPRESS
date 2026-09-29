@@ -3,13 +3,13 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 complete. Telemetry wired, and Stage 4 (8 nodes / 32 pipelines) prepared
-but **not yet submitted**. Earlier status line retained below.
+**Status:** Stage 4 (8 nodes / 32 pipelines, job `22534628`) **submitted and pending** — no smoke
+test; the early-abort gate below substitutes for one. Earlier status line retained below.
 
 **Stage 3:** (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
 `max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
 teardown hangs (see below).
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-28 (Stage 4 submitted)
 
 ---
 
@@ -35,7 +35,7 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 1b | ssh/TCP bring-up | 2 | 4 (PROD, see below) | 0:30 | 4 | `22466127` | **PASSED** | Ran on **both** nodes; full stack incl. boltz; no srun/ssh errors. Exposed the env-propagation blocker |
 | 2 | Remote-execution proof | — | — | — | — | — | **not needed** — 1b proved it via `TASK HOST` | gpub030 + gpub096 |
 | 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
-| 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | — | **prepared, not submitted** | telemetry wired; trajectories dropped; walltime right-sized |
+| 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | `22534628` | **SUBMITTED** (2026-09-28, `PD`) | telemetry wired; trajectories dropped; walltime right-sized. Est. start 2026-10-04 |
 
 Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
 Billing accrues on **elapsed**, not requested, time.
@@ -592,3 +592,31 @@ Per-pipeline throughput against the 4-node baseline of **11.46 rfd3/pipeline/h**
 
 The telemetry pass conditions for the run are in "Telemetry wiring → What to collect" above;
 **8 distinct `node_id`s** is the one that proves the adapter did not silently no-op.
+
+### Early-abort gate (substitutes for a smoke test)
+
+Stage 4 went straight to production, so it is the first HPC execution of the telemetry wiring,
+the PR #64 argv/`cfg` changes and `dump_trajectories=False`. Because `checkpoint_interval=300.0`
+flushes the telemetry file every 5 minutes, the decisive `node_id` question is answerable ~10
+minutes into the run itself rather than needing a separate job.
+
+**t+5 min — cancel on failure.** `N_PIPELINES: 32`, `--n-pipelines 32` in the launcher line,
+**`9 managers`** (`num_nodes + 1`; fewer means Dragon clamped and the extra nodes bill for
+nothing), `Starting with 32 initial pipelines`, and zero hits for `Unable to create step` /
+`node configuration is not available` / `Permission denied` / `Traceback`. Any failure →
+`scancel` at once; at 8 nodes an idle hour is 32 GPU-h.
+
+**t+10 min — telemetry, but do not cancel on it.** Read
+`logs/22534628/telemetry/*.telemetry.jsonl` for 8 distinct `node_id`s, labels `p*:rfd3`/`p*:boltz`
+rather than `bash`, and `impress.LocalStage` rows. A no-op here costs only instrumentation while
+re-queuing costs ~6 days, so record it and let the science finish.
+
+**t+20 min — outputs are real.** 32 `logs/22534628/p*/` dirs; the first `*_rfd3/out/` holding
+~8 files at ~71 KB with zero `noisy`/`denoised`. An empty `out/` beside
+`adaptive/backbone] passed=False` is the silent `--writable-tmpfs` failure, not a QC rejection.
+
+**At completion — do not repeat the 60-minute hang.** If
+`=== Small Molecule Binding pipeline done ===` has not printed within ~10 min of
+`[MANAGER] All pipelines finished. Exiting.`, `scancel` rather than waiting: the
+`flow.shutdown()` bounding fix is declined, so the wall clock is the only automatic backstop, and
+at 8 nodes the hang bills 32 GPU-h per hour.
