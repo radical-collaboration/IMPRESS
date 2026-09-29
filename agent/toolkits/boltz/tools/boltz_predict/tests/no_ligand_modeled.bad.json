@@ -1,0 +1,10 @@
+{
+  "why": "Boltz ran with an empty `ligand_smiles`, so `BoltzPredictAgent.run` (src/impress_a/tools/boltz_agents.py:57-59) appended no ligand chain to the YAML. Boltz then folded a bare protein perfectly well: the confidence JSON has no `ligand_iptm` key at all, and the extraction at boltz_agents.py:96 falls back to `iptm` and lands on 0.0. The protein is excellent and the campaign's actual objective - does it bind the ligand - was measured on nothing. This is backlog A2 as a QC payload. It is the most instructive fixture here because `output_present` PASSES and `complex_plddt` PASSES: it takes the THIRD gate to catch it, which is the argument for gates being a list rather than a single verdict.",
+  "failing_gates": ["metric_in_range[ligand_iptm]"],
+  "output": {
+    "result": "complex",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"complex_plddt": 0.88, "ligand_iptm": 0.0}
+  }
+}

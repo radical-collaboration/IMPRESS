@@ -1,0 +1,10 @@
+{
+  "why": "A properly relaxed complex. Chosen to clear UPSTREAM's calibrated PROD thresholds too (total_score < -250, fa_rep < 100), not merely ours - so the good fixture is not itself a quiet example of backlog G4.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": -318.2, "fa_rep": 92.0}
+  }
+}

@@ -47,6 +47,29 @@ def test_constraints_prune_before_ranking():
     assert all(n.metric("sc_rmsd") <= 3.0 for n in front)
 
 
+def test_a_node_missing_a_constrained_objective_is_never_feasible():
+    """Backlog G1's first cause, as one line of core logic.
+
+    The exploration chain (rfd3 -> ligandmpnn -> boltz) skips Rosetta, so its nodes carry
+    no shape_complementarity at all. `Objective.satisfied_by` returns False for a MISSING
+    value rather than treating it as unconstrained, so any objective with a min/max
+    excludes such a node - and `delta-small-molecule.yaml` constrains
+    shape_complementarity >= 0.55. Exploration can therefore never enter the front, which
+    is why every informed explore landing increments the stagnation counter.
+
+    This pins the CURRENT behaviour; the fix is undecided. See
+    plans/exploration-vs-stagnation.md.
+    """
+    objs = [Objective(name="shape_complementarity", direction=Direction.MAX, min=0.55),
+            Objective(name="ligand_iptm", direction=Direction.MAX, min=0.4)]
+    explore = _node(ligand_iptm=0.62)          # no Rosetta metrics at all
+    exploit = _node(ligand_iptm=0.55, shape_complementarity=0.61)
+
+    assert pareto_front([explore], objs) == []
+    assert [n.id for n in pareto_front([explore, exploit], objs)] == [exploit.id], \
+        "a worse-scoring exploit node still wins, because it is the only one ranked"
+
+
 def test_qc_failed_node_excluded_from_front():
     objs = [Objective(name="iptm", direction=Direction.MAX)]
     good, bad = _node(iptm=0.5), _node(iptm=0.99)

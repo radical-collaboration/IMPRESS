@@ -1,0 +1,10 @@
+{
+  "why": "A packed and minimized pose with a sane negative score. Passes both gates.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": -284.7}
+  }
+}

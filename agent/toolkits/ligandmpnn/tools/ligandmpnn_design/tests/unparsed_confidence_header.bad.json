@@ -1,0 +1,10 @@
+{
+  "why": "PINS CURRENT BEHAVIOUR; READ AS A BUG REPORT, NOT AN ENDORSEMENT. LigandMPNN produced sequences and a packed structure, but its FASTA header did not match `_CONF_RE` (src/impress_a/tools/ligandmpnn_agents.py:19). The loop at ligandmpnn_agents.py:74-78 initialises `overall = ligand = 0.0` and breaks only on a match, so a PARSER failure is reported as a design with 0.0 confidence - indistinguishable, downstream, from a genuinely terrible design. That is precisely the silent-failure shape this project exists to catch, in our own adapter. The gates do fail here, so nothing is promoted; what is lost is the reason. See tests/raw/unparsed_header.fa for a header that triggers it.",
+  "failing_gates": ["metric_in_range[overall_confidence]", "metric_in_range[ligand_confidence]"],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"overall_confidence": 0.0, "ligand_confidence": 0.0}
+  }
+}

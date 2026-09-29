@@ -1,0 +1,10 @@
+{
+  "why": "A co-folded protein+ligand complex that clears all three gates. Both numbers are Boltz's own self-reported confidence, which is exactly the caveat docs/limitations.md records about the real toolkits' QC: passing here means the tool is confident, not that the complex is right. A structural gate on this output is backlog B1.",
+  "failing_gates": [],
+  "output": {
+    "result": "complex",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"complex_plddt": 0.82, "ligand_iptm": 0.61}
+  }
+}

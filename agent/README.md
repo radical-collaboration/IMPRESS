@@ -117,7 +117,7 @@ different transport.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-pytest tests -q                                           # 77 tests, ~10s, no allocation needed
+pytest tests -q                                           # the whole local tier, ~10s, no allocation
 impress-a tools                                           # list registered tools
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```
@@ -192,7 +192,7 @@ Reference implementation, exercised end to end on a laptop and not yet on real h
 | Mock toolkit campaign | works |
 | Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | wired, CLI contracts verified against real installs, **never executed** |
 
-`pytest tests -q` — 77 tests, ~10s, no allocation. A complete campaign runs on a laptop with stubbed
+`pytest tests -q` — ~10s, no allocation. A complete campaign runs on a laptop with stubbed
 science, which is deliberate: HPC iteration is slow and expensive, so almost everything is verifiable
 locally. The corollary is that everything *only* verifiable on HPC is unverified.
 
@@ -223,8 +223,10 @@ a login node first regardless — it now also checks `ligand_smiles`.
 **QC for the real toolkits is thin where it matters most.** The specs lean almost entirely on
 `metric_in_range` against each tool's *own* self-reported confidence — which is exactly what a
 confidently-wrong tool passes. There are no structural gates (is the ligand actually in the output
-complex, are there chain breaks, does sequence length match the contig), and no toolkit carries the
-known-bad fixtures `docs/reference/authoring-tools.md` asks for.
+complex, are there chain breaks, does sequence length match the contig). Every real tool now
+carries the known-bad fixtures `docs/reference/authoring-tools.md` asks for, so its declared gates
+have been seen to fail on output that should fail them; what those gates *measure* is still the
+tool's own opinion of itself.
 
 **Cancellation is advisory.** Measured, not assumed: the concurrent backend's `Future.cancel()`
 returns `False` once a callable has started and asyncflow discards that answer, so queued work is
@@ -244,6 +246,6 @@ outstanding work with a recommended order, `plans/*.md` are stubs for the next t
 `plans/done/` records completed work and the decisions behind it — the rulings are the part worth
 keeping, not the task lists.
 
-Nearest term: structural QC gates and known-bad fixtures, then the first real Delta run. Further out:
+Nearest term: structural QC gates (the known-bad fixtures now exist), then the first real Delta run. Further out:
 the MCP adapter, checkpoint/restart resume (the ledger and `reattach` exist; nothing resumes from
 them yet), registry hardening, and the P5 network-service governor.

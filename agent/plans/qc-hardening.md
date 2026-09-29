@@ -1,6 +1,7 @@
 # Stub — structural QC gates and known-bad fixtures
 
-**Status:** not started. Next recommended track. Backlog items B1, B2, B3.
+**Status:** B2 done, B3 partly. B1 — the structural gates — not started, and still the next
+recommended track. See `plans/local-verification.md` for what the fixture harness now covers.
 
 ## Problem
 
@@ -15,8 +16,11 @@ against a metric the tool **reports about itself** — `complex_plddt`, `ligand_
 precise failure mode the gates exist to catch. Both `boltz/SKILL.md` and `rosetta/SKILL.md` already
 flag their thresholds as uncalibrated guesses.
 
-No toolkit carries the `tests/` known-bad fixtures `docs/reference/authoring-tools.md:85` requires:
-*"A gate that has never seen the output it was written to catch is an assertion, not a test."*
+Every non-mock tool now carries the `tests/` known-bad fixtures `authoring-tools.md` requires, so
+each tool's *declared* gates have been seen to fail on output that should fail them. That closes the
+"never seen the output it was written to catch" objection for the gates that exist — and leaves the
+real gap exactly where this plan says it is: **none of those gates is structural**. A fixture can
+only exercise a gate that exists.
 
 ## Shape of the work
 
@@ -35,8 +39,12 @@ these need new helpers. Keep Biopython/gemmi imports inside function bodies — 
 `dry_run` must keep working with none of the science stack installed, which is what makes the laptop
 tier possible.
 
-Fixtures go under `toolkits/<tk>/tools/<id>/tests/`, and must include at least one known-BAD output
-per gate. Write the gate against a failure actually seen, not an imagined one.
+Fixtures go under `toolkits/<tk>/tools/<id>/tests/` in the format `authoring-tools.md` now
+documents, and must include at least one known-BAD output per gate; `test_gate_fixtures.py` picks
+them up with no code change. A structural gate needs a structural fixture, which is the first thing
+in this plan that will need a real artifact on disk rather than a JSON payload — and Biopython is
+importable in the dev venv while gemmi and PyRosetta are not. Write the gate against a failure
+actually seen, not an imagined one.
 
 ## Watch out for
 

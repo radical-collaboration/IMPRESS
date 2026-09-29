@@ -11,7 +11,7 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # 94 tests, ~2min on a Delta login node, no allocation
+pytest tests -q                                      # the whole local tier, no allocation (~2min on a login node)
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
@@ -109,7 +109,15 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 `test_real_toolkits.py` (the real specs, without executing any real binary) ·
 `test_backend_bound.py` (backend-construction timeout/heartbeat, against a fake backend
 that blocks its own thread's event loop the way Dragon's `Batch()` does) ·
-`test_http_adapter.py` (a campaign driven end to end over a loopback socket).
+`test_http_adapter.py` (a campaign driven end to end over a loopback socket) ·
+`test_layering.py` (the import contract, walked with `ast` rather than trusted to review) ·
+`test_gate_fixtures.py` (each real tool's gates against its known-bad fixtures, and the
+registry against the tool directories on disk).
+
+**Counts are not restated in prose.** `test_gate_fixtures.py` derives the tool count from the
+toolkit directories rather than asserting 11; there is no asserted test count and no asserted lint
+count. The one number worth stating is the lint ceiling, and it is stated once, in
+`plans/backlog.md`.
 
 **A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
 tests before anyone noticed the defect was in the executor, not the test setup. If a test needs an

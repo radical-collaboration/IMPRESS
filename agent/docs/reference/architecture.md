@@ -55,24 +55,33 @@ exec/       backend factory · resource normalization · dispatcher · job ledge
 
 ### Import contract
 
-Enforced by review (and CI, where configured):
+Asserted by `tests/test_layering.py`, which walks the source with `ast` and checks every
+internal import against this table. `ast.walk` is used deliberately: the real adapters defer their
+science imports into `run()` bodies, and a deferred `from ..exec import ...` inside `compose` would
+be exactly as fatal as one at the top of the file.
 
 ```
+cli      → manager, policy, compose, tools, core
 control  → manager, runtime, core
-policy   → core                    (NOT tools, NOT exec, NOT runtime)
-manager  → runtime, policy, core   (a facade; the executor owns the work)
+policy   → core                           (NOT tools, NOT exec, NOT runtime)
+manager  → runtime, policy, tools, core   (a facade; the executor owns the work)
 runtime   → policy, compose, exec, tools, core
-compose  → tools, core             (NOT exec)
+compose  → tools, core                    (NOT exec)
 tools    → exec, core
 exec     → compose, tools, core
 core     → (nothing internal)
 ```
 
-Two notes on accuracy. `exec → compose, tools` has been true since the first prototype
+`__main__` imports `cli` and nothing else.
+
+Three notes on accuracy. `exec → compose, tools` has been true since the first prototype
 (`exec/dispatch.py` imports `TaskGraph` and `TaskAgent`); this line records what the code does rather
 than what an earlier version of this document claimed. And `policy → core` is what forced
 `core/session.py` and `core/results.py` to exist: a reasoner may hold a `RunOutcome`, so `RunOutcome`
-cannot live in `exec/` beside the `ExecutionResults` it projects from.
+cannot live in `exec/` beside the `ExecutionResults` it projects from. And `manager → tools` is
+real — `manager.py` imports `Registry` — and was missing from this table until the layering test
+was written; `cli` and `__main__` appeared in no row at all. Both are recorded above rather than
+quietly tolerated, because a contract with undocumented edges is not a contract.
 
 Two rules carry real weight:
 

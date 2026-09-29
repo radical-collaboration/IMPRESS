@@ -811,3 +811,33 @@ async def test_interpret_fires_once_per_collected_run(reg, tmp_path):
     assert len(pol.interpreted) == len(set(pol.interpreted)), \
         f"interpret called twice for the same run: {pol.interpreted}"
     assert res.stop_reason
+
+
+async def test_a_truncated_chain_can_never_move_the_front(reg, tmp_path):
+    """Backlog G1, made detectable rather than fixed.
+
+    A chain that skips the stage producing a constrained objective yields nodes that
+    `pareto.feasible` rejects for a MISSING value. The front stays empty; `_note_progress`
+    increments on every informed landing that leaves it unchanged, including
+    empty-and-still-empty; and at concurrency 1 every landing is informed by the one
+    before it. So the executor ends a campaign whose science is going fine. Nothing here
+    is a QC failure and nothing is over budget.
+
+    Here `mock_generate -> mock_design` stands in for the real explore chain: it emits
+    ss_fraction, designability, seq_recovery and diversity, and none of OBJS' sc_rmsd,
+    iptm or ddg.
+
+    This asserts the CURRENT behaviour. When G1 is decided
+    (plans/exploration-vs-stagnation.md) this test is the first thing that must change.
+    """
+    s = spec("t-g1", max_cycles=10, stagnation_limit=3, concurrency=1)
+    s.root = str(tmp_path)
+    res = await CampaignManager(
+        s, ThresholdPolicy(stages=["mock_generate", "mock_design"]), reg).run()
+
+    assert len(res.tree) > 0, "the runs happened"
+    assert all(n.qc.verdict is not QCVerdict.FAIL for n in res.tree), \
+        "and QC passed - nothing is wrong with the science"
+    assert res.front == [], "yet the front is empty: no node carries sc_rmsd or iptm"
+    assert res.stop_reason.startswith("stagnation:"), res.stop_reason
+    assert res.cycles < s.max_cycles, "the executor stopped it early"

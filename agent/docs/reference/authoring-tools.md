@@ -9,9 +9,12 @@ toolkits/<toolkit>/
 ├── SKILL.md                     # agent-facing guidance for the whole toolkit
 └── tools/<tool_id>/
     ├── spec.yaml                # the ToolSpec  (data)
-    ├── agent.py                 # a TaskAgent subclass (behaviour), or point `entry` elsewhere
     └── tests/                   # fixtures, including known-BAD outputs
 ```
+
+The behaviour class lives wherever `entry:` points. In practice every shipped tool points into the
+package (`src/impress_a/tools/<toolkit>_agents.py`) rather than co-locating an `agent.py` here, because
+several tools in a toolkit share helpers and a subprocess worker.
 
 Toolkits are discovered from, in precedence order: an explicit path, `$IMPRESS_A_TOOLKITS`, installed
 `impress_a.toolkits` entry points, then the bundled `toolkits/` directory. A site or third party can add
@@ -83,7 +86,35 @@ def _my_check(out: dict, params: dict) -> GateResult:
 boundary at which a tool's output enters campaign state, and the only defence against silent failure.
 
 Write gates against the failure you have actually seen. A gate that has never seen the output it was
-written to catch is an assertion, not a test — keep known-bad fixtures under `tests/`.
+written to catch is an assertion, not a test — so every non-mock tool carries known-bad fixtures under
+`tests/`, and `tests/test_gate_fixtures.py` fails if a new one does not.
+
+```
+toolkits/<tk>/tools/<id>/tests/
+├── <name>.bad.json     # a raw run() payload this tool's OWN gates must FAIL
+├── <name>.good.json    # a raw run() payload they must PASS
+└── raw/                # tool-native artifacts (a real FASTA, a real out_dir listing);
+                        # never collected as fixtures
+```
+
+The **filename suffix is authoritative**, never a field inside the file: a typo'd `"expect": "pass"`
+would be silently wrong, a wrong suffix cannot be. Each file has three keys:
+
+```json
+{
+  "why": "the failure this records, and where it was observed",
+  "failing_gates": ["output_present", "metric_in_range[ligand_iptm]"],
+  "output": {"result": null, "count": 0, "outputs": {}, "metrics": {}}
+}
+```
+
+`output` is verbatim what the agent's `run()` returns, and `outputs` is always `{}` — these fixtures
+cover the **QC** contract; the artifact contract is `_as_artifacts`, covered in `test_real_toolkits.py`.
+`failing_gates` is an exact set of *rendered* `GateResult.gate` labels, so `metric_in_range` entries take
+the `metric_in_range[<name>]` form. A fixture cannot claim to demonstrate one gate while tripping another.
+
+`toolkits/mock/tools/mock_noodle/tests/` is the worked example, and the one fixture pinned directly to
+the code that produces it.
 
 ## Task agents
 

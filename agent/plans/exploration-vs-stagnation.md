@@ -73,6 +73,23 @@ since both concern what exploitation means in this engine.
 
 ## Verification
 
+**Already pinned, as of the verification-hardening pass.** Two characterization tests assert the
+CURRENT (broken) behaviour against the real engine, so whatever is decided here has to change them
+deliberately rather than discover them:
+
+- `tests/test_core.py::test_a_node_missing_a_constrained_objective_is_never_feasible` — cause 1, as
+  pure logic: a node with no `shape_complementarity` is excluded by a `min` constraint.
+- `tests/test_campaign.py::test_a_truncated_chain_can_never_move_the_front` — all three causes
+  together, on mock tools: QC passes on every node, the front stays empty, and the executor stops
+  the campaign on stagnation before `max_cycles`.
+
+`slides/timeline_model.py` remains the only artifact that shows the *timing* (that the stop lands at
+t≈135, before the first exploit run at t=144). Note it is **untracked** — `slides/` is gitignored, so
+the two commands above exist only in a working tree that has it, and nothing in CI or a fresh clone
+can run them. Worth resolving before citing it as evidence anywhere else.
+
+Still to write, once the approach is chosen:
+
 - A campaign-scale test in `tests/test_campaign.py`:
   - a `conduct()` reasoner submits the truncated chain serially under the shipped
     `stagnation_limit`, then an exploit run;

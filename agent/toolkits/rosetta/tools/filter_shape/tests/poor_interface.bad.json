@@ -1,0 +1,10 @@
+{
+  "why": "A relaxed complex whose shape complementarity is far below the 0.55 floor: the binder and the ligand are not packed against each other. This is the gate doing its job on the metric it was given. Read it alongside backlog G5: our filter hardcodes <ShapeComplementarity jump=\"1\"/> with the default scorefunction (rosetta_agents.py:104) while upstream uses explicit chainA/chainB selectors under beta_nov16. If the ligand is not across jump 1, the number scored here is of some other interface - in which case a LOW value is still informative but a HIGH value is not evidence of anything.",
+  "failing_gates": ["metric_in_range[shape_complementarity]"],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"shape_complementarity": 0.21}
+  }
+}
