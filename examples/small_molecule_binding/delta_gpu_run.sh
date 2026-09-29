@@ -30,7 +30,7 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=240G
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 # Sizing notes (measured, do not shrink casually):
 #   cpus-per-task=64 — the whole node.  Requesting 4 GPUs already reserves and
 #     bills the entire node, and billing is max(cpu*31.25, mem/8, gpu*500) under
@@ -41,10 +41,21 @@
 #   mem=240G — node RealMemory is 257637MB but MemSpecLimit=8450 is reserved,
 #     so 249187MB is the allocatable ceiling.  Those same runs used only ~65GB
 #     for 4 pipelines (~16GB each), so 240G covers 8+ pipelines with headroom.
-#   time=48:00:00 — the gpuA40x4 partition maximum.  There is no checkpoint or
-#     resume: on TIMEOUT all in-memory ensemble state is lost.  Billing is on
-#     elapsed, not requested, time, and `sbatch --test-only` showed identical
-#     queue start estimates for 4h and 48h, so a short request buys nothing.
+#   time=12:00:00 — NOT the 48h partition maximum, deliberately.  Sized as
+#     ~6.8h expected compute (measured on job 22491438; unchanged by allocation
+#     width, since each pipeline independently accumulates its own max_tasks
+#     entries) + ~1h teardown + slack down to ~62% of baseline throughput.
+#     The wall limit is the ONLY backstop against a hung Dragon teardown: on
+#     22491438 `flow.shutdown()` never returned after all 16 pipelines finished,
+#     the job sat 60 minutes and had to be scancelled, burning ~64 GPU-h (37% of
+#     its billed total) for zero output.  At 8 nodes that is 32 GPU-h per hung
+#     hour, so a 48h request would let an unattended hang bill ~1536 GPU-h
+#     versus 384 at 12h.  `sbatch --test-only` returns an identical queue start
+#     estimate for 8/12/16/24/48h, so shortening costs nothing in scheduling,
+#     and billing is on elapsed rather than requested time either way.
+#     Do not go below 12h: there is no checkpoint or resume, so a TIMEOUT loses
+#     all in-memory ensemble state (the failure the scale-up was done to fix),
+#     and 8h would leave only a 1.18x margin over expected compute.
 # Override nodes per run without editing this file:  sbatch --nodes=2 ...
 #SBATCH --job-name=impress_sm_binding
 #SBATCH --mail-user=mh1314@scarletmail.rutgers.edu

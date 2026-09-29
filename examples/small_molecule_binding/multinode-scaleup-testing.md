@@ -3,8 +3,8 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 complete; telemetry now wired so the next campaign is measured rather than
-inferred. Earlier status line retained below.
+**Status:** Stage 3 complete. Telemetry wired, and Stage 4 (8 nodes / 32 pipelines) prepared
+but **not yet submitted**. Earlier status line retained below.
 
 **Stage 3:** (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
 `max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
@@ -35,6 +35,7 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 1b | ssh/TCP bring-up | 2 | 4 (PROD, see below) | 0:30 | 4 | `22466127` | **PASSED** | Ran on **both** nodes; full stack incl. boltz; no srun/ssh errors. Exposed the env-propagation blocker |
 | 2 | Remote-execution proof | — | — | — | — | — | **not needed** — 1b proved it via `TASK HOST` | gpub030 + gpub096 |
 | 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
+| 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | — | **prepared, not submitted** | telemetry wired; trajectories dropped; walltime right-sized |
 
 Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
 Billing accrues on **elapsed**, not requested, time.
@@ -540,3 +541,54 @@ present with durations.
 `node_id` and 0 of `telemetry`, since it predates the wiring. It carries only the
 `dragon-network-config` JSON (which nodes Dragon discovered, and which is primary) and the
 `N managers` line.
+
+## Correction: the Dragon primary is not the batch node
+
+Stage 3's interim note said the primary node was at 29.5/64 and "no busier than the rest". That
+was wrong — it assumed the primary was the batch node `gpub015`. The `dragon-network-config`
+JSON in `impress_22491438.out` shows index `0`, `is_primary: true`, is **`gpub068`**, which was
+the busiest node in both readings:
+
+| node | early | steady | role |
+|---|---|---|---|
+| gpub015 | 28.8 | 29.5 | batch node (frontend only) |
+| gpub026 | 15.6 | 31.3 | |
+| gpub066 | 33.8 | 29.5 | |
+| **gpub068** | **38.4** | **39.7** | **Dragon primary — runs all 11 local stages** |
+
+So the primary sat at **62%** of 64 cores at 16 pipelines, ~10 cores above the others — the
+`local_task` load, exactly as the architecture predicts. A naive doubling to 32 pipelines
+projects to **~124%, i.e. oversubscribed**, and `OMP_NUM_THREADS` is already at its floor of 1
+so no headroom can be reclaimed by trimming threads.
+
+This does not invalidate the 98% efficiency figure, which is measured throughput. It does mean
+Stage 4 is likelier to land in the degraded regime than first stated. **Always check which node
+is `is_primary` before reading a load figure — it is not the batch node.**
+
+## Stage 4 preparation (not submitted)
+
+- `scripts/rfd3.sh`: `dump_trajectories=False`. The `*_noisy_*`/`*_denoised_*` files are
+  11.85 MB of each 11.92 MB rfd3 dir (99.4%). Safe: nothing reads them, and `analysis_backbone`
+  selects from `.json` files containing `_model_` then derives `.cif.gz` by extension swap —
+  trajectory files ship no `.json`, so they are unreachable by that selection. Campaign
+  footprint ~30 GB → ~3.8 GB.
+- `delta_gpu_run.sh`: `--time` 48:00:00 → **12:00:00**. The wall limit is the only backstop
+  against the teardown hang. 12 h = ~6.8 h expected compute + ~1 h teardown + slack to ~62%
+  throughput. Exposure if it hangs: 384 GPU-h vs 1536 at 48 h. Queue start estimate is identical
+  for 8/12/16/24/48 h, so shortening costs nothing. Not shorter than 12 h: at 8 h the margin is
+  1.18x, and a truncated run loses all in-memory ensemble state since there is no checkpoint.
+- `p17_in` … `p32_in` created (all 32 checksum-identical, gitignored). 8 nodes now yields 32
+  pipelines with **zero idle GPUs**; `OMP_NUM_THREADS` = 1.
+
+### Decision rule for the run
+
+Per-pipeline throughput against the 4-node baseline of **11.46 rfd3/pipeline/h**:
+
+- **>=10.5 (>=90%)** — scaling holds; 16 nodes becomes a reasonable next step.
+- **<=9 (<=80%)** — the primary-node ceiling is binding. The fix is architectural, not more
+  nodes: move `fastrelax`/`packmin`/`filter_shape` off the primary and onto Dragon tasks. The
+  `impress.LocalStage` durations say which stages dominate, making that targeted rather than a
+  rewrite.
+
+The telemetry pass conditions for the run are in "Telemetry wiring → What to collect" above;
+**8 distinct `node_id`s** is the one that proves the adapter did not silently no-op.
