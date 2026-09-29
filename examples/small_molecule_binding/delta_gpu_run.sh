@@ -232,20 +232,12 @@ echo "N_PIPELINES:       ${IMPRESS_N_PIPELINES}"
 # os.environ itself, where the subprocesses that matter actually inherit it, and
 # sizes it from the pipeline count in use.
 
-# IMPRESS_TEST_MODE=1: 2 pipelines, inert thresholds, max_tasks=10.
-# Runs one full rfd3→mpnn→fastrelax→filter_shape→af2 cycle to verify the
-# end-to-end path without looping.  Set before sbatch:
-#   IMPRESS_TEST_MODE=1 sbatch delta_gpu_run.sh
-export IMPRESS_TEST_MODE="${IMPRESS_TEST_MODE:-0}"
-echo "TEST_MODE:         ${IMPRESS_TEST_MODE}"
-
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 RUNNER="${1:-run_small_molecule_binding.py}"
 
 # Run config forwarded as argv (see the comment at the dragon invocations below).
 RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_DIR}" )
-[ "${IMPRESS_TEST_MODE}" = "1" ] && RUNNER_ARGS+=( --test-mode )
 
 if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
     rm -f ddict_orc*

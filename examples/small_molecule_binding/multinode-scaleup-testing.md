@@ -90,9 +90,15 @@ Evidence it ran PROD despite `IMPRESS_TEST_MODE=1`: 4 pipeline dirs `p1`-`p4` (T
 ensemble hit 32 with no "Task budget exhausted" (PROD `max_tasks=300`, TEST 10).
 
 **Fix applied:** run config now travels as **argv**, which Dragon forwards verbatim —
-`delta_gpu_run.sh` passes `--n-pipelines N [--test-mode]`, and the runner sets thread caps in
+`delta_gpu_run.sh` passes `--n-pipelines N --work-dir DIR`, and the runner sets thread caps in
 `os.environ` itself (sized from `sched_getaffinity`, which respects the cgroup). Verified
 locally across six precedence cases under a 64-core mask.
+
+> **Since superseded:** this branch originally also forwarded `--test-mode`. `main` retired
+> `IMPRESS_TEST_MODE` and the `TEST` `RunConfig` entirely in PR #64, and merging that in dropped
+> the flag from both files. The argv mechanism and the evidence for it are unaffected — only the
+> one config flag that used to ride it is gone. `IMPRESS_TEST_MODE` below is a record of what the
+> Stage 1/2 runs actually used at the time, not of how to run the pipeline today.
 
 ---
 
@@ -233,8 +239,11 @@ Notes:
 
 ## Caveat: only 2 pipelines in TEST mode
 
-`IMPRESS_TEST_MODE=1` pins `n_pipelines=2`, and the `cfg is PROD` guard in
-`run_small_molecule_binding.py` deliberately blocks `IMPRESS_N_PIPELINES` from overriding TEST.
+*(Historical — `IMPRESS_TEST_MODE` was retired upstream by PR #64 and no longer exists. This
+records how the Stage 1/2 smoke tests behaved when they were run.)*
+
+`IMPRESS_TEST_MODE=1` pinned `n_pipelines=2`, and the `cfg is PROD` guard in
+`run_small_molecule_binding.py` deliberately blocked `IMPRESS_N_PIPELINES` from overriding TEST.
 With only 2 concurrent Dragon tasks, both *could* legitimately land on one node even when
 multi-node is working correctly.
 

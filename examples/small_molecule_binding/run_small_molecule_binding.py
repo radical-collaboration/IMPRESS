@@ -64,27 +64,7 @@ PROD = RunConfig(
     rfd3_partial_t            = 10.0,
 )
 
-# Inert thresholds — everything passes; low task budget for one full cycle.
-TEST = RunConfig(
-    n_pipelines               = 2,
-    max_tasks                 = 10,
-    backbone_max_ca_deviation = 9999.0,
-    backbone_min_ss_fraction  = 0.0,
-    fastrelax_max_fa_rep      = 9999.0,
-    fastrelax_max_score       = 9999.0,
-    fastrelax_max_interact    = 9999.0,
-    interface_min_sc          = 0.0,
-    fold_min_plddt            = -1.0,
-    fold_min_ligand_iptm      = None,
-    diffusion_batch_size      = 1,
-    num_refine_cycles         = 1,
-    mpnn_ensemble_size        = 2,
-    # Not a pass/fail threshold like the fields above — a diffusion-noise
-    # parameter, so kept at a sane real value rather than an inert extreme.
-    rfd3_partial_t            = 10.0,
-)
-
-BACKEND   = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
+BACKEND = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
@@ -97,21 +77,20 @@ else:
 # The CLI path exists because environment variables DO NOT reach this process on
 # a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
 # backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
-# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_TEST_MODE
-# / IMPRESS_N_PIPELINES set by delta_gpu_run.sh are silently dropped and the
-# defaults below would be used instead.  Confirmed on job 22466127, which ran the
-# PROD config despite IMPRESS_TEST_MODE=1.  (MPNN_DIR / BOLTZ_CACHE /
-# FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
+# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_N_PIPELINES
+# / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
+# below would be used instead.  Confirmed on job 22466127, which ran the built-in
+# defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
+# / FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
 # and the ssh login shell sources it -- do not rely on that for new settings.)
 # Dragon passes everything after PROG straight through to us, so argv is the one
 # channel that always works.  parse_known_args so any extra argv is ignored.
 _ap = argparse.ArgumentParser(add_help=False)
 _ap.add_argument("--n-pipelines", type=int, default=None)
-_ap.add_argument("--test-mode", action="store_true")
 _ap.add_argument("--work-dir", default=None)
 _args, _ = _ap.parse_known_args()
 
-cfg = TEST if (_args.test_mode or os.getenv("IMPRESS_TEST_MODE", "0") == "1") else PROD
+cfg = PROD
 
 # Scale pipeline count with the allocation without editing PROD.  run() is a
 # sequential state machine, so n_pipelines IS the job's total concurrency and
@@ -121,7 +100,7 @@ cfg = TEST if (_args.test_mode or os.getenv("IMPRESS_TEST_MODE", "0") == "1") el
 # PROD in place: it is a module-level singleton that run_nonadaptive.py and
 # run_test_small_molecule_binding.py also import.
 _n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
-if _n_pipelines and cfg is PROD:
+if _n_pipelines:
     cfg = replace(cfg, n_pipelines=int(_n_pipelines))
 
 # Thread caps, set here rather than in the batch script for the same reason:
