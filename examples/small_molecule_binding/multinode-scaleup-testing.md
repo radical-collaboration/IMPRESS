@@ -3,10 +3,13 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
+**Status:** Stage 3 complete; telemetry now wired so the next campaign is measured rather than
+inferred. Earlier status line retained below.
+
+**Stage 3:** (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
 `max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
 teardown hangs (see below).
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-28
 
 ---
 
@@ -471,3 +474,69 @@ Implications:
   A 48 h request means an unattended hang could bill the full remainder.
 - Mitigation is therefore two-part: **right-size `--time`** (12 h for the 8-node campaign), and
   **bound the shutdown in code** so the job self-terminates once the work is provably done.
+
+---
+
+## Telemetry wiring
+
+Enabling telemetry is three lines on `ImpressManager`, but the `protein_binding` reference
+wiring copied verbatim would produce a trace that cannot answer the next campaign's question.
+Two defects, both verified against that example's real 7.0 MB output:
+
+1. **Only 2 of 13 tasks would appear.** `auto_register_task(local_task=True)` returns the raw
+   coroutine and never reaches asyncflow, so only `rfd3` and `boltz` emit lifecycle events. The
+   other 11 — `mpnn`, `packmin`, `fastrelax`, `filter_shape`, `filter_energy` and the six
+   analysis stages — are exactly the ones that run on the primary node, whose saturation is the
+   thing worth measuring as the allocation widens.
+2. **Even those 2 are indistinguishable.** The label is `shlex.split(cmd)[0]`, i.e. always
+   `bash` — **3486 of 3486** `executable` attributes in the reference file.
+
+What landed, beyond enabling it:
+- `impress.LocalStage` custom event + a `_timed_local` decorator on all 11 local stages.
+  Additive instrumentation, not an execution change: converting them to `flow.function_task` is
+  not drop-in, since they mutate `self.state`/`self.taskcount` in-process and the
+  `OMP_NUM_THREADS` cap depends on them being subprocesses of the runner.
+- `workflow_id=f"{name}:rfd3"` / `:boltz` at the two Dragon call sites.
+- `checkpoint_path` derived from the resolved `work_dir` (a relative path resolves against
+  `$SCRATCH`, not the source tree, and this inherits per-job scoping);
+  `resource_poll_interval=15.0` (the reference's 5.0 made ResourceUpdate 69% of its file);
+  `checkpoint_interval=300.0` (the reference omits it, so a wall-clock kill loses the
+  128 KB-buffered file); `stop()` in `finally` before `flow.shutdown()` (the reference has it in
+  `try` and loses the file on any error).
+
+Verified off-HPC against the real stack: a live `WorkflowEngine.start_telemetry` session wrote
+the JSONL containing `fastrelax completed 0.020s` and `packmin failed`; the decorator preserves
+`__name__` (required by `auto_register_task`'s `setattr`), returns values and propagates
+exceptions.
+
+### Relationship to `origin/update_usecases/telemetry`
+
+`b8035a4` on that branch diagnoses the same local-task blindness — its comment reads "Local
+tasks never touch self.flow, so asyncflow's automatic telemetry never sees them" — and fixes it
+at the **framework** level: a new `src/impress/utils/telemetry.py` with `wrap_local_task`,
+`build_telemetry_config` and `make_default_subscriber`, with `auto_register_task`'s
+`local_task=True` branch becoming `task = wrap_local_task(self, func)` instead of `task = func`,
+plus unit and integration tests.
+
+That branch is **not in `main`** and does not apply to it: it predates PR #60's lifecycle rework
+and still calls `ImpressManager(execution_backend=...)` and `DragonExecutionBackendV3`. `main`
+carries only the manager-side half (`telemetry_config` / `telemetry_subscribers`), not
+`utils/telemetry.py` and not the `wrap_local_task` hook. The example-side wiring here is
+therefore what works against `main` today.
+
+**If `b8035a4` ever lands, remove `_timed_local` rather than keeping both** — every local stage
+would otherwise emit twice, once from the framework wrapper and once from the decorator.
+
+### What to collect
+
+`logs/<SLURM_JOB_ID>/telemetry/<session>.<ts>.telemetry.jsonl`, one file per run, written only
+on the primary node. The pass condition that matters is **one distinct `node_id` per allocated
+node**: `DragonTelemetryAdapter._collect_loop` is fail-soft at three points and only logs a
+warning, so a silent no-op looks exactly like a working run until the file is read. Secondary
+checks: task labels reading `p*:rfd3` / `p*:boltz` rather than `bash`, and all 11 local stages
+present with durations.
+
+`impress_<jobid>.out` **cannot** answer this — `impress_22491438.out` has 0 occurrences of
+`node_id` and 0 of `telemetry`, since it predates the wiring. It carries only the
+`dragon-network-config` JSON (which nodes Dragon discovered, and which is primary) and the
+`N managers` line.

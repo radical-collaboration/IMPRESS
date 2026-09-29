@@ -1,14 +1,35 @@
 
 import asyncio
 import copy
+import functools
 import gzip
 import json
 import os
 import pathlib
 import shutil
+import time
 from functools import lru_cache
 
 from impress.pipelines.impress_pipeline import ImpressBasePipeline
+
+try:
+    from rhapsody.telemetry import define_event
+    from rhapsody.telemetry.events import make_event
+    # Only 2 of this pipeline's 13 tasks (rfd3, boltz) are registered with the
+    # workflow engine; the other 11 use auto_register_task(local_task=True),
+    # which returns the raw coroutine and never reaches asyncflow, so they emit
+    # no lifecycle events at all.  Those 11 are also the stages that run on the
+    # primary node, i.e. exactly the ones whose cost we need to see.  This event
+    # instruments them additively, without changing how they execute.
+    # define_event requires a dotted namespace -- a flat name raises ValueError.
+    LocalStage = define_event(
+        "impress.LocalStage",
+        stage=str, pipeline=str, duration=float, status=str,
+    )
+except Exception:            # telemetry extra not installed -- stay importable
+    define_event = None
+    make_event = None
+    LocalStage = None
 
 
 # Step constants for the outer state machine
@@ -643,6 +664,56 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         else:
             self._register_real_tasks()
 
+    # ── Telemetry for local (unregistered) stages ──────────────────────────
+
+    def _emit_local_stage(self, stage, duration, status):
+        """Emit one impress.LocalStage event, if telemetry is running.
+
+        The telemetry manager is reached through the workflow engine rather
+        than injected: ImpressManager.start() calls flow.start_telemetry()
+        before it constructs any pipeline, so by the time a task runs the
+        engine already holds it. There is no public accessor, hence getattr.
+        Telemetry is opt-in, so every path here is a no-op when it is off.
+        """
+        if LocalStage is None:
+            return
+        tel = getattr(self.flow, "_telemetry", None)
+        if tel is None:
+            return
+        try:
+            tel.emit(make_event(
+                LocalStage,
+                session_id=tel.session_id,
+                backend="rhapsody",
+                stage=stage,
+                pipeline=self.name,
+                duration=duration,
+                status=status,
+            ))
+        except Exception:
+            # Instrumentation must never take the pipeline down.
+            pass
+
+    def _timed_local(self, func):
+        """Wrap a local_task coroutine so its wall time is recorded.
+
+        Applied *under* auto_register_task, and preserves __name__ because
+        auto_register_task does setattr(self, func.__name__, task).
+        """
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            t0 = time.monotonic()
+            status = "completed"
+            try:
+                return await func(*args, **kwargs)
+            except Exception:
+                status = "failed"
+                raise
+            finally:
+                self._emit_local_stage(
+                    func.__name__, time.monotonic() - t0, status)
+        return wrapper
+
     # ── MOCK tasks ─────────────────────────────────────────────────────────
 
     def _register_mock_tasks(self):
@@ -691,6 +762,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             return cmd
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_backbone():
             out_dir    = f"{self.base_path}/{self.name}/{self.taskcount}_rfd3/out"
             json_files = [
@@ -761,6 +833,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             ))
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def mpnn(
             fixed_residues_file: str | None = None):
             self.taskcount += 1
@@ -825,6 +898,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 raise RuntimeError(f"mpnn failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_sequence():
             out_dir  = f"{self.base_path}/{self.name}/{self.taskcount}_mpnn/out"
             seqs_dir = f"{out_dir}/seqs"
@@ -890,6 +964,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             ))
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def packmin():
             self.taskcount += 1
             taskname = "packmin"
@@ -922,6 +997,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 raise RuntimeError(f"packmin failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_packmin():
             out_dir     = f"{self.base_path}/{self.name}/{self.taskcount}_packmin/out"
             score_files = [f for f in os.listdir(out_dir) if f.endswith('_packmin_score.json')]
@@ -935,6 +1011,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.state['last_analysis_metrics'] = {'pass': True, 'total_score': total_score}
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def fastrelax():
             self.taskcount += 1
             taskname = "fastrelax"
@@ -963,6 +1040,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 raise RuntimeError(f"fastrelax failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_fastrelax():
             out_dir    = f"{self.base_path}/{self.name}/{self.taskcount}_fastrelax/out"
             fasc_files = [f for f in os.listdir(out_dir) if f.endswith('.fasc')]
@@ -991,6 +1069,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def filter_shape(ligand_name: str = "ALR"):
             taskname = "filter_shape"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
@@ -1016,6 +1095,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 raise RuntimeError(f"filter_shape failed with exit code {proc.returncode}\nSee {log_file}")
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_interface():
             sc_file = (
                 f"{self.base_path}/{self.name}/{self.taskcount}_filter_shape/out/"
@@ -1076,6 +1156,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             return cmd
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def analysis_fold():
             # Boltz nests its own output under out_dir/boltz_results_<yaml_stem>/
             # (see boltz/main.py: `out_dir = out_dir / f"boltz_results_{data.stem}"`)
@@ -1133,6 +1214,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task(local_task=True)
+        @self._timed_local
         async def filter_energy(ligand_name: str = "ALR"):
             taskname = "filter_energy"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
@@ -1238,7 +1320,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             if self.next_step == STEP_RFD3:
                 self.logger.pipeline_log("running rfd3")
-                await self.rfd3()
+                # workflow_id is popped from call kwargs by asyncflow and put
+                # into attributes['asyncflow.workflow_id'].  Without it every
+                # executable task is labelled with shlex.split(cmd)[0] -- i.e.
+                # literally 'bash' -- so rfd3 and boltz are indistinguishable
+                # in the trace (confirmed: 3486/3486 'bash' in the reference).
+                await self.rfd3(workflow_id=f"{self.name}:rfd3")
                 self.logger.pipeline_log("rfd3 finished")
                 await self.analysis_backbone()
                 await self.run_adaptive_step()
@@ -1265,7 +1352,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             elif self.next_step == STEP_AF2:
                 self.logger.pipeline_log("running boltz")
-                await self.boltz()
+                # See the rfd3 call above: labels the task in telemetry.
+                await self.boltz(workflow_id=f"{self.name}:boltz")
                 self.logger.pipeline_log("boltz finished")
                 await self.analysis_fold()
                 await self.run_adaptive_step()

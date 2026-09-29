@@ -20,6 +20,23 @@ import rhapsody
 rhapsody.enable_logging(level=logging.INFO)
 
 
+def _on_task_event(event) -> None:
+    """Surface task failures in the job log as they happen.
+
+    Telemetry writes a JSONL file that is only read after the fact; this makes
+    failures visible while the run is in flight.  Note the workflow label lives
+    in event.attributes, NOT as an event attribute -- run_nonadaptive.py in the
+    protein_binding example does getattr(event, "workflow_id", None), which
+    always yields None.  Dispatch swallows subscriber exceptions, so a bug here
+    would fail silently; keep it trivial.
+    """
+    if getattr(event, "event_type", None) == "TaskFailed":
+        attrs = getattr(event, "attributes", None) or {}
+        label = attrs.get("asyncflow.workflow_id") or attrs.get("executable")
+        print(f"[TELEMETRY] TaskFailed task={event.task_id} "
+              f"label={label} error={getattr(event, 'error_type', None)}")
+
+
 @dataclass
 class RunConfig:
     n_pipelines: int
@@ -367,7 +384,27 @@ async def impress_smallmol_bind() -> None:
     else:
         backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
-    manager: ImpressManager = ImpressManager(flow)
+    manager: ImpressManager = ImpressManager(
+        flow,
+        telemetry_config={
+            # Absolute, derived from the already-resolved work_dir.  A relative
+            # path (as the protein_binding reference uses) resolves against the
+            # cwd of whichever process builds the TelemetryManager -- under
+            # delta_gpu_run.sh that is $SCRATCH, not the source tree.  Deriving
+            # it from work_dir also inherits per-job scoping for free, since
+            # IMPRESS_WORK_DIR is logs/$SLURM_JOB_ID.
+            "checkpoint_path": os.path.join(work_dir, "telemetry"),
+            # The reference uses 5.0, which made ResourceUpdate 69% of its
+            # output file.  15s cuts that dominant term ~3x and leaves task
+            # lifecycle events untouched.
+            "resource_poll_interval": 15.0,
+            # The reference omits this, so nothing reaches disk until stop().
+            # The file is 128KB-buffered, so a job killed by the wall clock
+            # loses everything.  Flush every 5 minutes instead.
+            "checkpoint_interval": 300.0,
+        },
+        telemetry_subscribers=[_on_task_event],
+    )
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -399,6 +436,15 @@ async def impress_smallmol_bind() -> None:
     try:
         await manager.start(pipeline_setups=pipeline_setups)
     finally:
+        # stop() is the only thing that writes the metric/span sections and
+        # flushes the 128KB-buffered checkpoint file, so it must run even when
+        # manager.start() raises -- the reference implementation puts it in the
+        # try block and loses the file on any error.  Before flow.shutdown().
+        if manager.telemetry:
+            try:
+                await manager.telemetry.stop()
+            except Exception as exc:               # never mask the real error
+                print(f"[TELEMETRY] stop() failed: {exc!r}")
         await flow.shutdown()
 
 
