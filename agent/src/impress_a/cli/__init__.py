@@ -136,6 +136,37 @@ async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
                          f"{'' if r.trusted else ' untrusted'}]" for r in running))
 
 
+def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
+    """How many threads each CPU-bound child may take, sized from what this process was
+    actually given rather than from the machine.
+
+    `os.cpu_count()` reports the node, not the allocation, so on anything less than a
+    whole node every Rosetta stage would claim every core on the box and the stages
+    would fight each other. `sched_getaffinity` reports the cgroup we were placed in.
+    The divisor is the number of pipelines that can be in flight at once - concurrent
+    experiments times replica lineages, each of which can be running a CPU-bound P2
+    stage - halved again, which is upstream's sizing
+    (`run_small_molecule_binding.py:134-143`) and leaves headroom for the GPU stages'
+    host-side work.
+
+    Computed here rather than in an adapter because this is the only layer that knows
+    both numbers: a `TaskRequest` carries no concurrency information, and an agent
+    cannot see how many siblings it has. Applied with `setdefault`, so an operator who
+    exported their own value keeps it.
+    """
+    if hasattr(os, "sched_getaffinity"):
+        ncpu = len(os.sched_getaffinity(0))
+    else:  # not Linux; the campaign path is, but the test tier need not be
+        ncpu = os.cpu_count() or 1
+    pipelines = max(1, spec.concurrency) * max(1, spec.replicas)
+    per = max(1, ncpu // (pipelines * 2))
+    caps = {v: str(per) for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+                                  "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
+    # Spinning idle threads burn a core each while a stage waits on the GPU stages.
+    caps["OMP_WAIT_POLICY"] = "PASSIVE"
+    return caps
+
+
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None) -> int:
     t0 = time.monotonic()
@@ -144,6 +175,14 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
+    for var, val in _thread_caps(spec).items():
+        os.environ.setdefault(var, val)
+        # The effective value, not the computed one: an operator who exported their own
+        # keeps it, and a log that reported our suggestion instead would be describing a
+        # run that is not the one happening.
+        actual = os.environ[var]
+        log.info("thread cap %-22s %s%s", var, actual,
+                 "" if actual == val else f"  (kept from the environment, not {val})")
     spec.campaign_id = f"{spec.campaign_id}-{model}"
     policy = build_policy(model, spec, guard)
     reg = Registry().load()
@@ -203,6 +242,16 @@ def preflight(spec: CampaignSpec | None = None) -> int:
             checks.append((f"${var}", False, f"set but does not exist: {val}"))
         else:
             checks.append((f"${var}", True, val))
+
+    # Presence of the weights is not completeness of the CCD dictionary, and the two
+    # fail very differently: missing weights fail on the login node, a half-extracted
+    # CCD fails inside the allocation, per-lineage, as `CCD component ... not found!`.
+    if cache := os.environ.get("BOLTZ_CACHE"):
+        marked = (Path(cache) / ".mols_complete").exists()
+        checks.append(("boltz CCD cache", marked,
+                       "extraction proven complete" if marked else
+                       "no .mols_complete marker - re-run scripts/delta_env_setup.sh "
+                       "step 11 HERE, where there is still internet to repair it"))
 
     for exe, what in (("apptainer", "rfd3_design"), ("boltz", "boltz_predict")):
         found = shutil.which(exe)

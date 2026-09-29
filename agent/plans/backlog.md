@@ -1,9 +1,11 @@
 # Backlog
 
-Everything outstanding, as of the stagnation fix. Nothing here is started. Each item says why it
-matters so the list can be triaged rather than worked through top to bottom.
+Everything outstanding. Each item says why it matters so the list can be triaged rather than
+worked through top to bottom. Items resolved since the list was written carry a **RESOLVED**
+paragraph in place rather than being deleted - the evidence that forced them is the useful part.
 
-State it is measured against: 94 tests passing, lint 41, import contract clean, all control models
+State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
+now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
 on Delta - but no line of the real toolkits has executed yet (A1).
 
@@ -79,12 +81,21 @@ prove this failure mode is the dominant one; the real tools have no equivalent.
   output geometry rather than the tool's opinion of itself - so it is not the caveat in
   `docs/limitations.md`. See G2.
 
-**B2. No known-bad fixtures.** `docs/reference/authoring-tools.md` requires `tests/` per tool holding
-known-BAD outputs. Zero such directories exist, for any toolkit. A gate that has never seen the
-output it was written to catch is an assertion, not a test.
+**B2. No known-bad fixtures — RESOLVED.** Every non-mock tool now carries `tests/*.bad.json` and
+`tests/*.good.json`, run against its own declared gates by `tests/test_gate_fixtures.py`, which also
+fails if a new real tool arrives without one. The payloads are transcribed from each adapter's own
+failure branches, not observed from a run (A1 is still open), and two of them are filed as bug
+reports rather than as reassurance: `ligandmpnn_design/tests/unparsed_confidence_header.bad.json`
+pins a parser failure being reported as 0.0 confidence, and
+`fastrelax/tests/passes_ours_fails_upstream.good.json` is the executable record of G4 — it must move
+to `.bad.json` when G4 closes. What remains unmet is B1: no fixture here is *structural*, because no
+structural gate exists to feed.
 
 **B3. `count_matches_request` is implemented and referenced by nothing** — while `FastRelaxAgent` was,
-until recently, fabricating exactly the count such a gate would have caught.
+until recently, fabricating exactly the count such a gate would have caught. It now has its first
+test (`test_gate_fixtures.py::test_count_matches_request_catches_a_fabricated_count`), which also
+pins the reason wiring it up is not free: with no `expected` param the gate abstains, so adding the
+id to a spec does nothing on its own.
 
 ## C. Unbuilt from the roadmap
 
@@ -131,6 +142,20 @@ upstream; their fix holds `flock -x 200` across the whole check-and-repair and w
 `.mols_complete` marker (`scripts/boltz.sh:15-31`). We run `replicas: 4` against one shared
 `$BOLTZ_CACHE`, and `delta_env_setup.sh`'s warm-up is non-fatal, so a partial cache is reachable.
 
+  **RESOLVED, with one deliberate departure.** `_claim_cache` (`tools/boltz_agents.py`) takes an
+  exclusive `flock` on an unproven cache and holds it across the prediction - the extraction being
+  raced happens *inside* `boltz predict`, so a check-then-release would not close the window - then
+  writes `.mols_complete`. Only the first run pays; later lineages take the fast path and predict
+  in parallel. The lock is acquired via `asyncio.to_thread`, because a blocking `flock` on the
+  event loop would stall the heartbeat the same way Dragon's synchronous `Batch()` did. The
+  departure: **we never delete a partial cache**, where upstream repairs by removing and
+  re-downloading. Compute nodes have no egress - the reason the warm-up runs on a login node at
+  all - so deleting a cache that turned out to be fine would end the campaign with no way back.
+  Instead `delta_env_setup.sh` step 11 writes the marker on a *successful* warm-up, and
+  `impress-a preflight` now reports an unmarked cache, on the node that can still repair it.
+  A genuinely half-extracted cache that reaches a compute node unmarked is therefore caught early
+  and loudly rather than silently, but still cannot be repaired there.
+
 **C9. No thread caps; the Rosetta stages oversubscribe.** Upstream sizes from the cgroup -
 `sched_getaffinity(0)`, `_omp = max(1, _ncpu // (n_pipelines * 2))` across
 `OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS` plus `OMP_WAIT_POLICY=PASSIVE`, explicitly not
@@ -138,10 +163,23 @@ upstream; their fix holds `flock -x 200` across the whole check-and-repair and w
 (`run_small_molecule_binding.py:134-143`). We set none, with `replicas: 4` and three CPU-bound P2
 stages.
 
+  **RESOLVED.** `_thread_caps` (`cli/__init__.py`) applies upstream's sizing at campaign start.
+  Placed there rather than in an adapter because it is the only layer that knows both numbers: a
+  `TaskRequest` carries no concurrency information and an agent cannot see how many siblings it
+  has. Applied with `setdefault`, so an operator's own export wins - and the log reports the
+  *effective* value, not the computed one, so a run is never described as something it is not.
+  `run_cmd` passes `env=None`, so every child inherits these without any adapter change.
+
 **C10. `$HOME` leaks into the rfd3 container.** apptainer mounts `$HOME` by default; upstream does
 `unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE; export PYTHONNOUSERSITE=1` (set, not
 unset) before exec (`scripts/rfd3.sh:19-22`). `run_cmd` passes no `env`, so our container inherits
 everything including user site-packages.
+
+  **RESOLVED.** `_container_env()` (`tools/rfd3_agents.py`) strips exactly those three and sets
+  `PYTHONNOUSERSITE=1`, passed as `env=` to the `apptainer exec`. Everything else is passed
+  through deliberately - `$SCRATCH`, the SLURM and CUDA variables all have to reach the container.
+  Pinned by `test_rfd3_does_not_leak_this_pythons_packages_into_the_container`, which also asserts
+  an unrelated variable survives, so a future "strip more" does not quietly break the bind.
 
 ## D. Registry and spec-contract gaps
 
@@ -222,8 +260,12 @@ measure, and A1 is still open.
 
 **G3. `dump_trajectories=True` writes 99.4% waste.** Upstream measured trajectories at 11.85 MB of
 each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a campaign from ~30 GB to
-~3.8 GB. Safe because trajectory files ship no `.json`. We never read them. Left True only because
-flipping it alongside G2 is one decision, not two.
+~3.8 GB. Safe because trajectory files ship no `.json`. We never read them.
+
+  **RESOLVED** - flipped to `False` (`tools/rfd3_agents.py`) and asserted in the Hydra-contract
+  test. It was held back only to be decided alongside G2; on inspection they are independent.
+  G2 changes *which* file the agent reads for its metrics, while this changes whether a file
+  nothing reads is written at all, so flipping it early costs G2 nothing.
 
 **G4. The fastrelax gates are far looser than upstream's calibrated ones.** Ours:
 `total_score max: 0.0`, `fa_rep max: 500.0`, no `interaction_energy` at all. Upstream PROD:
@@ -242,20 +284,32 @@ rather than obviously wrong.
 
 ## Recommended order
 
-1. **B1/B2 QC hardening** — the central claim of the project is currently unbacked for real tools.
-2. **A1-A3 the first real run** — needs a person, and everything else is speculation until it happens.
-3. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
-4. **F1-F4 docs** — cheap, and the absent ADR is the one a future reader will most want.
-5. **C5-C7 the reasoner's entry points** — the transport is built and tested; without these
+This order was written at the stagnation fix, before C8-C10 and G2-G5 existed. Two things it got
+wrong, corrected here: **B1 partly depended on its own item 2** (B1's cheapest form is G2, which is
+deferred until a real run shows what an `out_dir` contains — whereas B2 needed nothing, since every
+gate takes a plain dict), and **the pre-run hazards were unranked** although they would have been
+paid for out of the first allocation.
+
+1. ~~**B2 known-bad fixtures**~~ — **DONE.** Every real tool now carries them, with a guard test
+   that fails when a tool has none. B1's structural gates remain open and follow G2.
+2. ~~**C8, C9, C10, G3 the pre-run hazards**~~ — **DONE.** Code-only, no allocation needed, and
+   each would have corrupted or wasted the first `replicas: 4` run.
+3. **A1-A3 the first real run** — needs a person, and everything else is speculation until it happens.
+4. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
+5. **F1-F4 docs** — cheap, and the absent ADR is the one a future reader will most want.
+6. **C5-C7 the reasoner's entry points** — the transport is built and tested; without these
    it can only be reached from `tests/`, and `--model C` keeps reporting a model-D campaign.
-6. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
-7. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. It is latent until then.
+7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
+   tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
+8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
+9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
+   then, and now pinned by two characterization tests that must change when it is decided.
 
 ## Verification that applies to any item
 
-`pytest tests -q` — 94 tests green, no allocation. `ruff check src tests` must not exceed 41.
-Import contract: `policy` must not reach `tools`/`exec`/`runtime`; `compose` must not reach `exec`;
-`core` imports nothing internal. `impress-a run campaigns/mock-stabilize.yaml --model D` and
+`pytest tests -q` green, no allocation. `ruff check src tests` **must not exceed 41** — the one
+number worth stating, and a budget that drifts upward is the thing you want to notice. The import
+contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
 `impress-a run campaigns/delta-small-molecule-smoke.yaml --model D` must compose `rfd3_design…`,
 never `mock_generate…`.

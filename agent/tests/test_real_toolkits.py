@@ -11,6 +11,7 @@ and each toolkit's SKILL.md Pitfalls).
 from __future__ import annotations
 
 import pathlib
+from typing import Any
 
 import pytest
 
@@ -240,10 +241,10 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
     monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
     monkeypatch.chdir(tmp_path)
 
-    captured: dict[str, list[str]] = {}
+    captured: dict[str, Any] = {}
 
-    async def fake_run_cmd(cmd, timeout_s=None):
-        captured["cmd"] = cmd
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["cmd"], captured["env"] = cmd, env
         return "", ""
 
     monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
@@ -273,7 +274,10 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
         "these flags do not exist on the real CLI"
     assert "inputs=/fake/inputs.json" in overrides
     assert "skip_existing=False" in overrides
-    assert "dump_trajectories=True" in overrides
+    # False, against the CLI's own default: trajectories were 99.4% of each output dir
+    # upstream and nothing here reads them. If this ever flips back, a campaign's
+    # footprint goes from ~3.8 GB to ~30 GB with no change in what is measured.
+    assert "dump_trajectories=False" in overrides
     assert "prevalidate_inputs=True" in overrides
     assert "diffusion_batch_size=3" in overrides
     assert "inference_sampler.num_timesteps=42" in overrides
@@ -295,10 +299,10 @@ async def test_rfd3_binds_scratch_into_the_container(reg, monkeypatch, tmp_path)
     monkeypatch.setenv("SCRATCH", "/work/hdd/fake")
     monkeypatch.chdir(tmp_path)
 
-    captured: dict[str, list[str]] = {}
+    captured: dict[str, Any] = {}
 
-    async def fake_run_cmd(cmd, timeout_s=None):
-        captured["cmd"] = cmd
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["cmd"], captured["env"] = cmd, env
         return "", ""
 
     monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
@@ -322,6 +326,50 @@ async def test_rfd3_binds_scratch_into_the_container(reg, monkeypatch, tmp_path)
     monkeypatch.delenv("SCRATCH")
     await agent.run(req, params)
     assert "--bind" not in captured["cmd"]
+
+
+async def test_rfd3_does_not_leak_this_pythons_packages_into_the_container(
+        reg, monkeypatch, tmp_path):
+    """apptainer passes the whole environment through and bind-mounts $HOME.
+
+    Without an explicit env the container imports THIS campaign's Python on top of its
+    own: `PYTHONPATH` carries the editable install of this repo, and `$HOME`'s user
+    site-packages carry a second torch/numpy. The image ships a pinned stack; layering
+    another over it is how a container that works interactively fails under a campaign.
+    """
+    from impress_a.tools import rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.setenv("PYTHONPATH", "/home/someone/exdrive/rad/impress-a/src")
+    monkeypatch.setenv("PYTHONUSERBASE", "/home/someone/.local")
+    monkeypatch.setenv("KEEP_ME", "yes")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["env"] = env
+        return "", ""
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
+    params = agent.parameterize(TaskRequest(
+        tool="rfd3_design", node_id=req.node_id,
+        params={"input_spec_path": "/fake/inputs.json"}))
+    await agent.run(req, params)
+
+    env = captured["env"]
+    assert env is not None, "no env passed: the container inherits ours wholesale"
+    assert "PYTHONPATH" not in env
+    assert "PYTHONUSERBASE" not in env
+    assert env["PYTHONNOUSERSITE"] == "1", \
+        "set, not unset - it is read for presence, so even '0' would disable user site"
+    assert env["KEEP_ME"] == "yes", \
+        "only the Python-resolution variables are stripped; $FOUNDRY_SIF_PATH, " \
+        "$SCRATCH and the SLURM/CUDA variables must still reach the container"
 
 
 async def test_ligandmpnn_passes_absolute_checkpoints_and_runs_in_the_checkout(
@@ -447,3 +495,89 @@ def test_check_ligand_smiles_catches_the_silent_wrong_answer():
 
     no_boltz = CampaignSpec(**base, stages=["rfd3_design"], params={})
     assert _check_ligand_smiles(no_boltz) is None
+
+
+def test_thread_caps_divide_the_allocation_not_the_node(monkeypatch):
+    """The three Rosetta stages are CPU-bound and run one per lineage.
+
+    Sized from `os.cpu_count()` they would each claim the whole node and fight; sized
+    from the cgroup and divided by the pipelines in flight they do not. Backlog C9.
+    """
+    from impress_a.cli import _thread_caps
+    from impress_a.core.pareto import Direction, Objective
+    from impress_a.manager import CampaignSpec
+
+    base = {"campaign_id": "c", "goal": "g",
+            "objectives": [Objective(name="x", direction=Direction.MIN)]}
+    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: set(range(64)))
+
+    caps = _thread_caps(CampaignSpec(**base, concurrency=2, replicas=4))
+    assert caps["OMP_NUM_THREADS"] == "4", "64 cpus / (2*4 pipelines * 2) = 4"
+    assert {caps[v] for v in ("MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                              "NUMEXPR_NUM_THREADS")} == {"4"}, \
+        "all four libraries must agree, or the widest one wins"
+    assert caps["OMP_WAIT_POLICY"] == "PASSIVE"
+
+    # Never zero: more pipelines than cores must still leave each child one thread.
+    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: {0, 1})
+    starved = _thread_caps(CampaignSpec(**base, concurrency=4, replicas=8))
+    assert starved["OMP_NUM_THREADS"] == "1"
+
+    # replicas defaults to 0 ("policy decides"), which must not divide by zero or
+    # hand a single lineage the entire allocation's worth of threads per stage.
+    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: set(range(16)))
+    unset = _thread_caps(CampaignSpec(**base))
+    assert unset["OMP_NUM_THREADS"] == "8"
+
+
+def test_the_boltz_cache_guard_serialises_once_then_gets_out_of_the_way(tmp_path):
+    """`download_boltz2()` checks the CCD directory's PRESENCE, not its completeness,
+    so a second lineage starting mid-extraction reads a half-populated cache and dies
+    on `CCD component ... not found!`. Backlog C8, measured upstream.
+
+    The guard must also be a one-time cost: once a run has proven the cache, later
+    lineages take the fast path and predict in parallel.
+    """
+    import os as _os
+
+    from impress_a.tools.boltz_agents import _CACHE_COMPLETE, _claim_cache
+
+    cache = tmp_path / "boltz"
+    fd = _claim_cache(cache)
+    assert fd is not None, "an unproven cache must be claimed exclusively"
+    assert cache.exists(), "and created if absent"
+    _os.close(fd)
+
+    # Nothing wrote the marker, so the cache is still unproven - a run that crashed
+    # must not leave the next one thinking the extraction completed.
+    assert _claim_cache(cache) is not None
+
+    (cache / _CACHE_COMPLETE).write_text("proven\n")
+    assert _claim_cache(cache) is None, \
+        "a proven cache must not be locked, or replicas would serialise forever"
+
+
+def test_the_boltz_cache_guard_never_deletes_a_cache_it_cannot_refetch(tmp_path):
+    """Where this departs from upstream, deliberately.
+
+    Upstream repairs a partial cache by removing it and re-downloading. Compute nodes
+    have no egress - which is why the warm-up runs on a login node at all - so deleting
+    a cache that turned out to be fine would end the campaign with no way back. An
+    unproven-but-populated cache is left exactly as found; `impress-a preflight` is
+    what catches it, on a node that can still repair it.
+    """
+    import os as _os
+
+    from impress_a.tools.boltz_agents import _claim_cache
+
+    cache = tmp_path / "boltz"
+    (cache / "mols").mkdir(parents=True)
+    (cache / "mols" / "ALR.pkl").write_text("payload")
+    (cache / "boltz2_conf.ckpt").write_text("weights")
+
+    fd = _claim_cache(cache)
+    assert fd is not None
+    _os.close(fd)
+
+    assert (cache / "mols" / "ALR.pkl").read_text() == "payload"
+    assert (cache / "boltz2_conf.ckpt").exists()

@@ -250,10 +250,19 @@ sequences:
       sequence: MAAAAAAAAAAAAAAAAAAA
       msa: empty
 YAML
-"${ENV_DIR}/bin/boltz" predict "${_WARM_DIR}/warm.yaml" \
+if "${ENV_DIR}/bin/boltz" predict "${_WARM_DIR}/warm.yaml" \
     --out_dir "${_WARM_DIR}/out" --cache "${BOLTZ_CACHE}" \
-    --devices 1 --accelerator cpu --output_format pdb \
-    || echo "WARNING: boltz cache warm-up failed - check login-node internet access"
+    --devices 1 --accelerator cpu --output_format pdb; then
+    # Marks the CCD dictionary as fully extracted. Compute nodes then take the fast
+    # path in `_claim_cache` (src/impress_a/tools/boltz_agents.py) instead of
+    # serialising their first prediction - and, more importantly, an unextracted cache
+    # is caught HERE, on a node that still has internet, rather than inside the
+    # allocation where it cannot be repaired.
+    touch "${BOLTZ_CACHE}/.mols_complete"
+else
+    echo "WARNING: boltz cache warm-up failed - check login-node internet access"
+    echo "         (leaving ${BOLTZ_CACHE}/.mols_complete unwritten; preflight will flag it)"
+fi
 rm -rf "${_WARM_DIR}"
 
 # ── 12. Verify ──────────────────────────────────────────────────────────────────

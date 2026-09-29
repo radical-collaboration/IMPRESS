@@ -6,14 +6,20 @@ YAML spec (protein sequence + ligand SMILES), and calls `boltz predict`.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import yaml
 
 from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
+
+#: Written beside the cache once a `boltz predict` against it has completed. Presence
+#: means the CCD component dictionary was fully extracted at least once.
+_CACHE_COMPLETE = ".mols_complete"
 
 _THREE_TO_ONE = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q", "GLU": "E",
@@ -29,6 +35,47 @@ def _extract_sequence(pdb_path: str) -> str:
     chain = next(iter(next(iter(structure))))
     return "".join(_THREE_TO_ONE.get(r.get_resname(), "X")
                     for r in chain if r.get_resname() in _THREE_TO_ONE)
+
+
+def _claim_cache(cache: Path) -> int | None:
+    """Blocking. Return an fd holding an exclusive lock on `cache`, or None if some
+    earlier run already proved the cache complete.
+
+    Boltz's own `download_boltz2()` guards extraction with `mols.exists()` - presence,
+    not completeness - so a second lineage starting while the first is mid-extraction
+    sees the directory, skips the download, and dies on `CCD component <resname> not
+    found!`. We run `replicas: 4` against one shared `$BOLTZ_CACHE` and the login-node
+    warm-up (`scripts/delta_env_setup.sh` step 11) is non-fatal, so an unextracted cache
+    reaching a compute node is reachable, not hypothetical. Measured upstream, which
+    fixes it the same way: `flock -x` across the whole check-and-repair plus a marker
+    file (`scripts/boltz.sh:15-31`).
+
+    Deliberately never deletes a partial cache, which is where this departs from
+    upstream's repair. Compute nodes have no egress - that is why the warm-up runs on a
+    login node at all - so removing a cache that turned out to be fine would take the
+    whole campaign down with no way to refetch. Serialising until one run succeeds is
+    the conservative half of the fix; `impress-a preflight` checks the marker so an
+    unproven cache is caught on the login node, where it can still be repaired.
+    """
+    import fcntl
+
+    cache.mkdir(parents=True, exist_ok=True)
+    if (cache / _CACHE_COMPLETE).exists():
+        return None
+    fd = os.open(str(cache / ".mols.lock"), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        # No flock on this filesystem. Better to race than to refuse to run: the
+        # failure this guards against is loud (`CCD component ... not found!`), and a
+        # campaign that cannot start is worse than one that might hit it.
+        os.close(fd)
+        return None
+    if (cache / _CACHE_COMPLETE).exists():
+        # Someone completed it while we were waiting for the lock.
+        os.close(fd)
+        return None
+    return fd
 
 
 class BoltzPredictAgent(TaskAgent):
@@ -79,7 +126,23 @@ class BoltzPredictAgent(TaskAgent):
             cmd += ["--seed", str(params["seed"])]
         if params["use_msa_server"]:
             cmd.append("--use_msa_server")
-        await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))
+
+        # Held across this whole call, not just a check: the extraction we are
+        # serialising against happens *inside* `boltz predict`. Only the first run pays
+        # for it - once the marker exists every later lineage takes the fast path and
+        # they proceed in parallel. `to_thread` because flock blocks, and a blocked
+        # event loop here would stall the executor's heartbeat exactly the way Dragon's
+        # synchronous `Batch()` did (see docs/limitations.md).
+        cache_lock = await asyncio.to_thread(_claim_cache, Path(cache))
+        try:
+            await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))
+            if cache_lock is not None:
+                (Path(cache) / _CACHE_COMPLETE).write_text(
+                    "written by impress_a after a boltz predict completed against this "
+                    "cache; delete to force the next run to re-prove it\n")
+        finally:
+            if cache_lock is not None:
+                os.close(cache_lock)  # releases the flock
 
         confidence_files = sorted((work / "out").glob("**/confidence_*.json"))
         pdb_files = sorted((work / "out").glob("**/*.pdb"))

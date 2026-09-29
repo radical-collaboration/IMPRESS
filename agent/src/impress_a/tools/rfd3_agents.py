@@ -21,6 +21,26 @@ from ._subprocess import run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
 
+def _container_env() -> dict[str, str]:
+    """The environment the `foundry` container should see - ours, minus the three
+    variables that would make it import this campaign's Python instead of its own.
+
+    apptainer bind-mounts `$HOME` by default and passes the whole environment through,
+    so without this the container inherits `PYTHONPATH` (this repo, via the editable
+    install), `PYTHONUSERBASE`, and `~/.local/lib/python3.x/site-packages` - a second,
+    incompatible torch/numpy stack layered over the image's own. The original IMPRESS
+    pipeline unsets exactly these three and sets `PYTHONNOUSERSITE` before exec
+    (`scripts/rfd3.sh:19-22`); this is that, as a dict.
+
+    Note `PYTHONNOUSERSITE` is *set*, not unset: it is read for presence, so any value
+    - including "0" - disables user site-packages.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONUSERBASE", "PYTHONDONTWRITEBYTECODE")}
+    env["PYTHONNOUSERSITE"] = "1"
+    return env
+
+
 class RFD3DesignAgent(TaskAgent):
     """De novo backbone generation. More `diffusion_steps` trades wall-clock for quality."""
 
@@ -40,7 +60,12 @@ class RFD3DesignAgent(TaskAgent):
             f"out_dir={work}",
             f"inputs={params['input_spec_path']}",
             "skip_existing=False",
-            "dump_trajectories=True",
+            # False, not the CLI's default True: upstream measured trajectories at
+            # 11.85 MB of each 11.92 MB output dir - 99.4% - and flipped it (IMPRESS
+            # 0800ad8), taking a campaign from ~30 GB to ~3.8 GB. Safe for us because
+            # nothing here reads them: the candidates are discovered by globbing
+            # `*.cif.gz`, and trajectory files ship no sidecar `.json` (see G2).
+            "dump_trajectories=False",
             "prevalidate_inputs=True",
             f"diffusion_batch_size={params['num_designs']}",
             f"inference_sampler.num_timesteps={params['diffusion_steps']}",
@@ -63,7 +88,7 @@ class RFD3DesignAgent(TaskAgent):
         await run_cmd([
             "apptainer", "exec", "--nv", *binds, foundry,
             "rfd3", "design", *overrides,
-        ], timeout_s=float(self.spec.resources.walltime_s))
+        ], env=_container_env(), timeout_s=float(self.spec.resources.walltime_s))
 
         cif_models = sorted(work.glob("*.cif.gz"))
         if not cif_models:

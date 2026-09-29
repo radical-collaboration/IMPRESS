@@ -28,6 +28,10 @@ fail loudly when their environment is absent, but no scientific code has run thr
    been rewritten to the real Hydra `key=value` contract; see backlog A3 and `toolkits/rfd3/SKILL.md`).
    Also found in the same pass and fixed: `boltz_predict` was missing the required `--no_kernels`
    flag.
+3a. **Re-run `scripts/delta_env_setup.sh` step 11 on a login node** if `impress-a preflight` reports
+   `boltz CCD cache` as unmarked. The marker is written only on a *successful* warm-up, and the
+   compute nodes have no egress to repair a half-extracted cache themselves (backlog C8).
+
 4. **Smoke first** — `sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml`.
    One cycle, one lineage. Both Delta campaign YAMLs now also set
    `backend_startup_timeout_s: 600` so a Dragon-backend-construction hang (job 22318678; see
@@ -46,6 +50,11 @@ fail loudly when their environment is absent, but no scientific code has run thr
   adapters inherit it as CWD. A path under the system temp dir means the workdir plumbing regressed,
   and under Dragon multi-node it will surface as a missing file deep inside a science tool.
 - The front carries `total_score`, `shape_complementarity`, `complex_plddt`, `ligand_iptm`.
+- The `thread cap` lines at the head of the campaign log divide the *allocation*, not the node. On
+  a partial-node allocation `OMP_NUM_THREADS` should be well under the node's core count; if it
+  equals it, `sched_getaffinity` is not seeing the cgroup and the Rosetta stages will fight
+  (backlog C9).
+- `out_dir` holds no `traj/` output and is ~1 MB per design, not ~12 (backlog G3).
 - Estimated vs actual cost per tool — the cost models are literature guesses and gate 5 refuses
   graphs against them. Record the real numbers; this is the only way that gets calibrated.
 
