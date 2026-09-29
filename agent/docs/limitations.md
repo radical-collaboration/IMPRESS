@@ -105,6 +105,26 @@ What this does **not** solve: *why* a real construction might stall inside Drago
 `Batch()`/`Pool()` (most likely GPU-affinity worker rendezvous or OFI/libfabric negotiation) is
 still unknown - see backlog A5.
 
+## ...and during teardown
+
+The mirror image, and the more expensive one, because by then the campaign has already produced
+everything it was asked for. Measured on the reference IMPRESS pipeline (job 22491438):
+`flow.shutdown()` never returned after all sixteen of its pipelines had finished. The job sat 60
+minutes and had to be cancelled by hand - roughly 64 GPU-hours, 37% of its billed total, spent
+after the science was done. That project's own conclusion was to treat it as reproducible until
+shown otherwise.
+
+Bounded by `CampaignSpec.backend_shutdown_timeout_s` (0 disables, as with startup; 300s in both
+Delta campaigns). On expiry the teardown is **abandoned with a warning rather than raised**:
+every result is already durable in provenance and the ledger by that point, so the worst case is
+leaked backend state in a process that is about to exit - whereas raising would turn a campaign
+that succeeded into one that reports failure.
+
+Note this is a place where we deliberately diverge from the reference pipeline, which declined the
+in-code bound and relies on an operator watching the log and issuing `scancel`. The SLURM wall
+clock remains our second line of defence, which is part of why `scripts/delta_gpu_run.sh` asks for
+12 hours rather than the partition maximum.
+
 ## Dragon removes the root logger's handlers
 
 `dragon.native.Pool.__init__` and `ProcessGroup.__init__` call `setup_BE_logging`, which begins with

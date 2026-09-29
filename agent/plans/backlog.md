@@ -3,7 +3,7 @@
 Everything outstanding, as of the stagnation fix. Nothing here is started. Each item says why it
 matters so the list can be triaged rather than worked through top to bottom.
 
-State it is measured against: 89 tests passing, lint 41, import contract clean, all control models
+State it is measured against: 94 tests passing, lint 41, import contract clean, all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
 on Delta - but no line of the real toolkits has executed yet (A1).
 
@@ -54,7 +54,10 @@ iterate against instead of another silent multi-hour loss.
 but the output-parsing half of `RFD3DesignAgent` (glob for `*.cif.gz`, convert via `cif_gz_to_pdb`)
 was not re-verified against a real `out_dir` listing - confirm the exact output filenames on the
 first real smoke run (`dump_prediction_metadata_json`/`output_full_json` are both `True` by
-default, so this should be visible immediately).
+default, so this should be visible immediately). **Largely answered by the reference pipeline**,
+which discovers candidates as `*.json` containing `_model_` and derives the structure by
+`.replace('.json', '.cif.gz')` - so the shape is `*_model_*.cif.gz` alongside `*_model_*.json`. Our
+glob finds the structures; confirm on the first real run, and see G2 for using the JSON we discard.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 
@@ -64,6 +67,17 @@ is currently a threshold on each tool's own opinion of itself.
 **B1. No structural QC gates.** Nothing checks the ligand is actually present in the output complex,
 that there are no chain breaks, or that sequence length matches the contig. `mock_noodle` exists to
 prove this failure mode is the dominant one; the real tools have no equivalent.
+
+  **Cheaper than this entry implies, for rfd3 at least.** RFD3 already reports its own structural
+  metrics in a sidecar `*_model_*.json` beside each `.cif.gz`: `n_clashing.ligand_clashes`,
+  `n_clashing.interresidue_clashes_w_sidechain`/`_w_backbone`, `max_ca_deviation`, `helix_fraction`,
+  `sheet_fraction`. The reference IMPRESS pipeline gates on exactly these
+  (`analysis_backbone`, `small_molecule_binding.py:766-833`). We ignore the JSON entirely: we glob
+  `*.cif.gz`, take `cif_models[0]` unconditionally, and compute our own phi/psi SS fraction
+  (`_pdbtools.py:19-42`, explicitly not DSSP). A `ligand_clashes == 0` gate is a real structural
+  check, and unlike `metric_in_range` on a self-reported confidence it is a measurement of the
+  output geometry rather than the tool's opinion of itself - so it is not the caveat in
+  `docs/limitations.md`. See G2.
 
 **B2. No known-bad fixtures.** `docs/reference/authoring-tools.md` requires `tests/` per tool holding
 known-BAD outputs. Zero such directories exist, for any toolkit. A gate that has never seen the
@@ -109,6 +123,25 @@ single trusted client, no auth, no TLS. Planning question M6
 process runs relative to the job — was sidestepped rather than answered, and a real split on Delta
 needs it settled: the compute node's private interface, or a tunnel, and what the security boundary
 then is. Blocked on C5.
+
+**C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
+`mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
+reads a half-populated directory, failing with `CCD component <resname> not found!`. Measured
+upstream; their fix holds `flock -x 200` across the whole check-and-repair and writes a
+`.mols_complete` marker (`scripts/boltz.sh:15-31`). We run `replicas: 4` against one shared
+`$BOLTZ_CACHE`, and `delta_env_setup.sh`'s warm-up is non-fatal, so a partial cache is reachable.
+
+**C9. No thread caps; the Rosetta stages oversubscribe.** Upstream sizes from the cgroup -
+`sched_getaffinity(0)`, `_omp = max(1, _ncpu // (n_pipelines * 2))` across
+`OMP/MKL/OPENBLAS/NUMEXPR_NUM_THREADS` plus `OMP_WAIT_POLICY=PASSIVE`, explicitly not
+`os.cpu_count()` which over-subscribes on any allocation smaller than a whole node
+(`run_small_molecule_binding.py:134-143`). We set none, with `replicas: 4` and three CPU-bound P2
+stages.
+
+**C10. `$HOME` leaks into the rfd3 container.** apptainer mounts `$HOME` by default; upstream does
+`unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE; export PYTHONNOUSERSITE=1` (set, not
+unset) before exec (`scripts/rfd3.sh:19-22`). `run_cmd` passes no `env`, so our container inherits
+everything including user site-packages.
 
 ## D. Registry and spec-contract gaps
 
@@ -180,6 +213,31 @@ first exploit run lands (`slides/timeline_model.py --limit 4`). This is latent, 
 policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 [`exploration-vs-stagnation.md`](exploration-vs-stagnation.md).
 
+**G2. rfd3 output parsing ignores the metrics rfd3 reports.** See B1 and A4. Switching
+`RFD3DesignAgent` to read the sidecar `*_model_*.json` would give a genuine structural gate
+(`ligand_clashes == 0`), replace our non-DSSP phi/psi estimate with rfd3's own `helix_fraction`/
+`sheet_fraction`, and let us select the *best* model rather than `cif_models[0]`. Deferred
+deliberately until a real run shows what an `out_dir` actually contains - it changes what the gates
+measure, and A1 is still open.
+
+**G3. `dump_trajectories=True` writes 99.4% waste.** Upstream measured trajectories at 11.85 MB of
+each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a campaign from ~30 GB to
+~3.8 GB. Safe because trajectory files ship no `.json`. We never read them. Left True only because
+flipping it alongside G2 is one decision, not two.
+
+**G4. The fastrelax gates are far looser than upstream's calibrated ones.** Ours:
+`total_score max: 0.0`, `fa_rep max: 500.0`, no `interaction_energy` at all. Upstream PROD:
+`total_score < -250.0`, `fa_rep < 100.0`, `interaction_energy < -8.0`. `interaction_energy` is the
+one that actually measures binding and our worker does not compute it (`rosetta_agents.py:88-91`).
+`toolkits/rosetta/SKILL.md` already admits these are uncalibrated.
+
+**G5. `filter_shape` may be measuring the wrong interface.** Ours hardcodes
+`<ShapeComplementarity name="sc" jump="1"/>` with the default scorefunction
+(`rosetta_agents.py:104`); upstream uses explicit chain selectors (`residue_selector1="chainA"`,
+`residue_selector2="chainB"`) under `beta_nov16`. `jump="1"` assumes a particular chain/jump
+arrangement in the relaxed pose - if the ligand is not across jump 1 the gate is meaningless
+rather than obviously wrong.
+
 ---
 
 ## Recommended order
@@ -195,7 +253,7 @@ policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 
 ## Verification that applies to any item
 
-`pytest tests -q` — 89 tests green, no allocation. `ruff check src tests` must not exceed 41.
+`pytest tests -q` — 94 tests green, no allocation. `ruff check src tests` must not exceed 41.
 Import contract: `policy` must not reach `tools`/`exec`/`runtime`; `compose` must not reach `exec`;
 `core` imports nothing internal. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and

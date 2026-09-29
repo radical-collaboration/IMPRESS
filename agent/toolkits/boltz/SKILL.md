@@ -22,10 +22,13 @@ signal that a design is real, not an artifact of the Rosetta scoring function.
 
 ## Cost posture
 GPU-bound but a single forward pass per `diffusion_samples` value - cheaper than
-`rfd3_design`'s iterative sampling. `use_msa_server` adds network latency (P5-flavored
-egress dependency even though this tool is declared P1); a login-node-unreachable MSA
-server degrades to single-sequence mode rather than failing outright in the old pipeline,
-and this agent inherits that same fallback behavior.
+`rfd3_design`'s iterative sampling. `use_msa_server` is a P5-flavored egress dependency in
+a tool declared P1, which is why it now **defaults to `false`**: it emits `msa: auto` and
+passes `--use_msa_server`, and a compute node with no outbound network does not degrade
+gracefully - it stalls until `walltime_s` kills the task. The claim previously made here,
+that an unreachable MSA server falls back to single-sequence mode, was never verified and
+should not be relied on. The original IMPRESS pipeline hardcodes `msa: empty` and offers no
+flag at all. Turn it on only where the allocation is known to have egress.
 
 ## Pitfalls
 - Requires `$BOLTZ_CACHE` pre-warmed (a first `boltz predict` call auto-downloads model

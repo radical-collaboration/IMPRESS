@@ -28,6 +28,12 @@ disordered backbone wastes the call.
 - Requires `$MPNN_DIR` pointing at a cloned `LigandMPNN` checkout with its checkpoints
   present (`ligandmpnn_sc_v_32_002_16.pt`, `ligandmpnn_v_32_010_25.pt`) - it is cloned, not
   pip-installed, by `scripts/delta_env_setup.sh`.
+- **Both checkpoints must be passed explicitly, as absolute paths, and the tool must run
+  with `cwd=$MPNN_DIR`.** `run.py` defaults them to `./model_params/...`, resolved against
+  the *current working directory* - which for a campaign is its own root, not the
+  checkout. Left implicit, every single invocation fails on a missing checkpoint. The
+  adapter does both; the original IMPRESS pipeline does too (explicit flags in
+  `scripts/mpnn.sh`, plus a `scripts/mpnn_run.py` shim that chdir's into the checkout).
 - Reported metrics are named `overall_confidence`/`ligand_confidence`, following
   LigandMPNN's own naming; do not rename them to a generic `seq_recovery` when comparing
   against ProteinMPNN-based work (a different tool, different metric semantics).

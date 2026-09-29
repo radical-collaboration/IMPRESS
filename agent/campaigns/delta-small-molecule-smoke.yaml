@@ -17,6 +17,12 @@ backend_config: {}
 # the allocation's walltime.
 backend_startup_timeout_s: 600
 backend_startup_heartbeat_s: 30
+# And the mirror image. Measured on the reference IMPRESS pipeline (job 22491438):
+# `flow.shutdown()` never returned once every pipeline had finished, and the job sat 60
+# minutes before being cancelled by hand - ~64 GPU-hours spent after the science was done.
+# Abandoning a stuck teardown is safe here: results are already durable in provenance and
+# the ledger by that point.
+backend_shutdown_timeout_s: 300
 max_cycles: 1
 stagnation_limit: 2
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}

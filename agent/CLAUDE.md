@@ -11,7 +11,7 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # 79 tests, ~80s on a Delta login node, no allocation
+pytest tests -q                                      # 94 tests, ~2min on a Delta login node, no allocation
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
@@ -137,6 +137,15 @@ way). Bounded now by `CampaignSpec.backend_startup_timeout_s`/`backend_startup_h
 bound stays effective, and builds the backend's async init and the engine on the caller's own loop —
 see the loop-ownership gotcha above); 0 disables it, the default for every non-Delta campaign. See
 `docs/limitations.md`.
+
+**Dragon teardown can hang too, and it is the more expensive end.** Measured on the reference
+IMPRESS pipeline (job 22491438): `flow.shutdown()` never returned after every pipeline had finished,
+and the job sat 60 minutes before being cancelled by hand — ~64 GPU-hours, 37% of its billed total,
+spent *after* the science was done. Bounded by `CampaignSpec.backend_shutdown_timeout_s` (0 disables;
+300s in both Delta campaigns). On expiry the teardown is abandoned with a warning, never raised:
+results are already durable in provenance and the ledger by then, so the cost is leaked backend state
+in an exiting process — whereas raising would report a campaign that succeeded as failed. The
+reference pipeline declined this fix and relies on an operator watching the log; we do not.
 
 **Cancellation is advisory.** Measured rather than assumed: the concurrent backend's `Future.cancel()`
 returns `False` once a callable has started, and asyncflow discards that answer — so queued work is

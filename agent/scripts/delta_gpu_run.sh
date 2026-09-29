@@ -23,10 +23,30 @@
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
-#SBATCH --mem=220G
-#SBATCH --time=06:00:00
+#SBATCH --mem=240G
+#SBATCH --time=12:00:00
+# Sizing notes - measured by the original IMPRESS project, do not shrink casually:
+#   cpus-per-task=64 - the whole node, and it is FREE. Requesting 4 GPUs already reserves
+#     and bills the entire node, and billing is max(cpu*31.25, mem/8, gpu*500) under
+#     PriorityFlags=MAX_TRES, so 64 cores resolves to the same gpu term (2000) as 16.
+#     `seff` on three 4h TIMEOUT runs (21933600/21945304/21960876) showed 97.7-98.1% CPU
+#     efficiency on 16 cores - those jobs were CPU-starved, which is why they never
+#     finished. We were asking for the starved shape at the unstarved price.
+#   mem=240G - node RealMemory is 257637MB less MemSpecLimit 8450, so 249187MB is the
+#     allocatable ceiling.
+#   time=12:00:00 - NOT the 48h partition maximum, deliberately. The wall clock is a
+#     backstop against a hung Dragon teardown: on IMPRESS job 22491438 `flow.shutdown()`
+#     never returned after all work finished, and the job sat 60 minutes before being
+#     scancelled - ~64 GPU-h, 37% of its billed total, for zero output. A 48h request
+#     would let an unattended hang bill proportionally more. `sbatch --test-only` returns
+#     an identical queue start estimate for 8/12/16/24/48h, so shortening costs nothing in
+#     scheduling, and billing is on elapsed time either way. Do not go below 12h: there is
+#     no checkpoint or resume, so a TIMEOUT loses all in-memory campaign state.
+#     We additionally bound teardown in code - see `backend_shutdown_timeout_s` - which
+#     the upstream pipeline does not; the wall clock is our second line, not our first.
+# Override nodes per run without editing this file:  sbatch --nodes=2 ...
 #SBATCH --job-name=impress_a_sm_binding
 #SBATCH --mail-user=<your email>
 #SBATCH --mail-type=ALL
@@ -56,15 +76,50 @@ IMPRESS_A_DIR="${IMPRESS_A_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "${IMPRESS_A_DIR}/scripts/_scratch_base.sh"
 
 # ── System library paths (Delta-specific, required by Dragon) ─────────────────
-export CUDA_HOME=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/cuda/12.8
-export MPI_LIB=/opt/cray/pe/mpich/8.1.32/ofi/gnu/11.2/lib-abi-mpich
-export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
+# These were hardcoded to CUDA 25.3 / mpich 8.1.32 / libfabric 1.22.0. Delta removed all
+# three in a Cray PE upgrade (/opt/cray/pe is now an NFS mount of cpe-26.5.3) - even the
+# case changed, `ofi/gnu` -> `ofi/GNU`. Single-node runs never noticed: `dragon -s` starts
+# no transport agent, so dead LD_LIBRARY_PATH entries are inert. Multi-node is a different
+# story - the transport dlopens libdfabric_ofi.so out of FAB_LIB and hangs with almost no
+# diagnostic if it is missing. Autodetect so the next site upgrade doesn't silently
+# re-break this.
+CUDA_HOME="${CUDA_HOME:-$(ls -d /opt/nvidia/hpc_sdk/Linux_x86_64/*/cuda/12.* 2>/dev/null | sort -V | tail -1)}"
+MPI_LIB="${MPI_LIB:-$(ls -d /opt/cray/pe/mpich/*/ofi/GNU/*/lib-abi-mpich 2>/dev/null | sort -V | tail -1)}"
+FAB_LIB="${FAB_LIB:-$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)}"
+export CUDA_HOME MPI_LIB FAB_LIB
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
+
+# Fail loudly rather than at Dragon bring-up: `dragon-config add` does NOT validate the
+# path it stores, so a bad FAB_LIB is only ever discovered as a hang.
+for _v in CUDA_HOME MPI_LIB FAB_LIB; do
+    if [ -z "${!_v}" ] || [ ! -d "${!_v}" ]; then
+        echo "ERROR: ${_v} does not resolve to an existing directory: '${!_v}'"
+        echo "       Delta's Cray PE layout changed. Check:"
+        echo "         ls -d /opt/nvidia/hpc_sdk/Linux_x86_64/*/cuda/12.*"
+        echo "         ls -d /opt/cray/pe/mpich/*/ofi/GNU/*/lib-abi-mpich"
+        echo "         ls -d /opt/cray/libfabric/*/lib64"
+        exit 1
+    fi
+done
+echo "CUDA_HOME:         ${CUDA_HOME}"
+echo "MPI_LIB:           ${MPI_LIB}"
+echo "FAB_LIB:           ${FAB_LIB}"
 
 # ── Environment ───────────────────────────────────────────────────────────────
 IMPRESS_A_VENV="${IMPRESS_A_VENV:-${IMPRESS_A_DIR}/.venv}"
+# Dragon launches its per-node backends with a plain `srun` and no `--export`, so srun's
+# default `--export=ALL` is what carries PATH (the venv), SCRATCH and the tool paths. Left
+# at NONE, every remote task loses the venv.
 unset SLURM_EXPORT_ENV
+# Dragon issues its own srun steps inside this allocation and does not pass `--overlap`
+# itself; without this they collide with the batch step and hang at "job step creation
+# temporarily disabled".
+export SLURM_OVERLAP=1
 source "${IMPRESS_A_VENV}/bin/activate"
+# `-c` first: `dragon-config add` APPENDS when a key already exists, so a stale
+# ofi_runtime_lib would survive as the first entry of a colon-joined list - which is
+# exactly what happened here while the hardcoded FAB_LIB above pointed at a removed path.
+dragon-config -c >/dev/null 2>&1 || true
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by the rfd3/ligandmpnn/rosetta/boltz task agents) ────────
@@ -132,15 +187,43 @@ echo "Campaign:          ${CAMPAIGN}"
 echo "Model:             ${MODEL}"
 echo "Working directory: ${WORKDIR}"
 
-# -s = single-node Dragon runtime; -m = multi-node (uses MPI/OFI fabric).
-if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
-    DRAGON_MODE="-m"
-else
-    DRAGON_MODE="-s"
-fi
+RUNNER="${IMPRESS_A_DIR}/scripts/delta_run_campaign.py"
+RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" )
 
+# Stale Dragon dictionary-orchestrator files from a previous run in this directory.
 rm -f ddict_orc*
-echo "Running: dragon ${DRAGON_MODE} ${IMPRESS_A_DIR}/scripts/delta_run_campaign.py run ${CAMPAIGN} --model ${MODEL}  (nodes=${SLURM_NNODES:-1})"
-dragon ${DRAGON_MODE} "${IMPRESS_A_DIR}/scripts/delta_run_campaign.py" run "${CAMPAIGN}" --model "${MODEL}"
+
+if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
+    # NOT `dragon -m`. Its slurm launcher builds `srun --nodelist=` from gethostname(),
+    # which on Delta returns FQDNs (gpub039.delta.ncsa.illinois.edu) while Slurm's node
+    # naming is short (gpub039). The step is then unsatisfiable and the whole job hangs
+    # until the wall clock - confirmed on IMPRESS job 22456499:
+    #   srun: error: Unable to create step for job 22456499: Requested node
+    #   configuration is not available
+    # `--hostlist` is not a workaround: SlurmWLM.__init__ accepts `_hostlist` and never
+    # references it. The working combination is three-part:
+    #   -w ssh            no --nodelist is ever built. Delta sets HostbasedAuthentication
+    #                     and EnableSSHKeysign cluster-wide, so this needs no user keys.
+    #   -t tcp            skips the HSTA/OFI path that dlopens libdfabric_ofi.so.
+    #   --network-config  satisfies the "SSH workload manager requires a valid hostlist
+    #                     or hostfile" check, which gates on the config being non-None.
+    # `dragon-network-config` writes <wlm>.yaml into its CWD, so generate it in a per-job
+    # directory - a bare slurm.yaml in a shared WORKDIR collides between concurrent jobs.
+    NETCONF_DIR="${WORKDIR}/netconf_${SLURM_JOB_ID:-manual}"
+    mkdir -p "${NETCONF_DIR}"
+    ( cd "${NETCONF_DIR}" && dragon-network-config --output-to-yaml )
+    NETCONF="${NETCONF_DIR}/slurm.yaml"
+    if [ ! -s "${NETCONF}" ]; then
+        echo "ERROR: dragon-network-config produced no usable ${NETCONF}"
+        ls -la "${NETCONF_DIR}"
+        exit 1
+    fi
+    echo "Network config:    ${NETCONF}"
+    echo "Running: dragon -w ssh --network-config ${NETCONF} -t tcp ${RUNNER} ${RUNNER_ARGS[*]}  (nodes=${SLURM_NNODES})"
+    dragon -w ssh --network-config "${NETCONF}" -t tcp "${RUNNER}" "${RUNNER_ARGS[@]}"
+else
+    echo "Running: dragon -s ${RUNNER} ${RUNNER_ARGS[*]}  (nodes=1)"
+    dragon -s "${RUNNER}" "${RUNNER_ARGS[@]}"
+fi
 
 echo "=== IMPRESS-A small-molecule-binding campaign done: $(date) ==="

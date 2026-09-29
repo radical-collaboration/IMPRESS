@@ -78,6 +78,13 @@ class CampaignSpec:
     # - until the whole allocation's walltime is spent. See `exec.backend.make_engine_bounded`.
     backend_startup_timeout_s: float = 0.0
     backend_startup_heartbeat_s: float = 30.0
+    # The mirror image, and measured on the reference pipeline rather than assumed: on
+    # IMPRESS job 22491438 `flow.shutdown()` never returned after every pipeline had
+    # finished. The job sat 60 minutes and had to be cancelled by hand - ~64 GPU-hours,
+    # 37% of its billed total, spent after the science was already done. Teardown is the
+    # worst place to hang, because the campaign has its results and is throwing them away
+    # by never writing the run to completion. 0 disables, as above.
+    backend_shutdown_timeout_s: float = 0.0
     # WHICH tools this campaign is about. Without it every policy falls back to its own
     # default chain - which is the mock one - so a campaign naming real toolkits would
     # load them, validate them, and then run mocks.
@@ -748,4 +755,27 @@ class CampaignExecutor:
         finally:
             self._fail_waiters(err or CampaignStopped(self.stop_reason))
             if self.flow is not None:
-                await self.flow.shutdown()
+                await self._shutdown_engine()
+
+    async def _shutdown_engine(self) -> None:
+        """Tear the engine down, bounded, and never let teardown sink the campaign.
+
+        A hung `flow.shutdown()` holds the allocation open long after the work is done -
+        see `backend_shutdown_timeout_s`. Giving up on it is safe in a way that giving up
+        on construction is not: every result is already written to provenance and the
+        ledger by this point, so the worst case is leaked backend state in a process that
+        is about to exit anyway. The timeout is therefore logged, not raised - an
+        abandoned teardown must not turn a finished campaign into a failed one.
+        """
+        timeout_s = self.spec.backend_shutdown_timeout_s
+        if timeout_s <= 0:
+            await self.flow.shutdown()
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(self.flow.shutdown()), timeout_s)
+        except asyncio.TimeoutError:
+            log.warning(
+                "engine: %s backend did not shut down within %.0fs - abandoning it. "
+                "The campaign's results are already durable; this leaks backend state in "
+                "an exiting process. See docs/limitations.md.",
+                self.spec.backend, timeout_s)

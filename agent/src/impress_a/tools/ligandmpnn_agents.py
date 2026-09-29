@@ -31,10 +31,21 @@ class LigandMPNNDesignAgent(TaskAgent):
         if not backbone_pdb:
             raise RuntimeError("ligandmpnn_design: no upstream 'backbone' output found")
 
+        root = Path(mpnn_dir)
         out = workdir_for(req, "ligandmpnn")
         cmd = [
-            "python", str(Path(mpnn_dir) / "run.py"),
+            "python", str(root / "run.py"),
             "--model_type", "ligand_mpnn",
+            # Both checkpoints, ABSOLUTE and explicit. `run.py` defaults them to
+            # "./model_params/..." - relative to the CURRENT WORKING DIRECTORY, which for
+            # us is the campaign root, not the checkout. Left implicit, every invocation
+            # fails on a missing path. The original IMPRESS pipeline guards this twice
+            # over: it passes both flags AND chdir's into the checkout (its
+            # `scripts/mpnn_run.py` shim); we do the same below.
+            "--checkpoint_ligand_mpnn",
+            str(root / "model_params" / "ligandmpnn_v_32_010_25.pt"),
+            "--checkpoint_path_sc",
+            str(root / "model_params" / "ligandmpnn_sc_v_32_002_16.pt"),
             "--pdb_path", str(backbone_pdb),
             "--out_folder", str(out),
             "--temperature", str(params["temperature"]),
@@ -49,7 +60,11 @@ class LigandMPNNDesignAgent(TaskAgent):
             cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1"]
         if params.get("fixed_residues"):
             cmd += ["--fixed_residues", params["fixed_residues"]]
-        await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))
+        # cwd=$MPNN_DIR: every other relative path inside `run.py` and its bundled
+        # openfold resolves the same way the checkpoints do. `--out_folder` and
+        # `--pdb_path` are absolute, so nothing lands in the checkout.
+        await run_cmd(cmd, cwd=root,
+                      timeout_s=float(self.spec.resources.walltime_s))
 
         fastas = sorted(out.glob("seqs/*.fa")) or sorted(out.glob("**/*.fa"))
         packed = sorted(out.glob("**/packed/*.pdb")) or sorted(out.glob("**/*.pdb"))

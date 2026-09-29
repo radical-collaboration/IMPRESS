@@ -110,3 +110,69 @@ async def test_a_bounded_non_cheap_backend_is_still_built_on_the_caller_loop(mon
         assert await asyncio.wait_for(hello(), timeout=20) == "hello"
     finally:
         await flow.shutdown()
+
+
+# ── teardown ──────────────────────────────────────────────────────────────────
+
+class _NeverShutsDown:
+    """An engine whose `shutdown()` hangs, the way IMPRESS job 22491438's did."""
+
+    def __init__(self):
+        self.entered = asyncio.Event()
+
+    async def shutdown(self):
+        self.entered.set()
+        await asyncio.Event().wait()          # never returns
+
+
+async def _executor_with(flow, timeout_s):
+    from impress_a.compose.validate import SiteCaps
+    from impress_a.runtime.executor import CampaignExecutor, CampaignSpec
+
+    spec = CampaignSpec(campaign_id="t-teardown", goal="g", objectives=[],
+                        site=SiteCaps(gpu_api="cuda", gpus_per_node=1),
+                        backend="concurrent",
+                        backend_shutdown_timeout_s=timeout_s)
+    ex = CampaignExecutor(spec, policy=None)
+    ex.flow = flow
+    return ex
+
+
+async def test_a_hung_teardown_is_abandoned_rather_than_holding_the_allocation():
+    """The campaign is DONE by the time shutdown runs; a hang there is pure waste.
+
+    Measured on the reference pipeline (IMPRESS job 22491438): `flow.shutdown()` never
+    returned once every pipeline had finished, and the job sat 60 minutes before being
+    cancelled by hand - ~64 GPU-hours, 37% of its billed total, spent after the science
+    was already done. Without the bound this test hangs forever.
+    """
+    flow = _NeverShutsDown()
+    ex = await _executor_with(flow, timeout_s=0.5)
+
+    await asyncio.wait_for(ex._shutdown_engine(), timeout=10)
+
+    assert flow.entered.is_set(), "shutdown must actually have been attempted"
+
+
+async def test_a_hung_teardown_does_not_fail_the_campaign():
+    """Giving up on teardown is not an error - results are already durable.
+
+    Raising here would turn a campaign that produced everything it was asked for into a
+    failed one, which is strictly worse than leaking backend state in a process that is
+    about to exit.
+    """
+    ex = await _executor_with(_NeverShutsDown(), timeout_s=0.5)
+    assert await asyncio.wait_for(ex._shutdown_engine(), timeout=10) is None
+
+
+async def test_teardown_is_unbounded_by_default():
+    """0 disables, matching `backend_startup_timeout_s` - no existing campaign changes."""
+    done = asyncio.Event()
+
+    class _Fine:
+        async def shutdown(self):
+            done.set()
+
+    ex = await _executor_with(_Fine(), timeout_s=0.0)
+    await asyncio.wait_for(ex._shutdown_engine(), timeout=10)
+    assert done.is_set()

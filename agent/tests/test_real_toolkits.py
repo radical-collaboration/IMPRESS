@@ -257,9 +257,18 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
     await agent.run(req, params)
 
     cmd = captured["cmd"]
-    assert cmd[:5] == ["apptainer", "exec", "--nv", "/fake/foundry.sif", "rfd3"]
-    assert cmd[5] == "design"
-    overrides = cmd[6:]
+    # Positions are not asserted: the apptainer flag list is not fixed-width (see the
+    # $SCRATCH bind test below). What must hold is the order of the three fixed tokens
+    # and that every apptainer flag precedes the image.
+    assert cmd[0] == "apptainer" and cmd[1] == "exec"
+    assert "--nv" in cmd
+    sif = cmd.index("/fake/foundry.sif")
+    assert cmd[sif + 1:sif + 3] == ["rfd3", "design"], \
+        "the image must be the last apptainer argument, followed by the command"
+    assert all(a.startswith("-") or a == "exec" or cmd[i - 1].startswith("-")
+               for i, a in enumerate(cmd[2:sif], start=2)), \
+        "only flags and their values may sit between `exec` and the image"
+    overrides = cmd[sif + 3:]
     assert not any(o.startswith(("--config", "--out")) for o in overrides), \
         "these flags do not exist on the real CLI"
     assert "inputs=/fake/inputs.json" in overrides
@@ -270,6 +279,93 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
     assert "inference_sampler.num_timesteps=42" in overrides
     assert "seed=7" in overrides
     assert any(o.startswith("out_dir=") for o in overrides)
+
+
+async def test_rfd3_binds_scratch_into_the_container(reg, monkeypatch, tmp_path):
+    """apptainer binds $HOME, /tmp and the CWD - and nothing else.
+
+    Both `inputs=` (the campaign's design spec, in the repo) and `out_dir=` (the per-job
+    scratch tree) live under $SCRATCH on Delta, so without an explicit bind the container
+    cannot read its own input. The original IMPRESS pipeline binds the same way.
+    """
+    from impress_a.tools import rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.setenv("SCRATCH", "/work/hdd/fake")
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, list[str]] = {}
+
+    async def fake_run_cmd(cmd, timeout_s=None):
+        captured["cmd"] = cmd
+        return "", ""
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
+    params = agent.parameterize(TaskRequest(
+        tool="rfd3_design", node_id=req.node_id,
+        params={"input_spec_path": "/work/hdd/fake/inputs.json"}))
+    await agent.run(req, params)
+
+    cmd = captured["cmd"]
+    assert "--bind" in cmd, "no bind: the container cannot see $SCRATCH"
+    assert cmd[cmd.index("--bind") + 1] == "/work/hdd/fake:/work/hdd/fake"
+    assert cmd.index("--bind") < cmd.index("/fake/foundry.sif"), \
+        "apptainer flags must precede the image"
+    assert "--writable-tmpfs" not in cmd, \
+        "deliberately absent - it lets rfd3 exit 0 into a vanishing overlay"
+
+    # And with no $SCRATCH set, no empty bind is emitted.
+    monkeypatch.delenv("SCRATCH")
+    await agent.run(req, params)
+    assert "--bind" not in captured["cmd"]
+
+
+async def test_ligandmpnn_passes_absolute_checkpoints_and_runs_in_the_checkout(
+        reg, monkeypatch, tmp_path):
+    """`run.py` defaults both checkpoints to `./model_params/...` - relative to the CWD.
+
+    A campaign's CWD is its own root, not the LigandMPNN checkout, so left implicit every
+    invocation fails on a missing checkpoint. This pins both halves of the fix: absolute
+    paths, and cwd set to the checkout.
+    """
+    from impress_a.core.artifacts import ArtifactRef
+    from impress_a.tools import ligandmpnn_agents
+    from impress_a.tools.agent import TaskRequest
+
+    mpnn = tmp_path / "LigandMPNN"
+    (mpnn / "model_params").mkdir(parents=True)
+    monkeypatch.setenv("MPNN_DIR", str(mpnn))
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
+        captured["cmd"], captured["cwd"] = cmd, cwd
+        return "", ""
+
+    monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    req = TaskRequest(
+        tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
+        inputs={"dep0": {"outputs": {
+            "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
+    await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
+
+    cmd = captured["cmd"]
+    for flag, name in (("--checkpoint_ligand_mpnn", "ligandmpnn_v_32_010_25.pt"),
+                       ("--checkpoint_path_sc", "ligandmpnn_sc_v_32_002_16.pt")):
+        assert flag in cmd, f"{flag} must be explicit - the default is CWD-relative"
+        value = cmd[cmd.index(flag) + 1]
+        assert value == str(mpnn / "model_params" / name)
+        assert pathlib.Path(value).is_absolute()
+
+    assert captured["cwd"] == mpnn, \
+        "must run inside the checkout - other relative paths resolve the same way"
 
 
 def test_ligandmpnn_passes_fixed_residues_through(reg):

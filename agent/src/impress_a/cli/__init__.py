@@ -43,6 +43,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         backend=d.get("backend", "concurrent"),
         backend_config=d.get("backend_config", {}),
         backend_startup_timeout_s=float(d.get("backend_startup_timeout_s", 0) or 0),
+        backend_shutdown_timeout_s=float(d.get("backend_shutdown_timeout_s", 0) or 0),
         backend_startup_heartbeat_s=float(d.get("backend_startup_heartbeat_s", 30) or 30),
         root=d.get("root", "campaigns/_runs"),
         stages=d.get("stages", []) or [],

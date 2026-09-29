@@ -48,8 +48,20 @@ class RFD3DesignAgent(TaskAgent):
         if params.get("seed") is not None:
             overrides.append(f"seed={params['seed']}")
 
+        # --bind $SCRATCH: apptainer binds $HOME, /tmp and the CWD by default, and nothing
+        # else. `inputs=` points into the repo and `out_dir=` into the per-job scratch
+        # tree, both under $SCRATCH on Delta and neither reachable in the container
+        # without this. The original IMPRESS pipeline binds the same way
+        # (`scripts/rfd3.sh`). Deliberately NOT adding its `--writable-tmpfs`: that gives
+        # the container a throwaway writable root, and the same pipeline records rfd3
+        # exiting 0 having written its output into that overlay, leaving an empty out_dir
+        # - a silent failure. Add it only if a real run shows the container needs it.
+        binds: list[str] = []
+        if scratch := os.environ.get("SCRATCH"):
+            binds = ["--bind", f"{scratch}:{scratch}"]
+
         await run_cmd([
-            "apptainer", "exec", "--nv", foundry,
+            "apptainer", "exec", "--nv", *binds, foundry,
             "rfd3", "design", *overrides,
         ], timeout_s=float(self.spec.resources.walltime_s))
 

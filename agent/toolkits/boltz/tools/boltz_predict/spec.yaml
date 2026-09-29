@@ -12,7 +12,12 @@ outputs:
 parameters:
   # Default 1: see rfd3_design.num_designs - breadth is `replicas`, not internal N.
   diffusion_samples: {type: int, default: 1, min: 1, max: 25, trades: "sampling vs GPU-hours"}
-  use_msa_server: {type: bool, default: true}
+  # Default FALSE: `true` emits `msa: auto` and passes --use_msa_server, which calls out
+  # to the MSA server - and Delta compute nodes have no egress, so the task stalls until
+  # its walltime kill rather than failing. The original IMPRESS pipeline hardcodes
+  # `msa: empty` for this reason and never offers the flag. Set true only where the
+  # allocation is known to have outbound network.
+  use_msa_server: {type: bool, default: false}
   ligand_smiles: {type: str, default: ""}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
