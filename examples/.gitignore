@@ -12,3 +12,5 @@
 
 # Legacy output dirs
 */myoutputs/
+impress_*.out
+impress_*.err
