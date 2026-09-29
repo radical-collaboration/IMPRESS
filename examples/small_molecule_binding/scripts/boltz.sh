@@ -4,6 +4,14 @@ set -euo pipefail
 # Args: $1=input_yaml $2=output_dir $3=boltz_cache_dir
 input_yaml="$1"; output_dir="$2"; boltz_cache_dir="$3"
 
+# This script and rfd3.sh are the only two dispatched to the Dragon backend, so
+# on a multi-node run they execute under a Local Services daemon on a remote
+# node rather than as a child of the driver.  Both the `boltz` console script
+# and the bare `python` below resolve purely through the inherited PATH.  The
+# same guard fastrelax.sh / packmin.sh / filter_shape.sh already carry makes
+# that explicit instead of depending on srun's --export=ALL surviving.
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
+
 # $boltz_cache_dir is shared across concurrently-running pipelines. boltz's own
 # download_boltz2() checks `mols.exists()` (directory presence), not
 # completeness, before skipping extraction — tarfile.extractall() creates the

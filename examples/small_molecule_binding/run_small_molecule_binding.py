@@ -1,6 +1,7 @@
+import argparse
 import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List
 
 from radical.asyncflow import WorkflowEngine
@@ -17,6 +18,23 @@ from small_molecule_binding import (
 import logging
 import rhapsody
 rhapsody.enable_logging(level=logging.INFO)
+
+
+def _on_task_event(event) -> None:
+    """Surface task failures in the job log as they happen.
+
+    Telemetry writes a JSONL file that is only read after the fact; this makes
+    failures visible while the run is in flight.  Note the workflow label lives
+    in event.attributes, NOT as an event attribute -- run_nonadaptive.py in the
+    protein_binding example does getattr(event, "workflow_id", None), which
+    always yields None.  Dispatch swallows subscriber exceptions, so a bug here
+    would fail silently; keep it trivial.
+    """
+    if getattr(event, "event_type", None) == "TaskFailed":
+        attrs = getattr(event, "attributes", None) or {}
+        label = attrs.get("asyncflow.workflow_id") or attrs.get("executable")
+        print(f"[TELEMETRY] TaskFailed task={event.task_id} "
+              f"label={label} error={getattr(event, 'error_type', None)}")
 
 
 @dataclass
@@ -71,7 +89,58 @@ else:
     from concurrent.futures import ProcessPoolExecutor
     from rhapsody.backends import ConcurrentExecutionBackend
 
+# Run config is taken from the command line first, environment second.
+#
+# The CLI path exists because environment variables DO NOT reach this process on
+# a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
+# backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
+# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_N_PIPELINES
+# / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
+# below would be used instead.  Confirmed on job 22466127, which ran the built-in
+# defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
+# / FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
+# and the ssh login shell sources it -- do not rely on that for new settings.)
+# Dragon passes everything after PROG straight through to us, so argv is the one
+# channel that always works.  parse_known_args so any extra argv is ignored.
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--n-pipelines", type=int, default=None)
+_ap.add_argument("--work-dir", default=None)
+_args, _ = _ap.parse_known_args()
+
 cfg = PROD
+
+# Scale pipeline count with the allocation without editing PROD.  run() is a
+# sequential state machine, so n_pipelines IS the job's total concurrency and
+# each pipeline keeps roughly one GPU busy -- delta_gpu_run.sh sets this to the
+# allocated GPU count.  Requires a matching p{i}_in/ dir per pipeline (the
+# launcher caps it at however many exist).  replace() rather than mutating
+# PROD in place: it is a module-level singleton that run_nonadaptive.py and
+# run_test_small_molecule_binding.py also import.
+_n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
+if _n_pipelines:
+    cfg = replace(cfg, n_pipelines=int(_n_pipelines))
+
+# Thread caps, set here rather than in the batch script for the same reason:
+# OMP_NUM_THREADS exported by delta_gpu_run.sh never survives the ssh hop.
+# 11 of the 13 tasks are local_task=True and run as concurrent subprocesses of
+# this process, inheriting os.environ -- so setting it here is what actually
+# takes effect.  Without a cap each of them defaults to every core on the node.
+# Divide by 2x the pipeline count to leave room for Dragon tasks co-resident on
+# this node; PyRosetta (fastrelax/packmin/filter_shape) is single-threaded
+# regardless, so this budget really targets the PyTorch tasks.
+# sched_getaffinity respects the cgroup/CPU mask SLURM applies to the job;
+# os.cpu_count() reports the physical core count and would over-subscribe on any
+# allocation smaller than a whole node.
+try:
+    _ncpu = len(os.sched_getaffinity(0))
+except AttributeError:          # not Linux
+    _ncpu = os.cpu_count() or 64
+_omp = max(1, _ncpu // (cfg.n_pipelines * 2))
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, str(_omp))
+# PASSIVE is what actually stops idle OpenMP teams from spinning on cores.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
@@ -298,7 +367,11 @@ async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     # Resolve paths before launching Dragon (os.getcwd() is the examples dir).
     examples_dir = os.path.dirname(os.path.abspath(__file__))
-    work_dir = os.environ.get(
+    # --work-dir first for the same reason as --n-pipelines: IMPRESS_WORK_DIR is
+    # another variable that does not survive the `dragon -w ssh` hop, so on a
+    # multi-node run the env value set by delta_gpu_run.sh never arrives and we
+    # would silently fall back to examples_dir/logs.
+    work_dir = _args.work_dir or os.environ.get(
         "IMPRESS_WORK_DIR", os.path.join(examples_dir, "logs")
     )
     os.makedirs(work_dir, exist_ok=True)
@@ -311,7 +384,27 @@ async def impress_smallmol_bind() -> None:
     else:
         backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
-    manager: ImpressManager = ImpressManager(flow)
+    manager: ImpressManager = ImpressManager(
+        flow,
+        telemetry_config={
+            # Absolute, derived from the already-resolved work_dir.  A relative
+            # path (as the protein_binding reference uses) resolves against the
+            # cwd of whichever process builds the TelemetryManager -- under
+            # delta_gpu_run.sh that is $SCRATCH, not the source tree.  Deriving
+            # it from work_dir also inherits per-job scoping for free, since
+            # IMPRESS_WORK_DIR is logs/$SLURM_JOB_ID.
+            "checkpoint_path": os.path.join(work_dir, "telemetry"),
+            # The reference uses 5.0, which made ResourceUpdate 69% of its
+            # output file.  15s cuts that dominant term ~3x and leaves task
+            # lifecycle events untouched.
+            "resource_poll_interval": 15.0,
+            # The reference omits this, so nothing reaches disk until stop().
+            # The file is 128KB-buffered, so a job killed by the wall clock
+            # loses everything.  Flush every 5 minutes instead.
+            "checkpoint_interval": 300.0,
+        },
+        telemetry_subscribers=[_on_task_event],
+    )
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -343,6 +436,15 @@ async def impress_smallmol_bind() -> None:
     try:
         await manager.start(pipeline_setups=pipeline_setups)
     finally:
+        # stop() is the only thing that writes the metric/span sections and
+        # flushes the 128KB-buffered checkpoint file, so it must run even when
+        # manager.start() raises -- the reference implementation puts it in the
+        # try block and loses the file on any error.  Before flow.shutdown().
+        if manager.telemetry:
+            try:
+                await manager.telemetry.stop()
+            except Exception as exc:               # never mask the real error
+                print(f"[TELEMETRY] stop() failed: {exc!r}")
         await flow.shutdown()
 
 
