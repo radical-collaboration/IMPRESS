@@ -39,18 +39,32 @@ Your shell prompt should now show `(impress-env)` indicating the environment is 
 
 ## Step 2: Install Impress
 
-Install **Impress** and its required dependencies from PyPI:
+Clone the repository and install **Impress** with its required
+dependencies (including `radical-asyncflow>=0.4.0`, its workflow engine):
 
 ```bash
-pip install impress
+git clone https://github.com/radical-collaboration/IMPRESS.git
+cd IMPRESS
+pip install .
 ```
 
-Impress uses **Radical AsyncFlow** as its workflow backend.  
-If not installed automatically, you can install it explicitly:
+Use `pip install -e .` instead if you plan to modify Impress itself.
+
+### HPC execution backends (optional)
+
+Local runs only need `radical.asyncflow`'s built-in `LocalExecutionBackend`.
+HPC backends such as `DragonExecutionBackend` and `RadicalExecutionBackend`
+come from [`rhapsody`](https://pypi.org/project/rhapsody-py/), which is not
+installed automatically. The example workflows under `examples/` import it:
 
 ```bash
-pip install radical.asyncflow
+pip install "rhapsody-py[dragon,telemetry]"
 ```
+
+The protein binding and small molecule binding examples also ship
+`delta_env_setup.sh` scripts that build a complete environment (Impress,
+rhapsody, PyTorch, PyRosetta, Boltz-2, and so on) on NCSA Delta. See
+[Examples](../examples/protein-binding.md).
 
 ---
 

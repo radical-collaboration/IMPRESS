@@ -174,5 +174,21 @@ python run_discontinuous_scaffolds.py
 Edit the path and threshold constants at the top of
 `run_discontinuous_scaffolds.py` before running; one
 `DiscontinuousScaffoldsPipeline` is launched per benchmark input file.
-`DragonExecutionBackendV3()` is active by default (HPC); swap in
-`LocalExecutionBackend(ThreadPoolExecutor())` for local testing.
+The runner launches pipelines `disco_p24` through `disco_p28`.
+
+The runner creates the backend and engine itself and hands the engine to
+the manager. `DragonExecutionBackendV3()` (from `rhapsody.backends`) is
+active by default for HPC. For local testing, swap in the commented-out
+`LocalExecutionBackend(ProcessPoolExecutor())`:
+
+```python
+backend = await DragonExecutionBackendV3()
+# backend = await LocalExecutionBackend(ProcessPoolExecutor())
+
+flow = await WorkflowEngine.create(backend=backend)
+manager = ImpressManager(flow)
+try:
+    await manager.start(pipeline_setups=pipeline_setups)
+finally:
+    await flow.shutdown()
+```

@@ -3,27 +3,41 @@
 IMPRESS is built from four cooperating pieces: an `ImpressManager` that
 orchestrates execution, `ImpressBasePipeline` subclasses that define
 individual workflows, `PipelineSetup` objects that declare how a pipeline
-should be submitted, and a `radical.asyncflow` execution backend that
-actually runs each task. This page describes how they fit together. For a
+should be submitted, and a `radical.asyncflow` `WorkflowEngine` (bound to an
+execution backend) that actually runs each task. This page describes how they fit together. For a
 worked, line-by-line example, see [Adaptive Execution](adaptive-execution.md);
 for full method-level detail, see the [API Reference](../reference/index.md).
 
 ## ImpressManager
 
-`ImpressManager` is the central orchestrator. It owns a
-`radical.asyncflow.WorkflowEngine` bound to whatever execution backend you
-pass in (a local thread/process pool for testing, or an HPC backend such as
-`RadicalExecutionBackend`/`DragonExecutionBackendV3` for production runs).
+`ImpressManager` is the central orchestrator. It runs pipelines on a
+`radical.asyncflow.WorkflowEngine` that **you** create and pass in. The
+caller owns the engine: create it from an execution backend (a local
+thread/process pool for testing, or an HPC backend such as
+`DragonExecutionBackend`/`RadicalExecutionBackend` for production runs),
+hand it to the manager, and shut it down when done. The manager never
+creates or shuts down the flow.
 
 ```python
-manager = ImpressManager(execution_backend=my_backend)
-await manager.start(pipeline_setups=[...])
+flow = await WorkflowEngine.create(backend=my_backend)
+manager = ImpressManager(flow)
+try:
+    await manager.start(pipeline_setups=[...])
+finally:
+    await flow.shutdown()
 ```
+
+`ImpressManager` also accepts `use_colors` (console log coloring),
+`telemetry_config` (kwargs forwarded to `flow.start_telemetry()`, e.g.
+`checkpoint_path`, `resource_poll_interval`; `None` disables telemetry), and
+`telemetry_subscribers` (callables registered on the telemetry stream right
+after it starts). When telemetry is enabled, the handle is available as
+`manager.telemetry`.
 
 `start()` is the only real entry point, and its lifecycle is a simple
 cooperative polling loop:
 
-1. Create the `WorkflowEngine` and (optionally) start telemetry.
+1. (Optionally) start telemetry on the supplied engine.
 2. Submit every initial `PipelineSetup` as a running `asyncio.Task`.
 3. Poll all live pipelines on a tight loop (sleeping briefly when nothing
    changed):
@@ -32,7 +46,9 @@ cooperative polling loop:
    - If a pipeline has a pending child-pipeline request, buffer it as a new
      `PipelineSetup`.
    - If a pipeline has set `kill_parent`, cancel its task.
-   - Track which pipelines and adaptive tasks have finished.
+   - Track which pipelines and adaptive tasks have finished. A pipeline
+     whose `run()` raised is logged as failed (`pipeline_failed`, with the
+     exception) rather than completed; the manager keeps running the rest.
    - Submit any buffered child pipelines.
 4. Exit once there are no running pipeline tasks, no running adaptive
    tasks, and nothing buffered.
@@ -45,8 +61,8 @@ results will keep the manager alive until that adaptive function resolves.
 
 ## ImpressBasePipeline
 
-Every workflow subclasses `ImpressBasePipeline` and implements three
-methods:
+Every workflow subclasses `ImpressBasePipeline` and implements two
+required methods, plus one optional one:
 
 - **`register_pipeline_tasks()`** — called once, synchronously, from
   `__init__`, before anything else runs. Use `@self.auto_register_task()`
@@ -54,9 +70,10 @@ methods:
 - **`run()`** — the pipeline's control flow: call the registered task
   methods, and call `await self.run_adaptive_step(...)` at points where the
   pipeline should evaluate intermediate results.
-- **`finalize()`** — cleanup/bookkeeping logic, typically invoked by a
-  pipeline's own adaptive function after it spawns a child pipeline (for
-  example, to remove migrated work items from the parent's tracking state).
+- **`finalize()`** *(optional; default no-op)* — cleanup/bookkeeping
+  logic, typically invoked by a pipeline's own adaptive function after it
+  spawns a child pipeline (for example, to remove migrated work items from
+  the parent's tracking state).
 
 `auto_register_task(local_task=False, **task_kwargs)` decides how a task
 runs: by default it wraps the function via
@@ -127,18 +144,27 @@ cleanly into a `PipelineSetup` and back.
 internally by both `ImpressManager` and `ImpressBasePipeline` (via
 `self.logger`) to report lifecycle events — pipeline start/completion,
 adaptive function start/completion/failure, child pipeline submission, and
-periodic activity summaries. Most users only interact with it indirectly,
-through the `use_colors` argument on `ImpressManager`, or by calling
-`self.logger.pipeline_log(...)` from within a pipeline's own `run()`.
+pipeline failures, and periodic activity summaries (at DEBUG level). All
+levels, including ERROR and CRITICAL, are written to the logger's
+`output_stream` (default `sys.stdout`); a `min_level` argument drops
+messages below a given `LogLevel`. Most users only interact with it
+indirectly, through the `use_colors` argument on `ImpressManager`, or by
+calling `self.logger.pipeline_log(...)` from within a pipeline's own
+`run()`.
 
 ## Execution backends
 
-`execution_backend` is any backend object supported by
-`radical.asyncflow` — for local development and testing,
-`ConcurrentExecutionBackend`/`LocalExecutionBackend` wrapping a
-`ThreadPoolExecutor` or `ProcessPoolExecutor`; for HPC production runs,
-`RadicalExecutionBackend` or `DragonExecutionBackendV3`, configured with
-resource requirements (GPUs, cores, runtime, target machine). IMPRESS itself
-is agnostic to which backend is used — it only calls
-`WorkflowEngine.create(backend=execution_backend)` and submits executable
-tasks through the resulting engine.
+The execution backend is any backend object supported by
+`radical.asyncflow`. For local development and testing, use
+`LocalExecutionBackend` (from `radical.asyncflow`) wrapping a
+`ThreadPoolExecutor` or `ProcessPoolExecutor`. For HPC production runs, use
+a backend from [`rhapsody`](https://pypi.org/project/rhapsody-py/)
+(`rhapsody.backends`): `DragonExecutionBackend`/`DragonExecutionBackendV3`,
+`RadicalExecutionBackend` (configured with resource requirements such as
+GPUs, cores, runtime, and target machine), or
+`ConcurrentExecutionBackend`.
+
+IMPRESS itself is agnostic to which backend is used. You build the engine
+with `WorkflowEngine.create(backend=...)`, pass it to `ImpressManager`, and
+every task registered with `auto_register_task()` is submitted through that
+engine.
