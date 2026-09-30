@@ -5,17 +5,17 @@
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
 # Usage:
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
 #
 # Defaults:
-#   ENV_DIR     = /u/$USER/ve/impress
-#   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
+#   ENV_DIR     = $WORK_DIR/ve/small_mol
+#   IMPRESS_DIR = $WORK_DIR/IMPRESS
 #   python      = auto-detected (python/3.11, cray-python/3.11.7, anaconda3)
 #
 # Tool directories (cloned by this script if absent):
-#   MPNN_DIR           = $SCRATCH/$USER/LigandMPNN
-#   BOLTZ_CACHE        = $SCRATCH/$USER/.cache/boltz  (model weights cache)
+#   MPNN_DIR           = $WORK_DIR/LigandMPNN
+#   BOLTZ_CACHE        = $WORK_DIR/.cache/boltz  (model weights cache)
 #
 # Foundry container (RFD3 backbone diffusion) is managed separately:
 #   Run pull_foundry.sh to build the sandbox tarball; delta_gpu_run.sh unpacks
@@ -25,17 +25,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
 fi
 
-# ── Require SCRATCH ───────────────────────────────────────────────────────────
-if [[ -z "${SCRATCH:-}" ]]; then
-    echo "ERROR: set the SCRATCH env var to your allocation scratch root, e.g.:"
-    echo "  export SCRATCH=/scratch/<allocation>"
+# ── Require WORK_DIR ──────────────────────────────────────────────────────────
+if [[ -z "${WORK_DIR:-}" ]]; then
+    echo "ERROR: set WORK_DIR to your nvme work root, e.g.:"
+    echo "  export WORK_DIR=/work/nvme/bdyk/\$USER"
     echo "  bash delta_env_setup.sh"
     exit 1
 fi
 
 # ── Defaults / arg parsing ────────────────────────────────────────────────────
-ENV_DIR="${ENV_DIR:-/u/${USER}/ve/impress}"
-IMPRESS_DIR="${IMPRESS_DIR:-${SCRATCH}/${USER}/IMPRESS}"
+ENV_DIR="${ENV_DIR:-${WORK_DIR}/ve/small_mol}"
+IMPRESS_DIR="${IMPRESS_DIR:-${WORK_DIR}/IMPRESS}"
 BASE_PY_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -50,8 +50,8 @@ done
 PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
-MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 
 echo "================================================================="
 echo "  ENV_DIR            = ${ENV_DIR}"
@@ -241,7 +241,7 @@ echo "── Step 12: PyRosetta ──"
 #
 echo ""
 echo "── Step 13: Boltz-2 model weights (cache warm-up) ──"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 _WARM_DIR=$(mktemp -d)
 cat > "${_WARM_DIR}/warm.yaml" <<'YAML'
@@ -291,7 +291,7 @@ echo "Activate with:"
 echo "  source ${ENV_DIR}/bin/activate"
 echo ""
 echo "Run the pipeline:"
-echo "  export SCRATCH=${SCRATCH}"
+echo "  export WORK_DIR=${WORK_DIR}"
 echo "  export SBATCH_ACCOUNT=bblj-delta-gpu"
 echo "  cd ${IMPRESS_DIR}/examples/small_molecule_binding"
 echo "  sbatch delta_gpu_run.sh"
