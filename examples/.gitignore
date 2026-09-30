@@ -1,8 +1,9 @@
 # SLURM log output (all workflows)
 */logs/
 
-# Per-pipeline task directories written to cwd
-*/p*/
+# Per-pipeline task directories written to cwd (p1/, p17/, p9_in/, ...).
+# Anchored on a digit so it does not also swallow e.g. plans/.
+*/p[0-9]*/
 
 # Dragon telemetry session dirs
 */telemetry/

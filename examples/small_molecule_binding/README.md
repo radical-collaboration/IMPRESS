@@ -119,6 +119,16 @@ Sequence analysis (`analysis_sequence`) always sets `pass=True`; routing is hand
 
 The `adaptive_decision` function in `run_small_molecule_binding.py` runs after every analysis step and sets `pipeline.next_step`. It uses an **ensemble-based selective average** to determine whether the current result is in a productive neighbourhood of the search space.
 
+> **Performance contract.** `adaptive_decision` is an `async` wrapper that runs its synchronous body
+> (`_adaptive_decision_sync`) via `asyncio.to_thread`, and the similarity readers it depends on
+> (`_read_fasta_seq`, `_parse_pdb_ca_coords`) are memoised. Both are load-bearing: the selective
+> average compares the current result against *every* prior entry of its type, so an uncached reader
+> costs O(ensemble) blocking filesystem reads per decision, and because the manager is one process
+> shared by all pipelines that stalls the entire job rather than one pipeline. Getting this wrong
+> capped an 8-node campaign at 37% of its 4-node baseline throughput with GPUs at 0.7% utilisation
+> (see the 2026-09-30 row in `CLAUDE.md` and `plans/2026-09-30-adaptive-callback-serialization.md`).
+> If you add a similarity metric, cache its reader and keep the body off the event loop.
+
 ### Ensemble store
 
 Every analysis task appends a tuple `(type, score, input_path, output_path)` to `pipeline.state['ensemble']`. All entries are kept regardless of pass/fail. The three entry types are:

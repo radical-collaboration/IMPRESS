@@ -144,6 +144,27 @@ os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
+    """Async entry point: runs the (entirely synchronous) decision body in a
+    worker thread so it cannot stall the manager's event loop.
+
+    This function used to be `async def` with no `await` anywhere in its body,
+    which meant every invocation blocked the single event loop shared by all
+    pipelines for its full duration -- including task dispatch, subprocess
+    reaping and Dragon completion handling. With the _read_fasta_seq memo added
+    alongside this change the body is now fast (pure in-memory CPU), so this
+    hand-off is the belt-and-braces half: it keeps a future similarity metric
+    that reintroduces I/O from taking the whole job down with it.
+
+    Safe to run off-loop because the body only reads pipeline.state and assigns
+    pipeline.state[...] / pipeline.next_step, and ImpressManager awaits each
+    pipeline's adaptive task before advancing that pipeline (see
+    src/impress/impress_manager.py:100-116), so there is no concurrent writer to
+    the same pipeline's state.
+    """
+    await asyncio.to_thread(_adaptive_decision_sync, pipeline)
+
+
+def _adaptive_decision_sync(pipeline: SmallMoleculeBindingPipeline) -> None:
     step     = pipeline.state.get('last_analysis_step')
     metrics  = pipeline.state.get('last_analysis_metrics', {})
     passed   = metrics.get('pass', False)

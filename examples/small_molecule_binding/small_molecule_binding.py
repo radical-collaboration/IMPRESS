@@ -49,7 +49,11 @@ ETYPE_FOLD     = 'fold decoy'
 
 # ── Ensemble utility functions ─────────────────────────────────────────────
 
-@lru_cache(maxsize=512)
+# maxsize sized for the whole job, not one pipeline: adaptive_decision() runs in
+# a single manager process shared by every pipeline, so the live working set is
+# (ensemble entries) x (n_pipelines) distinct paths -- 512 thrashed badly at 32
+# pipelines. ~14 KB per cached CA trace, so 4096 costs ~57 MB of a 240 GB node.
+@lru_cache(maxsize=4096)
 def _parse_pdb_ca_coords(pdb_path: str) -> tuple:
     coords = []
     with open(pdb_path) as f:
@@ -87,9 +91,32 @@ def _ca_rmsd(path1: str, path2: str):
     return _kabsch_rmsd(c1, c2)
 
 
+# Keyed by path alone, which is sound because every task writes into its own
+# {taskcount}_{taskname}/ directory and taskcount increments for every HPC task
+# in the run -- no FASTA path is ever written twice.
+#
+# This memo is load-bearing, not an optimisation. _ensemble_selective_avg() calls
+# _seq_identity() once per prior ensemble entry, so an uncached read made the
+# 'sequence' adaptive branch O(ensemble) *blocking Lustre opens* per decision
+# (~540 at ensemble 270). On job 22534628 (8 nodes / 32 pipelines) that branch
+# dominated the time the adaptive callback spent occupying the event loop --
+# 67.1% of manager wall clock over the run, 73-95% for its last nine hours, with
+# p99 per-call latency 1.36s -> 56.0s versus the 16-pipeline baseline -- which
+# starved task dispatch and dropped GPU utilisation to 0.7%. Memoising turns the
+# run's total reads from O(entries^2) into O(entries). _parse_pdb_ca_coords above
+# was already cached, which is exactly why the backbone/fold branches cost ~0.
+#
+# Negative results are deliberately NOT cached: '' means the file was missing or
+# empty, and caching that would pin the failure for the rest of the run.
+_FASTA_SEQ_CACHE: dict[str, str] = {}
+
+
 def _read_fasta_seq(fasta_path: str) -> str:
     if not fasta_path:
         return ''
+    hit = _FASTA_SEQ_CACHE.get(fasta_path)
+    if hit is not None:
+        return hit
     seq = []
     try:
         with open(fasta_path) as f:
@@ -98,7 +125,10 @@ def _read_fasta_seq(fasta_path: str) -> str:
                     seq.append(line.strip())
     except FileNotFoundError:
         return ''
-    return ''.join(seq)
+    out = ''.join(seq)
+    if out:
+        _FASTA_SEQ_CACHE[fasta_path] = out
+    return out
 
 
 def _seq_identity(fasta1: str, fasta2: str):
