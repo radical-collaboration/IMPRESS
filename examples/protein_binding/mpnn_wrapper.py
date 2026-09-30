@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env python3
 import argparse
 parser = argparse.ArgumentParser()
 import subprocess
@@ -15,7 +15,7 @@ parser.add_argument("-tie", "--tie", help="Which specific indices across multipl
 parser.add_argument("-homo", "--homo", help="Are your input files homomers? (0 or 1) Note: Overrides tied positions. If homomer is specified, all positions on designed chains will be tied. If positions are restricted, lists must be of same length. Example: -index='1 3 5 7, 1 3 5 7'", type=int)
 parser.add_argument("-bias_AA", "--bias_AA", help="For which amino acids would you like to install bias? Example: -bias_AA='D E H'", type=str)
 parser.add_argument("-bias_weight", "--bias_weight", help="What weights would you like to install for the biased amino acids? Lists must match in length. Example: -bias_weight='0.3 -0.3 0.5'", type=str)
-parser.add_argument("-temp", "--temp", help="What temperature would you like to sample from? Example: 0.3", type=int, default=0.1)
+parser.add_argument("-temp", "--temp", help="What temperature would you like to sample from? Example: 0.3", type=float, default=0.1)
 parser.add_argument("-inter", "--interface", help="Would you like to design the interface? Do not specify indices if designing the interface. (1 or 0)", type=int, default=0)
 
 
@@ -27,12 +27,12 @@ output_path=args.output_path
 mpnn_path=args.mpnn_path
 is_monomer=args.is_monomer #default is_monomer false
 chains=args.design_chains
-if chains == None:
+if chains is None:
 	chains='A' #default design chain A
 index=args.index
 fix=args.fix #default false, specify non fixed
 seqs=args.seqs
-if seqs == None:
+if seqs is None:
 	seqs=1 #default 1 design per structure
 tie=args.tie
 homo=args.homo

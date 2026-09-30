@@ -11,9 +11,11 @@ n_batches="$4"
 batch_size="$5"
 fixed_residues="${6:-}"
 
-source /anvil/projects/x-nairr240405/mason/LigandMPNN/.venv/bin/activate
+SCRIPT_DIR="$(dirname "$0")"
 
-python "$mpnn_dir/run.py" \
+# mpnn_run.py restores numpy deprecated aliases (np.int/np.bool/np.object)
+# removed in NumPy 1.24+ that LigandMPNN's bundled openfold still uses.
+python "$SCRIPT_DIR/mpnn_run.py" "$mpnn_dir" \
     --model_type "ligand_mpnn" \
     --checkpoint_path_sc "$mpnn_dir/model_params/ligandmpnn_sc_v_32_002_16.pt" \
     --checkpoint_ligand_mpnn "$mpnn_dir/model_params/ligandmpnn_v_32_010_25.pt" \

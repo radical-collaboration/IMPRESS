@@ -1,24 +1,16 @@
 import asyncio
-from unittest.mock import patch
+from unittest.mock import Mock
 
 import pytest
 
-from impress import PipelineSetup
+from impress import ImpressManager, PipelineSetup
 
+from ..conftest import RecordingEngine
 from .test_manager_core import MockPipeline
-
-
-class MockWorkflowEngine:
-    """Mock workflow engine"""
-
-    @classmethod
-    async def create(cls, backend=None):
-        return cls()
 
 
 class TestManagerLifecycle:
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_start_simple_pipeline(self, impress_manager):
         """Test starting with a simple pipeline that completes"""
         pipeline_setup = {
@@ -37,7 +29,6 @@ class TestManagerLifecycle:
         assert len(impress_manager.new_pipeline_buffer) == 0
 
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_start_multiple_pipelines(self, impress_manager):
         """Test starting with multiple pipelines"""
         pipeline_setups = [
@@ -53,7 +44,6 @@ class TestManagerLifecycle:
         assert len(impress_manager.adaptive_tasks) == 0
 
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_start_with_kill_parent(self, impress_manager):
         """Test starting with pipeline that kills itself"""
 
@@ -79,7 +69,6 @@ class TestManagerLifecycle:
         assert len(impress_manager.pipeline_tasks) == 0
 
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_pipeline_with_long_adaptive_task(self, impress_manager):
         """Test pipeline completion waits for adaptive task to finish"""
 
@@ -113,3 +102,48 @@ class TestManagerLifecycle:
 
         # Should take at least 0.15 seconds due to slow adaptive function
         assert end_time - start_time >= 0.15
+
+    @pytest.mark.asyncio
+    async def test_start_survives_pipeline_exception(self, impress_manager):
+        """start() returns cleanly when a pipeline raises mid-run"""
+
+        class ExplodingPipeline(MockPipeline):
+            async def run(self):
+                raise RuntimeError("pipeline exploded")
+
+        await impress_manager.start(
+            [{"name": "boom", "type": ExplodingPipeline, "config": {}, "kwargs": {}}]
+        )
+        assert len(impress_manager.pipeline_tasks) == 0
+
+
+class TestEngineOwnership:
+    """The caller owns the engine; the manager must never shut it down."""
+
+    @pytest.mark.asyncio
+    async def test_start_does_not_shutdown_injected_flow(self):
+        flow = RecordingEngine()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
+
+        await manager.start(
+            [{"name": "p1", "type": MockPipeline, "config": {}, "kwargs": {}}]
+        )
+
+        assert flow.shutdown_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_pipeline_exception_does_not_shutdown_injected_flow(self):
+        class ExplodingPipeline(MockPipeline):
+            async def run(self):
+                raise RuntimeError("pipeline exploded")
+
+        flow = RecordingEngine()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
+
+        await manager.start(
+            [{"name": "boom", "type": ExplodingPipeline, "config": {}, "kwargs": {}}]
+        )
+
+        assert flow.shutdown_calls == 0

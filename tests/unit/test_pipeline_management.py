@@ -1,15 +1,12 @@
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
 from .test_manager_core import MockPipeline
-from .test_manager_life_cycle import MockWorkflowEngine
 
 
 class TestChildPipelines:
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_start_with_child_pipeline(self, impress_manager):
         """Test starting with pipeline that creates child pipeline"""
 
@@ -42,7 +39,6 @@ class TestChildPipelines:
         assert len(impress_manager.new_pipeline_buffer) == 0
 
     @pytest.mark.asyncio
-    @patch("impress.impress_manager.WorkflowEngine", MockWorkflowEngine)
     async def test_simple_child_pipeline_creation(self, impress_manager):
         """Test a simple case of one parent creating one child pipeline"""
         completed_pipelines = []

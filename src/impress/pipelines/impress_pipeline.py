@@ -10,8 +10,9 @@ class ImpressBasePipeline(ABC):
     Abstract base class for all IMPRESS pipelines.
 
     Subclasses implement `register_pipeline_tasks()` to bind task methods
-    (via `auto_register_task()`), `run()` to define the pipeline's control
-    flow, and `finalize()` for cleanup. The base class provides the adaptive
+    (via `auto_register_task()`) and `run()` to define the pipeline's
+    control flow, and may optionally override `finalize()` for cleanup. The
+    base class provides the adaptive
     execution protocol (`run_adaptive_step()`) and the child-pipeline
     request mechanism (`submit_child_pipeline_request()` /
     `get_child_pipeline_request()`) used by `ImpressManager` to support
@@ -174,15 +175,14 @@ class ImpressBasePipeline(ABC):
         """
         return {}
 
-    @abstractmethod
-    async def finalize(self):
+    async def finalize(self):  # noqa: B027
         """
-        Cleanup or finalization logic; must be implemented by subclasses.
+        Cleanup or finalization logic.
 
-        Called by subclass-specific adaptive logic (typically after
-        spawning a child pipeline) to update or clear tracking state on the
-        parent pipeline. May be a no-op for pipelines with no cleanup to
-        perform.
+        Optional extension point; the default implementation is a no-op.
+        Typically called by subclass-specific adaptive logic (for example,
+        after spawning a child pipeline) to update or clear tracking state
+        on the parent pipeline.
         """
         pass
 

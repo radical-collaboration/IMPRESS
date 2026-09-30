@@ -45,12 +45,26 @@ class ImpressLogger:
     Provides generic level-based logging methods (`debug`, `info`,
     `warning`, `error`, `critical`) as well as semantic convenience methods
     for specific pipeline/manager lifecycle events (e.g.
-    `pipeline_started`, `adaptive_completed`). `error` and `critical`
-    messages are always written to stderr; all other levels write to
-    `output_stream` (default `sys.stdout`).
+    `pipeline_started`, `pipeline_failed`, `adaptive_completed`). All
+    levels are written to `output_stream` (default `sys.stdout`); messages
+    below `min_level` are dropped.
     """
 
-    def __init__(self, name="ImpressManager", use_colors=True, output_stream=None):
+    _LEVEL_ORDER = [
+        LogLevel.DEBUG,
+        LogLevel.INFO,
+        LogLevel.WARNING,
+        LogLevel.ERROR,
+        LogLevel.CRITICAL,
+    ]
+
+    def __init__(
+        self,
+        name="ImpressManager",
+        use_colors=True,
+        output_stream=None,
+        min_level: LogLevel = LogLevel.DEBUG,
+    ):
         """
         Initialize the logger.
 
@@ -58,12 +72,16 @@ class ImpressLogger:
             name: Logical name attached to `pipeline_log()` messages
                 (typically the owning pipeline or manager name).
             use_colors: Whether to wrap output in ANSI color codes.
-            output_stream: Stream to write non-error/critical messages to.
-                Defaults to `sys.stdout`.
+            output_stream: Stream to write all log messages to. Defaults
+                to `sys.stdout`.
+            min_level: Minimum severity to emit; messages below this
+                level are silently dropped. Defaults to `LogLevel.DEBUG`
+                (emit everything).
         """
         self.name = name
         self.use_colors = use_colors
         self.output_stream = output_stream or sys.stdout
+        self.min_level = min_level
 
         self.level_colors = {
             LogLevel.DEBUG: Colors.BRIGHT_BLACK,
@@ -117,10 +135,12 @@ class ImpressLogger:
             f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
         )
 
-    def _write_log(self, message, to_stderr=False):
-        stream = sys.stderr if to_stderr else self.output_stream
-        stream.write(message + "\n")
-        stream.flush()
+    def _is_enabled(self, level: LogLevel) -> bool:
+        return self._LEVEL_ORDER.index(level) >= self._LEVEL_ORDER.index(self.min_level)
+
+    def _write_log(self, message):
+        self.output_stream.write(message + "\n")
+        self.output_stream.flush()
 
     def debug(self, message, component="manager", pipeline_name=None):
         """Log a DEBUG-level message.
@@ -131,6 +151,8 @@ class ImpressLogger:
                 "manager", "pipeline", "adaptive").
             pipeline_name: Optional pipeline name to include in the log line.
         """
+        if not self._is_enabled(LogLevel.DEBUG):
+            return
         formatted = self._format_message(
             LogLevel.DEBUG, component, message, pipeline_name
         )
@@ -144,6 +166,8 @@ class ImpressLogger:
             component: Named component tag used for color-coding.
             pipeline_name: Optional pipeline name to include in the log line.
         """
+        if not self._is_enabled(LogLevel.INFO):
+            return
         formatted = self._format_message(
             LogLevel.INFO, component, message, pipeline_name
         )
@@ -157,36 +181,42 @@ class ImpressLogger:
             component: Named component tag used for color-coding.
             pipeline_name: Optional pipeline name to include in the log line.
         """
+        if not self._is_enabled(LogLevel.WARNING):
+            return
         formatted = self._format_message(
             LogLevel.WARNING, component, message, pipeline_name
         )
         self._write_log(formatted)
 
     def error(self, message, component="manager", pipeline_name=None):
-        """Log an ERROR-level message to stderr.
+        """Log an ERROR-level message.
 
         Args:
             message: Message text to log.
             component: Named component tag used for color-coding.
             pipeline_name: Optional pipeline name to include in the log line.
         """
+        if not self._is_enabled(LogLevel.ERROR):
+            return
         formatted = self._format_message(
             LogLevel.ERROR, component, message, pipeline_name
         )
-        self._write_log(formatted, to_stderr=True)
+        self._write_log(formatted)
 
     def critical(self, message, component="manager", pipeline_name=None):
-        """Log a CRITICAL-level message to stderr.
+        """Log a CRITICAL-level message.
 
         Args:
             message: Message text to log.
             component: Named component tag used for color-coding.
             pipeline_name: Optional pipeline name to include in the log line.
         """
+        if not self._is_enabled(LogLevel.CRITICAL):
+            return
         formatted = self._format_message(
             LogLevel.CRITICAL, component, message, pipeline_name
         )
-        self._write_log(formatted, to_stderr=True)
+        self._write_log(formatted)
 
     def pipeline_started(self, pipeline_name):
         """Log that a pipeline has started.
@@ -207,6 +237,17 @@ class ImpressLogger:
         colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
         message = f"Pipeline completed: {colored_name}"
         self.info(message, "manager")
+
+    def pipeline_failed(self, pipeline_name, exc):
+        """Log that a pipeline's task finished by raising an exception.
+
+        Args:
+            pipeline_name: Name of the pipeline that failed.
+            exc: The exception raised by the pipeline's `run()` task.
+        """
+        colored_name = self._colorize(pipeline_name, Colors.BRIGHT_WHITE)
+        message = f"Pipeline FAILED: {colored_name} — {exc}"
+        self.error(message, "manager")
 
     def pipeline_killed(self, pipeline_name):
         """Log that a pipeline was killed via `kill_parent`.
@@ -306,12 +347,13 @@ class ImpressLogger:
 
         Args:
             message: Message text to log.
-            level: Severity level; ERROR/CRITICAL are written to stderr.
+            level: Severity level (default `LogLevel.INFO`).
         """
+        if not self._is_enabled(level):
+            return
         pipeline_component = f"PIPELINE-{self.name.upper()}"
         formatted = self._format_message(level, pipeline_component, message)
-        stderr_levels = [LogLevel.ERROR, LogLevel.CRITICAL]
-        self._write_log(formatted, to_stderr=level in stderr_levels)
+        self._write_log(formatted)
 
     def separator(self, title=None):
         """Write a horizontal separator line, optionally with a title.

@@ -48,7 +48,7 @@ Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g.
 | `s1` | HPC | `scripts/s1_mpnn.sh` → `mpnn_wrapper.py` (ProteinMPNN) | GPU |
 | `s2` | local | parses MPNN FASTA output; ranks by score; populates `iter_seqs` | CPU |
 | `s3` | local | writes paired FASTA (designed sequence + peptide) per structure | CPU |
-| `s4` | HPC | `scripts/s4_boltz.sh` (Boltz) or `scripts/s4_alphafold.sh` (AF2, commented out) | GPU |
+| `s4` | HPC | `scripts/s4_boltz.sh` (Boltz-2) | GPU |
 | `s4_post_exec` | HPC | `cp` commands to stage best-model PDB, PTM JSON, and MPNN PDB from Boltz output | CPU |
 | `s5` | HPC | `scripts/s5_plddt_extract.sh` → `plddt_extract_pipeline.py` (PyRosetta + BioPandas) | CPU |
 
@@ -123,7 +123,9 @@ Key attributes on the `ProteinBindingPipeline` instance:
 
 ### Execution backends
 
-`run_protein_binding.py` has `LocalExecutionBackend(ProcessPoolExecutor())` active by default. `DragonExecutionBackendV3()` is commented out — swap it in for HPC production runs.
+`run_protein_binding.py` selects its backend from `IMPRESS_BACKEND`: `dragon` (the default) uses `rhapsody.backends.DragonExecutionBackend` for multi-node HPC runs, and `local` uses `ConcurrentExecutionBackend(ProcessPoolExecutor())` for single-node development on non-Dragon machines. The runner creates the `WorkflowEngine`, passes it to `ImpressManager`, and shuts it down in a `finally` block.
+
+GPU placement is left to the execution backend — the workflow does not pin tasks to devices.
 
 ### Hard-coded values
 

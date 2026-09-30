@@ -1,10 +1,10 @@
 from unittest.mock import Mock
 
 import pytest
+from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
 
 # Import the classes we're testing
-from impress import ImpressBasePipeline, PipelineSetup
-from impress import ImpressManager
+from impress import ImpressBasePipeline, ImpressManager, PipelineSetup
 
 
 class MockPipeline(ImpressBasePipeline):
@@ -44,15 +44,28 @@ class MockPipeline(ImpressBasePipeline):
 
 
 @pytest.fixture
-def mock_execution_backend():
-    """Mock execution backend"""
-    return Mock()
+async def real_flow(tmp_path):
+    """A real WorkflowEngine on asyncflow's no-op backend.
+
+    NoopExecutionBackend simulates execution with no executor and no
+    threads, so the engine stays cheap. It is constructed bare, not
+    awaited -- unlike LocalExecutionBackend it defines no __await__.
+
+    work_dir is pinned to tmp_path because attaching a backend does
+    os.makedirs(f"{work_dir}/{uid}"); the default would scatter session
+    dirs through the repo on every test run.
+    """
+    flow = await WorkflowEngine.create(
+        backend=NoopExecutionBackend(), work_dir=str(tmp_path)
+    )
+    yield flow
+    await flow.shutdown()
 
 
 @pytest.fixture
-def impress_manager(mock_execution_backend):
+def impress_manager(real_flow):
     """Create an ImpressManager instance for testing"""
-    manager = ImpressManager(mock_execution_backend, use_colors=False)
+    manager = ImpressManager(real_flow, use_colors=False)
     manager.logger = Mock()  # Mock the logger
     return manager
 
@@ -70,11 +83,11 @@ def sample_pipeline_setup():
 
 
 class TestImpressManagerCore:
-    def test_init(self, mock_execution_backend):
+    async def test_init(self, real_flow):
         """Test ImpressManager initialization"""
-        manager = ImpressManager(mock_execution_backend, use_colors=True)
+        manager = ImpressManager(real_flow, use_colors=True)
 
-        assert manager.execution_backend == mock_execution_backend
+        assert manager.flow is real_flow
         assert isinstance(manager.pipeline_tasks, dict)
         assert isinstance(manager.adaptive_tasks, dict)
         assert isinstance(manager.new_pipeline_buffer, list)
@@ -82,7 +95,7 @@ class TestImpressManagerCore:
         assert len(manager.adaptive_tasks) == 0
         assert len(manager.new_pipeline_buffer) == 0
 
-    def test_normalize_pipeline_setup_dict(self, impress_manager):
+    async def test_normalize_pipeline_setup_dict(self, impress_manager):
         """Test normalizing dict to PipelineSetup"""
         setup_dict = {
             "name": "test",
@@ -100,7 +113,7 @@ class TestImpressManagerCore:
         assert normalized.config == {"key": "value"}
         assert normalized.kwargs == {"kwargs": {"kwarg": "value"}}
 
-    def test_normalize_pipeline_setup_object(
+    async def test_normalize_pipeline_setup_object(
         self, impress_manager, sample_pipeline_setup
     ):
         """Test normalizing PipelineSetup object (no change)"""
@@ -108,7 +121,7 @@ class TestImpressManagerCore:
 
         assert normalized is sample_pipeline_setup
 
-    def test_normalize_pipeline_setup_invalid(self, impress_manager):
+    async def test_normalize_pipeline_setup_invalid(self, impress_manager):
         """Test normalizing invalid input raises ValueError"""
         with pytest.raises(ValueError, match="Expected dict or PipelineSetup"):
             impress_manager._normalize_pipeline_setup("invalid")

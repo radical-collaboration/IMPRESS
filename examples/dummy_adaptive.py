@@ -7,7 +7,7 @@ from impress import ImpressBasePipeline
 from impress import ImpressManager
 
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
@@ -70,15 +70,19 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
 
 
 async def run() -> None:
-    execution_backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    manager: ImpressManager = ImpressManager(execution_backend)
+    execution_backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=execution_backend)
+    manager: ImpressManager = ImpressManager(flow)
 
     pipeline_setups = [PipelineSetup(
         name=f'p{i}',
         type=DummyProteinPipeline,
         adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
 
-    await manager.start(pipeline_setups=pipeline_setups)
+    try:
+        await manager.start(pipeline_setups=pipeline_setups)
+    finally:
+        await flow.shutdown()
 
 
 if __name__ == "__main__":
