@@ -153,9 +153,18 @@ it notices root has been emptied. Anything that logs to the root logger directly
 ## Built, but unexercised against real science
 
 Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
-binaries, and the Delta HPC launch path is complete. **No campaign has yet run them on real hardware.**
-Everything below the adapters is exercised by the laptop tier; the adapters themselves are covered only
-for registration, validation and dry-run, because executing them needs the science stack installed.
+binaries, and the Delta HPC launch path is complete. **One adapter has now run on real hardware:**
+`rfd3_design` executed and succeeded on Delta (job 22536706). LigandMPNN failed on that same run,
+PyRosetta and Boltz were never reached, and no campaign has completed - so there is still no measured
+front, no ledger outcome and no calibrated cost. Everything below the adapters is exercised by the
+laptop tier; the remaining adapters are covered only for registration, validation and dry-run,
+because executing them needs the science stack installed.
+
+That one stage paid for itself. Its real `out_dir` showed that `RFD3DesignAgent`'s `*.cif.gz` glob
+was selecting a diffusion **trajectory** rather than the design - trajectories carry the same
+extension and `denoised` sorts first - so the backbone passed downstream was a multi-frame stack.
+Discovery now goes through the sidecar `*_model_*.json`. Read that as the expected yield of
+executing each remaining stage, not as a one-off.
 
 A verification pass against the actual installed toolkits on Delta (not just old scripts) found and
 fixed real contract bugs rather than merely confirming guesses: `rfd3_design` was invoking `rfd3`

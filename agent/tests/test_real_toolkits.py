@@ -602,3 +602,82 @@ def test_subprocess_error_survives_the_worker_boundary(args):
         assert type(back) is SubprocessError
         assert (back.cmd, back.returncode, back.stdout, back.stderr) == args
         assert str(back) == str(err)
+
+
+async def test_rfd3_never_hands_downstream_a_trajectory(reg, monkeypatch, tmp_path):
+    """The out_dir listing from job 22536706, verbatim.
+
+    RFD3 writes its trajectories as `.cif.gz` too and they carry no sidecar JSON, so a
+    bare `sorted(glob("*.cif.gz"))[0]` picked `..._denoised_model_0` - a multi-frame
+    trajectory, 1.7 MB against the real design's 19 KB - converted it, measured
+    `ss_fraction` on the stack and handed it to LigandMPNN as the backbone.
+
+    `dump_trajectories=False` (G3) hides this by never writing those files. That is luck,
+    not a fix: this asserts the selection is right even when they are present.
+    """
+    from impress_a.tools import _pdbtools, rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.chdir(tmp_path)
+    stem = "ALR_binder_design_partial_0"
+
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        work = pathlib.Path(next(a.split("=", 1)[1] for a in cmd if a.startswith("out_dir=")))
+        for name in (f"{stem}_denoised_model_0.cif.gz", f"{stem}_noisy_model_0.cif.gz",
+                     f"{stem}_model_0.cif.gz"):
+            (work / name).write_bytes(b"x")
+        (work / f"{stem}_model_0.json").write_text("{}")
+        return "", ""
+
+    converted: dict[str, Any] = {}
+
+    def fake_convert(src, dst):
+        converted["src"] = pathlib.Path(src)
+        pathlib.Path(dst).write_text("PDB")
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(_pdbtools, "cif_gz_to_pdb", fake_convert)
+    monkeypatch.setattr(_pdbtools, "secondary_structure_fraction", lambda p: 0.7)
+
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
+    params = agent.parameterize(TaskRequest(
+        tool="rfd3_design", node_id=req.node_id,
+        params={"input_spec_path": "/fake/inputs.json"}))
+    out = await agent.run(req, params)
+
+    assert converted["src"].name == f"{stem}_model_0.cif.gz", \
+        "the design is the model with a sidecar JSON, not whatever sorts first"
+    assert out["count"] == out["metrics"]["num_models"] == 1, \
+        "trajectories are not candidates; counting them would also inflate num_models"
+
+
+async def test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in(reg, monkeypatch,
+                                                                     tmp_path):
+    """Structures with no metadata beside them. Which one is a design is a guess, and a
+    confident guess is the failure mode this project exists to refuse - so this raises
+    rather than converting one. An out_dir with no `.cif.gz` at all is a different case:
+    that stays the quiet `count: 0` the `output_present` gate is written to catch
+    (`tests/empty_out_dir.bad.json`)."""
+    from impress_a.tools import rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.chdir(tmp_path)
+
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        work = pathlib.Path(next(a.split("=", 1)[1] for a in cmd if a.startswith("out_dir=")))
+        (work / "orphan_model_0.cif.gz").write_bytes(b"x")
+        return "", ""
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
+    params = agent.parameterize(TaskRequest(
+        tool="rfd3_design", node_id=req.node_id,
+        params={"input_spec_path": "/fake/inputs.json"}))
+
+    with pytest.raises(RuntimeError, match="sidecar"):
+        await agent.run(req, params)

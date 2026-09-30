@@ -1,9 +1,10 @@
 # Stub — the first real campaign on Delta
 
-**Status:** blocked on a person actually submitting the job. Steps 1-3 below are DONE for the ALR
-target as of this session (verified directly against the installed toolkits on Delta - see backlog
-A2, A3, A5). Backlog items A1 (no campaign has executed) and A4 (rfd3 output parsing needs
-confirming on a real run) remain.
+**Status:** submitted, and it got one stage in. Job 22536706 ran the smoke campaign on
+2026-09-29: `rfd3_design` succeeded, `ligandmpnn_design` failed, and the campaign then hung until
+the allocation ended (backlog G6). Steps 1-3 below were already DONE for the ALR target. A4 is
+closed by what that run wrote; A1 stays open, because no campaign has *completed*. What the run
+produced, and what it cost us to learn, is recorded at the bottom.
 
 ## Problem
 
@@ -60,3 +61,31 @@ fail loudly when their environment is absent, but no scientific code has run thr
 
 Then, with `replicas: 4`, confirm the four `DesignNode`s carry **different** metrics. That is the one
 check proving the seed work did anything, and it is the invariant most likely to be silently wrong.
+
+## What the first attempt actually produced (job 22536706)
+
+Answered, off roughly three minutes of real rfd3:
+
+- **The Hydra contract works.** rfd3 ran inside the container, exited 0 and wrote real output. A3
+  was verified by reading the CLI's source; it is now verified by execution.
+- **The output shape is `*_model_*.cif.gz` beside `*_model_*.json`**, as A4 predicted from the
+  reference pipeline. What A4 did *not* predict: our `*.cif.gz` glob was selecting the wrong one of
+  them. Trajectories are `.cif.gz` too and `denoised` sorts first, so the backbone handed downstream
+  was a 5.7 MB multi-frame trajectory rather than the 19 KB design. Fixed by discovering through the
+  sidecar JSON. Full evidence in backlog A4.
+- **`dump_trajectories` was still `True`** on that run - it predates the G3 flip - which is the only
+  reason the bug was visible at all. The current default hides it.
+
+Still unanswered, and all of it downstream of the one stage that ran: the ledger outcome, artifacts
+under `$SCRATCH` (rfd3's landed there correctly), the front's four objectives, the thread-cap lines,
+per-tool cost against estimate, and the `replicas: 4` independence check.
+
+**What it cost to learn.** `ligandmpnn_design` failed and we do not know why: its stderr went with
+the dropped monitor-loop sweep (backlog G6), and its work dir is empty. The campaign then held the
+allocation at `inflight=1` doing nothing until the wall clock ended it. Both halves of that are
+now bounded on our side only - `SubprocessError` is pickle-safe, so the *next* failure should
+arrive as a FAILED with its stderr attached, but nothing yet bounds a single run's wall clock, so
+watch the heartbeat and `scancel` on a stuck `inflight`.
+
+**Before resubmitting:** the rfd3 selection fix and the G6 fix are both code-only and both land
+before the next allocation is worth spending. Neither has executed on Delta.

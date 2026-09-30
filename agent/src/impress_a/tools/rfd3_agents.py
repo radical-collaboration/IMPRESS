@@ -90,8 +90,32 @@ class RFD3DesignAgent(TaskAgent):
             "rfd3", "design", *overrides,
         ], env=_container_env(), timeout_s=float(self.spec.resources.walltime_s))
 
-        cif_models = sorted(work.glob("*.cif.gz"))
+        # A candidate is a model that carries a sidecar metadata JSON - NOT whatever a bare
+        # `*.cif.gz` glob turns up first. RFD3 writes its trajectories as `.cif.gz` too
+        # (`*_denoised_model_*`, `*_noisy_model_*`), and `denoised` sorts BEFORE the design's
+        # own name, so `sorted(work.glob("*.cif.gz"))[0]` converted a multi-frame trajectory
+        # and handed it downstream as the backbone. Measured on job 22536706: a 5.7 MB
+        # backbone_0.pdb built from a 1.7 MB trajectory sitting beside the real 19 KB design,
+        # with ss_fraction computed on the stack. `dump_trajectories=False` above happens to
+        # hide it by not writing those files, which is exactly why selection must not depend
+        # on that flag. Same discovery rule as the reference IMPRESS pipeline; see backlog G2.
+        cif_models = []
+        for meta in sorted(work.glob("*_model_*.json")):
+            cif = meta.with_name(meta.name[:-len(".json")] + ".cif.gz")
+            if cif.exists():
+                cif_models.append(cif)
+
         if not cif_models:
+            stray = sorted(work.glob("*.cif.gz"))
+            if stray:
+                # Structures with no metadata beside them. Picking one would be a guess at
+                # which of them is a design, and this project's whole thesis is that a
+                # confident guess is worse than a loud failure.
+                raise RuntimeError(
+                    f"rfd3_design: {len(stray)} .cif.gz in {work} but none carries a sidecar "
+                    f"*_model_*.json (first: {stray[0].name}). rfd3 writes that JSON for every "
+                    "design and none for a trajectory, so this is not an out_dir we can pick a "
+                    "candidate from - check dump_prediction_metadata_json.")
             return {"result": None, "count": 0, "outputs": {},
                     "metrics": {"ss_fraction": 0.0}}
 

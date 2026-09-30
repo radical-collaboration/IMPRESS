@@ -130,12 +130,17 @@ dominant hazard, so the suite has to manufacture some.
 
 ## Known open risks
 
-**The real toolkits have never executed.** RFdiffusion3, LigandMPNN, PyRosetta and Boltz register,
-validate, type-check as a chain and dry-run — and no line of their code has run through this system.
-Their CLI contracts have since been checked directly against the installed binaries on Delta (not
-just read from old scripts), which found and fixed genuine bugs — `rfd3_design` was invoking flags
-the real Hydra-based CLI doesn't have at all — but "checked" is not "executed." Treat the real path
-as untested. `impress-a preflight` first; see `plans/first-real-run.md`.
+**One real stage has executed; the rest have not.** Job 22536706 got `rfd3_design` to run and
+succeed on Delta. `ligandmpnn_design` then failed with its stderr lost, and nothing downstream of it
+— PyRosetta, Boltz — has run at all. No campaign has completed, so there is still no measured front,
+no ledger outcome and no calibrated cost.
+
+The one stage that ran was worth it: reading its real `out_dir` found a defect no amount of dry-run
+would have. Our `*.cif.gz` glob was selecting a *trajectory* rather than the design, because
+trajectories share the extension and `denoised` sorts first. Discovery goes through the sidecar
+`*_model_*.json` now. Expect the same of every remaining stage — "checked against the binary" is not
+"executed," and the contracts were checked. `impress-a preflight` first; see
+`plans/first-real-run.md` and backlog A1/A4.
 
 **Dragon backend construction is synchronous and can hang the event loop.** `Batch()` builds with no
 `await` points, so a stall there is invisible — no heartbeat, no campaign log, nothing — until

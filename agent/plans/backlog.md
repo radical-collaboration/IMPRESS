@@ -7,14 +7,29 @@ paragraph in place rather than being deleted - the evidence that forced them is 
 State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
-on Delta - but no line of the real toolkits has executed yet (A1).
+on Delta. **One real stage has now executed:** `rfd3_design` ran to completion on Delta (job
+22536706) and the run then hung in LigandMPNN (A1, G6). Everything downstream of rfd3 is still
+unexecuted.
 
 ---
 
 ## A. Blocked on a person, not on code
 
-**A1. No real campaign has ever run.** Every claim about the real toolkits is validation, dry-run and
-unit-level. `campaigns/_runs/` holds only mock runs.
+**A1. No real campaign has ever completed** - one has now *started*. Job 22536706
+(`delta-small-molecule-smoke`, model D, one lineage) reached Delta on 2026-09-29:
+
+- `rfd3_design` **executed and succeeded** - roughly 3 minutes wall-clock, real output in
+  `impress_a_runs/22536706/work/rfd3_r0001_r0_s0_rfd3_design/`. The Hydra contract rewrite (A3) is
+  confirmed against the real CLI by execution, not by reading. The output shape is confirmed too
+  (A4) - and reading it found a real defect in our own adapter, below.
+- `ligandmpnn_design` **failed**, having written nothing into its work dir. *Why* is unknown and
+  probably unrecoverable: its stderr was lost with the monitor-loop sweep that G6 describes.
+- The campaign then hung at `inflight=1` until the allocation ended. `jobs/ledger.jsonl` holds
+  `campaign_started` and r0001 `submitted` with no terminal record - the shape G6 predicts.
+
+So: one stage proven, one stage failed for reasons we destroyed, nothing downstream touched, and no
+front, no measurement and no ledger outcome. A repeat run with the G6 fix in place is the next thing
+that moves this item, and it should now surface the real LigandMPNN error instead of hanging.
 
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
@@ -60,6 +75,29 @@ default, so this should be visible immediately). **Largely answered by the refer
 which discovers candidates as `*.json` containing `_model_` and derives the structure by
 `.replace('.json', '.cif.gz')` - so the shape is `*_model_*.cif.gz` alongside `*_model_*.json`. Our
 glob finds the structures; confirm on the first real run, and see G2 for using the JSON we discard.
+
+  **RESOLVED, and it was not finding them.** Job 22536706's `out_dir`, in full:
+
+  | file | size | sidecar JSON |
+  |---|---|---|
+  | `ALR_binder_design_partial_0_denoised_model_0.cif.gz` | 1.7 MB | no - trajectory |
+  | `ALR_binder_design_partial_0_model_0.cif.gz` | **19 KB** | **yes - the design** |
+  | `ALR_binder_design_partial_0_noisy_model_0.cif.gz` | 1.6 MB | no - trajectory |
+
+  Trajectories are `.cif.gz` as well, and `denoised` sorts **before** the design's own name. So
+  `sorted(work.glob("*.cif.gz"))[0]` took a multi-frame trajectory, converted it, measured
+  `ss_fraction` on the stack and handed it to LigandMPNN as the backbone - the 5.7 MB
+  `backbone_0.pdb` in that directory, against a 19 KB design. A candidate for what killed
+  LigandMPNN, though the stderr that would prove it is gone (G6).
+
+  Note what this says about G3: `dump_trajectories=False` makes the bug *unreachable* on current
+  code, because those two files are never written. It was flipped for footprint, and it silently
+  fixed a correctness defect nobody had found - which is the argument for not letting one flag's
+  default carry another decision's correctness. Selection now goes through the sidecar JSON
+  (`*_model_*.json` → `.cif.gz`, the reference pipeline's own rule), so it holds either way, and an
+  `out_dir` of structures with no metadata raises instead of guessing. Pinned by
+  `test_rfd3_never_hands_downstream_a_trajectory` and
+  `test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in`.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 
@@ -257,6 +295,12 @@ policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 `sheet_fraction`, and let us select the *best* model rather than `cif_models[0]`. Deferred
 deliberately until a real run shows what an `out_dir` actually contains - it changes what the gates
 measure, and A1 is still open.
+
+  **Half of it landed early, forced by A4:** *discovery* now reads the sidecar JSON, because a bare
+  `*.cif.gz` glob was selecting trajectories. What G2 still asks for is the rest - reading
+  `n_clashing.ligand_clashes` and friends *out* of that JSON for a structural gate, using rfd3's own
+  `helix_fraction`/`sheet_fraction` instead of our phi/psi estimate, and selecting the best model
+  rather than the first. The file is now open in the adapter; nothing is read from it yet.
 
 **G3. `dump_trajectories=True` writes 99.4% waste.** Upstream measured trajectories at 11.85 MB of
 each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a campaign from ~30 GB to
