@@ -581,3 +581,24 @@ def test_the_boltz_cache_guard_never_deletes_a_cache_it_cannot_refetch(tmp_path)
 
     assert (cache / "mols" / "ALR.pkl").read_text() == "payload"
     assert (cache / "boltz2_conf.ckpt").exists()
+
+
+@pytest.mark.parametrize("args", [
+    (["ligandmpnn", "--pdb", "x.pdb"], 2, "partial out", "Traceback: boom"),
+    (["boltz", "predict"], -1, "", "timed out after 60.0s"),
+])
+def test_subprocess_error_survives_the_worker_boundary(args):
+    """Dragon pickles a worker's exception into its results DDict. An exception that
+    cannot be unpickled does not surface as FAILED: rhapsody's monitor loop drops the
+    completion and the run sits in flight until walltime (job 22536706)."""
+    import pickle
+
+    from impress_a.tools._subprocess import SubprocessError
+
+    cloudpickle = pytest.importorskip("cloudpickle")
+    err = SubprocessError(*args)
+    for dumps, loads in ((pickle.dumps, pickle.loads), (cloudpickle.dumps, cloudpickle.loads)):
+        back = loads(dumps(err))
+        assert type(back) is SubprocessError
+        assert (back.cmd, back.returncode, back.stdout, back.stderr) == args
+        assert str(back) == str(err)

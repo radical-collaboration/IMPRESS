@@ -25,6 +25,13 @@ class SubprocessError(RuntimeError):
             f"command failed ({returncode}): {shlex.join(cmd)}\n--- stdout ---\n{stdout}\n"
             f"--- stderr ---\n{stderr}")
 
+    def __reduce__(self):
+        # This crosses a process boundary: Dragon pickles a worker's exception into its
+        # results DDict. Default unpickling calls cls(*self.args), which is (message,) here
+        # and fails. rhapsody's monitor loop then drops the completion, and the run hangs
+        # with no FAILED ever delivered (job 22536706).
+        return (type(self), (self.cmd, self.returncode, self.stdout, self.stderr))
+
 
 async def run_cmd(cmd: list[str], cwd=None, env=None, timeout_s: float | None = None) -> tuple[str, str]:
     """Run `cmd`, wait for it, return (stdout, stderr). Raises SubprocessError on nonzero exit."""

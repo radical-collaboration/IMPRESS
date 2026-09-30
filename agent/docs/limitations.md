@@ -125,6 +125,16 @@ in-code bound and relies on an operator watching the log and issuing `scancel`. 
 clock remains our second line of defence, which is part of why `scripts/delta_gpu_run.sh` asks for
 12 hours rather than the partition maximum.
 
+## ...and when a task's exception cannot be unpickled
+
+Dragon hands a worker's exception back by pickling it into a DDict. If it cannot be unpickled,
+rhapsody's monitor loop logs `Critical error in monitor loop` and drops every completion in that
+sweep. No FAILED arrives, and the run sits in flight until the SLURM wall clock kills it (job
+22536706, on a LigandMPNN failure). Our own `SubprocessError` is now pickle-safe. Any other
+exception with a required-argument `__init__` that does not forward those arguments to `super()`
+still triggers it, and nothing bounds a single run's wall-clock time. If a campaign log shows that
+error followed by a heartbeat whose `inflight` never drops, `scancel` it. See backlog G6.
+
 ## Dragon removes the root logger's handlers
 
 `dragon.native.Pool.__init__` and `ProcessGroup.__init__` call `setup_BE_logging`, which begins with

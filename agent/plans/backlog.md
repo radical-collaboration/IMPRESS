@@ -280,6 +280,23 @@ one that actually measures binding and our worker does not compute it (`rosetta_
 arrangement in the relaxed pose - if the ligand is not across jump 1 the gate is meaningless
 rather than obviously wrong.
 
+**G6. A worker exception that cannot be unpickled hangs the run.** Measured on job 22536706:
+ligandmpnn failed and `run_cmd` raised `SubprocessError`. Dragon pickles a worker's exception into
+its results DDict, but `SubprocessError`'s `args` held only the message, so unpickling failed. In
+rhapsody's `DragonExecutionBackend._monitor_loop`, `batch_task.get()` is guarded, but the
+follow-up `get_stdout(block=False)` re-reads the same entry and catches only `OSError`. The
+error goes to the outer handler (`Critical error in monitor loop`) and **that whole sweep's
+completions are dropped**. No FAILED is ever delivered, so the run stays `inflight=1` until walltime.
+The LigandMPNN stderr, the actual failure, was lost with it.
+
+  **Our half RESOLVED:** `SubprocessError.__reduce__`, pinned by
+  `test_real_toolkits.py::test_subprocess_error_survives_the_worker_boundary`. It is the only
+  custom exception raised inside a worker. **Still open:** rhapsody should catch `Exception`
+  around `get_stdout`/`get_stderr` and fail the one task instead of the sweep. That is an upstream
+  report, not a vendored patch. We have no per-run wall-clock bound that would catch the hang
+  either, so any third-party exception with the same shape (a required-arg `__init__` that does
+  not forward those args to `super()`) reproduces it.
+
 ---
 
 ## Recommended order
