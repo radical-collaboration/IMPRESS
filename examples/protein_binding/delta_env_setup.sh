@@ -5,12 +5,12 @@
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
 # Usage:
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
 #
 # Defaults:
-#   ENV_DIR     = /u/$USER/ve/impress
-#   IMPRESS_DIR = $SCRATCH/$USER/IMPRESS
+#   ENV_DIR     = $WORK_DIR/ve/impress
+#   IMPRESS_DIR = $WORK_DIR/IMPRESS
 #   python      = auto-detected via `module load python` (Delta default: 3.13+)
 # =============================================================================
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -23,17 +23,17 @@ if ! declare -f module &>/dev/null; then
     [ -f "${_lmod_init}" ] && source "${_lmod_init}"
 fi
 
-# ── Require SCRATCH ───────────────────────────────────────────────────────────
-if [[ -z "${SCRATCH:-}" ]]; then
-    echo "ERROR: set the SCRATCH env var to your allocation scratch root, e.g.:"
-    echo "  export SCRATCH=/scratch/<allocation>"
+# ── Require WORK_DIR ──────────────────────────────────────────────────────────
+if [[ -z "${WORK_DIR:-}" ]]; then
+    echo "ERROR: set WORK_DIR to your nvme work root, e.g.:"
+    echo "  export WORK_DIR=/work/nvme/bdyk/\$USER"
     echo "  bash delta_env_setup.sh"
     exit 1
 fi
 
 # ── Defaults / arg parsing ────────────────────────────────────────────────────
-ENV_DIR="${ENV_DIR:-/u/${USER}/ve/impress}"
-IMPRESS_DIR="${IMPRESS_DIR:-${SCRATCH}/${USER}/IMPRESS}"
+ENV_DIR="${ENV_DIR:-${WORK_DIR}/ve/impress}"
+IMPRESS_DIR="${IMPRESS_DIR:-${WORK_DIR}/IMPRESS}"
 BASE_PY_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -134,13 +134,11 @@ echo "── Step 9: Boltz (separate conda env) ──"
 # don't constrain the main IMPRESS venv. Boltz 2.0+ also installs fine via pip
 # in Python 3.13, but we keep the separation to avoid pin conflicts.
 # s4_boltz.sh activates BOLTZ_VENV (set in delta_gpu_run.sh) instead of VIRTUAL_ENV.
-MINIFORGE="${MINIFORGE:-${SCRATCH}/${USER}/miniforge3}"
-BOLTZ_ENV="${BOLTZ_ENV:-${HOME}/ve/boltz}"
-# Cache lives in home dir — scratch inode quota can't hold the 45K CCD files.
-BOLTZ_CACHE="${BOLTZ_CACHE:-${HOME}/boltz}"
+MINIFORGE="${MINIFORGE:-${WORK_DIR}/miniforge3}"
+BOLTZ_ENV="${BOLTZ_ENV:-${WORK_DIR}/ve/boltz}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/boltz}"
 if [ ! -x "${BOLTZ_ENV}/bin/python" ]; then
     echo "  Creating conda env (Python 3.11) at ${BOLTZ_ENV}"
-    # Use /tmp for package cache to avoid scratch quota exhaustion.
     CONDA_PKGS_DIRS=/tmp/conda_pkgs "${MINIFORGE}/bin/conda" create -p "${BOLTZ_ENV}" python=3.11 -y -q
 else
     echo "  boltz conda env already exists at ${BOLTZ_ENV}"
@@ -168,9 +166,8 @@ BOLTZ_MSA_CACHE="${BOLTZ_CACHE}/msa_cache"
 mkdir -p "${BOLTZ_MSA_CACHE}"
 echo "  Pre-computing MSAs into ${BOLTZ_MSA_CACHE}"
 # IMPRESS_BASE_DIR = parent of prod_in/; IMPRESS_OUTPUT_DIR = parent of af_pipeline_outputs_multi/
-_scratch="${SCRATCH}"
-_base_dir="${IMPRESS_BASE_DIR:-${_scratch}/IMPRESS_inputs}"
-_out_dir="${IMPRESS_OUTPUT_DIR:-${_scratch}/IMPRESS_outputs}"
+_base_dir="${IMPRESS_BASE_DIR:-${WORK_DIR}/IMPRESS_inputs}"
+_out_dir="${IMPRESS_OUTPUT_DIR:-${WORK_DIR}/IMPRESS_outputs}"
 _msa_inputs_dir="${_base_dir}/prod_in"
 if [ -d "${_msa_inputs_dir}" ]; then
     for _pdb_dir in "${_msa_inputs_dir}"/p*_in; do
@@ -238,7 +235,7 @@ echo "Activate with:"
 echo "  source ${ENV_DIR}/bin/activate"
 echo ""
 echo "Run the pipeline:"
-echo "  export SCRATCH=${SCRATCH}"
+echo "  export WORK_DIR=${WORK_DIR}"
 echo "  export SBATCH_ACCOUNT=bblj-delta-gpu"
 echo "  cd ${IMPRESS_DIR}/examples/protein_binding"
 echo "  sbatch delta_gpu_run.sh"

@@ -2,20 +2,19 @@
 #
 # Small Molecule Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #
-# Optional overrides (all have defaults based on SCRATCH/$USER):
+# Optional overrides:
 #   export MPNN_DIR=/path/to/LigandMPNN
 #   export BOLTZ_CACHE=/path/to/boltz_cache
 #
 # Foundry container (RFD3):
-#   The foundry sandbox is stored as a .tar.gz on scratch (built by pull_foundry.sh).
-#   This script extracts it to /tmp at job start (no scratch quota cost) and removes
-#   it on exit.  Override FOUNDRY_TAR to point to a different archive, or set
-#   FOUNDRY_SIF_PATH directly to skip extraction entirely (e.g. a pre-extracted dir).
+#   Stored as a .tar.gz under WORK_DIR (built by pull_foundry.sh).
+#   Extracted to /tmp at job start and removed on exit.
+#   Override FOUNDRY_TAR to point to a different archive, or set
+#   FOUNDRY_SIF_PATH directly to skip extraction entirely.
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -48,9 +47,9 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
+if [ -z "${WORK_DIR:-}" ]; then
+    echo "ERROR: WORK_DIR is not set."
+    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 
@@ -61,20 +60,16 @@ export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress}"
+IMPRESS_VENV="${IMPRESS_VENV:-${WORK_DIR}/ve/small_mol}"
 unset SLURM_EXPORT_ENV
 source "${IMPRESS_VENV}/bin/activate"
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by SmallMoleculeBindingPipeline via env vars) ─────────────
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
-export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/${USER}/LigandMPNN}"
+export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
 
-# Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
-# Pre-warm once on a login node via delta_env_setup.sh's Step 13 (boltz has no
-# dedicated "download weights" subcommand; weights auto-download on first
-# `boltz predict` call).
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/${USER}/.cache/boltz}"
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
@@ -82,11 +77,11 @@ mkdir -p "${BOLTZ_CACHE}"
 # space that is not quota-counted.  If FOUNDRY_SIF_PATH is already set (e.g.
 # a pre-built .sif or a persistent sandbox on a large allocation), extraction
 # is skipped entirely.
-if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
-    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
+if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${WORK_DIR}/foundry.sif" ]; then
+    export FOUNDRY_SIF_PATH="${WORK_DIR}/foundry.sif"
 fi
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/${USER}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${WORK_DIR}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it first: sbatch pull_foundry.sh"
@@ -114,8 +109,7 @@ if [ ! -d "${MPNN_DIR}" ]; then
 fi
 
 # ── Working directory ─────────────────────────────────────────────────────────
-#WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
-WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/IMPRESS/examples/small_molecule_binding}"
+WORKDIR="${IMPRESS_SCRIPTS_DIR:-${WORK_DIR}/IMPRESS/examples/small_molecule_binding}"
 cd "${WORKDIR}"
 mkdir -p logs
 
