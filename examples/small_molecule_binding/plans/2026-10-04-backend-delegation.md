@@ -1,6 +1,6 @@
 # Tool stages delegated to asyncflow/rhapsody instead of the runner
 
-**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide`, verified offline, not yet run on Delta
+**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke passed on Delta (`22670942`); 8-node throughput gate still open
 **Evidence:** branch history `976c0cf`..`90d6be3`, plus `d8c1b4b` and `8ddeb10` before it
 
 ## Why
@@ -32,6 +32,7 @@ Two branches added compute management to the example runner, which is the asyncf
 - **`adaptive_decision`** runs as `flow.function_task(backend="local")` on a `ConcurrentExecutionBackend(ThreadPoolExecutor)`.
 - **Per-stage logs** are kept at `{taskdir}/<stage>.log` via `scripts/run_logged.sh`.
 - **`mpnn.sh` and `filter_energy.sh`** gain the `VIRTUAL_ENV` guard.
+- **2026-10-05: `rfd3` and `boltz` capped too** (`GPU_TOOL_THREADS=8`). The first change capped only the five converted stages. On `22670942`, uncapped `boltz` took ~3,030% CPU (~30 cores) and `rfd3` ~680% on the Dragon primary, which sat at 3.8% idle. `rfd3.sh`'s `apptainer exec` has no `--cleanenv`, so the caps reach the container.
 - **Kept:**
   - The `--n-pipelines`/`--work-dir` argv plumbing. It works around a `dragon -w ssh` launcher limit, not compute delegation.
   - The `_read_fasta_seq` memo.
@@ -49,21 +50,48 @@ Two branches added compute management to the example runner, which is the asyncf
   - Zero failures; both backends shut down cleanly.
 - **`run_test_small_molecule_binding.py`** passes (exit 0).
 
-## Acceptance test — still required on Delta
+## Delta results
 
-1. **2-node smoke** (8 pipelines, small `max_tasks`):
-   - `mpnn`/`packmin`/`fastrelax`/`filter_shape` tasks appear on **both** nodes. Check the telemetry `node_id` per `workflow_id`.
-   - The primary's CPULoad drops relative to `22491438`.
-   - `nvidia-smi` on the primary shows no MPNN processes outside Dragon.
-2. **Env check:** temporarily `echo OMP_NUM_THREADS` from `fastrelax.sh`/`mpnn.sh`. Confirm the caps arrive on a remote node after the `dragon -w ssh` hop.
-3. **Throughput gate:** rfd3/pipeline/h at or above the 4-node baseline (11.46), with no rise in `TaskFailed`, before the next 8-node campaign.
+### `22669434` — 2 nodes (gpub036 + gpub060 primary), 1 h, cancelled at 55:51
+
+- **Effectively 1 pipeline.** `p2_in`–`p8_in` held only `ALR.smiles`; every `p*_in` dir had mtime 2026-09-30 12:56, so the loss predates this change. p2–p8 died on their first `rfd3` with `FileNotFoundError: p{N}_in/ALR_binder_design.json`. The dirs were restored from `p1_in` (identical to `p9_in`) before the next job. See BACKLOG item 9 for the launcher gap that let this through.
+- **p1 ran clean.** 31 converted-stage tasks completed on `compute` with no failures.
+- **Placement and env, confirmed by sampling `/proc/<pid>/environ` on both nodes during the run:**
+  - `mpnn`, `packmin`, `fastrelax` and `filter_shape` all ran on the **non-primary** gpub036, reached over the `dragon -w ssh` hop, as well as on the primary.
+  - Rosetta stages had `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE`; `mpnn` had `OMP_NUM_THREADS=4`. That closes the env check without editing any script.
+  - Every tool saw `CUDA_VISIBLE_DEVICES=0,1,2,3`, so there is still no GPU pinning (see Risks).
+- **Telemetry could not answer the placement question.** `node_id` is null on every task event; see `upstream/asyncflow-telemetry-backend-and-node-id.md`.
+
+### `22670942` — 2 nodes (gpub045 + gpub060 primary), 8 pipelines, `gpuA40x4-interactive`, 1 h, `TIMEOUT` at 01:00:25 (expected)
+
+| | |
+|---|---|
+| `TaskFailed` / pipeline failures / tracebacks | **0 / 0 / 0** |
+| Completed tasks | `mpnn` 337, `packmin` 108, `fastrelax` 82, `filter_shape` 32, `rfd3` 101, `boltz` 29, `adaptive_decision` 689 (`local`) |
+| Tasks per pipeline | 72–102; every pipeline completed full rfd3 → mpnn → packmin → fastrelax → filter_shape → boltz cycles |
+| Folds passing | 24 / 29 (83%) |
+| rfd3 / pipeline / h | ~13 (106 rfd3 over 8 pipelines in ~1 h) |
+
+**Reading the throughput number.** ~13 is above the 4-node baseline of 11.46, but it is a first-hour figure. The 8-node run `22534628` also did 12.05 in its first two hours before collapsing. So this shows the change does not slow the early phase. It does not replace the throughput gate.
+
+**Primary-node load.** The primary was oversubscribed (3.8% idle, 75–100 runnable on 64 cores). The causes were not the converted stages:
+- uncapped `boltz`/`rfd3`, now fixed;
+- Dragon's own pool workers, at ~21–25 cores per node of idle spin. See `upstream/dragon-batch-idle-spin.md`.
+
+The "primary's CPULoad drops relative to `22491438`" criterion therefore can't be judged until the Dragon spin is reduced, because it dominates the load figure.
+
+## Acceptance test — status
+
+1. **2-node smoke:** **passed** (`22670942`). Placement on both nodes was confirmed via `/proc`, since telemetry has no `node_id`.
+2. **Env check:** **passed** (`22669434`). Caps arrived on the non-primary node.
+3. **Throughput gate:** **open.** It needs rfd3/pipeline/h at or above 11.46 over a full campaign (or at least past hour 2), with no rise in `TaskFailed`. Run it after re-checking primary-node idle with the `rfd3`/`boltz` caps in place.
 
 ## Risks
 
 - **False-FAILED race exposure.** More tasks now go through Dragon, so there is more exposure to the 0.14.1 race. It did not manifest in `22534628` (zero task failures in 63,589 log lines).
 - **Task rate.** It is low (~32 × 300 tasks over ~7 h ≈ 0.4/s), well within the Dragon monitor thread's capacity.
 - **Fallback.** If Dragon placement of the PyRosetta stages misbehaves, add `backend="local"` to just those registrations. They stay asyncflow-managed with per-task env. Keep `mpnn` on `compute`, because it is a GPU tool.
-- **Process-mode tasks receive no `gpu_affinity` from Dragon.** So `rfd3`, `boltz` and now `mpnn` each see every GPU on their node. That was already true of `rfd3`/`boltz`, and is unchanged.
+- **Process-mode tasks receive no `gpu_affinity` from Dragon.** So `rfd3`, `boltz` and now `mpnn` each see every GPU on their node. That was already true of `rfd3`/`boltz`, and is unchanged. It was confirmed on `22669434`, where every tool had `CUDA_VISIBLE_DEVICES=0,1,2,3`.
 
 ## Upstream items (not patched here)
 
@@ -72,3 +100,5 @@ Two branches added compute management to the example runner, which is the asyncf
 | radical.asyncflow | Cancelling a task routed to a non-default backend calls the *default* backend's `cancel_task` (`workflow_manager.py:870`). The task state map comes only from the default backend (`:116`). This is harmless today because both backends register the default states. |
 | rhapsody | The Dragon backend has no `cores_per_rank`/threads key; caps only go through `process_template.env`. `shutdown()` blocks the loop and never cancels in-flight Batch tasks, which is a plausible contributor to the teardown hang (item 2). |
 | IMPRESS | `ImpressManager._run_adaptive_fn` could dispatch sync callbacks through a flow backend itself, so other examples get this without wiring it. |
+| dragonhpc | Batch pool workers and managers busy-spin when idle; the pool size is hardcoded `num_cpus // 2`. See [upstream/dragon-batch-idle-spin.md](upstream/dragon-batch-idle-spin.md). |
+| radical.asyncflow | Lifecycle events after submit carry the default backend's name, and `node_id` is never set on task events. See [upstream/asyncflow-telemetry-backend-and-node-id.md](upstream/asyncflow-telemetry-backend-and-node-id.md). |

@@ -50,6 +50,11 @@ ETYPE_FOLD     = 'fold decoy'
 # LigandMPNN is PyTorch, whose CPU-side work is what the cap actually bounds.
 ROSETTA_THREADS = 1
 MPNN_THREADS    = 4
+# rfd3 (inside apptainer, which inherits the env -- no --cleanenv) and boltz are
+# PyTorch too. Uncapped, boltz alone took ~30 cores of the Dragon primary on
+# smoke job 22670942 and oversubscribed it; 8 x ~4 GPU tools per node leaves
+# room for the Rosetta stages and Dragon's own pool workers.
+GPU_TOOL_THREADS = 8
 
 
 # ── Ensemble utility functions ─────────────────────────────────────────────
@@ -806,9 +811,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         """
         rosetta_td = self._tool_task_description(ROSETTA_THREADS)
         mpnn_td    = self._tool_task_description(MPNN_THREADS)
+        gpu_td     = self._tool_task_description(GPU_TOOL_THREADS)
 
         @self.auto_register_task(capture_stdio=True)
-        async def rfd3():
+        async def rfd3(task_description: dict = gpu_td):
             self.taskcount += 1
             taskname = "rfd3"
             self.previous_task = taskname
@@ -1172,7 +1178,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             }
 
         @self.auto_register_task(capture_stdio=True)
-        async def boltz():
+        async def boltz(task_description: dict = gpu_td):
             self.taskcount += 1
             taskname = "boltz"
             self.previous_task = taskname
