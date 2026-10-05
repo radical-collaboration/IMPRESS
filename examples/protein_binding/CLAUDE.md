@@ -10,12 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 2026-04-09 | 25224fa | Boltz logging + FASTA validation in s4_boltz.sh; s4_post_exec task added |
 | 2026-04-09 | d46a051 | protein_binding_run.py added (LLM-adaptive runner) |
 | 2026-04-18 | 758d868 | Fix post-exec staging cp paths |
+| 2026-09-30 | — | s4 is Boltz-2 only; paths moved to env vars; `protein_binding_run.py` removed |
 
 ## Context
 
 This directory is an **example workflow** within the larger [IMPRESS framework](https://github.com/radical-collaboration/IMPRESS) (Integrated Machine-learning for PRotEin Structures at Scale). IMPRESS is an HPC framework for protein inverse design using Foundation Models.
 
-The pipeline designs protein binders for PDZ domains against a target peptide (`EGYQDYEPEA`). It iterates over: ProteinMPNN sequence design → structure prediction (Boltz or AF2) → pLDDT/PTM scoring, with an adaptive function that offloads degraded proteins to child pipelines using the next-ranked MPNN candidate.
+The pipeline designs protein binders for PDZ domains against a target peptide (`EGYQDYEPEA`). It iterates over: ProteinMPNN sequence design → structure prediction (Boltz-2) → pLDDT/PTM scoring, with an adaptive function that offloads degraded proteins to child pipelines using the next-ranked MPNN candidate.
 
 The framework package lives at `../../` (two levels up). Install it with:
 ```shell
@@ -29,7 +30,9 @@ pip install .
 python run_protein_binding.py
 ```
 
-Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g. `mpnn_path`) and the `__init__` kwargs in `ProteinBindingPipeline` to match the target system. Place input PDB files in `p1_in/`.
+Configuration is entirely through environment variables — no source edits are needed. `MPNN_PATH` is required (the constructor raises `ValueError` without it). `IMPRESS_SCRIPTS_DIR`, `IMPRESS_BASE_DIR`, and `IMPRESS_OUTPUT_DIR` set `base_path`, `input_base_path`, and `output_base_path`; `IMPRESS_BACKEND`, `IMPRESS_N_PIPELINES`, and `IMPRESS_MAX_PASSES` control the run shape. Place input PDB files in `<IMPRESS_BASE_DIR>/prod_in/p1_in/`.
+
+On NCSA Delta, `delta_env_setup.sh` builds the environment (IMPRESS, rhapsody, PyTorch, PyRosetta, a separate Boltz env, pre-computed MSAs) and `sbatch delta_gpu_run.sh` submits the job.
 
 ## Architecture
 
@@ -39,7 +42,7 @@ Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g.
 
 - **`run_protein_binding.py`** — primary entry point. Defines `adaptive_decision()` (reads CSV, compares scores, spawns child pipelines) and `adaptive_criteria()` (score comparison predicate). Creates an `ImpressManager` and launches via `manager.start(pipeline_setups=[...])`.
 
-- **`protein_binding_run.py`** — alternative entry point with LLM-based adaptive decision. Uses the Anthropic Claude API (`claude-opus-4-6`) to compare current candidate metrics against the prior ensemble distribution and decide whether to refine the current sequence or sample a new one. Imports `anthropic`; requires `ANTHROPIC_API_KEY`.
+- **`run_nonadaptive.py`** — baseline entry point: the same 16 pipelines with no `adaptive_fn`, for measuring what the adaptive strategy buys.
 
 ### Pipeline tasks and scripts
 
@@ -49,7 +52,7 @@ Before running on HPC, edit the path constants in `run_protein_binding.py` (e.g.
 | `s2` | local | parses MPNN FASTA output; ranks by score; populates `iter_seqs` | CPU |
 | `s3` | local | writes paired FASTA (designed sequence + peptide) per structure | CPU |
 | `s4` | HPC | `scripts/s4_boltz.sh` (Boltz-2) | GPU |
-| `s4_post_exec` | HPC | `cp` commands to stage best-model PDB, PTM JSON, and MPNN PDB from Boltz output | CPU |
+| `s4_post_exec` | local | Python copy of best-model PDB, confidence JSON, and next-pass MPNN PDB from the Boltz output, rewriting chain IDs (`pdz`→`A`, `pep`→`B`) | CPU |
 | `s5` | HPC | `scripts/s5_plddt_extract.sh` → `plddt_extract_pipeline.py` (PyRosetta + BioPandas) | CPU |
 
 ### Execution flow
@@ -95,14 +98,15 @@ Child pipelines skip `s1` and `s2` on their first pass, inheriting `iter_seqs` f
 ### Output directory structure
 
 ```
-<base_path>/
-  <name>_in/                                  # input PDB files
+<input_base_path>/
+  prod_in/<name>_in/                          # input PDB files
+<output_base_path>/
   af_pipeline_outputs_multi/<name>/
     mpnn/job_<N>/seqs/                         # MPNN FASTA files for pass N
     af/fasta/                                  # paired FASTAs (designed + peptide)
     af/prediction/best_models/                 # best-model PDB per structure (s5 input)
     af/prediction/best_ptm/                    # iPTM+PTM JSON files (s5 input)
-    af/prediction/dimer_models/<name>/         # full Boltz/AF2 outputs
+    af/prediction/dimer_models/<name>/         # full Boltz-2 outputs
   af_stats_<name>_pass_<N>.csv               # per-pass scores (output-staged to client)
 ```
 
@@ -133,7 +137,7 @@ GPU placement is left to the execution backend — the workflow does not pin tas
 |---|---|---|
 | `s3` (`protein_binding.py`) | `"EGYQDYEPEA"` | Fixed target peptide sequence |
 | `s3` | `>pdz\|protein` / `>pep\|protein` | FASTA chain labels for Boltz |
-| `s1` | Chain `"A"` pass 1, `"B"` pass 2+ | Chain to redesign with MPNN |
+| `s1` | Chain `"A"` | Chain to redesign with MPNN (every pass) |
 | `adaptive_decision` | `MAX_SUB_PIPELINES = 3` | Maximum child pipeline nesting depth |
-| `s4_boltz.sh` | `--use_msa_server` | MSA lookup via server (requires internet on compute node) |
+| `s4_boltz.sh` | `--use_msa_server` | Opt-in via `BOLTZ_USE_MSA_SERVER=1`; off by default, since compute nodes have no internet. `s3` instead references the MSA cache under `~/boltz/msa_cache` when present, else single-sequence mode |
 | `s4_boltz.sh` | `--write_full_pae` | Write full PAE matrix (needed by s5 for avg_pae) |

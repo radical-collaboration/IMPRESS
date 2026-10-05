@@ -269,10 +269,10 @@ Mock mode (`mock=True`, `mock.py`) mirrors this same layout with hardcoded fixtu
 
 ### Production run (Delta HPC)
 
-1. One-time environment setup: `bash delta_env_setup.sh` (creates the venv, installs all dependencies including Boltz-2 and PyRosetta, warms the Boltz weights cache). See that script's header comment for required env vars (`SCRATCH`, etc.).
+1. One-time environment setup: `bash delta_env_setup.sh` (creates the venv, installs all dependencies including Boltz-2 and PyRosetta, warms the Boltz weights cache). See that script's header comment for required env vars (`WORK_DIR`, etc.).
 2. Derive each ligand's SMILES once: `python scripts/derive_ligand_smiles.py <ligand>.params <reference>.pdb`, then copy the resulting `.smiles` file into every `<pipeline_name>_in/` directory that uses that ligand.
 3. Adjust `PROD`/`TEST` in `run_small_molecule_binding.py` if the default thresholds don't fit your target (class defaults above are permissive; `PROD` is tuned tighter — e.g. `fastrelax_max_fa_rep=100.0`, `interface_min_sc=0.55`, `fold_min_plddt=75.0`).
-4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `SCRATCH`-relative defaults, or export them yourself beforehand to override — see that script's header comment). Pass `IMPRESS_TEST_MODE=1` before `sbatch` to run the inert `TEST` config instead of `PROD`.
+4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `WORK_DIR`-relative defaults, or export them yourself beforehand to override — see that script's header comment). Pass `IMPRESS_TEST_MODE=1` before `sbatch` to run the inert `TEST` config instead of `PROD`.
 
 After a run, validate the output against expected invariants (ligand identity preserved through the guided-RFD3 path, Boltz output shape, no regression to rejected design states, etc.):
 

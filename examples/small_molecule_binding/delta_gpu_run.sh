@@ -2,21 +2,19 @@
 #
 # Small Molecule Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #
-# Optional overrides (all have defaults based on $SCRATCH, which on Delta is
-# already per-user, e.g. /scratch/<alloc>/<user> -- do not add $USER again):
+# Optional overrides (default under $WORK_DIR):
 #   export MPNN_DIR=/path/to/LigandMPNN
 #   export BOLTZ_CACHE=/path/to/boltz_cache
 #
 # Foundry container (RFD3):
-#   The foundry sandbox is stored as a .tar.gz on scratch (built by pull_foundry.sh).
-#   This script extracts it to /tmp at job start (no scratch quota cost) and removes
-#   it on exit.  Override FOUNDRY_TAR to point to a different archive, or set
-#   FOUNDRY_SIF_PATH directly to skip extraction entirely (e.g. a pre-extracted dir).
+#   Stored as a .tar.gz under WORK_DIR (built by pull_foundry.sh).
+#   Extracted to /tmp at job start and removed on exit.
+#   Override FOUNDRY_TAR to point to a different archive, or set
+#   FOUNDRY_SIF_PATH directly to skip extraction entirely.
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -76,9 +74,9 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
+if [ -z "${WORK_DIR:-}" ]; then
+    echo "ERROR: WORK_DIR is not set."
+    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 
@@ -113,12 +111,12 @@ echo "MPI_LIB:           ${MPI_LIB}"
 echo "FAB_LIB:           ${FAB_LIB}"
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress}"
-# Keep this unset: Dragon launches its per-node backends with a plain
-# `srun --nodes=N --ntasks=N` and no --export flag, so srun's default
-# --export=ALL is what carries PATH (the venv), SCRATCH, MPNN_DIR, BOLTZ_CACHE
-# and FOUNDRY_SIF_PATH to the remote nodes.  If SLURM_EXPORT_ENV were left at
-# NONE, every remote task would lose the venv and boltz.sh would exit 127.
+IMPRESS_VENV="${IMPRESS_VENV:-${WORK_DIR}/ve/small_mol}"
+# Keep this unset so srun's default --export=ALL carries this environment to any
+# srun steps.  Note the multi-node path below (`dragon -w ssh`) does NOT use
+# srun: tasks on remote nodes see only Dragon's BASE_ENV_VARNAMES plus whatever
+# the ssh login shell's ~/.bashrc exports -- which is where WORK_DIR, MPNN_DIR,
+# BOLTZ_CACHE and FOUNDRY_SIF_PATH must come from for rfd3.sh/boltz.sh there.
 unset SLURM_EXPORT_ENV
 # Dragon's launcher issues its own srun steps inside this allocation; without
 # --overlap they can collide with the batch step and hang at "job step creation
@@ -133,13 +131,12 @@ dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by SmallMoleculeBindingPipeline via env vars) ─────────────
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
-export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/LigandMPNN}"
+export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
 
-# Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
-# Pre-warm once on a login node via delta_env_setup.sh's Step 13 (boltz has no
-# dedicated "download weights" subcommand; weights auto-download on first
-# `boltz predict` call).
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/.cache/boltz}"
+# Boltz-2 model weights cache.  Pre-warm once on a login node via
+# delta_env_setup.sh's Step 13 (boltz has no dedicated "download weights"
+# subcommand; weights auto-download on first `boltz predict` call).
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
@@ -147,8 +144,8 @@ mkdir -p "${BOLTZ_CACHE}"
 # space that is not quota-counted.  If FOUNDRY_SIF_PATH is already set (e.g.
 # a pre-built .sif or a persistent sandbox on a large allocation), extraction
 # is skipped entirely.
-if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
-    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
+if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${WORK_DIR}/foundry.sif" ]; then
+    export FOUNDRY_SIF_PATH="${WORK_DIR}/foundry.sif"
 fi
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     # The /tmp sandbox is extracted on THIS node only, so a multi-node job would
@@ -159,11 +156,11 @@ if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
         echo "ERROR: multi-node job (--nodes=${SLURM_NNODES}) but no shared foundry image."
         echo "       The /tmp sandbox extraction is node-local and will not be"
         echo "       visible to rfd3 tasks scheduled on other nodes."
-        echo "       Put the .sif on Lustre: ${SCRATCH}/foundry.sif"
+        echo "       Put the .sif on shared storage: ${WORK_DIR}/foundry.sif"
         echo "       (or set FOUNDRY_SIF_PATH to a shared path)"
         exit 1
     fi
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${WORK_DIR}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it first: sbatch pull_foundry.sh"
@@ -191,8 +188,7 @@ if [ ! -d "${MPNN_DIR}" ]; then
 fi
 
 # ── Working directory ─────────────────────────────────────────────────────────
-#WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
-WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/IMPRESS/examples/small_molecule_binding}"
+WORKDIR="${IMPRESS_SCRIPTS_DIR:-${WORK_DIR}/IMPRESS/examples/small_molecule_binding}"
 cd "${WORKDIR}"
 mkdir -p logs
 

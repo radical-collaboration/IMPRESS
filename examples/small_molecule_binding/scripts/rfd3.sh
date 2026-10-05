@@ -28,7 +28,11 @@ export PYTHONNOUSERSITE=1
 # .replace('.json', '.cif.gz'), while trajectory files ship no .json at all.
 # Only the 4 *_model_*.cif.gz designs and their .json metrics are kept (~71 KB).
 # To inspect a trajectory for one design, re-run that rfd3 task with this True.
-apptainer exec --nv --writable-tmpfs ${SCRATCH:+--bind "${SCRATCH}:${SCRATCH}"} "$foundry_sif_path" rfd3 design \
+#
+# The WORK_DIR bind is what makes inputs, outputs and the RFD3 checkpoints
+# visible inside the container.  On a remote node of a `dragon -w ssh` run,
+# WORK_DIR comes only from ~/.bashrc -- without it the bind is silently dropped.
+apptainer exec --nv --writable-tmpfs ${WORK_DIR:+--bind "${WORK_DIR}:${WORK_DIR}"} "$foundry_sif_path" rfd3 design \
     out_dir="$output_dir" \
     inputs="$inputs" \
     skip_existing=False \

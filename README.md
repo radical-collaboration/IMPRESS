@@ -1,10 +1,10 @@
 # Integrated Machine-learning for PRotEin Structures at Scale (IMPRESS)
 
-IMPRESS is a high-performance computational framework to enable the inverse design of proteins using Foundation Models such as AlphaFold and ESM2.
+IMPRESS is a high-performance computational framework to enable the inverse design of proteins using foundation models such as ProteinMPNN, RFDiffusion3, and Boltz-2. It runs many asynchronous, adaptive protein-design pipelines concurrently on HPC resources through [RADICAL AsyncFlow](https://pypi.org/project/radical-asyncflow/).
 
 
 ## Documentation
-📚 [IMPRESS Docs](https://radical-collaboration.github.io/IMPRESS/)
+[IMPRESS Docs](https://radical-collaboration.github.io/IMPRESS/)
 
 
 ## Installation
@@ -14,57 +14,73 @@ cd IMPRESS
 pip install .
 ```
 
+HPC execution backends (Dragon, RADICAL-Pilot) come from `rhapsody`, which is
+installed separately:
 
-## Example on HPC
+```shell
+pip install "rhapsody-py[dragon,telemetry]"
+```
+
+
+## Example
 ```python
 import asyncio
-from typing import Dict, Any, Optional, List
 
 from radical.asyncflow import WorkflowEngine
-from rhapsody.backends import RadicalExecutionBackend
+from rhapsody.backends import DragonExecutionBackend
 
-from impress import PipelineSetup
-from impress import ImpressManager
-from impress.pipelines.protein_binding import ProteinBindingPipeline
+from impress import ImpressBasePipeline, ImpressManager, PipelineSetup
 
 
-async def impress_protein_bind() -> None:
-    """
-    Execute protein binding analysis with adaptive optimization.
-    
-    Creates and manages multiple ProteinBindingPipeline instances with
-    adaptive optimization capabilities. Each pipeline can spawn child
-    pipelines based on protein quality degradation.
-    """
-    backend = await RadicalExecutionBackend(
-        {'gpus': 2,
-         'cores': 32,
-         'runtime': 13 * 60,
-         'resource': 'purdue.anvil_gpu'
-         })
+class MyPipeline(ImpressBasePipeline):
+    def register_pipeline_tasks(self):
+        @self.auto_register_task()
+        async def design(*args, **kwargs):
+            return "python3 design.py"
+
+        @self.auto_register_task()
+        async def fold(*args, **kwargs):
+            return "python3 fold.py"
+
+    async def run(self):
+        await self.design()
+        await self.fold()
+        await self.run_adaptive_step(wait=True)
+
+
+async def adaptive_decision(pipeline: MyPipeline) -> None:
+    # Inspect pipeline.state and optionally spawn a child pipeline:
+    # pipeline.submit_child_pipeline_request({...})
+    pass
+
+
+async def main() -> None:
+    # The caller owns the engine: create it, hand it to the manager,
+    # and shut it down when done.
+    backend = await DragonExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
-
-    manager: ImpressManager = ImpressManager(flow)
-
-    pipeline_setups: List[PipelineSetup] = [
-        PipelineSetup(
-            name='p1',
-            type=ProteinBindingPipeline,
-            adaptive_fn=adaptive_decision
-        )
-    ]
+    manager = ImpressManager(flow)
 
     try:
-        await manager.start(pipeline_setups=pipeline_setups)
+        await manager.start(pipeline_setups=[
+            PipelineSetup(name=f"p{i}", type=MyPipeline,
+                          adaptive_fn=adaptive_decision)
+            for i in range(1, 5)
+        ])
     finally:
         await flow.shutdown()
 
 
 if __name__ == "__main__":
-    asyncio.run(impress_protein_bind())
-
+    asyncio.run(main())
 ```
+
+Complete, runnable workflows live under [`examples/`](examples/):
+[protein binding](examples/protein_binding/) (ProteinMPNN + Boltz-2),
+[small molecule binding](examples/small_molecule_binding/) (RFDiffusion3 +
+LigandMPNN + Rosetta + Boltz-2), and
+[discontinuous scaffolds](examples/discontinuous_scaffolds/).
 
 
 ## Resources
-To learn more, please visit the project website at https://radical-project.github.io/impress/
+To learn more, please visit the [IMPRESS documentation](https://radical-collaboration.github.io/IMPRESS/).

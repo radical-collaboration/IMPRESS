@@ -2,16 +2,15 @@
 
 **Integrated Machine-learning for PRotEin Structures at Scale**
 
-IMPRESS is an asynchronous framework for managing complex protein design pipelines with adaptive decision-making capabilities. It is built for deploying heterogeneous scientific worflows (mixed CPU/GPU and data sharing) in high-performance computing environments. Using a building-block approach to workflow design, IMPRESS enables high-throughput campaigns based on foundation models like AlphaFold and ESM2 or with custom models requiring runtime training and optimization.
+IMPRESS is an asynchronous framework for managing complex protein design pipelines with adaptive decision-making capabilities. It is built for deploying heterogeneous scientific workflows (mixed CPU/GPU and data sharing) in high-performance computing environments. Using a building-block approach to workflow design, IMPRESS enables high-throughput campaigns based on foundation models like ProteinMPNN, RFDiffusion3, and Boltz-2, or with custom models requiring runtime training and optimization.
 
 
 ## Features
-|<!-- -->|<!-- -->|
-| ----------- | ----------- |
-|🧬|**Protein Design Pipelines**: Prebuilt and custom workflows|
-|🔄|**Adaptive Execution**: Dynamic pipeline spawning|
-|⚡|**HPC Optimized**: High-performance async execution|
-|🎯| **Flexible Architecture**: Standard and user-defined pipelines|
+
+- **Protein Design Pipelines**: Example and custom workflows
+- **Adaptive Execution**: Dynamic pipeline spawning
+- **HPC Optimized**: High-performance async execution
+- **Flexible Architecture**: Standard and user-defined pipelines
 
 
 ## Quick Example
@@ -26,15 +25,14 @@ from impress import ImpressBasePipeline, ImpressManager
 class MyPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         @self.auto_register_task()
-        async def analyze(self):
+        async def analyze(*args, **kwargs):
             return "echo 'Analyzing sequences'"
 
     async def run(self):
         await self.analyze()
-        await self.invoke_adaptive_step(wait=False)
+        await self.run_adaptive_step(wait=False)
 
 async def run_dummy_pipelines():
-
     backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
     manager = ImpressManager(flow)
@@ -52,4 +50,12 @@ async def run_dummy_pipelines():
 asyncio.run(run_dummy_pipelines())
 ```
 
+The caller owns the `WorkflowEngine`: create it from an execution backend,
+hand it to `ImpressManager`, and shut it down when `start()` returns.
 
+## Learn More
+
+- [Architecture](concepts/architecture.md) — how `ImpressManager`, `ImpressBasePipeline`, and `PipelineSetup` fit together
+- [Adaptive Execution](concepts/adaptive-execution.md) — a worked walkthrough of adaptive child-pipeline spawning
+- [Examples](examples/protein-binding.md) — real HPC workflows: protein binding, discontinuous scaffolds, small molecule binding
+- [API Reference](reference/index.md) — full class and method documentation

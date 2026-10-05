@@ -100,7 +100,7 @@ else:
 # / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
 # below would be used instead.  Confirmed on job 22466127, which ran the built-in
 # defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
-# / FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
+# / FOUNDRY_SIF_PATH / WORK_DIR survive that hop only because ~/.bashrc exports them
 # and the ssh login shell sources it -- do not rely on that for new settings.)
 # Dragon passes everything after PROG straight through to us, so argv is the one
 # channel that always works.  parse_known_args so any extra argv is ignored.
@@ -404,7 +404,7 @@ async def impress_smallmol_bind() -> None:
             # Absolute, derived from the already-resolved work_dir.  A relative
             # path (as the protein_binding reference uses) resolves against the
             # cwd of whichever process builds the TelemetryManager -- under
-            # delta_gpu_run.sh that is $SCRATCH, not the source tree.  Deriving
+            # delta_gpu_run.sh that is $WORK_DIR, not the source tree.  Deriving
             # it from work_dir also inherits per-job scoping for free, since
             # IMPRESS_WORK_DIR is logs/$SLURM_JOB_ID.
             "checkpoint_path": os.path.join(work_dir, "telemetry"),
