@@ -298,13 +298,18 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # lands as an unexplained task timeout inside an allocation (job 22675512, packmin).
     # Checked against the venv rather than $WORK_DIR itself, because the venv is what
     # holds the 598 MB rosetta.so and torch - it is the read that actually hurts.
-    venv_fs = str(Path(sys.executable).resolve())
-    on_hdd = "/work/hdd/" in venv_fs or venv_fs.startswith("/scratch/")
+    # sys.prefix, NOT sys.executable: inside a venv `bin/python` is a symlink to the base
+    # interpreter, so resolving it walks straight out of the venv and reports wherever
+    # CPython was installed. The first version of this check did that and cheerfully
+    # passed a venv sitting on HDD. sys.prefix is the venv root, and site-packages - the
+    # 598 MB rosetta.so and torch - is what actually gets read.
+    venv_root = str(Path(sys.prefix).resolve())
+    on_hdd = "/work/hdd/" in venv_root or venv_root.startswith("/scratch/")
     checks.append(("venv on fast storage", not on_hdd,
-                   f"{venv_fs.rsplit('/bin/', 1)[0]}" if not on_hdd
-                   else f"HDD-backed: {venv_fs.rsplit('/bin/', 1)[0]} - PyRosetta and "
-                        "torch are read from here every task; move it under a /work/nvme "
-                        "$WORK_DIR (scripts/delta_env_setup.sh)"))
+                   venv_root if not on_hdd
+                   else f"HDD-backed: {venv_root} - PyRosetta and torch are read from "
+                        "here every task; move it under a /work/nvme $WORK_DIR "
+                        "(scripts/delta_env_setup.sh)"))
 
     # Tier 1, ~1s, always: the one package `delta_env_setup.sh` was missing. Nothing of ours
     # imports it - LigandMPNN's bundled openfold does, at run.py import time - so it is
