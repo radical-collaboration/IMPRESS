@@ -1,5 +1,4 @@
 
-import asyncio
 import copy
 import functools
 import gzip
@@ -45,6 +44,12 @@ STEP_RETRY_SEQ = 6   # internal: retry sequence prediction without backbone rest
 ETYPE_BACKBONE = 'generate backbone'
 ETYPE_SEQUENCE = 'predict sequence'
 ETYPE_FOLD     = 'fold decoy'
+
+# Thread caps per backend-run tool (see _tool_task_description). PyRosetta
+# (packmin/fastrelax/filter_shape/filter_energy) is single-threaded regardless;
+# LigandMPNN is PyTorch, whose CPU-side work is what the cap actually bounds.
+ROSETTA_THREADS = 1
+MPNN_THREADS    = 4
 
 
 # ── Ensemble utility functions ─────────────────────────────────────────────
@@ -744,6 +749,44 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     func.__name__, time.monotonic() - t0, status)
         return wrapper
 
+    # ── Per-task environment for backend-run tools ─────────────────────────
+
+    def _tool_task_description(self, threads: int) -> dict:
+        """task_description giving one backend-run tool its own thread caps.
+
+        Each tool process gets its caps from the backend that launches it,
+        instead of inheriting them from the runner's os.environ. That is what
+        lets the caps reach a Dragon task on a remote node (env exported by
+        delta_gpu_run.sh does not survive `dragon -w ssh`), and lets each tool
+        be sized for itself rather than for the pipeline count.
+
+        The two backends treat `env` differently, so only the active one's key
+        is emitted:
+        - rhapsody's ConcurrentExecutionBackend passes `env` straight to
+          asyncio.create_subprocess_exec, which REPLACES the environment, so
+          it must be merged over os.environ here.
+        - Dragon's process_template env is MERGED by local services into the
+          target node's own environment (dragon/localservices/server.py,
+          `the_env = dict(os.environ); the_env.update(req_env)`), so only the
+          delta is sent. Sending the runner's whole environment would
+          overwrite the remote node's.
+        """
+        from rhapsody.backends import ConcurrentExecutionBackend
+
+        caps = {var: str(threads) for var in (
+            "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
+        # PASSIVE is what actually stops idle OpenMP teams spinning on cores.
+        caps["OMP_WAIT_POLICY"] = "PASSIVE"
+
+        if isinstance(self.flow.backend, ConcurrentExecutionBackend):
+            return {"env": {**os.environ, **caps}}
+        return {"process_template": {"env": caps}}
+
+    def _logged_cmd(self, log_file: str, cmd: str) -> str:
+        """Wrap a stage command so its output lands in {taskdir}/<stage>.log."""
+        return f"bash {self.scripts_path}/run_logged.sh {log_file} {cmd}"
+
     # ── MOCK tasks ─────────────────────────────────────────────────────────
 
     def _register_mock_tasks(self):
@@ -753,7 +796,17 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
     # ── REAL tasks ─────────────────────────────────────────────────────────
 
     def _register_real_tasks(self):
-        """Register real HPC tasks that return shell command strings."""
+        """Register real HPC tasks that return shell command strings.
+
+        Every stage that runs an external tool is an asyncflow executable
+        task: the decorated coroutine does the in-process bookkeeping
+        (taskcount, task dirs, input prep) and returns the command, and the
+        execution backend places and runs it. Only the pure-Python analysis
+        stages are local_task=True.
+        """
+        rosetta_td = self._tool_task_description(ROSETTA_THREADS)
+        mpnn_td    = self._tool_task_description(MPNN_THREADS)
+
         @self.auto_register_task(capture_stdio=True)
         async def rfd3():
             self.taskcount += 1
@@ -862,10 +915,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 ETYPE_BACKBONE, best['ss'], self.state.get('rfd3_input_pdb'), backbone_path,
             ))
 
-        @self.auto_register_task(local_task=True)
-        @self._timed_local
+        @self.auto_register_task(capture_stdio=True)
         async def mpnn(
-            fixed_residues_file: str | None = None):
+            fixed_residues_file: str | None = None,
+            task_description: dict = mpnn_td):
             self.taskcount += 1
             taskname = "mpnn"
             self.previous_task = taskname
@@ -916,16 +969,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {batch_size}"
                 f' "{fixed_residues}"'
             )
-            log_file = f"{taskdir}/mpnn.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=_lf,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"mpnn failed with exit code {proc.returncode}\nSee {log_file}")
+            return self._logged_cmd(f"{taskdir}/mpnn.log", cmd)
 
         @self.auto_register_task(local_task=True)
         @self._timed_local
@@ -993,9 +1037,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 self.state.get('best_backbone_path'), self.state.get('last_seq_fasta'),
             ))
 
-        @self.auto_register_task(local_task=True)
-        @self._timed_local
-        async def packmin():
+        @self.auto_register_task(capture_stdio=True)
+        async def packmin(task_description: dict = rosetta_td):
             self.taskcount += 1
             taskname = "packmin"
             self.previous_task = taskname
@@ -1017,14 +1060,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {lig_path}"
                 f" {output_dir}"
             )
-            log_file = f"{taskdir}/packmin.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"packmin failed with exit code {proc.returncode}\nSee {log_file}")
+            return self._logged_cmd(f"{taskdir}/packmin.log", cmd)
 
         @self.auto_register_task(local_task=True)
         @self._timed_local
@@ -1040,9 +1076,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             self.state['last_analysis_step']    = 'packmin'
             self.state['last_analysis_metrics'] = {'pass': True, 'total_score': total_score}
 
-        @self.auto_register_task(local_task=True)
-        @self._timed_local
-        async def fastrelax():
+        @self.auto_register_task(capture_stdio=True)
+        async def fastrelax(task_description: dict = rosetta_td):
             self.taskcount += 1
             taskname = "fastrelax"
             self.previous_task = taskname
@@ -1060,14 +1095,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {lig_path}"
                 f" {output_dir}"
             )
-            log_file = f"{taskdir}/fastrelax.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"fastrelax failed with exit code {proc.returncode}\nSee {log_file}")
+            return self._logged_cmd(f"{taskdir}/fastrelax.log", cmd)
 
         @self.auto_register_task(local_task=True)
         @self._timed_local
@@ -1098,9 +1126,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'rmsd':        rmsd,
             }
 
-        @self.auto_register_task(local_task=True)
-        @self._timed_local
-        async def filter_shape(ligand_name: str = "ALR"):
+        @self.auto_register_task(capture_stdio=True)
+        async def filter_shape(ligand_name: str = "ALR",
+                               task_description: dict = rosetta_td):
             taskname = "filter_shape"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
@@ -1115,14 +1143,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {self.pipeline_inputs}/{ligand_name}"
                 f" {taskdir}/out/interface_values.txt"
             )
-            log_file = f"{taskdir}/filter_shape.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"filter_shape failed with exit code {proc.returncode}\nSee {log_file}")
+            return self._logged_cmd(f"{taskdir}/filter_shape.log", cmd)
 
         @self.auto_register_task(local_task=True)
         @self._timed_local
@@ -1243,9 +1264,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'best_model':         best_model,
             }
 
-        @self.auto_register_task(local_task=True)
-        @self._timed_local
-        async def filter_energy(ligand_name: str = "ALR"):
+        @self.auto_register_task(capture_stdio=True)
+        async def filter_energy(ligand_name: str = "ALR",
+                                task_description: dict = rosetta_td):
             taskname = "filter_energy"
             taskdir  = f"{self.base_path}/{self.name}/{self.taskcount}_{taskname}"
             os.makedirs(f"{taskdir}/in",  exist_ok=True)
@@ -1265,14 +1286,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 f" {common_filenames_file}"
                 f" {ligand_name}"
             )
-            log_file = f"{taskdir}/filter_energy.log"
-            with open(log_file, "wb") as _lf:
-                proc = await asyncio.create_subprocess_shell(
-                    cmd, stdout=_lf, stderr=asyncio.subprocess.STDOUT,
-                )
-                await proc.wait()
-            if proc.returncode != 0:
-                raise RuntimeError(f"filter_energy failed with exit code {proc.returncode}\nSee {log_file}")
+            return self._logged_cmd(f"{taskdir}/filter_energy.log", cmd)
 
     # ── Score utils ────────────────────────────────────────────────────────
 
@@ -1298,7 +1312,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     return
 
                 self.logger.pipeline_log(f"running mpnn [cycle {cycle_i}]")
-                await self.mpnn()
+                await self.mpnn(workflow_id=f"{self.name}:mpnn")
                 self.logger.pipeline_log(f"mpnn [cycle {cycle_i}] finished")
                 await self.analysis_sequence()
                 await self.run_adaptive_step()
@@ -1318,7 +1332,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     self.next_step = STEP_DONE
                     return
                 self.logger.pipeline_log(f"running packmin [cycle {cycle_i}]")
-                await self.packmin()
+                await self.packmin(workflow_id=f"{self.name}:packmin")
                 self.logger.pipeline_log(f"packmin [cycle {cycle_i}] finished")
                 await self.analysis_packmin()
                 await self.run_adaptive_step()
@@ -1368,14 +1382,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
             elif self.next_step == STEP_FASTRELAX:
                 self.logger.pipeline_log("running fastrelax")
-                await self.fastrelax()
+                await self.fastrelax(workflow_id=f"{self.name}:fastrelax")
                 self.logger.pipeline_log("fastrelax finished")
                 await self.analysis_fastrelax()
                 await self.run_adaptive_step()
 
             elif self.next_step == STEP_INTERFACE:
                 self.logger.pipeline_log("running filter_shape")
-                await self.filter_shape()
+                await self.filter_shape(workflow_id=f"{self.name}:filter_shape")
                 self.logger.pipeline_log("filter_shape finished")
                 await self.analysis_interface()
                 await self.run_adaptive_step()

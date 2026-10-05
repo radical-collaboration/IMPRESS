@@ -12,6 +12,8 @@ ligand_name="$5"
 
 SCRIPT_DIR="$(dirname "$0")"
 
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
+
 python "$SCRIPT_DIR/filter_energy.py" \
     "$pdb_directory" \
     "$output_file" \

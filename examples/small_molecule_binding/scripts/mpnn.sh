@@ -13,6 +13,8 @@ fixed_residues="${6:-}"
 
 SCRIPT_DIR="$(dirname "$0")"
 
+[ -n "${VIRTUAL_ENV:-}" ] && source "${VIRTUAL_ENV}/bin/activate"
+
 # mpnn_run.py restores numpy deprecated aliases (np.int/np.bool/np.object)
 # removed in NumPy 1.24+ that LigandMPNN's bundled openfold still uses.
 python "$SCRIPT_DIR/mpnn_run.py" "$mpnn_dir" \

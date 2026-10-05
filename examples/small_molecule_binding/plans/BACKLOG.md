@@ -16,6 +16,7 @@ Run artifacts archived at
 | 3 | `fastrelax` passes only 58% — the real scientific bottleneck, 510 failures / 833 backbone escalations | medium | open, needs decision | [fastrelax-pass-rate](2026-09-30-fastrelax-pass-rate.md) |
 | 4 | `fold_min_ligand_iptm` gate is disabled; data supports enabling at 0.7 | low | open, needs decision | [ligand-iptm-gate](2026-09-30-ligand-iptm-gate.md) |
 | 5 | `README.md` still documents `IMPRESS_TEST_MODE` and the `PROD`/`TEST` pair, both removed by PR #64 | low | open | — (doc-only; noted in CLAUDE.md 2026-09-28 row) |
+| 6 | Tool stages delegated to asyncflow/rhapsody (per-task env; `mpnn` off the primary's GPUs; adaptive callback on a `local` backend) | medium | **implemented, unvalidated on Delta** | [backend-delegation](2026-10-04-backend-delegation.md) |
 
 ## Item 1 status detail
 
@@ -24,7 +25,9 @@ Fixed on branch `scaling-wide`:
 - `small_molecule_binding.py` — `_read_fasta_seq` memoised (`_FASTA_SEQ_CACHE`);
   `_parse_pdb_ca_coords` `lru_cache` raised 512 → 4096.
 - `run_small_molecule_binding.py` — `adaptive_decision()` split into an `async` wrapper that
-  `await asyncio.to_thread(...)`s a synchronous `_adaptive_decision_sync()` body.
+  `await asyncio.to_thread(...)`s a synchronous `_adaptive_decision_sync()` body. Since superseded
+  by item 6: the callback now runs as `flow.function_task(backend="local")` on a thread-pool
+  rhapsody backend rather than via `asyncio.to_thread`.
 
 Validated offline: 12/12 adaptive branch cases produce identical `(next_step, seq_retry_count,
 rfd3_input_pdb)` cached vs uncached; the event loop now ticks during a cold 1200-entry decision

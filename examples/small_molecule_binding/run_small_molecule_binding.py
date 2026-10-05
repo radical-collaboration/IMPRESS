@@ -83,11 +83,13 @@ PROD = RunConfig(
 
 BACKEND = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
+from concurrent.futures import ThreadPoolExecutor
+from rhapsody.backends import ConcurrentExecutionBackend
+
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
 else:
     from concurrent.futures import ProcessPoolExecutor
-    from rhapsody.backends import ConcurrentExecutionBackend
 
 # Run config is taken from the command line first, environment second.
 #
@@ -120,48 +122,29 @@ _n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
 if _n_pipelines:
     cfg = replace(cfg, n_pipelines=int(_n_pipelines))
 
-# Thread caps, set here rather than in the batch script for the same reason:
-# OMP_NUM_THREADS exported by delta_gpu_run.sh never survives the ssh hop.
-# 11 of the 13 tasks are local_task=True and run as concurrent subprocesses of
-# this process, inheriting os.environ -- so setting it here is what actually
-# takes effect.  Without a cap each of them defaults to every core on the node.
-# Divide by 2x the pipeline count to leave room for Dragon tasks co-resident on
-# this node; PyRosetta (fastrelax/packmin/filter_shape) is single-threaded
-# regardless, so this budget really targets the PyTorch tasks.
-# sched_getaffinity respects the cgroup/CPU mask SLURM applies to the job;
-# os.cpu_count() reports the physical core count and would over-subscribe on any
-# allocation smaller than a whole node.
-try:
-    _ncpu = len(os.sched_getaffinity(0))
-except AttributeError:          # not Linux
-    _ncpu = os.cpu_count() or 64
-_omp = max(1, _ncpu // (cfg.n_pipelines * 2))
-for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-    os.environ.setdefault(_var, str(_omp))
-# PASSIVE is what actually stops idle OpenMP teams from spinning on cores.
-os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+# Thread caps are NOT set here.  Every tool-running stage is an asyncflow task
+# whose backend launches it with its own per-task env
+# (SmallMoleculeBindingPipeline._tool_task_description), so nothing depends on
+# this process's os.environ reaching a subprocess.
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
-    """Async entry point: runs the (entirely synchronous) decision body in a
-    worker thread so it cannot stall the manager's event loop.
+    """Adaptive callback: picks pipeline.next_step from the last analysis.
 
-    This function used to be `async def` with no `await` anywhere in its body,
-    which meant every invocation blocked the single event loop shared by all
-    pipelines for its full duration -- including task dispatch, subprocess
-    reaping and Dragon completion handling. With the _read_fasta_seq memo added
-    alongside this change the body is now fast (pure in-memory CPU), so this
-    hand-off is the belt-and-braces half: it keeps a future similarity metric
-    that reintroduces I/O from taking the whole job down with it.
+    The body is entirely synchronous, so calling this directly on the event
+    loop blocks every pipeline for its duration -- the defect that capped job
+    22534628 at 37% of baseline.  impress_smallmol_bind() therefore runs it as
+    a flow.function_task on the `local` thread-pool backend; run it the same
+    way anywhere more than a toy number of pipelines share the loop.
 
     Safe to run off-loop because the body only reads pipeline.state and assigns
     pipeline.state[...] / pipeline.next_step, and ImpressManager awaits each
     pipeline's adaptive task before advancing that pipeline (see
-    src/impress/impress_manager.py:100-116), so there is no concurrent writer to
-    the same pipeline's state.
+    src/impress/impress_manager.py:100-122), so there is no concurrent writer to
+    the same pipeline's state.  It must stay on a THREAD pool: a process pool
+    would mutate a pickled copy of the pipeline.
     """
-    await asyncio.to_thread(_adaptive_decision_sync, pipeline)
+    _adaptive_decision_sync(pipeline)
 
 
 def _adaptive_decision_sync(pipeline: SmallMoleculeBindingPipeline) -> None:
@@ -400,11 +383,21 @@ async def impress_smallmol_bind() -> None:
     # correctly regardless of what base_path / work_dir is set to. Each
     # pipeline reads its own p{i}_in/ directory rather than sharing one.
 
+    # Two named backends on one engine; asyncflow routes each task by name.
+    #   compute -- the default.  Every tool-running stage (rfd3, mpnn, packmin,
+    #              fastrelax, filter_shape, boltz) goes here, so placement across
+    #              nodes, per-task env and process lifecycle are the backend's.
+    #   local   -- an in-process thread pool for Python callbacks that must see
+    #              the live pipeline objects (adaptive_decision).
+    # The constructors, not .create(), because .create() takes no name.
     if BACKEND == "dragon":
-        backend = await DragonExecutionBackend()
+        compute = await DragonExecutionBackend(name="compute")
     else:
-        backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+        compute = await ConcurrentExecutionBackend(
+            ProcessPoolExecutor(), name="compute")
+    local = await ConcurrentExecutionBackend(
+        ThreadPoolExecutor(max_workers=cfg.n_pipelines), name="local")
+    flow = await WorkflowEngine.create(backend=[compute, local])
     manager: ImpressManager = ImpressManager(
         flow,
         telemetry_config={
@@ -427,11 +420,15 @@ async def impress_smallmol_bind() -> None:
         telemetry_subscribers=[_on_task_event],
     )
 
+    # Runs off the event loop, bounded by the local pool, and shows up in
+    # telemetry as a task with target_backend=local.
+    adaptive_fn = flow.function_task(backend="local")(adaptive_decision)
+
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_decision,
+            adaptive_fn=adaptive_fn,
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),
