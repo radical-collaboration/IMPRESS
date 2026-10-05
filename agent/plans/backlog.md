@@ -287,7 +287,7 @@ everything including user site-packages.
 
   **RESOLVED.** `_container_env()` (`tools/rfd3_agents.py`) strips exactly those three and sets
   `PYTHONNOUSERSITE=1`, passed as `env=` to the `apptainer exec`. Everything else is passed
-  through deliberately - `$SCRATCH`, the SLURM and CUDA variables all have to reach the container.
+  through deliberately - `$WORK_DIR`, the SLURM and CUDA variables all have to reach the container.
   Pinned by `test_rfd3_does_not_leak_this_pythons_packages_into_the_container`, which also asserts
   an unrelated variable survives, so a future "strip more" does not quietly break the bind.
 

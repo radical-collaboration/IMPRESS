@@ -259,7 +259,7 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
 
     cmd = captured["cmd"]
     # Positions are not asserted: the apptainer flag list is not fixed-width (see the
-    # $SCRATCH bind test below). What must hold is the order of the three fixed tokens
+    # bind test below). What must hold is the order of the three fixed tokens
     # and that every apptainer flag precedes the image.
     assert cmd[0] == "apptainer" and cmd[1] == "exec"
     assert "--nv" in cmd
@@ -285,19 +285,28 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
     assert any(o.startswith("out_dir=") for o in overrides)
 
 
-async def test_rfd3_binds_scratch_into_the_container(reg, monkeypatch, tmp_path):
+async def test_rfd3_binds_both_trees_into_the_container(reg, monkeypatch, tmp_path):
     """apptainer binds $HOME, /tmp and the CWD - and nothing else.
 
-    Both `inputs=` (the campaign's design spec, in the repo) and `out_dir=` (the per-job
-    scratch tree) live under $SCRATCH on Delta, so without an explicit bind the container
-    cannot read its own input. The original IMPRESS pipeline binds the same way.
+    Two trees have to reach the container and they are not siblings: `out_dir=` is under
+    $WORK_DIR on NVMe, while `inputs=` points into the repo, which stayed on /work/hdd.
+    The reference pipeline binds only $WORK_DIR because its checkout moved there too, and
+    IMPRESS 3c7c67d is the commit where binding the wrong single tree made every input
+    JSON raise FileNotFoundError inside the container. Binding one of ours would
+    reproduce that for the other.
     """
     from impress_a.tools import rfd3_agents
     from impress_a.tools.agent import TaskRequest
 
+    work_dir = tmp_path / "nvme"
+    repo = tmp_path / "hdd" / "impress_a" / "campaigns"
+    repo.mkdir(parents=True)
+    (repo / "inputs.json").write_text("{}")
+    work_dir.mkdir()
+
     monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
-    monkeypatch.setenv("SCRATCH", "/work/hdd/fake")
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("WORK_DIR", str(work_dir))
+    monkeypatch.chdir(work_dir)
 
     captured: dict[str, Any] = {}
 
@@ -311,21 +320,34 @@ async def test_rfd3_binds_scratch_into_the_container(reg, monkeypatch, tmp_path)
     req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design")
     params = agent.parameterize(TaskRequest(
         tool="rfd3_design", node_id=req.node_id,
-        params={"input_spec_path": "/work/hdd/fake/inputs.json"}))
+        params={"input_spec_path": str(repo / "inputs.json")}))
     await agent.run(req, params)
 
     cmd = captured["cmd"]
-    assert "--bind" in cmd, "no bind: the container cannot see $SCRATCH"
-    assert cmd[cmd.index("--bind") + 1] == "/work/hdd/fake:/work/hdd/fake"
+    bound = {cmd[i + 1].split(":")[0] for i, a in enumerate(cmd) if a == "--bind"}
+    assert str(work_dir.resolve()) in bound, "out_dir lives under $WORK_DIR"
+    assert str(repo.resolve()) in bound, \
+        "the design spec is in the repo, which did NOT move to $WORK_DIR"
+    for i, a in enumerate(cmd):
+        if a == "--bind":
+            host, _, guest = cmd[i + 1].partition(":")
+            assert host == guest, "the container path must match the host path"
     assert cmd.index("--bind") < cmd.index("/fake/foundry.sif"), \
         "apptainer flags must precede the image"
     assert "--writable-tmpfs" not in cmd, \
         "deliberately absent - it lets rfd3 exit 0 into a vanishing overlay"
 
-    # And with no $SCRATCH set, no empty bind is emitted.
-    monkeypatch.delenv("SCRATCH")
+    # A tree already covered by another bind is not bound twice: apptainer accepts it,
+    # but a duplicated mount point is the kind of thing that works until it does not.
+    assert len(bound) == len([a for a in cmd if a == "--bind"]), "binds must be unique"
+
+    # With no $WORK_DIR set the input tree is still bound - a campaign that is merely
+    # misconfigured must not also become unable to read its own input.
+    monkeypatch.delenv("WORK_DIR")
     await agent.run(req, params)
-    assert "--bind" not in captured["cmd"]
+    assert str(repo.resolve()) in {
+        captured["cmd"][i + 1].split(":")[0]
+        for i, a in enumerate(captured["cmd"]) if a == "--bind"}
 
 
 async def test_rfd3_does_not_leak_this_pythons_packages_into_the_container(
@@ -369,7 +391,7 @@ async def test_rfd3_does_not_leak_this_pythons_packages_into_the_container(
         "set, not unset - it is read for presence, so even '0' would disable user site"
     assert env["KEEP_ME"] == "yes", \
         "only the Python-resolution variables are stripped; $FOUNDRY_SIF_PATH, " \
-        "$SCRATCH and the SLURM/CUDA variables must still reach the container"
+        "$WORK_DIR and the SLURM/CUDA variables must still reach the container"
 
 
 async def test_ligandmpnn_passes_absolute_checkpoints_and_runs_in_the_checkout(

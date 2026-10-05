@@ -48,7 +48,7 @@ fail loudly when their environment is absent, but no scientific code has run thr
 - The `graphs` provenance names the real tools, not `mock_*`. This is the bug that made the smoke
   test necessary in the first place.
 - `jobs/ledger.jsonl` shows one submitted → done run with an outcome payload.
-- Artifacts exist under `$SCRATCH`, not `/tmp` — the launcher `cd`s to a shared per-job directory and
+- Artifacts exist under `$WORK_DIR`, not `/tmp` — the launcher `cd`s to a shared per-job directory and
   adapters inherit it as CWD. A path under the system temp dir means the workdir plumbing regressed,
   and under Dragon multi-node it will surface as a missing file deep inside a science tool.
 - The front carries `total_score`, `shape_complementarity`, `complex_plddt`, `ligand_iptm`.
@@ -78,7 +78,7 @@ Answered, off roughly three minutes of real rfd3:
   reason the bug was visible at all. The current default hides it.
 
 Still unanswered, and all of it downstream of the one stage that ran: the ledger outcome, artifacts
-under `$SCRATCH` (rfd3's landed there correctly), the front's four objectives, the thread-cap lines,
+under `$WORK_DIR` (rfd3's landed there correctly), the front's four objectives, the thread-cap lines,
 per-tool cost against estimate, and the `replicas: 4` independence check.
 
 **What it cost to learn.** `ligandmpnn_design` failed and we do not know why: its stderr went with

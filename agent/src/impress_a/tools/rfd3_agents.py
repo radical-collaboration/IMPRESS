@@ -15,6 +15,7 @@ scope - `Registry.load()` and `Validator.dry_run()` must work with none of them 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from ._subprocess import run_cmd, workdir_for
@@ -73,17 +74,32 @@ class RFD3DesignAgent(TaskAgent):
         if params.get("seed") is not None:
             overrides.append(f"seed={params['seed']}")
 
-        # --bind $SCRATCH: apptainer binds $HOME, /tmp and the CWD by default, and nothing
-        # else. `inputs=` points into the repo and `out_dir=` into the per-job scratch
-        # tree, both under $SCRATCH on Delta and neither reachable in the container
-        # without this. The original IMPRESS pipeline binds the same way
-        # (`scripts/rfd3.sh`). Deliberately NOT adding its `--writable-tmpfs`: that gives
-        # the container a throwaway writable root, and the same pipeline records rfd3
-        # exiting 0 having written its output into that overlay, leaving an empty out_dir
-        # - a silent failure. Add it only if a real run shows the container needs it.
+        # apptainer binds $HOME, /tmp and the CWD by default, and nothing else. Two
+        # separate trees have to reach the container and they are no longer siblings:
+        # `out_dir=` is under $WORK_DIR (NVMe), while `inputs=` points into the repo,
+        # which deliberately stayed on /work/hdd. The reference pipeline binds only
+        # $WORK_DIR because it moved its checkout there too (IMPRESS 3c7c67d, which fixed
+        # exactly this after its own SCRATCH->WORK_DIR migration: the container saw
+        # nothing and every input JSON raised FileNotFoundError). Binding one of ours
+        # would reproduce that bug for the other, so bind both, de-duplicated.
+        #
+        # Deliberately NOT adding the reference's `--writable-tmpfs`: that gives the
+        # container a throwaway writable root, and the same pipeline records rfd3 exiting
+        # 0 having written its output into that overlay, leaving an empty out_dir - a
+        # silent failure. Add it only if a real run shows the container needs it.
         binds: list[str] = []
-        if scratch := os.environ.get("SCRATCH"):
-            binds = ["--bind", f"{scratch}:{scratch}"]
+        seen: set[str] = set()
+        for host_path in (os.environ.get("WORK_DIR"),
+                          str(Path(params["input_spec_path"]).resolve().parent),
+                          str(work.resolve())):
+            if not host_path:
+                continue
+            resolved = str(Path(host_path).resolve())
+            if resolved in seen or any(
+                    resolved == s or resolved.startswith(s + "/") for s in seen):
+                continue
+            seen.add(resolved)
+            binds += ["--bind", f"{resolved}:{resolved}"]
 
         await run_cmd([
             "apptainer", "exec", "--nv", *binds, foundry,

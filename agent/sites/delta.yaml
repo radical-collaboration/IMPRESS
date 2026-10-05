@@ -7,6 +7,6 @@ name: delta
 scheduler: slurm
 backend: {kind: dragon, config: {}}
 gpu: {vendor: nvidia, api: cuda, per_node: 4}
-filesystems: {shared: "$SCRATCH/$USER/impress_a_runs", scratch: "$SCRATCH"}
+filesystems: {shared: "$WORK_DIR/impress_a_runs", scratch: "$WORK_DIR"}
 tool_delivery: {default: real}
 p5_governor: {max_concurrency: {}}

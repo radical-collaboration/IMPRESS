@@ -30,6 +30,14 @@ Use the project `.venv`. The system Python has `radical.asyncflow` **0.3.1** ins
 requires **0.5.1**, and its `rhapsody` is an editable install pointing at a different checkout. Running
 tests against it produces confusing API errors.
 
+On Delta, `.venv` is a **symlink** to `$WORK_DIR/ve/impress_a`, and `$WORK_DIR` must be on NVMe
+(`/work/nvme/<project>/$USER`). The venv holds PyRosetta and torch, and reading them is the single
+largest cost this project pays: measured on HDD-backed `/work/hdd`, `import pyrosetta` alone takes
+**471s** (a 598 MB `rosetta.so`, demand-paged) and `import torch` ~280s. That is not a tuning
+detail — it is why `packmin` could not start inside its 300s budget in job 22675512. `WORK_DIR`
+replaces the older `$SCRATCH`, which was both HDD-backed and ambiguous about whether it already
+included `$USER`. `impress-a preflight` flags a venv still on HDD.
+
 ## Repository layout
 
 | Path | Role |

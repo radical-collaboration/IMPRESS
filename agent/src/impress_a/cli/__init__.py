@@ -243,7 +243,8 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
-    for var, what in (("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
+    for var, what in (("WORK_DIR", "every default path, and the rfd3 container bind"),
+                      ("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
                       ("MPNN_DIR", "ligandmpnn_design (checkout + checkpoints)"),
                       ("BOLTZ_CACHE", "boltz_predict (pre-warmed weights)")):
         val = os.environ.get(var)
@@ -291,6 +292,19 @@ def preflight(spec: CampaignSpec | None = None) -> int:
                                            "can take that long to import it; re-run")))
     except (OSError, subprocess.SubprocessError) as e:
         checks.append(("pyrosetta", False, f"could not check: {e}"))
+
+    # $WORK_DIR must be on NVMe, not HDD. This is the whole point of the migration and it
+    # is invisible otherwise: an HDD path works perfectly, just ~8x slower, and the cost
+    # lands as an unexplained task timeout inside an allocation (job 22675512, packmin).
+    # Checked against the venv rather than $WORK_DIR itself, because the venv is what
+    # holds the 598 MB rosetta.so and torch - it is the read that actually hurts.
+    venv_fs = str(Path(sys.executable).resolve())
+    on_hdd = "/work/hdd/" in venv_fs or venv_fs.startswith("/scratch/")
+    checks.append(("venv on fast storage", not on_hdd,
+                   f"{venv_fs.rsplit('/bin/', 1)[0]}" if not on_hdd
+                   else f"HDD-backed: {venv_fs.rsplit('/bin/', 1)[0]} - PyRosetta and "
+                        "torch are read from here every task; move it under a /work/nvme "
+                        "$WORK_DIR (scripts/delta_env_setup.sh)"))
 
     # Tier 1, ~1s, always: the one package `delta_env_setup.sh` was missing. Nothing of ours
     # imports it - LigandMPNN's bundled openfold does, at run.py import time - so it is

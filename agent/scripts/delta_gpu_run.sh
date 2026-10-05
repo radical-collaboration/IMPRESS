@@ -5,10 +5,19 @@
 # Adapted from the original IMPRESS project's
 # examples/small_molecule_binding/delta_gpu_run.sh.
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required):
+# Set before calling sbatch (only SBATCH_ACCOUNT and WORK_DIR are required):
 #   export SBATCH_ACCOUNT=<project>-delta-gpu     # <project>-delta-gpu or <project>-delta-gpu
-#   export SCRATCH=/work/hdd/<project>           # or /work/hdd/<project>/$USER - either
-#                                                # form works, see scripts/_scratch_base.sh
+#   export WORK_DIR=/work/nvme/<project>/$USER        # NVMe-backed; see "Why NVMe" below
+#
+# Why NVMe, and why this replaced SCRATCH: every default path here used to hang off
+# $SCRATCH, which on Delta resolves under /work/hdd - HDD-backed Lustre. Measured on
+# that filesystem, `import pyrosetta` alone takes 471s (a 598 MB rosetta.so, demand-paged)
+# and `import torch` ~280s, which is most of what LigandMPNN's 292.6s in job 22675512 was
+# and the entire reason packmin could not start inside its 300s budget. $SCRATCH was also
+# ambiguous - sometimes the allocation root, sometimes already the per-user directory -
+# which is what scripts/_scratch_base.sh existed to paper over. WORK_DIR is unambiguous by
+# construction and points at NVMe, so both problems go away together. Ported from the
+# reference pipeline's IMPRESS commits 7ad76f6 and 3c7c67d (PR #67).
 #
 # Optional overrides:
 #   export MPNN_DIR=/path/to/LigandMPNN
@@ -20,13 +29,14 @@
 #   sbatch scripts/delta_gpu_run.sh                                    # full campaign
 #   sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml  # smoke test
 #
-#SBATCH --partition=gpuA40x4
+##SBATCH --partition=gpuA40x4-interactive
+#SBATCH --partition=gpuA100x4-interactive
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=240G
-#SBATCH --time=12:00:00
+#SBATCH --time=01:00:00
 # Sizing notes - measured by the original IMPRESS project, do not shrink casually:
 #   cpus-per-task=64 - the whole node, and it is FREE. Requesting 4 GPUs already reserves
 #     and bills the entire node, and billing is max(cpu*31.25, mem/8, gpu*500) under
@@ -62,18 +72,24 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/work/hdd/<project> && sbatch scripts/delta_gpu_run.sh"
+if [ -z "${WORK_DIR:-}" ]; then
+    echo "ERROR: WORK_DIR is not set."
+    echo "       export WORK_DIR=/work/nvme/<project>/\$USER && sbatch scripts/delta_gpu_run.sh"
+    if [ -n "${SCRATCH:-}" ]; then
+        echo
+        echo "       NOTE: \$SCRATCH is set (${SCRATCH}) but is no longer read. It pointed at"
+        echo "       HDD-backed Lustre; WORK_DIR replaces it and should be on /work/nvme."
+    fi
     exit 1
 fi
 
 IMPRESS_A_DIR="${IMPRESS_A_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-# SCRATCH_BASE, not ${SCRATCH}/${USER}: $SCRATCH may already BE the per-user directory.
-# Shared with delta_env_setup.sh so setup and run cannot disagree about where the tool
-# trees live.
-source "${IMPRESS_A_DIR}/scripts/_scratch_base.sh"
+# WORK_DIR is taken as-is: it IS the per-user directory, which is the whole point of
+# replacing $SCRATCH (see the header). No _scratch_base.sh, no $USER appending, no way for
+# setup and run to disagree about where the tool trees live.
+WORK_DIR="${WORK_DIR%/}"
+export WORK_DIR
 
 # ── System library paths (Delta-specific, required by Dragon) ─────────────────
 # These were hardcoded to CUDA 25.3 / mpich 8.1.32 / libfabric 1.22.0. Delta removed all
@@ -108,7 +124,7 @@ echo "FAB_LIB:           ${FAB_LIB}"
 # ── Environment ───────────────────────────────────────────────────────────────
 IMPRESS_A_VENV="${IMPRESS_A_VENV:-${IMPRESS_A_DIR}/.venv}"
 # Dragon launches its per-node backends with a plain `srun` and no `--export`, so srun's
-# default `--export=ALL` is what carries PATH (the venv), SCRATCH and the tool paths. Left
+# default `--export=ALL` is what carries PATH (the venv), WORK_DIR and the tool paths. Left
 # at NONE, every remote task loses the venv.
 unset SLURM_EXPORT_ENV
 # Dragon issues its own srun steps inside this allocation and does not pass `--overlap`
@@ -123,18 +139,18 @@ dragon-config -c >/dev/null 2>&1 || true
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by the rfd3/ligandmpnn/rosetta/boltz task agents) ────────
-export MPNN_DIR="${MPNN_DIR:-${SCRATCH_BASE}/LigandMPNN}"
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH_BASE}/.cache/boltz}"
+export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
-for _sif in "${SCRATCH_BASE}/foundry.sif" "${SCRATCH}/foundry.sif"; do
+for _sif in "${WORK_DIR}/foundry.sif"; do
     if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${_sif}" ]; then
         export FOUNDRY_SIF_PATH="${_sif}"
     fi
 done
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH_BASE}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${WORK_DIR}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it the way the original IMPRESS examples' pull_foundry.sh does,"
@@ -150,7 +166,7 @@ if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     trap "echo 'Removing ${_FOUNDRY_TMP}'; rm -rf '${_FOUNDRY_TMP}'" EXIT
 fi
 
-echo "SCRATCH_BASE:      ${SCRATCH_BASE}"
+echo "WORK_DIR:          ${WORK_DIR}"
 echo "MPNN_DIR:          ${MPNN_DIR}"
 echo "FOUNDRY_SIF_PATH:  ${FOUNDRY_SIF_PATH}"
 echo "BOLTZ_CACHE:       ${BOLTZ_CACHE}"
@@ -177,7 +193,7 @@ CAMPAIGN="$(realpath "${CAMPAIGN}")"
 # impress_a's CampaignSpec.root and asyncflow's own session dir both resolve relative to
 # the process CWD (see CLAUDE.md's asyncflow-writes-into-CWD gotcha), so `cd`ing into a
 # per-job scratch directory before launch is sufficient.
-WORKDIR="${IMPRESS_A_WORKDIR:-${SCRATCH_BASE}/impress_a_runs/${SLURM_JOB_ID:-manual}}"
+WORKDIR="${IMPRESS_A_WORKDIR:-${WORK_DIR}/impress_a_runs/${SLURM_JOB_ID:-manual}}"
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
 

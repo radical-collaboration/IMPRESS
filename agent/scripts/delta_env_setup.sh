@@ -9,15 +9,14 @@
 # the foundry (RFD3) container prerequisites.
 #
 # Usage:
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/<project>/$USER
 #   bash scripts/delta_env_setup.sh [--env-dir DIR] [--python PATH]
 #
-# Defaults:
-#   ENV_DIR   = <repo>/.venv
-#   MPNN_DIR    = $SCRATCH_BASE/LigandMPNN
-#   BOLTZ_CACHE = $SCRATCH_BASE/.cache/boltz
-#   ($SCRATCH_BASE is $SCRATCH plus /$USER, appended only when $SCRATCH is not already
-#    the per-user directory - see scripts/_scratch_base.sh)
+# Defaults (all under $WORK_DIR, which must be on NVMe - see delta_gpu_run.sh's header
+# for the measurements that forced this off HDD-backed Lustre):
+#   ENV_DIR     = $WORK_DIR/ve/impress_a   (symlinked back as <repo>/.venv)
+#   MPNN_DIR    = $WORK_DIR/LigandMPNN
+#   BOLTZ_CACHE = $WORK_DIR/.cache/boltz
 #
 # Foundry container (RFD3 backbone diffusion) is NOT built by this script - it is managed
 # the same way the original IMPRESS examples do (see their pull_foundry.sh). Point
@@ -30,16 +29,26 @@ fi
 
 IMPRESS_A_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# ── Require SCRATCH ───────────────────────────────────────────────────────────
-if [[ -z "${SCRATCH:-}" ]]; then
-    echo "ERROR: set the SCRATCH env var to your allocation scratch root, e.g.:"
-    echo "  export SCRATCH=/scratch/<allocation>"
+# ── Require WORK_DIR ──────────────────────────────────────────────────────────
+if [[ -z "${WORK_DIR:-}" ]]; then
+    echo "ERROR: set the WORK_DIR env var to your NVMe work root, e.g.:"
+    echo "  export WORK_DIR=/work/nvme/<project>/\$USER"
     echo "  bash scripts/delta_env_setup.sh"
+    if [[ -n "${SCRATCH:-}" ]]; then
+        echo
+        echo "  NOTE: \$SCRATCH is set (${SCRATCH}) but is no longer read - it pointed at"
+        echo "  HDD-backed Lustre, where \`import pyrosetta\` alone costs 471s."
+    fi
     exit 1
 fi
+WORK_DIR="${WORK_DIR%/}"
 
 # ── Defaults / arg parsing ────────────────────────────────────────────────────
-ENV_DIR="${ENV_DIR:-${IMPRESS_A_DIR}/.venv}"
+# The venv lives on NVMe, NOT in the repo: it holds PyRosetta (598 MB rosetta.so plus a
+# 2.4 GB / 7,717-file database) and torch, which is every slow read this project makes.
+# Step 1 symlinks ${IMPRESS_A_DIR}/.venv at it, so `source .venv/bin/activate` and
+# CLAUDE.md's "use the project .venv" stay true while the bytes sit on fast storage.
+ENV_DIR="${ENV_DIR:-${WORK_DIR}/ve/impress_a}"
 BASE_PY_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
@@ -54,14 +63,13 @@ PY="${ENV_DIR}/bin/python"
 PIP="${ENV_DIR}/bin/pip"
 
 # Shared with delta_gpu_run.sh: the run MUST derive the same paths this setup creates.
-source "${IMPRESS_A_DIR}/scripts/_scratch_base.sh"
-
-MPNN_DIR="${MPNN_DIR:-${SCRATCH_BASE}/LigandMPNN}"
-BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH_BASE}/.cache/boltz}"
+# Both now read WORK_DIR directly, so there is nothing left to disagree about.
+MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
+BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 
 echo "================================================================="
 echo "  IMPRESS_A_DIR      = ${IMPRESS_A_DIR}"
-echo "  SCRATCH_BASE       = ${SCRATCH_BASE}"
+echo "  WORK_DIR           = ${WORK_DIR}"
 echo "  ENV_DIR            = ${ENV_DIR}"
 echo "  MPNN_DIR           = ${MPNN_DIR}"
 echo "  BOLTZ_CACHE        = ${BOLTZ_CACHE}"
@@ -104,11 +112,33 @@ fi
 echo "Using Python: ${BASE_PY} ($(${BASE_PY} --version))"
 
 if [ ! -x "${PY}" ]; then
+    mkdir -p "$(dirname "${ENV_DIR}")"
     "${BASE_PY}" -m venv "${ENV_DIR}"
 else
     echo "venv already exists at ${ENV_DIR}"
 fi
 echo "Python: $("${PY}" --version)"
+
+# Symlink the repo's .venv at it. CLAUDE.md tells every contributor (and every agent) to
+# `source .venv/bin/activate`, and tests/CI assume the in-tree path - but the bytes have
+# to live on NVMe, not in the repo on HDD. A symlink satisfies both. Refuse to clobber a
+# real directory: that is someone's existing venv, and deleting 9 GB of installed science
+# stack because a path moved is not a thing this script should do unasked.
+_REPO_VENV="${IMPRESS_A_DIR}/.venv"
+if [ -L "${_REPO_VENV}" ]; then
+    ln -sfn "${ENV_DIR}" "${_REPO_VENV}"
+    echo "  ${_REPO_VENV} -> ${ENV_DIR}"
+elif [ -e "${_REPO_VENV}" ]; then
+    echo "  WARNING: ${_REPO_VENV} is a real directory, not a symlink."
+    echo "           Leaving it alone. It is on HDD-backed storage, which is what the"
+    echo "           WORK_DIR migration exists to get off. To switch over:"
+    echo "             mv ${_REPO_VENV} ${_REPO_VENV}.hdd-old"
+    echo "             ln -s ${ENV_DIR} ${_REPO_VENV}"
+    echo "           and remove the old copy once a run has succeeded."
+else
+    ln -s "${ENV_DIR}" "${_REPO_VENV}"
+    echo "  ${_REPO_VENV} -> ${ENV_DIR}"
+fi
 
 # ── 2. Bootstrap pip ──────────────────────────────────────────────────────────
 echo ""
@@ -329,7 +359,7 @@ echo "Activate with:"
 echo "  source ${ENV_DIR}/bin/activate"
 echo ""
 echo "Run the smoke campaign:"
-echo "  export SCRATCH=${SCRATCH}"
+echo "  export WORK_DIR=${WORK_DIR}"
 echo "  export SBATCH_ACCOUNT=<project>-delta-gpu   # or <project>-delta-gpu"
 echo "  cd ${IMPRESS_A_DIR}"
 echo "  sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml"
