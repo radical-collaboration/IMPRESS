@@ -7,9 +7,10 @@ paragraph in place rather than being deleted - the evidence that forced them is 
 State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
-on Delta. **One real stage has now executed:** `rfd3_design` ran to completion on Delta (job
-22536706) and the run then hung in LigandMPNN (A1, G6). Everything downstream of rfd3 is still
-unexecuted.
+on Delta. **One real stage has now executed:** `rfd3_design` ran to completion on Delta (jobs
+22536706 and 22669509). The first run hung in LigandMPNN (G6); the second surfaced it as a clean
+FAILED with its stderr intact, which is what G6's fix was for, and that stderr showed LigandMPNN
+cannot import under this venv's numpy at all (A6). Everything downstream of rfd3 is still unexecuted.
 
 ---
 
@@ -30,6 +31,18 @@ unexecuted.
 So: one stage proven, one stage failed for reasons we destroyed, nothing downstream touched, and no
 front, no measurement and no ledger outcome. A repeat run with the G6 fix in place is the next thing
 that moves this item, and it should now surface the real LigandMPNN error instead of hanging.
+
+  **The repeat run happened: job 22669509, 2026-10-04, and it did exactly that.** `rfd3_design`
+  succeeded again and this time selected the right file (A4's fix: `backbone_0.pdb` 53,784 B from
+  the sidecar-identified `*_model_0.cif.gz`, against the multi-MB trajectory of the first run).
+  `ligandmpnn_design` reached `FAILED` with its full stderr attached - no `Critical error in monitor
+  loop`, no hang - and the campaign terminated on `max_cycles=1` with Dragon shutting down in 1.5s.
+  The ledger carries a `failed` outcome with a complete payload: QC gates, metrics
+  (`ss_fraction` 0.847, `num_models` 1), cost (0.25 GPU-h against a 0.5 estimate) and the artifact's
+  sha256. Both the G6 and A4 fixes are therefore confirmed by execution, not just by test.
+
+  Still one stage. LigandMPNN's recovered stderr showed it cannot import at all here (A6), so
+  `packmin` onwards remain untouched and this item does not move.
 
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
@@ -90,6 +103,12 @@ glob finds the structures; confirm on the first real run, and see G2 for using t
   `backbone_0.pdb` in that directory, against a 19 KB design. A candidate for what killed
   LigandMPNN, though the stderr that would prove it is gone (G6).
 
+  **It was not what killed LigandMPNN.** Job 22669509 handed it the correct 53 KB backbone and
+  LigandMPNN still failed, at import, for a wholly unrelated reason (A6). Worth keeping as a note on
+  how this reasoning went: the trajectory was a real defect *and* a plausible explanation for a
+  failure it had nothing to do with, and the only thing that separated the two was recovering the
+  actual stderr. A plausible cause in hand is what stops you looking for the real one.
+
   Note what this says about G3: `dump_trajectories=False` makes the bug *unreachable* on current
   code, because those two files are never written. It was flipped for footprint, and it silently
   fixed a correctness defect nobody had found - which is the argument for not letting one flag's
@@ -98,6 +117,59 @@ glob finds the structures; confirm on the first real run, and see G2 for using t
   `out_dir` of structures with no metadata raises instead of guessing. Pinned by
   `test_rfd3_never_hands_downstream_a_trajectory` and
   `test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in`.
+
+**A6. LigandMPNN cannot import under this venv's numpy — RESOLVED in code, unexecuted.** Job
+22669509's recovered stderr: `run.py` dies in its **module-level imports**, before parsing an
+argument, so no flag, path or checkpoint we pass is ever read. Two independent holes, hit in
+sequence:
+
+- `openfold/config.py` does `import ml_collections`, which was not installed. It is in LigandMPNN's
+  own `requirements.txt` alongside `dm-tree`; `dm-tree` arrived incidentally via Boltz's step 5, so
+  `ml_collections` was the single omission from `delta_env_setup.sh` step 6.
+- With that installed, `openfold/np/residue_constants.py:1124` does `np.zeros(..., dtype=np.int)`.
+  numpy removed `np.int` in 1.24. LigandMPNN pins numpy 1.23.5; this venv carries 2.5.3 because
+  Boltz and the rest of the stack require it, so pinning down is not available to us.
+
+**RESOLVED.** `ml-collections` added to step 6 (with an import check, and the weak
+`_check "LigandMPNN" test -d` widened to assert `run.py` and both checkpoints). For the aliases, the
+adapter no longer runs `run.py` directly: `MPNN_SHIM` (`tools/ligandmpnn_agents.py`) is written into
+the task workdir and run with `sys.executable`, restoring the aliases before handing off via `runpy`
+with `run_name="__main__"`. Same device as the reference pipeline's `scripts/mpnn_run.py`, and the
+same device as `rosetta_agents.py`'s `_*_WORKER` constants. Pinned by
+`test_ligandmpnn_runs_run_py_through_the_numpy_alias_shim` and
+`test_the_mpnn_shim_restores_the_aliases_openfold_needs`, the latter hermetic - a fake checkout, no
+torch, no GPU. Verified against the real checkout on a login node before resubmitting.
+
+**A third hole, found while fixing the first two, and the one that would have cost the next
+allocation.** `ligandmpnn_design` declared `walltime_s: 300`. Job 22669509's own log says
+`task.000002` went RUNNING at 23:09:51 and FAILED at 23:14:27 - **276s to reach a
+`ModuleNotFoundError`**, before one tensor was allocated. Roughly 280s of that is `import torch`
+paging 1.6 GB of shared objects off Lustre (measured again on a login node: ~360s wall for 9s of
+CPU). So fixing the imports alone would have produced `timed out after 300s` on the next run -
+indistinguishable from a hang, attributed to LigandMPNN rather than to the number, and paid for out
+of an allocation. `walltime_s` is now 1800 and `cost_model.gpu_hours` 0.1 → 0.25, both with the
+measurement in the spec, and pinned by `test_ligandmpnn_walltime_covers_the_measured_import_cost`.
+
+  Worth generalising: the import cost was sitting in plain sight in the log of the run we had
+  already diagnosed. The failure we were looking for made the number next to it invisible. Every
+  remaining stage's `walltime_s` is still a literature guess, and the first thing each one's real
+  run will produce is the true figure - `rfd3_design`'s is now known (0.25 GPU-h against a 0.5
+  estimate), the other four are not.
+
+**Still open, and it is the part worth reading.** Both holes were knowable on a login node in
+seconds, and both were found inside a GPU allocation after a queue wait. `impress-a preflight` now
+runs the real import chain through the same shim (`--help`, which exercises every module-level
+import and then exits 0 because `run.py` does its work under a `__main__` guard), and gained an
+**undetermined** state so a probe that times out reports `warn` instead of `FAIL` - two meaningless
+FAILs train a reader to ignore the column. But **no launcher invokes preflight**: not
+`delta_gpu_run.sh`, not `delta_run_campaign.py`. It is operator-run and gates nothing by itself.
+Making the launcher run it, and failing the job early when it reports a real FAIL, is the open item.
+
+Note also what this says about where the remaining risk lives. Three stages have now been fixed
+before execution (A3's Hydra contract) or by execution (A4's selection, A6's imports), and the two
+found *by* execution were both things a contract check cannot see: what a tool writes, and whether it
+can import. Expect the same shape from `packmin`, `fastrelax`, `filter_shape` and `boltz_predict` —
+their arguments are checked, their environments are not.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

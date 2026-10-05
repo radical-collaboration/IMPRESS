@@ -183,7 +183,19 @@ else
     echo "  LigandMPNN already at ${MPNN_DIR}, pulling latest"
     git -C "${MPNN_DIR}" pull --ff-only || echo "  (pull skipped - non-fast-forward or detached HEAD)"
 fi
-"${PIP}" install -q ProDy biopython
+# ml-collections is NOT optional, and nothing here imports it directly: LigandMPNN's
+# bundled openfold does, at `run.py` import time, so without it stage 2 of every campaign
+# dies before parsing an argument. It is in LigandMPNN's own requirements.txt alongside
+# dm-tree (which step 5 already installed for Boltz, which is why this was the only hole).
+# Job 22669509 paid a queue slot to find it. The numpy-alias half of the same problem is
+# handled at run time by MPNN_SHIM in src/impress_a/tools/ligandmpnn_agents.py - a wrapper
+# rather than a patch to the checkout, because the clone is `git pull`ed above and any
+# in-place edit would be silently reverted.
+# Pinned: unpinned it re-resolves absl-py and PyYAML against the tree steps 4-5 spent a
+# long comment block stabilising. 1.1.0 is what the full import chain was verified against
+# here; the reference pipeline pins 0.1.1, and both expose what openfold uses.
+"${PIP}" install -q ProDy biopython "ml-collections==1.1.0"
+"${PY}" -c "import ml_collections, prody, Bio; print('LigandMPNN deps import OK')"
 
 # ── 7. gemmi - pinned to what Boltz's step 5 install already resolved ─────────
 echo ""
@@ -287,7 +299,14 @@ _check "gemmi"             "${PY}" -c "import gemmi; print(gemmi.__version__)"
 _check "rdkit"             "${PY}" -c "import rdkit; print(rdkit.__version__)"
 _check "pyrosetta"         "${PY}" -c "import pyrosetta; print('ok')"
 _check "ProDy"             "${PY}" -c "import prody; print(prody.__version__)"
-_check "LigandMPNN"        test -d "${MPNN_DIR}" && echo "present"
+_check "ml_collections"    "${PY}" -c "import ml_collections; print('ok')"
+# `test -d` proved only that a clone happened. The checkpoints are what stage 2 actually
+# opens, and this script never downloads them (LigandMPNN ships get_model_params.sh for
+# that) - so say so here rather than let a fresh setup discover it inside an allocation.
+_check "LigandMPNN"        test -f "${MPNN_DIR}/run.py" \
+                             -a -f "${MPNN_DIR}/model_params/ligandmpnn_v_32_010_25.pt" \
+                             -a -f "${MPNN_DIR}/model_params/ligandmpnn_sc_v_32_002_16.pt" \
+                           && echo "run.py + both checkpoints present"
 _check "boltz weights"     test -f "${BOLTZ_CACHE}/boltz2_conf.ckpt" && echo "present"
 
 echo ""

@@ -19,10 +19,18 @@ now carries a designed sequence plus the ligand context) - everything downstream
 PyRosetta operates on that packed structure, not on the raw backbone.
 
 ## Cost posture
-Cheaper per-call than `rfd3_design` (one forward pass plus side-chain packing, not an
-iterative diffusion sampler), but every backbone that reaches this stage should already
-have cleared `rfd3_design`'s `has_secondary_structure` gate - designing sequence onto a
+Cheaper per-call than `rfd3_design` *in compute* (one forward pass plus side-chain packing,
+not an iterative diffusion sampler), but not in wall clock, and the difference is the thing
+to size a campaign against. Every backbone that reaches this stage should already have
+cleared `rfd3_design`'s `has_secondary_structure` gate - designing sequence onto a
 disordered backbone wastes the call.
+
+**~280s of every invocation is `import torch` paging off Lustre, before any work starts.**
+Measured on job 22669509: 276s elapsed to reach a `ModuleNotFoundError` in `run.py`'s
+module-level imports, and ~360s wall for 9s of CPU repeating the full chain on a login node.
+`walltime_s` is 1800 because of that, not because inference is slow. With `replicas: N` this
+is N×280s of allocation spent on dynamic linking, which is worth knowing before sizing a run
+rather than after.
 
 ## Pitfalls
 - Requires `$MPNN_DIR` pointing at a cloned `LigandMPNN` checkout with its checkpoints
@@ -34,6 +42,21 @@ disordered backbone wastes the call.
   checkout. Left implicit, every single invocation fails on a missing checkpoint. The
   adapter does both; the original IMPRESS pipeline does too (explicit flags in
   `scripts/mpnn.sh`, plus a `scripts/mpnn_run.py` shim that chdir's into the checkout).
+- **`run.py` is never invoked directly.** It cannot import under this venv's numpy, so the
+  adapter writes `MPNN_SHIM` (`tools/ligandmpnn_agents.py`) into the task workdir and runs
+  *that*, with `sys.executable` rather than a PATH-resolved `python`. The shim restores the
+  numpy aliases LigandMPNN's bundled openfold still uses and hands off via `runpy` with
+  `run_name="__main__"` - run.py does all its work under a `__main__` guard, so importing
+  it any other way defines `main` and exits having done nothing, which looks exactly like a
+  successful run that produced no output.
+- **The numpy gap, and why it is not fixable by pinning.** The vendored openfold uses
+  `np.int` (`openfold/np/residue_constants.py`) and `np.object` (`openfold/data/templates.py`),
+  both removed in numpy 1.24; LigandMPNN pins numpy 1.23.5, and this venv carries 2.x because
+  Boltz and the rest of the stack require it. `ml-collections` is the other half - nothing of
+  ours imports it, but `openfold/config.py` does, so a venv without it fails at stage 2 before
+  parsing an argument. It is installed by `delta_env_setup.sh` step 6. Job 22669509 found both,
+  one after the other, from inside an allocation; `impress-a preflight` now runs the same shim
+  with `--help` on a login node so the next one of these is free.
 - Reported metrics are named `overall_confidence`/`ligand_confidence`, following
   LigandMPNN's own naming; do not rename them to a generic `seq_recovery` when comparing
   against ProteinMPNN-based work (a different tool, different metric semantics).

@@ -130,17 +130,26 @@ dominant hazard, so the suite has to manufacture some.
 
 ## Known open risks
 
-**One real stage has executed; the rest have not.** Job 22536706 got `rfd3_design` to run and
-succeed on Delta. `ligandmpnn_design` then failed with its stderr lost, and nothing downstream of it
-— PyRosetta, Boltz — has run at all. No campaign has completed, so there is still no measured front,
-no ledger outcome and no calibrated cost.
+**One real stage has executed; the rest have not.** Jobs 22536706 and 22669509 both got
+`rfd3_design` to run and succeed on Delta, and both then failed in `ligandmpnn_design`. Nothing
+downstream of it — PyRosetta, Boltz — has run at all. No campaign has completed, so there is still
+no measured front and no calibrated cost (one real number so far: 0.25 GPU-h for rfd3 against a 0.5
+estimate).
 
-The one stage that ran was worth it: reading its real `out_dir` found a defect no amount of dry-run
-would have. Our `*.cif.gz` glob was selecting a *trajectory* rather than the design, because
-trajectories share the extension and `denoised` sorts first. Discovery goes through the sidecar
-`*_model_*.json` now. Expect the same of every remaining stage — "checked against the binary" is not
-"executed," and the contracts were checked. `impress-a preflight` first; see
-`plans/first-real-run.md` and backlog A1/A4.
+That one stage has now paid for itself twice, and both times the defect was invisible to a dry run:
+
+- **What a tool writes.** Our `*.cif.gz` glob was selecting a *trajectory* rather than the design,
+  because trajectories share the extension and `denoised` sorts first. Discovery goes through the
+  sidecar `*_model_*.json` now.
+- **Whether a tool can import.** LigandMPNN dies in `run.py`'s module-level imports, before reading
+  an argument — a missing `ml_collections`, then `np.int`, which numpy removed in 1.24 and the
+  vendored openfold still uses. The adapter runs `run.py` through `MPNN_SHIM` now, never directly.
+
+Expect the same of every remaining stage — "checked against the binary" is not "executed," and only
+the contracts were checked. Note also that the first defect was a *plausible* explanation for the
+second one's failure and had nothing to do with it; what separated them was recovering the real
+stderr. `impress-a preflight` first — it runs LigandMPNN's real import chain, and its new `warn`
+state means undetermined, not pass. See `plans/first-real-run.md` and backlog A1/A4/A6.
 
 **Dragon backend construction is synchronous and can hang the event loop.** `Batch()` builds with no
 `await` points, so a stall there is invisible — no heartbeat, no campaign log, nothing — until

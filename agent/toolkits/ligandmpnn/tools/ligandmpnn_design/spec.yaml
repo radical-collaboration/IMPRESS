@@ -3,7 +3,14 @@ toolkit: ligandmpnn
 version: "0.1"
 pattern: P1
 entry: impress_a.tools.ligandmpnn_agents.LigandMPNNDesignAgent
-resources: {gpus: 1, cores: 4, walltime_s: 300}
+# walltime_s is 6x the MEASURED import cost, not a guess. Job 22669509: task.000002
+# went RUNNING at 23:09:51 and FAILED at 23:14:27 - 276s to reach a ModuleNotFoundError
+# in run.py's module-level imports, before one tensor was allocated. ~280s of that is
+# `import torch` paging 1.6 GB of shared objects off Lustre; measured again on a login
+# node at ~360s wall for 9s of CPU. At the old 300s this tool could not have finished
+# importing, and would have failed as `timed out after 300s` - indistinguishable from a
+# hang, and blamed on LigandMPNN rather than on this number.
+resources: {gpus: 1, cores: 4, walltime_s: 1800}
 gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
 inputs:
   backbone: {type: Backbone}
@@ -23,4 +30,6 @@ qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: overall_confidence, min: 0.4}}
   - {id: metric_in_range, params: {metric: ligand_confidence, min: 0.4}}
-cost_model: {unit: invocation, cost: {gpu_hours: 0.1}}
+# 0.1 (=360s) was a literature guess that the import alone now exceeds. 0.25 is the
+# first figure here grounded in a real run; still an estimate for the inference half.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.25}}

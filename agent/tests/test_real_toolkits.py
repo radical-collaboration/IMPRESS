@@ -681,3 +681,172 @@ async def test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in(reg, monke
 
     with pytest.raises(RuntimeError, match="sidecar"):
         await agent.run(req, params)
+
+
+async def test_ligandmpnn_runs_run_py_through_the_numpy_alias_shim(reg, monkeypatch,
+                                                                   tmp_path):
+    """`run.py` cannot import under this venv's numpy, so invoking it directly is a bug.
+
+    Job 22669509: LigandMPNN died in its module-level imports, before parsing an argument
+    - first on a missing `ml_collections`, then on `np.int`, removed in numpy 1.24. The
+    venv carries numpy 2.x because Boltz needs it. The shim restores the aliases and
+    hands off via runpy; this pins that the adapter goes through it, and that the
+    interpreter is `sys.executable` rather than whatever a Dragon worker's PATH resolves
+    `python` to.
+    """
+    import sys
+
+    from impress_a.core.artifacts import ArtifactRef
+    from impress_a.tools import ligandmpnn_agents
+    from impress_a.tools.agent import TaskRequest
+
+    mpnn = tmp_path / "LigandMPNN"
+    (mpnn / "model_params").mkdir(parents=True)
+    monkeypatch.setenv("MPNN_DIR", str(mpnn))
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
+        captured["cmd"], captured["cwd"] = cmd, cwd
+        return "", ""
+
+    monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
+
+    agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    req = TaskRequest(
+        tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
+        inputs={"dep0": {"outputs": {
+            "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
+    await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
+
+    cmd = captured["cmd"]
+    assert cmd[0] == sys.executable, \
+        "PATH happened to be right on job 22669509 because the launcher activates the " \
+        "venv; this removes the dependency on that staying true"
+    assert cmd[1] == "-P", \
+        "without -P, CPython prepends the shim's directory - a LigandMPNN output dir - " \
+        "to sys.path ahead of the stdlib"
+    shim = pathlib.Path(cmd[2])
+    assert shim.name == "mpnn_run.py" and shim.exists(), \
+        "the shim must be written to disk before it can be run"
+    assert "setattr(np, _alias, _builtin)" in shim.read_text()
+    assert cmd[3] == str(mpnn), "the shim takes mpnn_dir as its first argument"
+    assert str(mpnn / "run.py") not in cmd, \
+        "run.py must never be invoked directly - it cannot import under numpy 2.x"
+    assert cmd[4:6] == ["--model_type", "ligand_mpnn"], \
+        "everything after the shim's own argument is run.py's argv, unchanged"
+
+
+def test_the_mpnn_shim_restores_the_aliases_openfold_needs(tmp_path):
+    """The shim, run for real against a fake checkout. No torch, no GPU, no LigandMPNN.
+
+    `np.int` and `np.object` are what the vendored openfold actually uses and what numpy
+    1.24 removed. `np.bool` is deliberately not forced - numpy 2.x defines it as its own
+    bool scalar, which is a valid dtype, and the only `np.bool` site in the checkout is
+    off the import path. This also pins the three things a wrapper silently gets wrong:
+    argv forwarding, the working directory, and the child's exit code.
+    """
+    import json
+    import subprocess
+    import sys
+
+    from impress_a.tools.ligandmpnn_agents import MPNN_SHIM
+
+    mpnn = tmp_path / "LigandMPNN"
+    mpnn.mkdir()
+    (mpnn / "run.py").write_text(
+        "import json, os, sys\n"
+        "import numpy as np\n"
+        "assert np.int is int, np.int\n"
+        "assert np.object is object, np.object\n"
+        "assert np.zeros([2, 2], dtype=np.int).dtype == np.int64\n"
+        "assert hasattr(np, 'bool'), 'numpy 2 defines this one itself'\n"
+        "print(json.dumps({'argv': sys.argv, 'cwd': os.getcwd(), 'path': sys.path}))\n"
+        "sys.exit(7)\n")
+    shim = tmp_path / "mpnn_run.py"
+    shim.write_text(MPNN_SHIM)
+
+    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn), "--seed", "11"],
+                         capture_output=True, timeout=120, check=False, cwd=tmp_path)
+
+    assert out.returncode == 7, \
+        f"the child's exit code must survive runpy, got {out.returncode}: {out.stderr.decode()}"
+    assert not out.stderr, \
+        f"probing np.object emits a FutureWarning; stderr is the diagnostic: {out.stderr.decode()}"
+    payload = json.loads(out.stdout.decode().strip().splitlines()[-1])
+    assert payload["argv"] == [str(mpnn / "run.py"), "--seed", "11"], \
+        "run.py must see its own name as argv[0] and nothing of the shim's"
+    assert pathlib.Path(payload["cwd"]).resolve() == mpnn.resolve(), \
+        "run.py resolves its bundled resources relative to the checkout"
+    assert str(tmp_path) not in payload["path"], \
+        ("-P must keep the shim's own directory off sys.path. Without it CPython prepends "
+         "it, which puts a LigandMPNN *output* directory ahead of the stdlib for the whole "
+         "run - invisible until something writes a .py-named file in there")
+
+
+def test_the_mpnn_shim_does_not_launder_a_failure(tmp_path):
+    """A wrapper is the easiest place to lose the diagnostic G6 just finished restoring.
+
+    Three ways that happens: swallowing the exit code, swallowing the traceback, and
+    losing `__file__` so the frames no longer name run.py. The shim's own frames staying
+    on top is deliberate - when the shim is the bug, those frames are the evidence.
+    """
+    import subprocess
+    import sys
+
+    from impress_a.tools.ligandmpnn_agents import MPNN_SHIM
+
+    shim = tmp_path / "mpnn_run.py"
+    shim.write_text(MPNN_SHIM)
+
+    mpnn = tmp_path / "LigandMPNN"
+    mpnn.mkdir()
+    (mpnn / "run.py").write_text("raise RuntimeError('boom')\n")
+    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn)],
+                         capture_output=True, timeout=120, check=False)
+    err = out.stderr.decode()
+    assert out.returncode != 0, "a raising run.py must not report success"
+    assert "boom" in err, "the real exception has to reach SubprocessError's stderr"
+    assert "run.py" in err, "runpy must set __file__, or the traceback names no source"
+
+    # argparse exits 2 on a usage error; laundering that into 0 or 1 would mean a
+    # malformed invocation reads as something else entirely.
+    (mpnn / "run.py").write_text("import sys\nsys.exit(2)\n")
+    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn)],
+                         capture_output=True, timeout=120, check=False)
+    assert out.returncode == 2, f"exit code must pass through runpy, got {out.returncode}"
+
+
+def test_the_mpnn_shim_says_so_when_mpnn_dir_is_not_a_checkout(tmp_path):
+    """Otherwise a mis-set $MPNN_DIR is a bare FileNotFoundError three frames inside
+    runpy, which reads like a LigandMPNN bug rather than a configuration one."""
+    import subprocess
+    import sys
+
+    from impress_a.tools.ligandmpnn_agents import MPNN_SHIM
+
+    shim = tmp_path / "mpnn_run.py"
+    shim.write_text(MPNN_SHIM)
+    empty = tmp_path / "not-a-checkout"
+    empty.mkdir()
+
+    out = subprocess.run([sys.executable, "-P", str(shim), str(empty)],
+                         capture_output=True, timeout=120, check=False)
+    assert out.returncode != 0
+    assert "no run.py under" in out.stderr.decode()
+
+
+def test_ligandmpnn_walltime_covers_the_measured_import_cost(reg):
+    """A magic number that is a bug report, per CLAUDE.md - so here is the report.
+
+    Job 22669509: `task.000002` went RUNNING at 23:09:51 and FAILED at 23:14:27. That is
+    276s to reach a ModuleNotFoundError in run.py's module-level imports, before a single
+    tensor was allocated - ~280s of it `import torch` paging off Lustre. The old
+    `walltime_s: 300` left 24s for the actual work, so the next run would have died as
+    `timed out after 300s`: indistinguishable from a hang, and blamed on LigandMPNN.
+    """
+    spec = reg.get("ligandmpnn_design")
+    assert spec.resources.walltime_s >= 900, \
+        ("the measured import alone is ~280-360s; anything under 900s is a budget that "
+         "cannot cover it plus inference")

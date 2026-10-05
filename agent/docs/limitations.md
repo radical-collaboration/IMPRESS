@@ -51,6 +51,20 @@ Validation gate 5 refuses graphs against `cost_model` figures drawn from literat
 not measurements on the target platforms. Early campaigns should record actual-versus-estimated cost per
 tool and recalibrate; until then the gate should carry a safety margin rather than be treated as precise.
 
+**Two real numbers now exist, and the second one was a latent bug rather than a mis-estimate.**
+`rfd3_design` cost 0.25 GPU-h against a 0.5 estimate (job 22669509). `ligandmpnn_design` had
+`walltime_s: 300` - and that same job shows its task spending **276s reaching a `ModuleNotFoundError`
+in module-level imports**, before allocating a tensor. Roughly 280s of every invocation is `import
+torch` paging off a Lustre mount, so the tool could not have finished importing inside its own
+timeout, and would have failed as `timed out after 300s`: a message that reads like a hang and blames
+the tool rather than the budget. Now 1800s, with the measurement recorded in the spec.
+
+The general point is about where these numbers hide rather than about this tool. A `walltime_s` that
+is too small does not announce itself as a mis-estimate; it announces itself as a timeout, which is
+the same shape as a hang. On shared HPC the import cost can dominate a short task entirely, and it is
+invisible to every local test because no local test pays it. The other four real tools' figures are
+still literature guesses, and the first thing each one's real run will produce is the true number.
+
 ## Cancellation
 
 **Still the open risk, but now measured.** Backtracking works by *branching the tree*, which avoids
@@ -154,17 +168,35 @@ it notices root has been emptied. Anything that logs to the root logger directly
 
 Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
 binaries, and the Delta HPC launch path is complete. **One adapter has now run on real hardware:**
-`rfd3_design` executed and succeeded on Delta (job 22536706). LigandMPNN failed on that same run,
-PyRosetta and Boltz were never reached, and no campaign has completed - so there is still no measured
-front, no ledger outcome and no calibrated cost. Everything below the adapters is exercised by the
-laptop tier; the remaining adapters are covered only for registration, validation and dry-run,
-because executing them needs the science stack installed.
+`rfd3_design` executed and succeeded on Delta (jobs 22536706 and 22669509). LigandMPNN failed on
+both, PyRosetta and Boltz have never been reached, and no campaign has completed - so there is still
+no measured front, no ledger outcome and no calibrated cost. Everything below the adapters is
+exercised by the laptop tier; the remaining adapters are covered only for registration, validation
+and dry-run, because executing them needs the science stack installed.
 
 That one stage paid for itself. Its real `out_dir` showed that `RFD3DesignAgent`'s `*.cif.gz` glob
 was selecting a diffusion **trajectory** rather than the design - trajectories carry the same
 extension and `denoised` sorts first - so the backbone passed downstream was a multi-frame stack.
 Discovery now goes through the sidecar `*_model_*.json`. Read that as the expected yield of
 executing each remaining stage, not as a one-off.
+
+Job 22669509 made the point again and sharpened it. Handed the correct 53 KB backbone, LigandMPNN
+still failed - in `run.py`'s **module-level imports**, before parsing an argument: first a missing
+`ml_collections`, then `np.int`, which numpy removed in 1.24. Neither had anything to do with the
+trajectory bug, which had merely been the plausible-looking explanation for the earlier failure; the
+two defects were independent. Both are environmental rather than logical - LigandMPNN vendors a copy
+of openfold written against pre-1.20 numpy, and this venv carries 2.x because Boltz requires it - and
+the adapter now runs `run.py` through a shim restoring those aliases, as the reference pipeline
+always did. The recurring lesson: **an adapter checked against a binary's contract is not an adapter
+that has been run**, and what breaks first is usually the environment, not the arguments.
+
+What makes this class expensive is *where* it was found. A missing module and a removed numpy alias
+are both knowable on a login node in seconds; both were instead discovered inside a GPU allocation,
+after a queue wait. `impress-a preflight` now runs LigandMPNN's real import chain through the same
+shim the adapter uses - but only for someone who runs it, since no launcher invokes preflight. In
+the same pass, preflight gained an **undetermined** state: a probe that times out now reports `warn`
+rather than `FAIL`, because a check that could not be run to a conclusion is not a check that failed,
+and two meaningless FAILs teach a reader to ignore the column that matters.
 
 A verification pass against the actual installed toolkits on Delta (not just old scripts) found and
 fixed real contract bugs rather than merely confirming guesses: `rfd3_design` was invoking `rfd3`

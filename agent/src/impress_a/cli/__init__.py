@@ -226,9 +226,20 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     """
     import shutil
     import subprocess
+    import tempfile
 
     stages = spec.stages if spec else None
-    checks: list[tuple[str, bool, str]] = []
+    # `ok` is tri-state. None means UNDETERMINED - the probe could not be run to a
+    # conclusion - which is not the same as the check failing. Every probe here that shells
+    # out to import a heavy science stack can take minutes on a busy login node, and
+    # reporting that as FAIL trains the reader to ignore the FAIL column.
+    #
+    # The rule, and it must not erode: None is ONLY for a probe that did not produce an
+    # answer - a timeout, an OSError, a check that does not apply. A deterministic negative
+    # is always False. A missing $MPNN_DIR is a FAIL forever; a pyrosetta *import error* is
+    # a FAIL, while a pyrosetta *timeout* is undetermined. The moment `warn` starts meaning
+    # "a failure we would rather not block on", this column is worth nothing.
+    checks: list[tuple[str, bool | None, str]] = []
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
@@ -240,6 +251,14 @@ def preflight(spec: CampaignSpec | None = None) -> int:
             checks.append((f"${var}", False, f"unset - needed by {what}"))
         elif not Path(val).exists():
             checks.append((f"${var}", False, f"set but does not exist: {val}"))
+        elif var == "MPNN_DIR" and not (Path(val) / "run.py").is_file():
+            # `exists()` only proved a directory. What stage 2 opens is run.py and the
+            # checkpoints, and `delta_env_setup.sh` clones the first but has never
+            # downloaded the second (LigandMPNN ships get_model_params.sh for that).
+            checks.append((f"${var}", False, f"no run.py under {val} - not a checkout"))
+        elif var == "MPNN_DIR" and not (Path(val) / "model_params").is_dir():
+            checks.append((f"${var}", False,
+                           f"{val} has no model_params/ - run its get_model_params.sh"))
         else:
             checks.append((f"${var}", True, val))
 
@@ -267,17 +286,71 @@ def preflight(spec: CampaignSpec | None = None) -> int:
                        "importable" if ok
                        else out.stderr.decode().strip().splitlines()[-1:][0]
                        if out.stderr else "import failed"))
+    except subprocess.TimeoutExpired:
+        checks.append(("pyrosetta", None, ("timed out after 120s - a loaded login node "
+                                           "can take that long to import it; re-run")))
     except (OSError, subprocess.SubprocessError) as e:
         checks.append(("pyrosetta", False, f"could not check: {e}"))
+
+    # Tier 1, ~1s, always: the one package `delta_env_setup.sh` was missing. Nothing of ours
+    # imports it - LigandMPNN's bundled openfold does, at run.py import time - so it is
+    # invisible until stage 2 of a campaign. Cheap enough to never be worth skipping.
+    try:
+        out = subprocess.run([sys.executable, "-c", "import ml_collections"],
+                             capture_output=True, timeout=60, check=False)
+        checks.append(("ml_collections", out.returncode == 0,
+                       "importable - LigandMPNN's openfold needs it" if out.returncode == 0
+                       else "missing; re-run scripts/delta_env_setup.sh step 6"))
+    except (OSError, subprocess.SubprocessError) as e:
+        # Including TimeoutExpired. A preflight that raises tells the operator nothing
+        # about the other eight checks, which is the opposite of what it is for.
+        checks.append(("ml_collections", None, f"could not check: {e}"))
+
+    # Tier 2, MINUTES, and only for a campaign that actually runs it: the whole import
+    # chain, through the same shim the adapter uses. `run.py` does its work under an
+    # `if __name__ == "__main__"` guard, so `--help` runs every module-level import and
+    # then exits 0 without touching a GPU or a checkpoint. That chain is what failed on
+    # job 22669509, twice for two unrelated reasons, both only visible from inside an
+    # allocation.
+    #
+    # The bound is 900s because the probe is genuinely slow: ~280s of it is `import torch`
+    # paging off Lustre (measured ~360s wall for 9s of CPU on a login node). That is also
+    # why the elapsed time is printed - it is the early warning for ligandmpnn_design's
+    # walltime_s, which this measurement is what set.
+    deep = stages is None or "ligandmpnn_design" in stages
+    if (mpnn := os.environ.get("MPNN_DIR")) and deep:
+        from ..tools.ligandmpnn_agents import MPNN_SHIM
+        t0 = time.monotonic()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                shim = Path(td) / "mpnn_run.py"
+                shim.write_text(MPNN_SHIM)
+                out = subprocess.run([sys.executable, "-P", str(shim), mpnn, "--help"],
+                                     capture_output=True, timeout=900, check=False)
+            took = time.monotonic() - t0
+            ok = out.returncode == 0
+            checks.append(("ligandmpnn imports", ok,
+                           f"run.py --help exited 0 in {took:.0f}s" if ok
+                           else out.stderr.decode().strip().splitlines()[-1:][0]
+                           if out.stderr else f"exited {out.returncode} after {took:.0f}s"))
+        except subprocess.TimeoutExpired:
+            checks.append(("ligandmpnn imports", None,
+                           ("no result in 900s - undetermined, NOT a pass; a loaded "
+                            "Lustre mount can do this. Re-run before submitting")))
+        except (OSError, subprocess.SubprocessError) as e:
+            checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
 
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
 
     print("\n  preflight\n")
     for name, ok, detail in checks:
-        print(f"    [{'ok ' if ok else 'FAIL'}] {name:20s} {detail}")
-    failed = [n for n, ok, _ in checks if not ok]
-    print(f"\n  {len(checks) - len(failed)}/{len(checks)} ok"
+        mark = "ok  " if ok else "warn" if ok is None else "FAIL"
+        print(f"    [{mark}] {name:20s} {detail}")
+    failed = [n for n, ok, _ in checks if ok is False]
+    unknown = [n for n, ok, _ in checks if ok is None]
+    print(f"\n  {len(checks) - len(failed) - len(unknown)}/{len(checks)} ok"
+          + (f", {len(unknown)} undetermined ({', '.join(unknown)})" if unknown else "")
           + (f" - missing: {', '.join(failed)}" if failed else ""))
     if stages:
         print(f"  (a campaign using {', '.join(stages)} needs the entries above)")

@@ -1,10 +1,11 @@
 # Stub — the first real campaign on Delta
 
-**Status:** submitted, and it got one stage in. Job 22536706 ran the smoke campaign on
-2026-09-29: `rfd3_design` succeeded, `ligandmpnn_design` failed, and the campaign then hung until
-the allocation ended (backlog G6). Steps 1-3 below were already DONE for the ALR target. A4 is
-closed by what that run wrote; A1 stays open, because no campaign has *completed*. What the run
-produced, and what it cost us to learn, is recorded at the bottom.
+**Status:** submitted twice, one stage in both times. Job 22536706 (2026-09-29) ran `rfd3_design`
+to success, then hung on a LigandMPNN failure whose stderr was lost (backlog G6). Job 22669509
+(2026-10-04) re-ran it with the G6 and rfd3-selection fixes in place: both held, LigandMPNN failed
+*loudly* this time, and its stderr showed it cannot import at all under this venv's numpy (A6).
+Steps 1-3 below were already DONE for the ALR target. A4 is closed by what the first run wrote; A1
+stays open, because no campaign has *completed*. Both runs are recorded at the bottom.
 
 ## Problem
 
@@ -89,3 +90,33 @@ watch the heartbeat and `scancel` on a stuck `inflight`.
 
 **Before resubmitting:** the rfd3 selection fix and the G6 fix are both code-only and both land
 before the next allocation is worth spending. Neither has executed on Delta.
+
+## What the second attempt produced (job 22669509)
+
+Both of those fixes executed, and both held.
+
+- **G6 holds.** `ligandmpnn_design` reached `FAILED` with its full stderr attached. No `Critical
+  error in monitor loop`, no hang: the executor reaped the run, the ledger took a `failed` outcome
+  with a complete payload, the campaign terminated on `max_cycles=1` and Dragon shut down in 1.5s.
+  7m28s of campaign inside a 9m35s job.
+- **The rfd3 selection fix holds.** `out_dir` held exactly `ALR_binder_design_partial_0_model_0.cif.gz`
+  (19,697 B) and its `.json`; `backbone_0.pdb` is **53,784 B**, the real single-model design, against
+  5.7 MB of trajectory last time. `num_models=1`, `ss_fraction=0.847` measured on one structure, both
+  QC gates pass. Caveat worth stating: `dump_trajectories=False` was in effect, so rfd3 wrote no
+  trajectories at all - the adversarial case is covered by the unit test, not by this run.
+- **Cost:** 0.25 GPU-h recorded for rfd3 against a 0.5 estimate. The first real number against gate
+  5's literature guesses.
+- Downstream stages all took `DependencyFailureError` and ran nothing, which is correct.
+
+**What it bought.** LigandMPNN's recovered stderr - the thing job 22536706 destroyed - showed it
+dies in `run.py`'s module-level imports: `ml_collections` missing, then `np.int` removed in numpy
+1.24. See backlog A6. That also disproved the standing theory that the trajectory had killed it: it
+got the right backbone this time and failed anyway, for an unrelated reason.
+
+**Still unanswered**, unchanged from the first attempt and all downstream of stage 2: the four
+objectives on a front, artifacts from the Rosetta and Boltz stages, per-tool cost against estimate,
+and the `replicas: 4` independence check.
+
+**Before resubmitting again:** run `impress-a preflight` and confirm `ligandmpnn imports` reads
+`[ok  ]`. A `[warn]` is a timeout, not a pass - run the shim by hand against `$MPNN_DIR` with
+`--help` and require exit 0 before spending a queue slot.
