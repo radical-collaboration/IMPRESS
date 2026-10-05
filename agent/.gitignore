@@ -1,4 +1,9 @@
+# Both forms deliberately. On Delta `.venv` is a SYMLINK to $WORK_DIR/ve/impress_a on
+# NVMe, not a directory, and `.venv/` with the trailing slash matches directories only -
+# so the symlink would otherwise show up as an untracked file and get committed.
 .venv/
+.venv
+.venv.*
 __pycache__/
 *.pyc
 .pytest_cache/
