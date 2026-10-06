@@ -501,5 +501,27 @@ async def impress_smallmol_bind() -> None:
         await flow.shutdown()
 
 
+def _write_runner_status(status: str) -> None:
+    """Record how this run ended, for delta_gpu_run.sh to check.
+
+    `dragon -w ssh` exits 0 even when this process dies with a traceback
+    (job 22692267: AttributeError 26 s in, Slurm state COMPLETED), so the
+    launcher cannot use dragon's exit code.  It reads this file instead.
+    """
+    work_dir = _args.work_dir or os.environ.get("IMPRESS_WORK_DIR")
+    if not work_dir:
+        return
+    try:
+        with open(os.path.join(work_dir, "runner_status"), "w") as fh:
+            fh.write(status + "\n")
+    except OSError as exc:
+        print(f"[RUNNER] could not write runner_status: {exc!r}")
+
+
 if __name__ == "__main__":
-    asyncio.run(impress_smallmol_bind())
+    try:
+        asyncio.run(impress_smallmol_bind())
+    except BaseException as exc:
+        _write_runner_status(f"failed: {exc!r}"[:500])
+        raise
+    _write_runner_status("ok")
