@@ -138,11 +138,24 @@ dominant hazard, so the suite has to manufacture some.
 
 ## Known open risks
 
-**Five of six real stages have executed. `boltz_predict` never has, and no campaign has
-produced a front.** Job 22684607 ran `rfd3_design -> ligandmpnn_design -> packmin -> fastrelax ->
-filter_shape` to `5/5 tasks ok` in 3m44s, with real metrics and artifacts. Those two facts are the
-same fact: Boltz is the only producer of `complex_plddt` and `ligand_iptm`, both bounded objectives,
-so a Boltz-less graph cannot rank anything. It was dropped by a *budget correction*, not a failure.
+**One campaign has completed.** Job 22692304 ran all six stages — `rfd3_design ->
+ligandmpnn_design -> packmin -> fastrelax -> filter_shape -> boltz_predict` — to `6/6 tasks ok`
+in 2m53s, admitted on the *first* attempt, every stage passing its gates, and terminated with a
+one-node Pareto front. All four campaign objectives carry real values (`total_score` −272.0,
+`shape_complementarity` 0.591, `complex_plddt` 0.507, `ligand_iptm` 0.752). Per-tool cost is
+measured for all six.
+
+Read that as a floor, not a result. It is **one lineage, one cycle, one draw**: `replicas > 1`
+has never run, so the independence invariant is unexercised; nothing has ever been promoted by
+the trust ledger (one clean run recorded, three needed, and `max_cycles: 1` gives one run per
+campaign), so the trusted path has never executed; and no measurement has ever superseded a
+prediction, so the calibration machinery is untested against reality. The node is `suspect`
+rather than `pass` because the pattern is provisional — that is the interlock working.
+
+**Wall time is not stable, and cost models must not be tuned as if it were.** `rfd3_design` took
+145.7s in job 22684607 and 45.0s in 22692304 — same campaign, same allocation, same parameters,
+3.2× apart. `cost_model` figures feed gate 5 and the untrusted-pattern cap, which *refuse*
+graphs, so they sit a few multiples above measurement on purpose.
 
 Four defects reached real hardware before anything caught them, and each was invisible to a dry run:
 

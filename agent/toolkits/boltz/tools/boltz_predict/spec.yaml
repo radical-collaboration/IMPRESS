@@ -25,4 +25,14 @@ qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: complex_plddt, min: 0.5, max: 1.0}}
   - {id: metric_in_range, params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
-cost_model: {unit: invocation, cost: {gpu_hours: 0.15}}
+# Measured on job 22692304 - the first run in which this tool executed at all: 57.8s
+# = 0.0160 h. Declared 0.15 was 9.3x that, the same literature guess the other five
+# carried, and it was left alone in 77a0363 precisely because there was nothing to
+# correct it against.
+#
+# 0.05 is ~3x measured, NOT the measured figure. One run is one sample: rfd3_design
+# took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
+# shape, same parameters, 3.2x apart. These numbers feed gate 5 and the untrusted-
+# pattern cap, which REFUSE graphs, so a cost model tuned to a fast observation starts
+# rejecting work the first time a slow one arrives.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.05}}

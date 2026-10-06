@@ -1,6 +1,12 @@
 # Stub — the first real campaign on Delta
 
-**Status:** five of six stages now execute. Job 22684607 (2026-10-05) ran
+**Status: DONE — a campaign has completed.** Job 22692304 (2026-10-06) ran all six stages to
+`6/6 tasks ok` in 2m53s, admitted on the first attempt, every gate passing, terminating with a
+one-node front and all four objectives valued. This stub's question is answered; what it asked to
+check on the first run is recorded at the bottom, including the items it got wrong. The remaining
+unexercised ground moved to backlog A10 (`replicas > 1`) and A11 (cost-model variance).
+
+**Previously:** five of six stages executed. Job 22684607 (2026-10-05) ran
 `rfd3_design -> ligandmpnn_design -> packmin -> fastrelax -> filter_shape` to `5/5 tasks ok` in
 3m44s. `boltz_predict` has never run: it is truncated off the chain by a budget correction, not by
 a failure (backlog A7). No campaign has produced a front. Earlier history below.
@@ -162,3 +168,58 @@ objectives on a front, `boltz_predict` executing at all, per-tool cost for boltz
 **Before the next submission:** confirm the six-stage chain composes with no interlock rejection
 (simulate the admission path locally - no allocation needed), and expect `boltz_predict` to run for
 the first time.
+
+## The first completed campaign (job 22692304)
+
+```
+reaped r0001: 6/6 tasks ok   cost={'gpu_hours': 0.27, 'cpu_hours': 0.06}
+terminated: {"reason": "max_cycles=1 reached", "cycles": 1, "front": ["n000001-4101"]}
+```
+
+Admitted on `r0001` - the first attempt - with `rejected: None` and
+`unproducible_objectives: []`. The two runs before it needed four attempts and lost a stage.
+
+| stage | duration | QC | metrics |
+|---|---|---|---|
+| `rfd3_design` | 45.0s | pass | `ss_fraction` 0.827 |
+| `ligandmpnn_design` | 14.6s | pass | `overall_confidence` 0.448, `ligand_confidence` 0.424 |
+| `packmin` | 15.2s | pass | `total_score` +14.8 |
+| `fastrelax` | 22.4s | pass | `total_score` -272.0, `fa_rep` 109.4 |
+| `filter_shape` | 10.0s | pass | `shape_complementarity` 0.591 |
+| `boltz_predict` | 57.8s | pass | `complex_plddt` 0.507, `ligand_iptm` 0.752 |
+
+The node is `suspect`, not `pass`: `executor.py:245` marks a provisional composition pattern, and
+it is still rankable. The trust ledger recorded one `clean` run; promotion needs three.
+
+### Against this stub's own checklist
+
+- **`graphs` provenance names the real tools** - yes, all six.
+- **`jobs/ledger.jsonl` shows submitted → done with an outcome payload** - yes, `state: done`.
+- **Artifacts under the shared filesystem, not `/tmp`** - yes, under `$WORK_DIR` on NVMe.
+- **The front carries `total_score`, `shape_complementarity`, `complex_plddt`, `ligand_iptm`** -
+  yes, all four, and the node is on the front.
+- **Estimated vs actual cost per tool** - measured for all six and the specs corrected. This was
+  the checklist item that mattered most and nobody expected: the literature guesses were 6-69x
+  over, which is not harmless, because gate 5 and the untrusted-pattern cap REFUSE graphs against
+  them. Two runs were spent on chains that had `boltz_predict` truncated off to fit a cap that
+  only existed because the numbers were wrong.
+- **`out_dir` holds no `traj/` output** - yes, `dump_trajectories=False`.
+- **Thread caps divide the allocation** - `OMP_NUM_THREADS 32` on a 64-core node, correct.
+
+### What this stub asked for and got wrong
+
+It said to check that `rfd3_design`'s outputs "match what `RFD3DesignAgent` globs for
+(`*.cif.gz`)". They did match, and the glob was still wrong - it was selecting a trajectory. A
+checklist that asks whether the code does what it says cannot catch the code saying the wrong
+thing; reading the real `out_dir` is what caught it.
+
+It also never asked where any of this was being read from, which turned out to be the single
+largest cost in the system (533.8s of PyRosetta startup off HDD).
+
+### Still not done
+
+`replicas: 4` (backlog A10) - the four-lineage independence check this stub calls the invariant
+most likely to be silently wrong. It does **not** fit the untrusted-pattern cap today: four
+lineages estimate 0.68 gpu-h against 0.60, so the correction would silently shrink it to three.
+Running the smoke campaign three times promotes the pattern and removes the cap; at ~3 minutes a
+run that is the cheapest route.

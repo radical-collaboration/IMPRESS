@@ -188,29 +188,45 @@ too high**: the cost models were 6-69x over, the gpu side summed past the untrus
 cap, and the budget correction that followed silently truncated `boltz_predict` - the only
 producer of two of the campaign's four objectives - off the end of the chain.
 
-## Built, but unexercised against real science
+## One campaign has completed — what that does and does not establish
 
-Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
-binaries, and the Delta HPC launch path is complete. **Five of the six have now run on real
-hardware** (job 22684607, `5/5 tasks ok`): `rfd3_design`, `ligandmpnn_design`, `packmin`,
-`fastrelax` and `filter_shape` all executed and produced real metrics and artifacts.
+Job 22692304 ran all six real tools end to end (`6/6 tasks ok`, 2m53s), admitted on the first
+attempt, every stage passing its gates, terminating with a one-node Pareto front. All four
+campaign objectives carry real values: `total_score` -272.0, `shape_complementarity` 0.591,
+`complex_plddt` 0.507, `ligand_iptm` 0.752. Per-tool cost is measured for all six and the
+`cost_model` figures corrected from it.
 
-**`boltz_predict` has still never run**, and no campaign has produced a front. Those two facts are
-the same fact: Boltz is the only producer of `complex_plddt` and `ligand_iptm`, both of which carry
-`min:` bounds, so a missing value is a constraint violation and no node from a Boltz-less graph can
-be ranked. It was dropped by a budget correction, not by a failure - see the section above.
+**It establishes that the machinery runs.** It does not establish that the science is good, and
+it is important not to read it as more than one draw:
 
-What is now measured: per-tool cost for five tools, and a first set of real QC outcomes. What is
-not: anything about Boltz, any front, any `replicas > 1` independence check, and whether the QC
-thresholds are calibrated - `filter_shape` returned 0.524 against a 0.55 bound, which is a genuine
-near-miss, while `packmin`'s bound turned out to be upstream's fastrelax threshold on the wrong
-stage. Everything below the adapters is exercised by the laptop tier.
+- **One lineage.** `replicas > 1` has never executed, so `replicas: N` producing N *independent*
+  `DesignNode`s - the invariant the whole seed-plumbing exists for - remains unverified.
+- **One cycle.** `max_cycles: 1`, so no policy has ever acted on an observation, and backtracking
+  has never been exercised against real results.
+- **Nothing trusted.** The trust ledger recorded one clean run; promotion needs three consecutive.
+  The node is `suspect` rather than `pass` for exactly that reason, and the *trusted* code path -
+  no dry-run, no cost cap, concurrent instances allowed - has never run at all.
+- **No measurement has superseded a prediction.** `ingest_measurement` and the whole
+  predicted-vs-measured calibration story still have no real assay data behind them.
+- **The QC thresholds have one or two observations each.** `complex_plddt` cleared its 0.5 bound
+  by 0.007. `filter_shape` returned 0.524 against 0.55 on the run before and 0.591 here. Whether
+  these numbers sit in the right place is unknown, and `packmin`'s turned out to be upstream's
+  *fastrelax* threshold copied onto the wrong stage - it failed +145.3 and +14.8, both healthy.
 
-That one stage paid for itself. Its real `out_dir` showed that `RFD3DesignAgent`'s `*.cif.gz` glob
+**Cost figures are single samples and should not be tightened.** `rfd3_design` took 145.7s in job
+22684607 and 45.0s in 22692304 - same campaign, same allocation shape, same parameters, 3.2x
+apart. The declared `cost_model` values deliberately sit 3-5x above measurement because they feed
+gate 5 and the untrusted-pattern cap, both of which *refuse* graphs; tuning them to a fast
+observation is how a campaign starts being rejected for no real reason.
+
+### Getting here cost four defects, none of which a dry run could have found
+
+The first stage to execute paid for itself immediately. Its real `out_dir` showed that
+`RFD3DesignAgent`'s `*.cif.gz` glob
 was selecting a diffusion **trajectory** rather than the design - trajectories carry the same
 extension and `denoised` sorts first - so the backbone passed downstream was a multi-frame stack.
-Discovery now goes through the sidecar `*_model_*.json`. Read that as the expected yield of
-executing each remaining stage, not as a one-off.
+Discovery now goes through the sidecar `*_model_*.json`. That turned out to be the expected yield
+of executing each remaining stage rather than a one-off.
 
 Job 22669509 made the point again and sharpened it. Handed the correct 53 KB backbone, LigandMPNN
 still failed - in `run.py`'s **module-level imports**, before parsing an argument: first a missing

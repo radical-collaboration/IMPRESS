@@ -7,16 +7,15 @@ paragraph in place rather than being deleted - the evidence that forced them is 
 State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
-on Delta. **Five of six real stages have now executed:** job 22684607 ran
-`rfd3_design -> ligandmpnn_design -> packmin -> fastrelax -> filter_shape` to `5/5 tasks ok` in
-3m44s. `boltz_predict` has still never run - it is dropped by a budget correction, not by a
-failure (A7) - and no campaign has produced a front.
+on Delta. **One campaign has completed:** job 22692304 ran all six stages to `6/6 tasks ok`
+in 2m53s, admitted on the first attempt, every gate passing, terminating with a one-node front and
+all four objectives valued. One lineage, one cycle, one draw - see A1 for what that does not cover.
 
 ---
 
 ## A. Blocked on a person, not on code
 
-**A1. No real campaign has ever completed** - one has now *started*. Job 22536706
+**A1. No real campaign has ever completed — RESOLVED by job 22692304** (see the ruling at the end of this entry). The history that got there, in order. Job 22536706
 (`delta-small-molecule-smoke`, model D, one lineage) reached Delta on 2026-09-29:
 
 - `rfd3_design` **executed and succeeded** - roughly 3 minutes wall-clock, real output in
@@ -43,6 +42,20 @@ that moves this item, and it should now surface the real LigandMPNN error instea
 
   Still one stage. LigandMPNN's recovered stderr showed it cannot import at all here (A6), so
   `packmin` onwards remain untouched and this item does not move.
+
+  **RESOLVED by job 22692304.** All six stages ran (`6/6 tasks ok`, 2m53s), admitted on the first
+  attempt with `rejected: None`, every stage passing its gates, terminating `front:
+  ["n000001-4101"]`. Node metrics: `ss_fraction` 0.827, `overall_confidence` 0.448,
+  `ligand_confidence` 0.424, `total_score` -272.0, `fa_rep` 109.4, `shape_complementarity` 0.591,
+  `complex_plddt` 0.507, `ligand_iptm` 0.752. The ledger carries a `done` outcome and per-tool cost
+  for all six tools.
+
+  **Read it as a floor.** One lineage, one cycle, one draw. The node is `suspect` rather than
+  `pass` because the pattern is provisional (`executor.py:245`), which is the interlock working.
+  What this run does NOT cover, and what should replace this item on the list: `replicas > 1` has
+  never run (A10); nothing has been promoted by the trust ledger - one clean run recorded, three
+  needed, and `max_cycles: 1` gives one run per campaign - so the trusted path has never executed;
+  and no measurement has superseded a prediction, so calibration is untested.
 
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
@@ -175,7 +188,7 @@ their arguments are checked, their environments are not.
 (`overall_confidence` 0.525, `ligand_confidence` 0.496). `MPNN_SHIM` and the pinned `ml-collections`
 both hold on real hardware.
 
-**A7. `boltz_predict` has never executed, and a budget correction is why.** Not a tool failure. The
+**A7. `boltz_predict` has never executed, and a budget correction is why — RESOLVED.** Not a tool failure. The
 `cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
 against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,
 and `ThresholdPolicy.on_rejected` truncated the last stage off (`policy/explicit.py`, `stages[:-1]`).
@@ -188,7 +201,12 @@ run was unwinnable from the moment it was admitted and nothing said so.
   packmin 0.2→0.02, fastrelax 0.5→0.03, filter_shape 0.05→0.01), and the six-stage estimate is now
   gpu 0.27 / cpu 0.06 against caps of 0.60 / 1.00 - admitted on the first attempt, verified by
   simulating the real admission path. The budget itself is untouched: raising it to accommodate a
-  wrong number would have hidden the defect. **Still open:** boltz has not actually run.
+  wrong number would have hidden the defect.
+
+  **RESOLVED.** Job 22692304: `boltz_predict` executed for the first time in 57.8s, passed both
+  gates and produced `complex_plddt` 0.507 and `ligand_iptm` 0.752 - the two objectives that had
+  never had a producer in a completed graph. Its own cost model was the last literature guess
+  standing (0.15 against 0.0160 measured, 9.3x) and is now 0.05.
 
 **A8. Nothing checks that an admitted graph can produce the campaign's objectives.** `grep -rn
 "objective" src/impress_a/compose` returns nothing - the composer and validator never receive them.
@@ -209,6 +227,36 @@ On job 22675512 attempts 1-3 shrank replicas 3→2→1 while composing **identic
 signature, same estimate, same rejection - and only attempt 4 reached the stage-dropping branch.
 `max_attempts` is 4: one more rejection and the campaign would have run nothing at all. The policy
 should see the effective replica count.
+
+**A10. `replicas > 1` has never executed.** `plans/first-real-run.md` calls the four-lineage
+independence check the invariant most likely to be silently wrong: `replicas: N` must produce N
+`DesignNode`s carrying DIFFERENT metrics, which is the only evidence the per-lineage seed plumbing
+does anything. Every real run so far has been `replicas: 1`.
+
+  **It does not currently fit, and that is worth knowing before an allocation is spent on it.**
+  Simulated against the real admission path: `replicas: 4` composes 24 nodes at **0.68 gpu-h**
+  against the untrusted cap of 0.60 - rejected, and `on_rejected` would then shrink replicas
+  4 → 3 → 2 and admit *three* lineages, quietly turning the four-lineage independence check into
+  a three-lineage one. The check would still be meaningful but it would not be the check that was
+  asked for, and nothing in the log would say so except the new correction warning.
+
+  Three ways out, in preference order. **(a) Earn trust first:** three consecutive clean runs
+  promote the pattern (`TrustLedger.promote_after`), and a trusted pattern bypasses the cap
+  entirely - `max_cycles: 1` means that is three smoke campaigns, which are now ~3 minutes each.
+  This is the path the interlock was designed for and it costs almost nothing. **(b)** Raise
+  `budget.gpu_hours` for a replicas-4 campaign specifically (8.0 gives a 0.80 cap). **(c)** Run
+  `replicas: 2` (0.34, fits today) and accept a weaker version of the check.
+
+**A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
+`rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
+shape, same parameters. Every `cost_model` figure now in the specs comes from one or two
+observations. This is not a reason to revert to literature guesses, which were 6-69x out; it is a
+reason the declared figures deliberately sit ~3-5x above measurement and must not be tightened
+toward equality. These numbers feed gate 5 and the untrusted-pattern cap, both of which REFUSE
+graphs, so erring low is how a campaign starts getting rejected for no real reason. Recalibrate
+from a distribution once several runs exist, and treat a single fast run as the least trustworthy
+input. Pinned by `test_cost_models_are_within_an_order_of_magnitude_of_measurement`, which asserts
+a band rather than a value for exactly this reason.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

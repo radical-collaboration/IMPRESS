@@ -29,14 +29,13 @@
 #   sbatch scripts/delta_gpu_run.sh                                    # full campaign
 #   sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml  # smoke test
 #
-##SBATCH --partition=gpuA40x4-interactive
-#SBATCH --partition=gpuA100x4-interactive
+#SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=240G
-#SBATCH --time=01:00:00
+#SBATCH --time=12:00:00
 # Sizing notes - measured by the original IMPRESS project, do not shrink casually:
 #   cpus-per-task=64 - the whole node, and it is FREE. Requesting 4 GPUs already reserves
 #     and bills the entire node, and billing is max(cpu*31.25, mem/8, gpu*500) under

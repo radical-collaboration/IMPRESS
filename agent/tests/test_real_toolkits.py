@@ -880,6 +880,8 @@ def test_ligandmpnn_walltime_covers_the_measured_import_cost(reg):
     ("packmin", "cpu_hours", 15.9),
     ("fastrelax", "cpu_hours", 25.9),
     ("filter_shape", "cpu_hours", 10.2),
+    # Job 22692304, the first run in which boltz_predict executed at all.
+    ("boltz_predict", "gpu_hours", 57.8),
 ])
 def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
         reg, tool, dim, measured_s):
@@ -891,9 +893,16 @@ def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
     four objectives, off the end. The run was then incapable of producing a front and
     said so nowhere.
 
-    Job 22684607 measured all five. The bound here is deliberately loose in BOTH
-    directions: an estimate feeding a refusal gate should err high, but being 50x high
-    is how a budget gate starts refusing work that would have fit.
+    Job 22684607 measured five; 22692304 added boltz_predict. The bound here is
+    deliberately loose in BOTH directions: an estimate feeding a refusal gate should err
+    high, but being 50x high is how a budget gate starts refusing work that would have fit.
+
+    It is loose for a second reason. These are single samples and wall time is not
+    stable: rfd3_design took 145.7s in 22684607 and 45.0s in 22692304 - same campaign,
+    same allocation shape, same parameters, 3.2x apart. A cost model pinned to a fast
+    observation starts rejecting graphs the first time a slow one shows up, so the
+    declared figures deliberately sit a few multiples above what was measured and this
+    test must not tighten toward equality.
     """
     measured_h = measured_s / 3600
     declared = reg.get(tool).cost_model.cost[dim]
