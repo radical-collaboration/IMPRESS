@@ -1,6 +1,6 @@
 # Tool stages delegated to asyncflow/rhapsody instead of the runner
 
-**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke passed on Delta (`22670942`); 8-node throughput gate still open
+**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke (`22670942`), 4-node 1 h (`22675825`) and post-merge gate (`22684833`) all passed on Delta with 0 failures; throughput gate past hour 2 still open
 **Evidence:** branch history `976c0cf`..`90d6be3`, plus `d8c1b4b` and `8ddeb10` before it
 
 ## Why
@@ -80,18 +80,57 @@ Two branches added compute management to the example runner, which is the asyncf
 
 The "primary's CPULoad drops relative to `22491438`" criterion therefore can't be judged until the Dragon spin is reduced, because it dominates the load figure.
 
+### `22675825` — 4 nodes (gpub039/056/085 + gpub098 primary), 16 pipelines, `gpuA40x4-interactive`, 1 h, `TIMEOUT` at 01:00:09 (expected)
+
+The first Delta run with the `rfd3`/`boltz` caps.
+
+| | |
+|---|---|
+| `TaskFailed` / pipeline failures / tracebacks / OOM | **0 / 0 / 0 / 0** |
+| Completed tasks | `mpnn` 667, `packmin` 212, `fastrelax` 165, `filter_shape` 86, `rfd3` 209, `boltz` 79, `adaptive_decision` 1417 |
+| Tasks per pipeline | 73–106 |
+| Folds passing | **71 / 79 (90%)** |
+| rfd3 / pipeline / h | **13.1** (209 ÷ 16), against ~13 on 2 nodes: first-hour scaling from 2 to 4 nodes is about 100% (2.0× job-wide for 2× pipelines) |
+| Mean node CPU% (telemetry) | primary 51.2%; others 45.7–46.2%. On `22670942`, before the `rfd3`/`boltz` caps, it was ~58% on both nodes |
+| Mean GPU% | 9.8–14.7% per node, which is GPU 0 only; see [2026-10-05-gpu0-only](2026-10-05-gpu0-only.md) |
+
+The `rfd3`/`boltz` caps were **not** live-verified here: the job started unattended, and telemetry carries no env. They are verified offline only.
+
+### `22684833` — post-merge gate: 2 nodes (gpub082 primary + gpub084), 8 pipelines, run entirely from `/work/nvme`, `TIMEOUT` at 01:00:02 (expected)
+
+This run gated the merge of `origin/main` (`ebfc0cb`) and the move to a `WORK_DIR` on `/work/nvme`: checkout, data, and the new venv `ve/small_mol`.
+
+| | |
+|---|---|
+| `TaskFailed` / pipeline failures / tracebacks | **0 / 0 / 0** |
+| Completed tasks | `mpnn` 357, `packmin` 105, `fastrelax` 82, `filter_shape` 32, `rfd3` 99, `boltz` 29, `adaptive_decision` 703 |
+| Folds passing | 27 / 29 |
+| rfd3 / pipeline / h | 13.1 (105 ÷ 8) |
+| Paths | `MPNN_DIR`, `BOLTZ_CACHE`, `FOUNDRY_SIF_PATH`, task outputs and telemetry all under `$WORK_DIR` |
+
+Remote placement of `rfd3`/`boltz` was **inferred, not sampled**:
+- GPU 0 on the non-primary gpub084 averaged 45% busy;
+- 0 of 99 `rfd3` and 0 of 29 `boltz` tasks failed.
+
+A remote `rfd3` without the `WORK_DIR` bind would be expected to fail, but nobody took a `/proc` sample to confirm `WORK_DIR` in the remote env. That indirect evidence was accepted.
+
 ## Acceptance test — status
 
 1. **2-node smoke:** **passed** (`22670942`). Placement on both nodes was confirmed via `/proc`, since telemetry has no `node_id`.
 2. **Env check:** **passed** (`22669434`). Caps arrived on the non-primary node.
-3. **Throughput gate:** **open.** It needs rfd3/pipeline/h at or above 11.46 over a full campaign (or at least past hour 2), with no rise in `TaskFailed`. Run it after re-checking primary-node idle with the `rfd3`/`boltz` caps in place.
+3. **4-node, 1 h:** **passed** (`22675825`, 0 failures, ~100% first-hour scaling from 2 to 4 nodes).
+4. **Post-merge gate:** **passed** (`22684833`); remote placement was inferred, see above.
+5. **Throughput gate:** **open.** It needs rfd3/pipeline/h at or above 11.46 over a full campaign (or at least past hour 2), with no rise in `TaskFailed`. Run it after re-checking primary-node idle with the `rfd3`/`boltz` caps in place.
 
 ## Risks
 
 - **False-FAILED race exposure.** More tasks now go through Dragon, so there is more exposure to the 0.14.1 race. It did not manifest in `22534628` (zero task failures in 63,589 log lines).
 - **Task rate.** It is low (~32 × 300 tasks over ~7 h ≈ 0.4/s), well within the Dragon monitor thread's capacity.
 - **Fallback.** If Dragon placement of the PyRosetta stages misbehaves, add `backend="local"` to just those registrations. They stay asyncflow-managed with per-task env. Keep `mpnn` on `compute`, because it is a GPU tool.
-- **Process-mode tasks receive no `gpu_affinity` from Dragon.** So `rfd3`, `boltz` and now `mpnn` each see every GPU on their node. That was already true of `rfd3`/`boltz`, and is unchanged. It was confirmed on `22669434`, where every tool had `CUDA_VISIBLE_DEVICES=0,1,2,3`.
+- **Process-mode tasks receive no `gpu_affinity` from Dragon, so every GPU tool runs on GPU 0.**
+  - Every tool sees `CUDA_VISIBLE_DEVICES=0,1,2,3` (confirmed on `22669434`) and defaults to `cuda:0`.
+  - Measured on `22684833`: GPU 0 averaged 52% / 45%, GPUs 1–3 exactly 0% on both nodes.
+  - This predates this change; `mpnn` merely joined `rfd3`/`boltz` on GPU 0. See [2026-10-05-gpu0-only](2026-10-05-gpu0-only.md) and BACKLOG item 10.
 
 ## Upstream items (not patched here)
 
