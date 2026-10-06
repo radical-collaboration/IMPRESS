@@ -1,0 +1,80 @@
+# Exercises PROMOTION - the one code path this project has never run.
+#
+# A composition pattern is promoted after `TrustLedger.promote_after` = 3 CONSECUTIVE clean
+# runs, and promotion is what turns off the forced dry-run, the 10%-of-budget cap, and the
+# one-instance-in-flight rule. None of that has ever happened on Delta: until commit 52332c6
+# the trust ledger resolved inside each job's working directory and started empty every run
+# (backlog A12), so three single-cycle jobs produced three ledgers holding one run each.
+#
+# This campaign does it in one allocation. Identical science to delta-small-molecule-smoke -
+# same chain, same target, same parameters - differing only in how many cycles it runs.
+#
+# max_cycles: 6, not 4. Three clean runs promote, and a fourth is needed to be the first
+# graph ADMITTED as trusted. The extra two are slack for a cycle that fails QC, which resets
+# the counter to zero (`TrustLedger.on_failure`): `filter_shape` returned 0.524 in job
+# 22684607 and 0.591 in 22692304 against a 0.55 bound, so a failing cycle is a real
+# possibility rather than a hypothetical.
+#
+# stagnation_limit: 6 disables the early stop on purpose. The campaign's job is to accumulate
+# evidence about one pattern, not to search - and the stop triggers on the front's node set
+# being unchanged, which says nothing about whether a run was clean. At 2 it could end the
+# campaign after three runs, exactly when promotion had just happened and nothing had used it.
+#
+# Projected ~20 min: job 22692304 ran one cycle's six stages in 2m53s, and rfd3 varies
+# 45-146s run to run. Interactive is appropriate; submit with
+#   sbatch --partition=gpuA100x4-interactive --time=01:00:00 scripts/delta_gpu_run.sh <this>
+campaign_id: delta-small-molecule-trust
+goal: "Design a small-molecule-binding protein around the configured ligand"
+backend: dragon
+backend_config: {}
+# rhapsody's Dragon backend builds Batch() synchronously with no await points - a stall
+# there blocks the event loop entirely (no heartbeat, no timeout) until the walltime is
+# spent (see docs/limitations.md). 600s is generous for legitimate startup, nowhere near
+# the allocation's walltime.
+backend_startup_timeout_s: 600
+backend_startup_heartbeat_s: 30
+# And the mirror image. Measured on the reference IMPRESS pipeline (job 22491438):
+# `flow.shutdown()` never returned once every pipeline had finished, and the job sat 60
+# minutes before being cancelled by hand - ~64 GPU-hours spent after the science was done.
+# Abandoning a stuck teardown is safe here: results are already durable in provenance and
+# the ledger by that point.
+backend_shutdown_timeout_s: 300
+max_cycles: 6
+stagnation_limit: 6
+site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+# Sized against the INTERLOCK, not just the chain: an untrusted pattern is capped at 10% of
+# AVAILABLE budget (remaining less in-flight), and that cap shrinks as the campaign spends.
+# One pass now estimates 0.17 gpu-h / 0.06 cpu-h against measured costs (job 22684607), so
+# six passes spend ~1.0 gpu-h and the cap stays above 0.17 throughout. The figures in the
+# older comment here - 0.5/0.75 - were the literature guesses corrected in 77a0363.
+budget:
+  gpu_hours: 6.0
+  cpu_hours: 10.0
+stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]
+# Boltz is LAST on purpose: an independent prediction run AFTER the Rosetta physics
+# gates, so agreement between the two is the campaign's strongest signal
+# (toolkits/boltz/SKILL.md). Running Rosetta on a Boltz output inverts that logic.
+params:
+  rfd3_design:
+    # A real DesignInputSpecification (RFD3 has no scaffold/guidance CLI override - the
+    # target is selected entirely by which JSON file this points at).
+    input_spec_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR_binder_design.json"
+    num_designs: 1
+    diffusion_steps: 50
+  ligandmpnn_design:
+    fixed_residues: "A16"      # hold this residue fixed during sequence design
+  packmin:
+    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+  fastrelax:
+    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+  filter_shape:
+    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+  boltz_predict:
+    ligand_smiles: "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12"
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.5}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}
