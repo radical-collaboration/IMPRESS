@@ -14,6 +14,7 @@ parameters:
   # will raise (confirmed: old IMPRESS's filter_shape.py always passes this, plus
   # -ignore_unrecognized_res -ignore_zero_occupancy).
   ligand_params_path: {type: str, default: ""}
+metrics: [shape_complementarity]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: shape_complementarity, min: 0.55, max: 1.0}}

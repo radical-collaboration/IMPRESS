@@ -17,6 +17,7 @@ parameters:
   # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
   # will raise (confirmed: old IMPRESS's fastrelax.py always passes this).
   ligand_params_path: {type: str, default: ""}
+metrics: [total_score, fa_rep]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: total_score, max: 0.0}}

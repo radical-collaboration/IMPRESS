@@ -9,6 +9,7 @@ outputs:
   designs: {type: Backbone}
 parameters:
   num_designs: {type: int, default: 2, min: 1, max: 8}
+metrics: [ss_fraction, designability]
 qc_gates:
   - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}
 cost_model: {unit: invocation, cost: {gpu_hours: 0.001}}

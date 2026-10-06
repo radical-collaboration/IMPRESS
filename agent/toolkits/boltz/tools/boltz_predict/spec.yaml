@@ -21,6 +21,7 @@ parameters:
   ligand_smiles: {type: str, default: ""}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
+metrics: [complex_plddt, ligand_iptm]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: complex_plddt, min: 0.5, max: 1.0}}

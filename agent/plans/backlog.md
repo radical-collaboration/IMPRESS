@@ -216,9 +216,16 @@ A terminal-metrics gate was specified in
   **Half-resolved.** `runtime/executor._objectives_without_a_producer` now WARNs and records
   `unproducible_objectives` in `graphs` provenance, and `on_rejected` logs the stage it drops.
   Both are warn-and-proceed. The warning is a **heuristic**: `ToolSpec` has no `metrics:` field, so
-  producible metrics are inferred from each spec's `metric_in_range` gate params, and a tool that
-  emits a metric it does not gate reads as a non-producer. **Still open:** declare metrics on
-  `ToolSpec` and make this a real gate.
+  producible metrics were inferred from each spec's `metric_in_range` gate params, and a tool
+  that emits a metric it does not gate read as a non-producer.
+
+  **That inference was wrong in practice, not just in theory.** It warned on `mock-stabilize`
+  that the graph could not produce `ddg`, `iptm` or `sc_rmsd` while that same run returned a
+  four-node front carrying all three - the mock tools emit them and gate on none. A warning that
+  fires on a healthy campaign is noise. `ToolSpec.metrics` is now declared by all eleven tools
+  and is the source of truth, with gate metrics unioned in so a drifting declaration still gets
+  caught; `test_every_tool_declares_the_metrics_it_reports` enforces both halves. **Still open:**
+  this is a warning, not a gate.
 
 **A9. Three of four admission attempts are wasted, and the fourth is the last one.** `ThresholdPolicy.
 decide` asks for `base_replicas + 1 = 3` replicas, but the campaign's `replicas: 1` is applied
@@ -257,6 +264,33 @@ graphs, so erring low is how a campaign starts getting rejected for no real reas
 from a distribution once several runs exist, and treat a single fast run as the least trustworthy
 input. Pinned by `test_cost_models_are_within_an_order_of_magnitude_of_measurement`, which asserts
 a band rather than a value for exactly this reason.
+
+**A12. The trust ledger reset every job, so promotion was unreachable on Delta — RESOLVED.**
+`executor.py` loaded it from `Path(spec.root) / "_trust"`, and `spec.root` defaults to the
+*relative* `campaigns/_runs`. `delta_gpu_run.sh` cds into `$WORK_DIR/impress_a_runs/$SLURM_JOB_ID`
+before launching, so that path resolved inside each job's own directory. On disk after two real
+runs: `22684607/campaigns/_runs/_trust/cuda.jsonl` with 0 clean events and
+`22692304/.../cuda.jsonl` with 1. Two files, `promote_after=3` counting within one file.
+
+  This was structural, not a shortfall of runs - it had been true since the first Delta job, so
+  **the trusted code path has never executed**: no pattern has ever skipped the forced dry-run,
+  and `provisional_budget_fraction` has applied to every graph ever composed on real hardware.
+  That cap is exactly what truncated `boltz_predict` off the chain twice (A7). Worth noting how
+  it hid: nothing ever logged where the ledger was, so a file that silently reset looked
+  identical to one that had not earned promotion yet - and I reported it that way.
+
+  **RESOLVED.** `CampaignSpec.trust_root` (new), filled by `cli.load_spec` from
+  `$IMPRESS_A_TRUST_DIR`, which `delta_gpu_run.sh` exports as `${WORK_DIR}/_trust`. The relative
+  default is unchanged for the laptop tier, where CWD is stable. Campaign start now logs the
+  absolute ledger path with a pattern/trusted count. Pinned by
+  `test_trust_survives_a_campaign_running_from_a_different_directory`, which builds executors
+  from three different CWDs and asserts promotion - it fails on the old code. Verified end to
+  end: two runs from different directories reported `0 patterns known, 0 trusted` then
+  `2 patterns known, 1 trusted`.
+
+  **Still open:** nothing has actually been promoted on Delta yet. Three clean runs do it, and
+  `max_cycles: 4` in one campaign would promote on the third and admit the fourth graph as
+  trusted - the first time that path would ever run.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

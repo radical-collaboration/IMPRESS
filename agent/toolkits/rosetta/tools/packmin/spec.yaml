@@ -16,6 +16,7 @@ parameters:
   # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
   # will raise (confirmed: old IMPRESS's packmin.py always passes this).
   ligand_params_path: {type: str, default: ""}
+metrics: [total_score]
 qc_gates:
   - {id: output_present, params: {key: result}}
   # A LOOSE sanity bound, not a quality threshold. This gate used to read `max: 0.0`,

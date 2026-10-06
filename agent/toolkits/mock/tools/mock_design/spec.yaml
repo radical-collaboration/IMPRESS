@@ -12,6 +12,7 @@ outputs:
 parameters:
   temperature: {type: float, default: 0.1, min: 0.0, max: 1.0, trades: "diversity vs recovery"}
   num_seqs: {type: int, default: 4, min: 1, max: 32}
+metrics: [seq_recovery, diversity]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: seq_recovery, min: 0.15}}

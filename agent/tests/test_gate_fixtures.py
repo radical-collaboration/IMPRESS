@@ -232,3 +232,40 @@ def test_a_tool_directory_is_named_for_its_spec_id():
             if spec_id != p.parent.name:
                 mismatched.append(f"{p.parent.name}/ declares id {spec_id!r}")
     assert mismatched == []
+
+
+def test_every_tool_declares_the_metrics_it_reports():
+    """`ToolSpec.metrics` is what tells the executor whether a graph can measure anything.
+
+    It exists because inferring the set from `metric_in_range` gate params does not work: a
+    tool that emits a metric without gating on it reads as producing nothing. The first
+    version did infer it, and warned on `mock-stabilize` that the graph could not produce
+    ddg, iptm or sc_rmsd - while that same run returned a four-node front carrying exactly
+    those three. A warning that fires on a healthy campaign is noise, and noise is how the
+    real case gets ignored.
+
+    So: every non-P6 tool must declare at least one metric, and every metric any gate names
+    must appear in the declaration. The second half is the one that catches drift - a gate
+    referring to a metric the tool no longer reports is a tool whose QC silently stopped
+    applying.
+    """
+    from impress_a.tools.spec import Pattern
+
+    reg = Registry().load()
+    assert not reg.errors, reg.errors
+
+    undeclared, ungated = [], []
+    for tid in reg.ids():
+        spec = reg.get(tid)
+        if spec.pattern is Pattern.P6:
+            continue
+        if not spec.metrics:
+            undeclared.append(tid)
+        gated = {g.params.get("metric") for g in spec.qc_gates if g.params.get("metric")}
+        if missing := gated - set(spec.metrics):
+            ungated.append(f"{tid} gates on {sorted(missing)} but does not declare it")
+
+    assert not undeclared, \
+        f"these tools declare no metrics, so any graph using them looks unable to " \
+        f"measure anything: {undeclared}"
+    assert not ungated, "; ".join(ungated)

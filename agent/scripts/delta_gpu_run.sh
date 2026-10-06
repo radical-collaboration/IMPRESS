@@ -142,6 +142,15 @@ export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
 export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
+# The trust ledger is SITE-scoped and must outlive the job. Without this it resolves
+# relative to the per-job WORKDIR we cd into below, so every job started with an empty
+# ledger, promotion counts consecutive clean runs within one file, and nothing could ever
+# be promoted - the trusted path (no forced dry-run, no 10% cost cap, concurrent instances
+# of one pattern) had never executed on Delta. Jobs 22684607 and 22692304 each wrote their
+# own copy holding a single run.
+export IMPRESS_A_TRUST_DIR="${IMPRESS_A_TRUST_DIR:-${WORK_DIR}/_trust}"
+mkdir -p "${IMPRESS_A_TRUST_DIR}"
+
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
 for _sif in "${WORK_DIR}/foundry.sif"; do
     if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${_sif}" ]; then
@@ -169,6 +178,7 @@ echo "WORK_DIR:          ${WORK_DIR}"
 echo "MPNN_DIR:          ${MPNN_DIR}"
 echo "FOUNDRY_SIF_PATH:  ${FOUNDRY_SIF_PATH}"
 echo "BOLTZ_CACHE:       ${BOLTZ_CACHE}"
+echo "TRUST_DIR:         ${IMPRESS_A_TRUST_DIR}"
 
 # ── Tool existence checks ──────────────────────────────────────────────────────
 if [ ! -d "${MPNN_DIR}" ]; then

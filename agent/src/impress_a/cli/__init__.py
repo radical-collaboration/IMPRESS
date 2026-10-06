@@ -46,6 +46,10 @@ def load_spec(path: str | Path) -> CampaignSpec:
         backend_shutdown_timeout_s=float(d.get("backend_shutdown_timeout_s", 0) or 0),
         backend_startup_heartbeat_s=float(d.get("backend_startup_heartbeat_s", 30) or 30),
         root=d.get("root", "campaigns/_runs"),
+        # Env, not YAML, because the right value is machine-specific: on Delta it has to be
+        # outside the per-job working directory the launcher cds into, and YAML carries no
+        # env expansion. Set beside MPNN_DIR/BOLTZ_CACHE in scripts/delta_gpu_run.sh.
+        trust_root=d.get("trust_root") or os.environ.get("IMPRESS_A_TRUST_DIR", ""),
         stages=d.get("stages", []) or [],
         params=d.get("params", {}) or {},
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
@@ -195,6 +199,15 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",
              spec.campaign_id, model, spec.backend, mgr.root,
              ",".join(spec.stages) or "<policy default>", spec.replicas)
+    # Absolute, and with a count. Trust accumulated inside each job's working directory for
+    # three allocations without anyone noticing, because nothing ever named the file - a
+    # ledger that silently reset looked exactly like one that had not earned promotion yet.
+    _trust = mgr.executor.trust
+    _known = _trust.patterns
+    log.info("trust ledger %s (%d pattern%s known, %d trusted)",
+             Path(_trust.path).resolve() if _trust.path else "<in-memory, nothing persists>",
+             len(_known), "" if len(_known) == 1 else "s",
+             sum(1 for r in _known.values() if r.trusted))
     hb = (asyncio.create_task(_heartbeat(mgr, heartbeat_s, t0))
           if heartbeat_s > 0 else None)
     try:

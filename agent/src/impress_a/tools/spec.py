@@ -82,6 +82,14 @@ class ToolSpec(BaseModel):
     gpu_portability: GPUPortability = Field(default_factory=GPUPortability)
     parameters: dict[str, ParameterSpec] = Field(default_factory=dict)
     frozen_parameters: dict[str, str] = Field(default_factory=dict)  # name -> reason
+    # The metric names this tool's agent reports. Declared, not inferred: the composer has
+    # no other way to know what a graph can measure, and inferring it from `qc_gates` reads
+    # a tool that emits a metric it does not gate as producing nothing. That inference was
+    # tried first and warned falsely on the mock campaign, whose tools emit ddg/iptm/
+    # sc_rmsd and gate on none of them. Used by
+    # `runtime/executor._objectives_without_a_producer` to say when an admitted graph
+    # cannot inform an objective it was composed for.
+    metrics: list[str] = Field(default_factory=list)
     qc_gates: list[GateSpec] = Field(default_factory=list)
     cost_model: CostModel = Field(default_factory=CostModel)
     agent: Literal["deterministic", "llm"] = "deterministic"

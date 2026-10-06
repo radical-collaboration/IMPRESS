@@ -12,6 +12,7 @@ parameters:
   diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs time"}
 frozen_parameters:
   checkpoint: "Mixing checkpoints within a campaign makes designs non-comparable."
+metrics: [ss_fraction, designability]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}

@@ -203,9 +203,13 @@ it is important not to read it as more than one draw:
   `DesignNode`s - the invariant the whole seed-plumbing exists for - remains unverified.
 - **One cycle.** `max_cycles: 1`, so no policy has ever acted on an observation, and backtracking
   has never been exercised against real results.
-- **Nothing trusted.** The trust ledger recorded one clean run; promotion needs three consecutive.
-  The node is `suspect` rather than `pass` for exactly that reason, and the *trusted* code path -
-  no dry-run, no cost cap, concurrent instances allowed - has never run at all.
+- **Nothing trusted, and for a while nothing could be.** The ledger resolved against a relative
+  path inside each job's working directory, so every SLURM job started with an empty one and
+  promotion - three *consecutive* clean runs in one file - was unreachable on Delta from the
+  first run onward. Fixed; the path is now site-scoped and logged absolutely at campaign start.
+  The consequence stands either way: the *trusted* code path (no forced dry-run, no 10% cost cap,
+  concurrent instances of one pattern) has still never executed, and that cap is what truncated
+  `boltz_predict` off the chain twice. The node is `suspect` rather than `pass` for this reason.
 - **No measurement has superseded a prediction.** `ingest_measurement` and the whole
   predicted-vs-measured calibration story still have no real assay data behind them.
 - **The QC thresholds have one or two observations each.** `complex_plddt` cleared its 0.5 bound

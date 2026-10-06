@@ -72,6 +72,15 @@ class CampaignSpec:
     backend: str = "concurrent"
     backend_config: dict[str, Any] = field(default_factory=dict)
     root: str = "campaigns/_runs"
+    # Where the SITE-scoped trust ledger lives, independent of `root`. Empty keeps the
+    # historical `root/_trust`, which is right wherever CWD is stable - a laptop, the test
+    # tier. It is wrong the moment something cds per run: `delta_gpu_run.sh` cds into
+    # $WORK_DIR/impress_a_runs/$SLURM_JOB_ID, so a relative path resolved INSIDE each job
+    # and the ledger started empty every time. Promotion counts consecutive clean runs
+    # within one file, so it was unreachable on Delta from the first run onward and the
+    # trusted code path had never executed. `cli.load_spec` fills this from
+    # $IMPRESS_A_TRUST_DIR; the launcher exports it beside MPNN_DIR and BOLTZ_CACHE.
+    trust_root: str = ""
     # 0 disables: rhapsody's Dragon backend builds `Batch()` synchronously in its own
     # constructor (worker pool, GPU-affinity policies, telemetry) with no `await` points,
     # so a stall there blocks the event loop entirely - no heartbeat, no timeout, nothing
@@ -143,7 +152,8 @@ class CampaignExecutor:
         self.root = Path(spec.root) / spec.campaign_id
         self.prov = ProvenanceLog(self.root / "provenance")
         self.jobs = JobLedger(self.root / "jobs" / "ledger.jsonl")
-        self.trust = TrustLedger.load(Path(spec.root) / "_trust" / f"{spec.site.gpu_api}.jsonl")
+        trust_dir = Path(spec.trust_root) if spec.trust_root else Path(spec.root) / "_trust"
+        self.trust = TrustLedger.load(trust_dir / f"{spec.site.gpu_api}.jsonl")
         self.composer = Composer(self.reg)
         self.validator = Validator(self.reg, spec.site, self.budget)
         self.cycle = 0
@@ -387,20 +397,21 @@ class CampaignExecutor:
         receive `spec.objectives` at all, so the graph was type-correct, affordable,
         admitted, and incapable of informing half of what it was for.
 
-        `ToolSpec` has no `metrics:` field, so a tool's output metric names are not
-        declared anywhere machine-readable. The one place they appear is a `metric_in_range`
-        gate's `metric` param, which every real tool happens to carry for the numbers it
-        reports. That makes this a HEURISTIC and it is allowed to under-report: a tool that
-        emits a metric it does not gate looks like a non-producer here, so a false warning
-        is possible and a missed one is not what matters - the expensive case is staying
-        silent, which is what we did. Declaring metrics on ToolSpec is the real fix.
+        Reads `ToolSpec.metrics`, which every tool now declares. The first version of this
+        inferred the set from `metric_in_range` gate params instead, and warned falsely on
+        the mock campaign - its tools emit ddg/iptm/sc_rmsd and gate on none of them, so a
+        graph that demonstrably produced a four-node front was reported as unable to produce
+        anything. Gate metrics are still unioned in, because a gated name is by definition
+        reported, and that keeps a tool honest if its declaration drifts.
         """
         wanted = {o.name for o in self.spec.objectives}
         if not wanted:
             return []
         produced: set[str] = set()
         for node in graph.nodes.values():
-            for gate in self.reg.get(node.tool).qc_gates:
+            spec = self.reg.get(node.tool)
+            produced.update(spec.metrics)
+            for gate in spec.qc_gates:
                 if metric := (gate.params or {}).get("metric"):
                     produced.add(metric)
         return sorted(wanted - produced)

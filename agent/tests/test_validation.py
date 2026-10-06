@@ -1,4 +1,6 @@
 """T1 - the five composition gates."""
+import pathlib
+
 import pytest
 
 from impress_a.compose.composer import Composer
@@ -128,6 +130,69 @@ def test_trust_ledger_survives_concurrent_writers(tmp_path):
     b.on_failure("sig")
     assert not TrustLedger.load(path, promote_after=3).is_trusted("sig"), \
         "demotion is evidence too and must persist"
+
+
+def test_trust_survives_a_campaign_running_from_a_different_directory(tmp_path, monkeypatch):
+    """Promotion has to accumulate across JOBS, and on HPC every job is a fresh CWD.
+
+    `spec.root` defaults to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into
+    `$WORK_DIR/impress_a_runs/$SLURM_JOB_ID` before launching - so the ledger resolved inside
+    each job's own directory and started empty every time. On disk after two real runs:
+
+        22684607/campaigns/_runs/_trust/cuda.jsonl   0 clean
+        22692304/campaigns/_runs/_trust/cuda.jsonl   1 clean
+
+    Two files, one clean run each, `promote_after=3` counting within one file. Promotion was
+    unreachable on Delta from the first run onward - which means the entire trusted path (no
+    forced dry-run, no 10% cost cap, concurrent instances allowed) had never executed, and no
+    number of extra campaigns would have changed that.
+
+    The ledger's own accumulation is covered above. What was never covered is how its path gets
+    chosen, which is the whole of the defect - every other trust test hands it an explicit
+    tmp_path.
+    """
+    from impress_a.manager import CampaignSpec
+    from impress_a.runtime.executor import CampaignExecutor
+
+    shared = tmp_path / "site_trust"
+    sig = "a-pattern-signature"
+
+    def executor_in(job_dir: str) -> CampaignExecutor:
+        d = tmp_path / job_dir
+        (d / "campaigns" / "_runs").mkdir(parents=True, exist_ok=True)
+        monkeypatch.chdir(d)
+        spec = CampaignSpec(campaign_id="c", goal="g", objectives=[],
+                            trust_root=str(shared), site=SiteCaps(gpu_api="cuda"))
+        return CampaignExecutor(spec, policy=None)
+
+    for job in ("job_1", "job_2", "job_3"):
+        ex = executor_in(job)
+        ex.trust.record_for(sig, ["x"])
+        ex.trust.on_clean_run(sig)
+
+    assert executor_in("job_4").trust.is_trusted(sig), \
+        "three clean runs from three job directories must promote the pattern; if this " \
+        "fails the ledger is resolving per-job again and nothing can ever be trusted"
+
+
+def test_trust_root_overrides_the_campaign_root(tmp_path, monkeypatch):
+    """And with neither override, the path must not move - the laptop tier depends on it."""
+    from impress_a.manager import CampaignSpec
+    from impress_a.runtime.executor import CampaignExecutor
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "campaigns" / "_runs").mkdir(parents=True)
+
+    explicit = tmp_path / "elsewhere"
+    ex = CampaignExecutor(CampaignSpec(campaign_id="c", goal="g", objectives=[],
+                                       trust_root=str(explicit),
+                                       site=SiteCaps(gpu_api="cuda")), policy=None)
+    assert pathlib.Path(ex.trust.path) == explicit / "cuda.jsonl"
+
+    ex = CampaignExecutor(CampaignSpec(campaign_id="c", goal="g", objectives=[],
+                                       site=SiteCaps(gpu_api="cuda")), policy=None)
+    assert pathlib.Path(ex.trust.path) == pathlib.Path("campaigns/_runs/_trust/cuda.jsonl"), \
+        "the default is relative on purpose - stable CWD, and tests rely on it"
 
 
 def test_trust_ledger_without_a_path_persists_nothing():

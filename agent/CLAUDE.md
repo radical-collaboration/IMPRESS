@@ -146,9 +146,10 @@ one-node Pareto front. All four campaign objectives carry real values (`total_sc
 measured for all six.
 
 Read that as a floor, not a result. It is **one lineage, one cycle, one draw**: `replicas > 1`
-has never run, so the independence invariant is unexercised; nothing has ever been promoted by
-the trust ledger (one clean run recorded, three needed, and `max_cycles: 1` gives one run per
-campaign), so the trusted path has never executed; and no measurement has ever superseded a
+has never run, so the independence invariant is unexercised; nothing has ever been promoted by the
+trust ledger — and until `f509c80`+ it *could* not be, because the ledger resolved inside each
+job's working directory and started empty every run (backlog A12), so the trusted path has never
+executed; and no measurement has ever superseded a
 prediction, so the calibration machinery is untested against reality. The node is `suspect`
 rather than `pass` because the pattern is provisional — that is the interlock working.
 
