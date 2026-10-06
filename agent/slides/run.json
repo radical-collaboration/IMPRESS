@@ -1,0 +1,351 @@
+{
+ "code": {
+  "head": "a810d67",
+  "packages": {
+   "tools": 1435,
+   "runtime": 1027,
+   "control": 928,
+   "core": 831,
+   "policy": 755,
+   "exec": 512,
+   "compose": 433,
+   "cli": 420,
+   "manager.py": 115,
+   "__main__.py": 3,
+   "__init__.py": 0
+  },
+  "src_total": 6459,
+  "test_lines": 3476,
+  "tests_collected": 152,
+  "tools": [
+   "boltz_predict",
+   "fastrelax",
+   "filter_shape",
+   "ligandmpnn_design",
+   "mock_design",
+   "mock_fold",
+   "mock_generate",
+   "mock_noodle",
+   "mock_score",
+   "packmin",
+   "rfd3_design"
+  ],
+  "n_tools": 11
+ },
+ "mock": {
+  "campaign": "mock-stabilize-D",
+  "stdout_tail": [
+   "campaign : mock-stabilize-D",
+   "  policy   : rulecorrectionspolicy(threshold)",
+   "  cycles   : 3",
+   "  stop     : target front size 3 reached",
+   "  nodes    : 6  front: 4",
+   "    n000001-f6e5 qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
+   "    n000004-f6e5 qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
+   "    n000005-f6e5 qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
+   "    n000006-f6e5 qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
+  ],
+  "admissions": [
+   {
+    "run": "r0001",
+    "signature": "9fdcfd202951f82f",
+    "nodes": 12,
+    "estimate": {
+     "gpu_hours": 0.165,
+     "cpu_hours": 1.5
+    },
+    "trusted": false,
+    "rejected": {
+     "gate": "interlock",
+     "node": null,
+     "reason": "provisional pattern capped at 10% of available cpu_hours (1.500 > 1.200)",
+     "detail": {},
+     "transient": true
+    }
+   },
+   {
+    "run": "r0002",
+    "signature": "66bb492308e3d238",
+    "nodes": 8,
+    "estimate": {
+     "gpu_hours": 0.11,
+     "cpu_hours": 1.0
+    },
+    "trusted": false,
+    "rejected": null
+   },
+   {
+    "run": "r0003",
+    "signature": "66bb492308e3d238",
+    "nodes": 8,
+    "estimate": {
+     "gpu_hours": 0.11,
+     "cpu_hours": 1.0
+    },
+    "trusted": false,
+    "rejected": null
+   },
+   {
+    "run": "r0004",
+    "signature": "66bb492308e3d238",
+    "nodes": 8,
+    "estimate": {
+     "gpu_hours": 0.11,
+     "cpu_hours": 1.0
+    },
+    "trusted": false,
+    "rejected": null
+   }
+  ],
+  "nodes": [
+   {
+    "node": "n000001-f6e5",
+    "run": "r0002",
+    "lineage": 0,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.675,
+     "designability": 0.95,
+     "seq_recovery": 0.544,
+     "diversity": 0.35,
+     "iptm": 0.751,
+     "sc_rmsd": 1.204,
+     "ddg": -2.119,
+     "clashscore": 2.95
+    }
+   },
+   {
+    "node": "n000002-f6e5",
+    "run": "r0002",
+    "lineage": 1,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.499,
+     "designability": 0.943,
+     "seq_recovery": 0.508,
+     "diversity": 0.35,
+     "iptm": 0.398,
+     "sc_rmsd": 4.086,
+     "ddg": 0.068,
+     "clashscore": 0.27
+    }
+   },
+   {
+    "node": "n000003-f6e5",
+    "run": "r0003",
+    "lineage": 0,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.594,
+     "designability": 0.649,
+     "seq_recovery": 0.696,
+     "diversity": 0.07,
+     "iptm": 0.589,
+     "sc_rmsd": 2.643,
+     "ddg": 0.605,
+     "clashscore": 6.2
+    }
+   },
+   {
+    "node": "n000004-f6e5",
+    "run": "r0003",
+    "lineage": 1,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.643,
+     "designability": 0.67,
+     "seq_recovery": 0.726,
+     "diversity": 0.07,
+     "iptm": 0.686,
+     "sc_rmsd": 2.13,
+     "ddg": 1.817,
+     "clashscore": 2.27
+    }
+   },
+   {
+    "node": "n000005-f6e5",
+    "run": "r0004",
+    "lineage": 0,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.639,
+     "designability": 0.72,
+     "seq_recovery": 0.684,
+     "diversity": 0.07,
+     "iptm": 0.678,
+     "sc_rmsd": 2.258,
+     "ddg": 0.877,
+     "clashscore": 1.49
+    }
+   },
+   {
+    "node": "n000006-f6e5",
+    "run": "r0004",
+    "lineage": 1,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.659,
+     "designability": 0.663,
+     "seq_recovery": 0.678,
+     "diversity": 0.07,
+     "iptm": 0.719,
+     "sc_rmsd": 1.584,
+     "ddg": -2.909,
+     "clashscore": 3.02
+    }
+   }
+  ],
+  "front": [
+   "n000001-f6e5",
+   "n000004-f6e5",
+   "n000005-f6e5",
+   "n000006-f6e5"
+  ],
+  "stop": "target front size 3 reached",
+  "cycles": 3,
+  "promoted": [
+   "66bb492308e3d238"
+  ],
+  "trust_events": [
+   {
+    "event": "seen",
+    "signature": "9fdcfd202951f82f"
+   },
+   {
+    "event": "seen",
+    "signature": "66bb492308e3d238"
+   },
+   {
+    "event": "clean",
+    "signature": "66bb492308e3d238"
+   },
+   {
+    "event": "clean",
+    "signature": "66bb492308e3d238"
+   },
+   {
+    "event": "clean",
+    "signature": "66bb492308e3d238"
+   }
+  ],
+  "ledger_records": 10
+ },
+ "shape": {
+  "1": {
+   "signature": "f5b21d82924fbcd0",
+   "nodes": 6
+  },
+  "2": {
+   "signature": "f8bcefed63c493ae",
+   "nodes": 12
+  },
+  "4": {
+   "signature": "78e730c67750a361",
+   "nodes": 24
+  },
+  "1_tuned_params": {
+   "signature": "f5b21d82924fbcd0",
+   "nodes": 6
+  }
+ },
+ "delta": {
+  "source": "plans/first-real-run.md, plans/backlog.md - transcribed, raw logs on Delta",
+  "jobs": [
+   {
+    "job": "22536706",
+    "date": "2026-09-29",
+    "storage": "hdd",
+    "outcome": "rfd3 ok; ligandmpnn failed, stderr lost (G6); hung at inflight=1",
+    "stages": {
+     "rfd3_design": 180.0
+    }
+   },
+   {
+    "job": "22669509",
+    "date": "2026-10-04",
+    "storage": "hdd",
+    "outcome": "rfd3 ok; ligandmpnn FAILED loudly at import (A6) after 276s",
+    "stages": {
+     "rfd3_design": null,
+     "ligandmpnn_design": 276.0
+    }
+   },
+   {
+    "job": "22684607",
+    "date": "2026-10-05",
+    "storage": "nvme",
+    "outcome": "5/5 ok in 3m44s; boltz truncated off by the cost cap (A7)",
+    "stages": {
+     "rfd3_design": 145.7,
+     "ligandmpnn_design": 18.1,
+     "packmin": 15.9,
+     "fastrelax": 25.9,
+     "filter_shape": 10.2
+    }
+   },
+   {
+    "job": "22692304",
+    "date": "2026-10-06",
+    "storage": "nvme",
+    "outcome": "6/6 ok in 2m53s, first attempt, one-node front",
+    "stages": {
+     "rfd3_design": 45.0,
+     "ligandmpnn_design": 14.6,
+     "packmin": 15.2,
+     "fastrelax": 22.4,
+     "filter_shape": 10.0,
+     "boltz_predict": 57.8
+    }
+   }
+  ],
+  "hdd_baseline_22675512": {
+   "rfd3_design": 137.2,
+   "ligandmpnn_design": 292.6,
+   "packmin": "could not finish import pyrosetta in 300s"
+  },
+  "import_cost_s": {
+   "pyrosetta_hdd": 471,
+   "torch_hdd": 280
+  },
+  "completed": {
+   "job": "22692304",
+   "wall": "2m53s",
+   "cost": {
+    "gpu_hours": 0.27,
+    "cpu_hours": 0.06
+   },
+   "qc": "suspect",
+   "front": [
+    "n000001-4101"
+   ],
+   "metrics": {
+    "ss_fraction": 0.827,
+    "overall_confidence": 0.448,
+    "ligand_confidence": 0.424,
+    "total_score": -272.0,
+    "fa_rep": 109.4,
+    "shape_complementarity": 0.591,
+    "complex_plddt": 0.507,
+    "ligand_iptm": 0.752
+   }
+  },
+  "filter_shape_sc": {
+   "22684607": 0.524,
+   "22692304": 0.591,
+   "bound": 0.55
+  },
+  "cost_guess_over_measured": [
+   6,
+   69
+  ],
+  "boltz_cost": {
+   "declared": 0.15,
+   "measured": 0.016,
+   "now": 0.05
+  },
+  "untrusted_cap": {
+   "replicas4_gpu_h": 0.68,
+   "cap": 0.6
+  }
+ }
+}
