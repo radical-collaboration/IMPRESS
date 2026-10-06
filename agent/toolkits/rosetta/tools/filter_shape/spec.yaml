@@ -17,4 +17,9 @@ parameters:
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
-cost_model: {unit: invocation, cost: {cpu_hours: 0.05}}
+# Measured on job 22684607 (NVMe, 1 node): 10.2s = 0.0028 h. Declared 0.05 was
+# 18x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.01 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.01}}

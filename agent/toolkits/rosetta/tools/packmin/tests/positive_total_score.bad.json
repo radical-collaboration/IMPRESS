@@ -1,10 +1,10 @@
 {
-  "why": "A pose that did not minimize: a large positive total_score is the signature of unresolved clashes, and the most likely cause on this campaign is a ligand PyRosetta never had parameters for. Until commit 041caba none of the three Rosetta tools could pass -extra_res_fa at all, so a real ALR-ligand PDB would either raise in pose_from_pdb() or score like this. The gate catches the second case; nothing catches a ligand quietly dropped by -ignore_unrecognized_res, which is backlog B1.",
+  "why": "An exploded pose: a total_score in the thousands is the signature of unresolved clashes, and the most likely cause on this campaign is a ligand PyRosetta never had parameters for. Until commit 041caba none of the three Rosetta tools could pass -extra_res_fa at all, so a real ALR-ligand PDB would either raise in pose_from_pdb() or score like this. The gate catches the second case; nothing catches a ligand quietly dropped by -ignore_unrecognized_res, which is backlog B1. This fixture read 812.5 while the gate was `max: 0.0` - back then ANY positive score failed, so the number only had to be positive. That gate was upstream's fastrelax threshold ported onto the wrong stage: job 22684607 measured +145.3 from a perfectly healthy packmin, with fastrelax reaching -322.6 one stage later. The bound is 1000.0 now, so this fixture has to encode a structure that is actually broken rather than merely un-relaxed. Both numbers are one-observation-wide; where the real boundary sits is unmeasured.",
   "failing_gates": ["metric_in_range[total_score]"],
   "output": {
     "result": "structure",
     "count": 1,
     "outputs": {},
-    "metrics": {"total_score": 812.5}
+    "metrics": {"total_score": 8125.0}
   }
 }

@@ -7,10 +7,10 @@ paragraph in place rather than being deleted - the evidence that forced them is 
 State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
-on Delta. **One real stage has now executed:** `rfd3_design` ran to completion on Delta (jobs
-22536706 and 22669509). The first run hung in LigandMPNN (G6); the second surfaced it as a clean
-FAILED with its stderr intact, which is what G6's fix was for, and that stderr showed LigandMPNN
-cannot import under this venv's numpy at all (A6). Everything downstream of rfd3 is still unexecuted.
+on Delta. **Five of six real stages have now executed:** job 22684607 ran
+`rfd3_design -> ligandmpnn_design -> packmin -> fastrelax -> filter_shape` to `5/5 tasks ok` in
+3m44s. `boltz_predict` has still never run - it is dropped by a budget correction, not by a
+failure (A7) - and no campaign has produced a front.
 
 ---
 
@@ -170,6 +170,45 @@ before execution (A3's Hydra contract) or by execution (A4's selection, A6's imp
 found *by* execution were both things a contract check cannot see: what a tool writes, and whether it
 can import. Expect the same shape from `packmin`, `fastrelax`, `filter_shape` and `boltz_predict` —
 their arguments are checked, their environments are not.
+
+**A6 RESOLVED by execution.** Job 22684607: `ligandmpnn_design` ran in 18.1s and passed its gates
+(`overall_confidence` 0.525, `ligand_confidence` 0.496). `MPNN_SHIM` and the pinned `ml-collections`
+both hold on real hardware.
+
+**A7. `boltz_predict` has never executed, and a budget correction is why.** Not a tool failure. The
+`cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
+against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,
+and `ThresholdPolicy.on_rejected` truncated the last stage off (`policy/explicit.py`, `stages[:-1]`).
+`boltz_predict` is last for a documented scientific reason and is the only producer of
+`complex_plddt` and `ligand_iptm` - two of the campaign's four objectives, both with `min:` bounds,
+so a missing value is a constraint violation and no node from that graph can reach the front. The
+run was unwinnable from the moment it was admitted and nothing said so.
+
+  **Costs corrected** from job 22684607's measurements (rfd3 0.25→0.10, ligandmpnn 0.25→0.02,
+  packmin 0.2→0.02, fastrelax 0.5→0.03, filter_shape 0.05→0.01), and the six-stage estimate is now
+  gpu 0.27 / cpu 0.06 against caps of 0.60 / 1.00 - admitted on the first attempt, verified by
+  simulating the real admission path. The budget itself is untouched: raising it to accommodate a
+  wrong number would have hidden the defect. **Still open:** boltz has not actually run.
+
+**A8. Nothing checks that an admitted graph can produce the campaign's objectives.** `grep -rn
+"objective" src/impress_a/compose` returns nothing - the composer and validator never receive them.
+A terminal-metrics gate was specified in
+`planning/phase1-partB-architecture/05-graph-composition-and-validation.md:66` and never built.
+
+  **Half-resolved.** `runtime/executor._objectives_without_a_producer` now WARNs and records
+  `unproducible_objectives` in `graphs` provenance, and `on_rejected` logs the stage it drops.
+  Both are warn-and-proceed. The warning is a **heuristic**: `ToolSpec` has no `metrics:` field, so
+  producible metrics are inferred from each spec's `metric_in_range` gate params, and a tool that
+  emits a metric it does not gate reads as a non-producer. **Still open:** declare metrics on
+  `ToolSpec` and make this a real gate.
+
+**A9. Three of four admission attempts are wasted, and the fourth is the last one.** `ThresholdPolicy.
+decide` asks for `base_replicas + 1 = 3` replicas, but the campaign's `replicas: 1` is applied
+downstream as an executor cap (`executor._apply_campaign_defaults`), so the policy never sees it.
+On job 22675512 attempts 1-3 shrank replicas 3→2→1 while composing **identical** graphs - same
+signature, same estimate, same rejection - and only attempt 4 reached the stage-dropping branch.
+`max_attempts` is 4: one more rejection and the campaign would have run nothing at all. The policy
+should see the effective replica count.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

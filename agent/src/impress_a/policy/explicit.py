@@ -6,11 +6,14 @@ their cost. `ReplayPolicy` turns a provenance log from a record into an executab
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from ..core.decision import (Backtrack, CampaignObservation, ComposeAndRun, Decision,
                              ExperimentIntent, Stop, ValidationFailure)
 from .base import BasePolicy
+
+log = logging.getLogger(__name__)
 
 SELF_CONSISTENCY = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
 
@@ -84,7 +87,22 @@ class ThresholdPolicy(BasePolicy):
                 decision.intent.replicas -= 1
                 return decision
             if len(decision.intent.stages) > 2:
+                # Truncating the tail is a cost heuristic that knows nothing about what
+                # the graph can then MEASURE. On job 22675512 it dropped boltz_predict -
+                # solely because the campaign lists it last - and boltz_predict is the
+                # only producer of complex_plddt and ligand_iptm, two of that campaign's
+                # four objectives. The run was unwinnable from that moment and said so
+                # nowhere: the admitted graph records `rejected: null`. Nothing here can
+                # see the objectives (policy must not import tools or runtime), so this
+                # cannot refuse - but it must not be silent either. The executor warns
+                # about the objectives; this names the stage.
+                dropped = decision.intent.stages[-1]
                 decision.intent.stages = decision.intent.stages[:-1]
+                log.warning(
+                    "correction: dropped stage %r to fit %s (%s). Remaining chain: %s. "
+                    "Any objective only this stage could produce is now unmeasurable.",
+                    dropped, failure.gate, failure.reason,
+                    " -> ".join(decision.intent.stages))
                 return decision
         return Stop(reason=f"rejected at {failure.gate}: {failure.reason}")
 

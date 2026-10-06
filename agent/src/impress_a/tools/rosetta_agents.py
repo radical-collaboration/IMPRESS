@@ -18,8 +18,23 @@ from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
 _PACKMIN_WORKER = r"""
-import json, sys
+# Phase timings to stderr, flushed. `-mute all` below silences every Rosetta tracer, so
+# without these a stage that stalls reports nothing at all about where its time went -
+# which is how job 22675512's packmin burned a 300s timeout leaving an empty work dir and
+# no way to tell import from work. run_cmd now drains the pipes on a timeout kill, so
+# these survive even when the worker never reaches its own output.
+import sys, time as _time
+_T0 = _LAST = _time.monotonic()
+def phase(name):
+    global _LAST
+    now = _time.monotonic()
+    sys.stderr.write("[phase] %-18s %7.1fs  (total %7.1fs)\n" % (name, now - _LAST, now - _T0))
+    sys.stderr.flush()
+    _LAST = now
+
+import json
 import pyrosetta
+phase("import pyrosetta")
 
 # A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
 # replicas of a deterministic protocol are just the same run repeated N times.
@@ -34,9 +49,12 @@ def _init(seed_arg, ligand_params_arg):
 in_pdb, out_pdb, cycles, seed, ligand_params, result_json = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6])
 _init(seed, ligand_params)
+phase("pyrosetta.init")
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
+phase("pose_from_pdb")
 sfxn = pyrosetta.get_fa_scorefxn()
+phase("get_fa_scorefxn")
 task_factory = pyrosetta.rosetta.core.pack.task.TaskFactory()
 task_factory.push_back(pyrosetta.rosetta.core.pack.task.operation.RestrictToRepacking())
 pack_mover = pyrosetta.rosetta.protocols.minimization_packing.PackRotamersMover(sfxn)
@@ -45,13 +63,29 @@ min_mover = pyrosetta.rosetta.protocols.minimization_packing.MinMover()
 for _ in range(cycles):
     pack_mover.apply(pose)
     min_mover.apply(pose)
+phase("pack+min x%d" % cycles)
 pose.dump_pdb(out_pdb)
 json.dump({"total_score": sfxn(pose)}, open(result_json, "w"))
 """
 
 _FASTRELAX_WORKER = r"""
-import json, sys
+# Phase timings to stderr, flushed. `-mute all` below silences every Rosetta tracer, so
+# without these a stage that stalls reports nothing at all about where its time went -
+# which is how job 22675512's packmin burned a 300s timeout leaving an empty work dir and
+# no way to tell import from work. run_cmd now drains the pipes on a timeout kill, so
+# these survive even when the worker never reaches its own output.
+import sys, time as _time
+_T0 = _LAST = _time.monotonic()
+def phase(name):
+    global _LAST
+    now = _time.monotonic()
+    sys.stderr.write("[phase] %-18s %7.1fs  (total %7.1fs)\n" % (name, now - _LAST, now - _T0))
+    sys.stderr.flush()
+    _LAST = now
+
+import json
 import pyrosetta
+phase("import pyrosetta")
 
 # A seed makes a replica lineage an independent, REPRODUCIBLE draw; without one,
 # replicas of a deterministic protocol are just the same run repeated N times.
@@ -67,10 +101,13 @@ in_pdb, out_pdb, cycles, nstruct, seed, ligand_params, result_json = (
     sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5], sys.argv[6],
     sys.argv[7])
 _init(seed, ligand_params)
+phase("pyrosetta.init")
 
 start = pyrosetta.pose_from_pdb(in_pdb)
+phase("pose_from_pdb")
 sfxn = pyrosetta.get_fa_scorefxn()
 relax = pyrosetta.rosetta.protocols.relax.FastRelax(sfxn, cycles)
+phase("build FastRelax")
 
 # `nstruct` independent trajectories from the same start, keeping the best. It used to
 # be accepted, range-checked and budgeted, and then never passed here at all - while the
@@ -82,6 +119,7 @@ for _ in range(max(1, nstruct)):
     score = sfxn(pose)
     if best_score is None or score < best_score:
         best, best_score = pose, score
+    phase("relax trajectory")
 
 best.dump_pdb(out_pdb)
 scores = best.scores
@@ -92,19 +130,37 @@ json.dump({
 """
 
 _FILTER_SHAPE_WORKER = r"""
-import json, sys
+# Phase timings to stderr, flushed. `-mute all` below silences every Rosetta tracer, so
+# without these a stage that stalls reports nothing at all about where its time went -
+# which is how job 22675512's packmin burned a 300s timeout leaving an empty work dir and
+# no way to tell import from work. run_cmd now drains the pipes on a timeout kill, so
+# these survive even when the worker never reaches its own output.
+import sys, time as _time
+_T0 = _LAST = _time.monotonic()
+def phase(name):
+    global _LAST
+    now = _time.monotonic()
+    sys.stderr.write("[phase] %-18s %7.1fs  (total %7.1fs)\n" % (name, now - _LAST, now - _T0))
+    sys.stderr.flush()
+    _LAST = now
+
+import json
 import pyrosetta
+phase("import pyrosetta")
 in_pdb, ligand_params, result_json = sys.argv[1], sys.argv[2], sys.argv[3]
 flags = "-mute all"
 if ligand_params != "none":
     flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params
 pyrosetta.init(flags)
+phase("pyrosetta.init")
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
+phase("pose_from_pdb")
 xml = '<SCOREFXNS/><RESIDUE_SELECTORS/><FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>'
 objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
 sc_filter = objs.get_filter("sc")
 value = sc_filter.report_sm(pose)
+phase("ShapeComplementarity")
 json.dump({"shape_complementarity": value}, open(result_json, "w"))
 """
 

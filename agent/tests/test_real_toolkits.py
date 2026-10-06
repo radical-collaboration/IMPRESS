@@ -872,3 +872,108 @@ def test_ligandmpnn_walltime_covers_the_measured_import_cost(reg):
     assert spec.resources.walltime_s >= 900, \
         ("the measured import alone is ~280-360s; anything under 900s is a budget that "
          "cannot cover it plus inference")
+
+
+@pytest.mark.parametrize("tool,dim,measured_s", [
+    ("rfd3_design", "gpu_hours", 145.7),
+    ("ligandmpnn_design", "gpu_hours", 18.1),
+    ("packmin", "cpu_hours", 15.9),
+    ("fastrelax", "cpu_hours", 25.9),
+    ("filter_shape", "cpu_hours", 10.2),
+])
+def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
+        reg, tool, dim, measured_s):
+    """A magic number that is a bug report, per CLAUDE.md.
+
+    These were literature guesses, and on job 22675512 the gpu ones summed to 0.65
+    against an interlock cap of 0.60 - so the six-stage chain was refused three times
+    and the policy truncated `boltz_predict`, the only producer of two of the campaign's
+    four objectives, off the end. The run was then incapable of producing a front and
+    said so nowhere.
+
+    Job 22684607 measured all five. The bound here is deliberately loose in BOTH
+    directions: an estimate feeding a refusal gate should err high, but being 50x high
+    is how a budget gate starts refusing work that would have fit.
+    """
+    measured_h = measured_s / 3600
+    declared = reg.get(tool).cost_model.cost[dim]
+    assert declared >= measured_h, \
+        f"{tool} declares {declared} {dim} but measured {measured_h:.4f} - an estimate " \
+        "below the real cost lets a campaign overrun its budget"
+    assert declared <= measured_h * 10, \
+        f"{tool} declares {declared} {dim} against {measured_h:.4f} measured " \
+        f"({declared / measured_h:.0f}x). Over-estimating by this much is what got " \
+        "boltz_predict dropped in job 22675512"
+
+
+def test_the_six_stage_chain_fits_the_untrusted_pattern_cap(reg):
+    """The whole point of the cost-model correction.
+
+    An untrusted pattern is capped at 10% of available budget (`TrustLedger.
+    provisional_budget_fraction`). The smoke campaign budgets 6.0 gpu-h / 10.0 cpu-h, so
+    a first run of the full chain has 0.60 / 1.00 to fit inside. It did not, and the
+    correction that followed was silently destructive.
+    """
+    stages = ["rfd3_design", "ligandmpnn_design", "packmin", "fastrelax",
+              "filter_shape", "boltz_predict"]
+    est: dict[str, float] = {}
+    for tool in stages:
+        for dim, value in reg.get(tool).cost_model.cost.items():
+            est[dim] = est.get(dim, 0.0) + value
+
+    assert est["gpu_hours"] <= 6.0 * 0.10, \
+        f"gpu estimate {est['gpu_hours']:.3f} exceeds the 0.600 provisional cap - the " \
+        "first run of the full chain would be refused and a stage truncated away"
+    assert est["cpu_hours"] <= 10.0 * 0.10, \
+        f"cpu estimate {est['cpu_hours']:.3f} exceeds the 1.000 provisional cap"
+
+
+def test_packmin_does_not_gate_on_a_relaxed_score(reg):
+    """`max: 0.0` on packmin was `fastrelax_max_total_score` ported onto the wrong stage.
+
+    Upstream (`small_molecule_binding.py:678`) applies that threshold to fastrelax and
+    gates nothing on packmin. Ours is PackRotamersMover + MinMover with no constraints -
+    a preparation step. Job 22684607 measured +145.3 from packmin and -322.6 from
+    fastrelax on that same structure one stage later, so the old gate failed a run that
+    was going fine. fastrelax keeps the <= 0.0 gate, which is where it belongs.
+    """
+    def score_bound(tool):
+        for g in reg.get(tool).qc_gates:
+            if g.id == "metric_in_range" and g.params.get("metric") == "total_score":
+                return g.params.get("max")
+        return None
+
+    assert score_bound("fastrelax") == 0.0, \
+        "fastrelax is where upstream puts the <= 0.0 threshold, and it passed there"
+    packmin_max = score_bound("packmin")
+    assert packmin_max is not None and packmin_max > 145.3, \
+        "packmin measured +145.3 on a healthy run; a bound at or below that rejects " \
+        "every normal pre-relax score, and a gate that always fires carries no " \
+        "information"
+
+
+async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
+    """A timeout used to raise with "" for both streams.
+
+    Job 22675512's packmin died that way: 300s, an empty work dir, and a message that
+    named no cause - indistinguishable from a hang. The workers print phase timings to
+    stderr precisely so a kill still leaves evidence, which only works if run_cmd drains
+    the pipes instead of discarding them.
+    """
+    import sys
+
+    from impress_a.tools._subprocess import SubprocessError, run_cmd
+
+    script = ("import sys, time\n"
+              "sys.stderr.write('[phase] import pyrosetta  471.0s\\n'); sys.stderr.flush()\n"
+              "sys.stdout.write('partial stdout\\n'); sys.stdout.flush()\n"
+              "time.sleep(30)\n")
+    with pytest.raises(SubprocessError) as exc:
+        await run_cmd([sys.executable, "-c", script], timeout_s=2.0)
+
+    err = exc.value
+    assert err.returncode == -1
+    assert "timed out after 2.0s" in err.stderr
+    assert "[phase] import pyrosetta" in err.stderr, \
+        "the phase timings are the whole diagnostic; losing them is the old bug"
+    assert "partial stdout" in err.stdout

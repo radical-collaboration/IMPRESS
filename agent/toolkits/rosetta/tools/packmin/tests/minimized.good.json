@@ -1,5 +1,5 @@
 {
-  "why": "A packed and minimized pose with a sane negative score. Passes both gates.",
+  "why": "A packed and minimized pose with a sane score. Passes both gates. Negative here, though packmin is NOT required to reach a negative score - it is pack+min, not a relaxation, and job 22684607 measured +145.3 from a healthy run that fastrelax then took to -322.6. See positive_total_score.bad.json.",
   "failing_gates": [],
   "output": {
     "result": "structure",

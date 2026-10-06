@@ -136,7 +136,14 @@ class LigandMPNNDesignAgent(TaskAgent):
         if params.get("seed") is not None:
             cmd += ["--seed", str(params["seed"])]
         if params["pack_side_chains"]:
-            cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1"]
+            # `--number_of_packs_per_design` defaults to 4 in run.py, and the adapter uses
+            # packed[0]. Job 22684607 produced backbone_0_packed_1_{1,2,3,4}.pdb and threw
+            # three away - and reported count: 4 for ONE sequence, which is wrong twice
+            # over: four packs of one design are not four candidates, and breadth in this
+            # project comes from `replicas`, never from a tool's internal N. The reference
+            # pipeline passes 1 explicitly (scripts/mpnn.sh:30).
+            cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1",
+                    "--number_of_packs_per_design", "1"]
         if params.get("fixed_residues"):
             cmd += ["--fixed_residues", params["fixed_residues"]]
         # cwd=$MPNN_DIR: every other relative path inside `run.py` and its bundled

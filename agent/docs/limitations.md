@@ -164,15 +164,47 @@ the job working directory) on the `impress_a`/`rhapsody`/`radical`/`dragon` logg
 `propagate = False`, out of root's reach, and logs a one-off WARNING naming `setup_BE_logging` when
 it notices root has been emptied. Anything that logs to the root logger directly is still lost.
 
+## Storage was the bottleneck, and it masqueraded as three other bugs
+
+Every path this project reads at runtime used to hang off `$SCRATCH`, which on Delta
+resolves under HDD-backed `/work/hdd`. Measured there: `import pyrosetta` **471s** (a 598 MB
+`rosetta.so`, demand-paged), `pyrosetta.init` 4.5s, `get_fa_scorefxn` 58.2s - **533.8s before
+any work**, against a `packmin` budget of 300s. `import torch` cost ~280s of LigandMPNN's
+292.6s.
+
+What makes this worth a section is not the slowness but the disguise. It arrived as a task
+timeout, which reads as a hung tool; it was about to be "fixed" by raising three walltimes
+to 1800/3600/1200 with the 533.8s figure written into each spec as justification. Moving
+`$WORK_DIR` to `/work/nvme` (ported from the reference pipeline's PR #67) instead produced,
+on job 22684607: `ligandmpnn_design` 292.6s → **18.1s**, and `packmin` - which could not
+finish importing in 300s - completing in **15.9s**, with `fastrelax` 25.9s and
+`filter_shape` 10.2s. The existing walltimes were never wrong. Had the raises shipped, the
+real cost would have stayed hidden behind timeouts six times larger than necessary.
+
+Two general points. **A timeout names a budget, not a cause** - which is why `run_cmd` now
+preserves whatever a killed process already wrote, and why the Rosetta workers emit phase
+timings to stderr. And **an estimate that feeds a refusal gate is not harmless when it is
+too high**: the cost models were 6-69x over, the gpu side summed past the untrusted-pattern
+cap, and the budget correction that followed silently truncated `boltz_predict` - the only
+producer of two of the campaign's four objectives - off the end of the chain.
+
 ## Built, but unexercised against real science
 
 Real tool adapters for RFdiffusion3, LigandMPNN, PyRosetta and Boltz exist and are wired to real
-binaries, and the Delta HPC launch path is complete. **One adapter has now run on real hardware:**
-`rfd3_design` executed and succeeded on Delta (jobs 22536706 and 22669509). LigandMPNN failed on
-both, PyRosetta and Boltz have never been reached, and no campaign has completed - so there is still
-no measured front, no ledger outcome and no calibrated cost. Everything below the adapters is
-exercised by the laptop tier; the remaining adapters are covered only for registration, validation
-and dry-run, because executing them needs the science stack installed.
+binaries, and the Delta HPC launch path is complete. **Five of the six have now run on real
+hardware** (job 22684607, `5/5 tasks ok`): `rfd3_design`, `ligandmpnn_design`, `packmin`,
+`fastrelax` and `filter_shape` all executed and produced real metrics and artifacts.
+
+**`boltz_predict` has still never run**, and no campaign has produced a front. Those two facts are
+the same fact: Boltz is the only producer of `complex_plddt` and `ligand_iptm`, both of which carry
+`min:` bounds, so a missing value is a constraint violation and no node from a Boltz-less graph can
+be ranked. It was dropped by a budget correction, not by a failure - see the section above.
+
+What is now measured: per-tool cost for five tools, and a first set of real QC outcomes. What is
+not: anything about Boltz, any front, any `replicas > 1` independence check, and whether the QC
+thresholds are calibrated - `filter_shape` returned 0.524 against a 0.55 bound, which is a genuine
+near-miss, while `packmin`'s bound turned out to be upstream's fastrelax threshold on the wrong
+stage. Everything below the adapters is exercised by the laptop tier.
 
 That one stage paid for itself. Its real `out_dir` showed that `RFD3DesignAgent`'s `*.cif.gz` glob
 was selecting a diffusion **trajectory** rather than the design - trajectories carry the same

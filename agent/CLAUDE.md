@@ -138,26 +138,33 @@ dominant hazard, so the suite has to manufacture some.
 
 ## Known open risks
 
-**One real stage has executed; the rest have not.** Jobs 22536706 and 22669509 both got
-`rfd3_design` to run and succeed on Delta, and both then failed in `ligandmpnn_design`. Nothing
-downstream of it — PyRosetta, Boltz — has run at all. No campaign has completed, so there is still
-no measured front and no calibrated cost (one real number so far: 0.25 GPU-h for rfd3 against a 0.5
-estimate).
+**Five of six real stages have executed. `boltz_predict` never has, and no campaign has
+produced a front.** Job 22684607 ran `rfd3_design -> ligandmpnn_design -> packmin -> fastrelax ->
+filter_shape` to `5/5 tasks ok` in 3m44s, with real metrics and artifacts. Those two facts are the
+same fact: Boltz is the only producer of `complex_plddt` and `ligand_iptm`, both bounded objectives,
+so a Boltz-less graph cannot rank anything. It was dropped by a *budget correction*, not a failure.
 
-That one stage has now paid for itself twice, and both times the defect was invisible to a dry run:
+Four defects reached real hardware before anything caught them, and each was invisible to a dry run:
 
-- **What a tool writes.** Our `*.cif.gz` glob was selecting a *trajectory* rather than the design,
-  because trajectories share the extension and `denoised` sorts first. Discovery goes through the
-  sidecar `*_model_*.json` now.
-- **Whether a tool can import.** LigandMPNN dies in `run.py`'s module-level imports, before reading
-  an argument — a missing `ml_collections`, then `np.int`, which numpy removed in 1.24 and the
-  vendored openfold still uses. The adapter runs `run.py` through `MPNN_SHIM` now, never directly.
+- **What a tool writes.** The `*.cif.gz` glob selected a diffusion *trajectory* rather than the
+  design - same extension, and `denoised` sorts first. Discovery goes through `*_model_*.json` now.
+- **Whether a tool can import.** LigandMPNN died in `run.py`'s module-level imports: a missing
+  `ml_collections`, then `np.int`, removed in numpy 1.24 and still used by its vendored openfold.
+  It runs through `MPNN_SHIM` now, never directly.
+- **Where the bytes live.** `import pyrosetta` cost **471s** off HDD-backed Lustre, so `packmin`
+  could not finish starting inside its 300s budget. On NVMe it is seconds. This one nearly caused a
+  second bug: the fix queued up was to raise three walltimes to 1800/3600/1200, which would have
+  hidden the real cost behind timeouts six times too large. See `docs/limitations.md`.
+- **An estimate that refuses work.** The `cost_model` figures were literature guesses 6-69x over
+  measurement. Gate 5 and the untrusted-pattern cap refuse graphs against them, so the inflated
+  gpu side summed past the cap and the policy truncated `boltz_predict` off the chain - silently,
+  because nothing checks that a graph can still produce the campaign's objectives. It warns now
+  (`runtime/executor._objectives_without_a_producer`), and it is a heuristic, not a gate.
 
-Expect the same of every remaining stage — "checked against the binary" is not "executed," and only
-the contracts were checked. Note also that the first defect was a *plausible* explanation for the
-second one's failure and had nothing to do with it; what separated them was recovering the real
-stderr. `impress-a preflight` first — it runs LigandMPNN's real import chain, and its new `warn`
-state means undetermined, not pass. See `plans/first-real-run.md` and backlog A1/A4/A6.
+The pattern worth carrying forward: **"checked against the binary" is not "executed,"** and a
+plausible explanation is not a diagnosis - the trajectory bug was a convincing cause for a
+LigandMPNN failure it had nothing to do with. `impress-a preflight` first. See
+`plans/first-real-run.md` and backlog A1/A4/A6.
 
 **Dragon backend construction is synchronous and can hang the event loop.** `Batch()` builds with no
 `await` points, so a stall there is invisible — no heartbeat, no campaign log, nothing — until

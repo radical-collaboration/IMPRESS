@@ -38,13 +38,55 @@ async def run_cmd(cmd: list[str], cwd=None, env=None, timeout_s: float | None = 
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=cwd, env=env,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+    # Accumulate as output arrives rather than calling communicate(). On a timeout
+    # communicate() is cancelled and whatever it had read is lost - so a timed-out task
+    # used to arrive carrying nothing but "timed out after Ns", which is the same shape
+    # as a hang and names no cause. Job 22675512's packmin died exactly that way: a 300s
+    # timeout, an empty work dir, and no way to tell 290s-of-import from 290s-of-work
+    # without spending another allocation. Draining the readers after the kill does not
+    # work either; by then the buffers are gone. Holding the chunks ourselves does.
+    chunks: dict[str, list[bytes]] = {"out": [], "err": []}
+
+    async def _accumulate(stream, key: str) -> None:
+        if stream is None:
+            return
+        while True:
+            chunk = await stream.read(8192)
+            if not chunk:
+                return
+            chunks[key].append(chunk)
+
+    readers = [asyncio.create_task(_accumulate(proc.stdout, "out")),
+               asyncio.create_task(_accumulate(proc.stderr, "err"))]
+
+    def _decode(key: str) -> str:
+        return b"".join(chunks[key]).decode(errors="replace")
+
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        await asyncio.wait_for(proc.wait(), timeout=timeout_s)
+        await asyncio.gather(*readers)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise SubprocessError(cmd, -1, "", f"timed out after {timeout_s}s")
-    stdout, stderr = out.decode(errors="replace"), err.decode(errors="replace")
+        for r in readers:
+            r.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
+        partial_err = _decode("err")
+        raise SubprocessError(
+            cmd, -1, _decode("out"),
+            f"timed out after {timeout_s}s"
+            + (f"\n--- partial stderr before the kill ---\n{partial_err}"
+               if partial_err else ""))
+    except BaseException:
+        # Including cancellation of the caller: do not leak the child or the readers.
+        for r in readers:
+            r.cancel()
+        if proc.returncode is None:
+            proc.kill()
+        raise
+
+    stdout, stderr = _decode("out"), _decode("err")
     if proc.returncode != 0:
         raise SubprocessError(cmd, proc.returncode, stdout, stderr)
     return stdout, stderr

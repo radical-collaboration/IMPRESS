@@ -30,6 +30,9 @@ qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metric_in_range, params: {metric: overall_confidence, min: 0.4}}
   - {id: metric_in_range, params: {metric: ligand_confidence, min: 0.4}}
-# 0.1 (=360s) was a literature guess that the import alone now exceeds. 0.25 is the
-# first figure here grounded in a real run; still an estimate for the inference half.
-cost_model: {unit: invocation, cost: {gpu_hours: 0.25}}
+# Measured on job 22684607 (NVMe, 1 node): 18.1s = 0.0050 h. Declared 0.25 was
+# 50x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.02 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.02}}

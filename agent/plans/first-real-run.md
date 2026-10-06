@@ -1,6 +1,11 @@
 # Stub — the first real campaign on Delta
 
-**Status:** submitted twice, one stage in both times. Job 22536706 (2026-09-29) ran `rfd3_design`
+**Status:** five of six stages now execute. Job 22684607 (2026-10-05) ran
+`rfd3_design -> ligandmpnn_design -> packmin -> fastrelax -> filter_shape` to `5/5 tasks ok` in
+3m44s. `boltz_predict` has never run: it is truncated off the chain by a budget correction, not by
+a failure (backlog A7). No campaign has produced a front. Earlier history below.
+
+**Previously:** submitted twice, one stage in both times. Job 22536706 (2026-09-29) ran `rfd3_design`
 to success, then hung on a LigandMPNN failure whose stderr was lost (backlog G6). Job 22669509
 (2026-10-04) re-ran it with the G6 and rfd3-selection fixes in place: both held, LigandMPNN failed
 *loudly* this time, and its stderr showed it cannot import at all under this venv's numpy (A6).
@@ -120,3 +125,40 @@ and the `replicas: 4` independence check.
 **Before resubmitting again:** run `impress-a preflight` and confirm `ligandmpnn imports` reads
 `[ok  ]`. A `[warn]` is a timeout, not a pass - run the shim by hand against `$MPNN_DIR` with
 `--help` and require exit 0 before spending a queue slot.
+
+## What the NVMe migration produced (job 22684607)
+
+Same allocation as 22675512 - 1 node, `gpuA100x4-interactive`, 1h - with storage as the only
+changed variable, so the two read directly against each other.
+
+| Stage | NVMe | HDD baseline |
+|---|---|---|
+| `rfd3_design` | 145.7s | 137.2s (unchanged - GPU-bound, not read-bound) |
+| `ligandmpnn_design` | **18.1s** | 292.6s |
+| `packmin` | **15.9s** | could not finish `import pyrosetta` in 300s |
+| `fastrelax` | **25.9s** | never ran |
+| `filter_shape` | **10.2s** | never ran |
+
+Campaign 13m42s → 3m44s. First real metrics from the Rosetta stages:
+
+```
+rfd3_design        pass   ss_fraction 0.824
+ligandmpnn_design  pass   overall_confidence 0.525, ligand_confidence 0.496
+packmin            FAIL   total_score +145.3   (gate was <= 0.0 - the gate was wrong)
+fastrelax          pass   total_score -322.6, fa_rep 114.1
+filter_shape       FAIL   shape_complementarity 0.524  (gate >= 0.55 - a genuine near-miss)
+```
+
+**What this run invalidated.** The plan going in was to raise the three Rosetta walltimes to
+1800/3600/1200, justified by a 533.8s PyRosetta startup measured on HDD. Every one of those numbers
+would have been wrong: measured on NVMe, packmin needs 15.9s against its existing 300s. The
+walltimes were never the defect. Gating the change on this test is the only reason that did not
+ship.
+
+**Still unanswered**, and all of it downstream of the budget correction that drops boltz: the four
+objectives on a front, `boltz_predict` executing at all, per-tool cost for boltz, and the
+`replicas: 4` independence check.
+
+**Before the next submission:** confirm the six-stage chain composes with no interlock rejection
+(simulate the admission path locally - no allocation needed), and expect `boltz_predict` to run for
+the first time.

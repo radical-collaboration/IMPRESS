@@ -18,5 +18,21 @@ parameters:
   ligand_params_path: {type: str, default: ""}
 qc_gates:
   - {id: output_present, params: {key: result}}
-  - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
-cost_model: {unit: invocation, cost: {cpu_hours: 0.2}}
+  # A LOOSE sanity bound, not a quality threshold. This gate used to read `max: 0.0`,
+  # which is the reference pipeline's `fastrelax_max_total_score`
+  # (small_molecule_binding.py:678) copied onto the wrong stage - upstream gates that
+  # value on fastrelax and gates nothing on packmin. packmin is PackRotamersMover +
+  # MinMover with no constraints: it PREPARES a structure for relaxation, and expecting
+  # it to reach a negative Rosetta score is expecting it to be fastrelax. Job 22684607
+  # measured +145.3 here and -322.6 from fastrelax on that same structure one stage
+  # later, so the old gate would have failed a run that was going fine. A gate that
+  # always fires carries no information, which is worse than no gate.
+  # 1000.0 catches a structure that blew up. It is ONE observation wide - recalibrate
+  # once several real runs exist.
+  - {id: metric_in_range, params: {metric: total_score, max: 1000.0}}
+# Measured on job 22684607 (NVMe, 1 node): 15.9s = 0.0044 h. Declared 0.2 was
+# 45x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.02 keeps ~5x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.02}}

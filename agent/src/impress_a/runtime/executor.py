@@ -350,11 +350,24 @@ class CampaignExecutor:
                     detail={"estimate": est,
                             "available": {d: self.budget.available(d) for d in blown}})
 
+        orphaned = self._objectives_without_a_producer(graph) if failure is None else []
+        if orphaned:
+            log.warning(
+                "graph %s is admitted but cannot produce %s - no tool in %s reports "
+                "%s. Objectives with a min/max bound count a missing value as a "
+                "constraint violation, so every node from this graph is excluded from "
+                "the front. The run will cost its full estimate and return nothing "
+                "rankable.",
+                graph.id, ", ".join(orphaned),
+                " -> ".join(n.tool for n in graph.nodes.values()),
+                "them" if len(orphaned) > 1 else "it")
+
         self._log("graphs", {
             "cycle": self.cycle, "graph": graph.id, "run": run_label,
             "signature": sig, "trusted": scrutiny.trusted,
             "nodes": {k: v.tool for k, v in graph.nodes.items()},
             "estimate": self.validator.estimate(graph),
+            "unproducible_objectives": orphaned,
             "rejected": failure.model_dump() if failure else None})
 
         if failure is not None:
@@ -364,6 +377,33 @@ class CampaignExecutor:
         return RunRecord(run_id=run_label, graph=graph, signature=sig,
                          scrutiny=scrutiny, intent=intent, turn=self.cycle,
                          informed_by=len(self._absorbed)), None
+
+    def _objectives_without_a_producer(self, graph) -> list[str]:
+        """Campaign objectives no tool in this graph reports a metric for.
+
+        Job 22675512: a budget correction truncated `boltz_predict` off the chain, and
+        with it the only producer of `complex_plddt` and `ligand_iptm` - two of that
+        campaign's four objectives. Nothing noticed. The composer and the validator never
+        receive `spec.objectives` at all, so the graph was type-correct, affordable,
+        admitted, and incapable of informing half of what it was for.
+
+        `ToolSpec` has no `metrics:` field, so a tool's output metric names are not
+        declared anywhere machine-readable. The one place they appear is a `metric_in_range`
+        gate's `metric` param, which every real tool happens to carry for the numbers it
+        reports. That makes this a HEURISTIC and it is allowed to under-report: a tool that
+        emits a metric it does not gate looks like a non-producer here, so a false warning
+        is possible and a missed one is not what matters - the expensive case is staying
+        silent, which is what we did. Declaring metrics on ToolSpec is the real fix.
+        """
+        wanted = {o.name for o in self.spec.objectives}
+        if not wanted:
+            return []
+        produced: set[str] = set()
+        for node in graph.nodes.values():
+            for gate in self.reg.get(node.tool).qc_gates:
+                if metric := (gate.params or {}).get("metric"):
+                    produced.add(metric)
+        return sorted(wanted - produced)
 
     def _apply_campaign_defaults(self, intent: ExperimentIntent) -> ExperimentIntent:
         """Fill in what the campaign declares and the policy did not ask about.
