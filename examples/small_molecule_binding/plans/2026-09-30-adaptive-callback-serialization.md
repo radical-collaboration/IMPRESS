@@ -1,6 +1,6 @@
 # Adaptive callback serialized the whole job (job 22534628)
 
-**Severity:** critical · **Status:** fixed on `scaling-wide`, unvalidated at scale
+**Severity:** critical · **Status:** fixed on `scaling-wide`; **validated at scale** on `22701168` (2026-10-06, 32 pipelines, 4 h)
 **Evidence:** job `22534628`, 8 nodes / 32 pipelines, `TIMEOUT` at `Elapsed=12:00:10`
 **Artifacts:** `<hdd work dir>/impress-data-after-fixes/smb_8node/small_molecule_binding/`
 
@@ -104,7 +104,19 @@ metric which reintroduces I/O from taking the whole job down again.
 - A concurrent heartbeat task ticks during a cold 1200-entry decision (0 ticks would mean it still
   blocks).
 
-## Acceptance test — still required
+## Acceptance test — passed (`22701168`, 2026-10-06)
+
+| Measure | Required | `22701168` (8 nodes / 32 pipelines / 4 h) |
+|---|---|---|
+| Adaptive occupancy | < 10 % | **0.96 %** (13,074 paired `.out` calls; telemetry gives 0.81 %) |
+| p99 per call | < 2 s | **0.071 s** (max 0.79 s) |
+| rfd3/pipeline/h beyond hour 2 | ≥ 11 | **16.28** in h2, **15.19** in h3; 15.71 overall |
+| GPU utilisation | no decay toward ~1 % | 9–15 % per node in every hour |
+| GPU-h per passing fold | vs baseline 0.194 | **0.160** (802 of 871 folds passed) |
+
+This run also had the later delegation (`59a9e20`) and GPU spread (`854ecd6`) changes, so the gain is not attributable to this fix alone. The collapse mechanism, the callback saturating the loop, is gone either way. Details: [scale-gate](2026-10-06-scale-gate.md).
+
+## Original acceptance criteria
 
 Re-run the occupancy measurement against the next 32-pipeline campaign: pair
 `Adaptive function started/completed for: pN` in the `.out` file, sum the durations, divide by span.

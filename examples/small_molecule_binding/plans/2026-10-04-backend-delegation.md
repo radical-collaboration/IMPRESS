@@ -1,6 +1,6 @@
 # Tool stages delegated to asyncflow/rhapsody instead of the runner
 
-**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke (`22670942`), 4-node 1 h (`22675825`) and post-merge gate (`22684833`) all passed on Delta with 0 failures; throughput gate past hour 2 still open
+**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke (`22670942`), 4-node 1 h (`22675825`) and post-merge gate (`22684833`) all passed on Delta with 0 failures; **throughput gate passed** on `22701168` (8 nodes / 32 pipelines / 4 h, 15.71 rfd3/pipeline/h, 0 failures)
 **Evidence:** branch history `976c0cf`..`90d6be3`, plus `d8c1b4b` and `8ddeb10` before it
 
 ## Why
@@ -120,7 +120,7 @@ A remote `rfd3` without the `WORK_DIR` bind would be expected to fail, but nobod
 2. **Env check:** **passed** (`22669434`). Caps arrived on the non-primary node.
 3. **4-node, 1 h:** **passed** (`22675825`, 0 failures, ~100% first-hour scaling from 2 to 4 nodes).
 4. **Post-merge gate:** **passed** (`22684833`); remote placement was inferred, see above.
-5. **Throughput gate:** **open.** It needs rfd3/pipeline/h at or above 11.46 over a full campaign (or at least past hour 2), with no rise in `TaskFailed`. Run it after re-checking primary-node idle with the `rfd3`/`boltz` caps in place.
+5. **Throughput gate:** **passed** (`22701168`, 2026-10-06). It required ≥ 11.46 rfd3/pipeline/h past hour 2 with no rise in `TaskFailed`. Measured: 15.16 / 16.22 / 16.28 / 15.19 by hour (15.71 overall), 0 failures over 4 h at 32 pipelines. Primary-node CPU averaged 62.7 % (others ~47 %). See [scale-gate](2026-10-06-scale-gate.md).
 
 ## Risks
 
