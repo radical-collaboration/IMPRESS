@@ -128,6 +128,30 @@ if _n_pipelines:
 # this process's os.environ reaching a subprocess.
 
 
+def _node_gpus() -> List[int]:
+    """GPU device IDs on a compute node, for spreading pipelines over them.
+
+    Dragon Batch does no GPU accounting: a process task with no gpu_affinity
+    is given every GPU on its node, and every GPU tool then runs on the first
+    one (GPU 0).  So each pipeline asks for one device, chosen here
+    round-robin (see gpu_index below and _tool_task_description).  Under
+    Dragon the IDs come from Dragon's own node descriptor, which is what
+    gpu_affinity is checked against; assumes all nodes are alike (Delta
+    gpuA40x4: 4 each).
+    """
+    if BACKEND == "dragon":
+        from dragon.native.machine import Node, System
+        return list(Node(System().nodes[0]).gpus or [])
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None:
+        return [int(d) for d in visible.split(",") if d.strip().isdigit()]
+    try:
+        import torch
+        return list(range(torch.cuda.device_count()))
+    except Exception:
+        return []
+
+
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
     """Adaptive callback: picks pipeline.next_step from the last analysis.
 
@@ -424,6 +448,16 @@ async def impress_smallmol_bind() -> None:
     # telemetry as a task with target_backend=local.
     adaptive_fn = flow.function_task(backend="local")(adaptive_decision)
 
+    # One GPU per pipeline, round-robin: p1 -> gpus[0], p2 -> gpus[1], ...
+    # A pipeline runs its stages one at a time, so it never has more than one
+    # GPU task in flight.  The backend still picks the node.
+    gpus = _node_gpus()
+    def _gpu_for(i: int):
+        return gpus[(i - 1) % len(gpus)] if gpus else None
+    print(f"[GPU] devices per node: {gpus or 'none'}; pipeline -> GPU: "
+          + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
+          flush=True)
+
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=f"p{str(i)}",
@@ -446,6 +480,7 @@ async def impress_smallmol_bind() -> None:
                 "mpnn_ensemble_size":        cfg.mpnn_ensemble_size,
                 "rfd3_partial_t":            cfg.rfd3_partial_t,
                 "max_tasks":                 cfg.max_tasks,
+                "gpu_index":                 _gpu_for(i),
             }
         )
         for i in range(1, cfg.n_pipelines + 1)

@@ -638,6 +638,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.iter_seqs       = kwargs.get("iter_seqs",      {})
         self.previous_scores = kwargs.get("previous_score", {})
 
+        # GPU this pipeline's GPU tools ask the backend for (see
+        # _tool_task_description).  None = no request; the tool sees all GPUs.
+        # Set before super().__init__, which registers the tasks and so
+        # builds their task descriptions.
+        self.gpu_index = kwargs.get("gpu_index", None)
+
         super().__init__(name, flow, **configs, **kwargs)
 
         # Paths
@@ -756,7 +762,7 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
 
     # ── Per-task environment for backend-run tools ─────────────────────────
 
-    def _tool_task_description(self, threads: int) -> dict:
+    def _tool_task_description(self, threads: int, gpu: bool = False) -> dict:
         """task_description giving one backend-run tool its own thread caps.
 
         Each tool process gets its caps from the backend that launches it,
@@ -775,6 +781,19 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
           `the_env = dict(os.environ); the_env.update(req_env)`), so only the
           delta is sent. Sending the runner's whole environment would
           overwrite the remote node's.
+
+        With gpu=True the tool is also given self.gpu_index as its only GPU.
+        Every GPU tool (rfd3, boltz, LigandMPNN) uses the first device it
+        sees, so without this they all share GPU 0.
+        - Dragon: a Policy(gpu_affinity=[g]) on the template.  Setting
+          CUDA_VISIBLE_DEVICES in the template env does NOT work there: local
+          services applies the policy layout after merging the env, and a
+          policy with no gpu_affinity resolves to every GPU on the node, so
+          the variable is always overwritten (dragon/localservices/server.py
+          PopenProps; dragon/globalservices/policy_eval.py _get_gpu_affinity).
+        - Concurrent: the env is used as-is, so CUDA_VISIBLE_DEVICES works.
+        Dragon Batch does no GPU accounting of its own, so the device is
+        chosen per pipeline by the runner (gpu_index).
         """
         from rhapsody.backends import ConcurrentExecutionBackend
 
@@ -783,10 +802,18 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
         # PASSIVE is what actually stops idle OpenMP teams spinning on cores.
         caps["OMP_WAIT_POLICY"] = "PASSIVE"
+        pin_gpu = gpu and self.gpu_index is not None
 
         if isinstance(self.flow.backend, ConcurrentExecutionBackend):
+            if pin_gpu:
+                caps["CUDA_VISIBLE_DEVICES"] = str(self.gpu_index)
             return {"env": {**os.environ, **caps}}
-        return {"process_template": {"env": caps}}
+
+        template = {"env": caps}
+        if pin_gpu:
+            from dragon.infrastructure.policy import Policy
+            template["policy"] = Policy(gpu_affinity=[self.gpu_index])
+        return {"process_template": template}
 
     def _logged_cmd(self, log_file: str, cmd: str) -> str:
         """Wrap a stage command so its output lands in {taskdir}/<stage>.log."""
@@ -810,8 +837,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         stages are local_task=True.
         """
         rosetta_td = self._tool_task_description(ROSETTA_THREADS)
-        mpnn_td    = self._tool_task_description(MPNN_THREADS)
-        gpu_td     = self._tool_task_description(GPU_TOOL_THREADS)
+        # LigandMPNN runs on CUDA too, so it gets the pipeline's GPU as well.
+        mpnn_td    = self._tool_task_description(MPNN_THREADS, gpu=True)
+        gpu_td     = self._tool_task_description(GPU_TOOL_THREADS, gpu=True)
 
         @self.auto_register_task(capture_stdio=True)
         async def rfd3(task_description: dict = gpu_td):
