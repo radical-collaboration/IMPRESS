@@ -32,6 +32,14 @@ on all N runs — will promote. Two consequences: raise the promotion threshold 
 irreversible or expensive commitments, and weight cross-tool agreement conservatively, since tools
 sharing training data or architecture may agree *because* they share a bias.
 
+Since decision 0013, the interlock counts only **integrity** gates, which ask whether the tool ran and
+reported real numbers. It ignores **acceptance** gates, the quality thresholds. That made promotion
+reachable on a hard target, and it narrowed what trust rests on. For the real toolkits the integrity
+gates are thin: presence checks, `has_secondary_structure`, and the Rosetta divergence bounds. There is
+nothing structural (backlog B1). A tool that emits well-formed, plausibly-scored garbage could already
+promote; one that emits well-formed, *low*-scored garbage now can too, as long as it reports its numbers.
+Acceptance failures still keep such a node off the front.
+
 ## Reproducibility, by layer
 
 | Layer | Reproducible? |

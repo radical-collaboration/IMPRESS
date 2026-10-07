@@ -1,10 +1,10 @@
 {
-  "why": "Boltz ran with an empty `ligand_smiles`, so `BoltzPredictAgent.run` (src/impress_a/tools/boltz_agents.py:57-59) appended no ligand chain to the YAML. Boltz then folded a bare protein perfectly well: the confidence JSON has no `ligand_iptm` key at all, and the extraction at boltz_agents.py:96 falls back to `iptm` and lands on 0.0. The protein is excellent and the campaign's actual objective - does it bind the ligand - was measured on nothing. This is backlog A2 as a QC payload. It is the most instructive fixture here because `output_present` PASSES and `complex_plddt` PASSES: it takes the THIRD gate to catch it, which is the argument for gates being a list rather than a single verdict.",
-  "failing_gates": ["metric_in_range[ligand_iptm]"],
+  "why": "Boltz ran with an empty `ligand_smiles`, so `BoltzPredictAgent.run` appended no ligand chain to the YAML. Boltz then folded a bare protein perfectly well, and its confidence JSON has no `ligand_iptm` key at all. The extraction used to fall back to `iptm` and then to 0.0, which turned 'the ligand was never modelled' into 'the ligand binds badly': a broken run that only an acceptance threshold noticed. `_boltz_metrics` now reports only what Boltz wrote, so the value is absent, and the INTEGRITY gate `metrics_reported` catches it - which is what keeps this from counting toward trust (docs/decisions/0013). The protein is excellent and the campaign's objective - does it bind the ligand - was measured on nothing. This is backlog A2 as a QC payload. `output_present` and the `complex_plddt` threshold both PASS: it takes the presence check to see it.",
+  "failing_gates": ["metrics_reported", "metric_in_range[ligand_iptm]"],
   "output": {
     "result": "complex",
     "count": 1,
     "outputs": {},
-    "metrics": {"complex_plddt": 0.88, "ligand_iptm": 0.0}
+    "metrics": {"complex_plddt": 0.88}
   }
 }

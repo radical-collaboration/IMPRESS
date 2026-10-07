@@ -221,3 +221,162 @@ def test_trust_ledger_without_a_path_persists_nothing():
     assert L.on_clean_run("sig") is False
     assert L.on_clean_run("sig") is True
     assert L.path is None
+
+
+# -- integrity vs acceptance (decision 0013) ------------------------------------------
+
+def _executor_with_memory_ledger(tmp_path):
+    from impress_a.manager import CampaignSpec
+    from impress_a.runtime.executor import CampaignExecutor
+
+    ex = CampaignExecutor(CampaignSpec(campaign_id="c", goal="g", objectives=[],
+                                       root=str(tmp_path), site=SiteCaps(gpu_api="cuda")),
+                          policy=None)
+    ex.trust = TrustLedger(promote_after=3)
+    ex.trust.record_for("sig", ["x"])
+    return ex
+
+
+def _results(reg, per_tool: dict, failures: dict | None = None):
+    """ExecutionResults whose QC comes from the REAL specs' gates over these metrics."""
+    from impress_a.exec.dispatch import ExecutionResults
+    from impress_a.tools import gates
+    from impress_a.tools.agent import TaskResult
+
+    per_task = {}
+    for tool, metrics in per_tool.items():
+        payload = {"result": "x", "count": 1, "outputs": {}, "metrics": metrics}
+        per_task[tool] = TaskResult(tool=tool, outputs={}, metrics=metrics,
+                                    qc=gates.evaluate(reg.get(tool), payload), cost={})
+    return ExecutionResults(graph_id="g", per_task=per_task, failures=failures or {})
+
+
+def test_gate_role_defaults_to_integrity_and_rejects_anything_else():
+    from impress_a.tools.spec import GateSpec
+
+    assert GateSpec(id="output_present").role == "integrity", \
+        "an unclassified gate must keep blocking trust"
+    with pytest.raises(ValueError):
+        GateSpec(id="metric_in_range", role="advisory")
+
+
+def test_an_acceptance_threshold_needs_a_presence_check(reg):
+    """Otherwise a value the adapter never read is just a low score, and promotes."""
+    from impress_a.tools.spec import ToolSpec
+
+    spec = reg.get("boltz_predict").model_dump()
+    spec["qc_gates"] = [g for g in spec["qc_gates"] if g["id"] != "metrics_reported"]
+    with pytest.raises(ValueError, match="metrics_reported"):
+        ToolSpec(**spec)
+
+
+def test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance(reg):
+    acceptance = {(t, g.params["metric"]) for t in reg.specs
+                  for g in reg.get(t).qc_gates if g.role == "acceptance"}
+    assert acceptance == {("ligandmpnn_design", "overall_confidence"),
+                          ("ligandmpnn_design", "ligand_confidence"),
+                          ("filter_shape", "shape_complementarity"),
+                          ("boltz_predict", "complex_plddt"),
+                          ("boltz_predict", "ligand_iptm")}, \
+        "every other gate - presence, structure, the Rosetta divergence bounds - is integrity"
+
+
+def test_qc_report_separates_integrity_from_acceptance():
+    from impress_a.core.qc import GateOutcome, GateResult, QCReport
+
+    q = QCReport().add(GateResult(gate="t", outcome=GateOutcome.FAIL, role="acceptance",
+                                  observed=0.3, threshold=[0.4, None]))
+    assert q.integrity_ok and not q.eligible_for_front, \
+        "an acceptance FAIL still fails the node - it just is not evidence against the pattern"
+    q.add(GateResult(gate="present", outcome=GateOutcome.FAIL))
+    assert not q.integrity_ok
+    assert [f["role"] for f in q.failed()] == ["acceptance", "integrity"]
+
+
+def test_only_integrity_failures_reset_trust(reg, tmp_path):
+    from types import SimpleNamespace
+
+    ex = _executor_with_memory_ledger(tmp_path)
+    rec = SimpleNamespace(signature="sig")
+    weak = {"boltz_predict": {"complex_plddt": 0.3, "ligand_iptm": 0.2}}  # worked, scored low
+    for _ in range(3):
+        assert ex._record_evidence(rec, _results(reg, weak)) is False
+    assert ex.trust.is_trusted("sig"), "three acceptance-only failures are three clean runs"
+
+    no_ligand = {"boltz_predict": {"complex_plddt": 0.88}}                # broke silently
+    assert ex._record_evidence(rec, _results(reg, no_ligand)) is True
+    assert not ex.trust.is_trusted("sig"), "an integrity failure demotes immediately"
+
+    ex.trust.record_for("sig", ["x"])
+    fine = {"boltz_predict": {"complex_plddt": 0.8, "ligand_iptm": 0.6}}
+    assert ex._record_evidence(rec, _results(reg, fine, failures={"t": "boom"})) is True, \
+        "a task that failed outright is still a failure, whatever its gates say"
+
+
+# Per-task metrics of job 22702568, copied from its jobs/ledger.jsonl. Under the old rule
+# (every gate counts) its five 6/6 runs recorded failure/clean/failure/failure/clean and
+# promoted nothing. This is the offline prediction the next Delta run is checked against.
+_JOB_22702568 = {
+    "r0001": {"rfd3_design": {"ss_fraction": 0.827},
+              "ligandmpnn_design": {"overall_confidence": 0.45, "ligand_confidence": 0.455},
+              "packmin": {"total_score": 45.91},
+              "fastrelax": {"total_score": -291.79, "fa_rep": 110.75},
+              "filter_shape": {"shape_complementarity": 0.653},
+              "boltz_predict": {"complex_plddt": 0.486, "ligand_iptm": 0.327}},
+    "r0002": {"rfd3_design": {"ss_fraction": 0.896},
+              "ligandmpnn_design": {"overall_confidence": 0.494, "ligand_confidence": 0.57},
+              "packmin": {"total_score": 231.797},
+              "fastrelax": {"total_score": -466.539, "fa_rep": 195.602},
+              "filter_shape": {"shape_complementarity": 0.731},
+              "boltz_predict": {"complex_plddt": 0.678, "ligand_iptm": 0.844}},
+    "r0003": {"rfd3_design": {"ss_fraction": 0.879},
+              "ligandmpnn_design": {"overall_confidence": 0.355, "ligand_confidence": 0.4},
+              "packmin": {"total_score": 140.123},
+              "fastrelax": {"total_score": -503.14, "fa_rep": 183.626},
+              "filter_shape": {"shape_complementarity": 0.519},
+              "boltz_predict": {"complex_plddt": 0.878, "ligand_iptm": 0.905}},
+    "r0004": {"rfd3_design": {"ss_fraction": 0.832},
+              "ligandmpnn_design": {"overall_confidence": 0.503, "ligand_confidence": 0.548},
+              "packmin": {"total_score": 99.713},
+              "fastrelax": {"total_score": -352.975, "fa_rep": 133.96},
+              "filter_shape": {"shape_complementarity": 0.676},
+              "boltz_predict": {"complex_plddt": 0.426, "ligand_iptm": 0.493}},
+    "r0005": {"rfd3_design": {"ss_fraction": 0.847},
+              "ligandmpnn_design": {"overall_confidence": 0.455, "ligand_confidence": 0.474},
+              "packmin": {"total_score": -7.635},
+              "fastrelax": {"total_score": -204.115, "fa_rep": 71.342},
+              "filter_shape": {"shape_complementarity": 0.672},
+              "boltz_predict": {"complex_plddt": 0.561, "ligand_iptm": 0.489}},
+}
+
+
+def test_replaying_job_22702568_promotes_at_its_third_run(reg, tmp_path):
+    from types import SimpleNamespace
+
+    runs = [_results(reg, m) for m in _JOB_22702568.values()]
+    assert [r.all_gates_passed for r in runs] == [False, True, False, False, True], \
+        "the old rule's verdicts, reproduced from the recorded metrics"
+
+    ex = _executor_with_memory_ledger(tmp_path)
+    promoted_at = None
+    for run_id, results in zip(_JOB_22702568, runs):
+        assert ex._record_evidence(SimpleNamespace(signature="sig"), results) is False, \
+            f"{run_id}: every tool worked, so no run is evidence against the pattern"
+        if promoted_at is None and ex.trust.is_trusted("sig"):
+            promoted_at = run_id
+    assert promoted_at == "r0003"
+
+
+def test_the_lying_mock_never_earns_trust(reg, tmp_path):
+    """mock_noodle reports success and designs a noodle; `has_secondary_structure` is an
+    integrity gate, so however many times it runs, it is never a clean run."""
+    import json
+    from types import SimpleNamespace
+
+    bad = json.loads(pathlib.Path(
+        "toolkits/mock/tools/mock_noodle/tests/noodle.bad.json").read_text())["output"]
+    ex = _executor_with_memory_ledger(tmp_path)
+    for _ in range(5):
+        assert ex._record_evidence(SimpleNamespace(signature="sig"),
+                                   _results(reg, {"mock_noodle": bad["metrics"]})) is True
+    assert not ex.trust.is_trusted("sig")

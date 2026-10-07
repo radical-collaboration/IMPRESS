@@ -53,6 +53,7 @@ class PortSpec(BaseModel):
 class GateSpec(BaseModel):
     id: str
     params: dict[str, Any] = Field(default_factory=dict)
+    role: Literal["integrity", "acceptance"] = "integrity"   # see core/qc.GateResult.role
 
 
 class CostModel(BaseModel):
@@ -105,4 +106,15 @@ class ToolSpec(BaseModel):
             raise ValueError(f"{self.id}: {overlap} both varyable and frozen")
         if self.pattern is Pattern.P1 and self.resources.gpus == 0:
             raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
+        # An acceptance threshold must not be the only thing that notices a value is
+        # missing: that is how a fabricated 0.0 passed for a measurement (decision 0013).
+        reported = {m for g in self.qc_gates
+                    if g.id == "metrics_reported" and g.role == "integrity"
+                    for m in g.params.get("metrics", [])}
+        for g in self.qc_gates:
+            if g.role == "acceptance" and g.id == "metric_in_range" \
+                    and g.params.get("metric") not in reported:
+                raise ValueError(
+                    f"{self.id}: acceptance gate on {g.params.get('metric')!r} needs an "
+                    "integrity metrics_reported gate naming it")
         return self

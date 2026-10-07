@@ -67,11 +67,8 @@ def _fixtures() -> list[tuple[str, pathlib.Path, bool]]:
 
 
 def _run_spec_gates(spec, payload: dict) -> QCReport:
-    """Exactly what `TaskAgent.post_process` does to build a QCReport, minus artifacts."""
-    qc = QCReport()
-    for g in spec.qc_gates:
-        qc.add(gates.get(g.id)(payload, g.params))
-    return qc
+    """The same call `TaskAgent.post_process` makes, so the fixtures test what runs."""
+    return gates.evaluate(spec, payload)
 
 
 @pytest.mark.parametrize("tool_id,path,must_fail", _fixtures(),
@@ -93,6 +90,14 @@ def test_gate_fixture(reg, tool_id, path, must_fail):
             # actually tripping another.
             assert failed == set(doc["failing_gates"]), \
                 f"{path.name}: failing gates were {sorted(failed)}"
+        # Only integrity failures reset trust (decision 0013), so a known-bad output that
+        # nothing but an acceptance threshold catches would promote a pattern. That is
+        # right for a genuinely weak design and wrong for a broken run - the fixture has
+        # to say which it is.
+        assert report.integrity_ok is bool(doc.get("acceptance_only")), \
+            f"{path.name}: integrity_ok={report.integrity_ok}, but acceptance_only=" \
+            f"{bool(doc.get('acceptance_only'))} - a broken run must fail an integrity " \
+            "gate; a weak design that fails only acceptance must declare acceptance_only"
     else:
         assert report.verdict is QCVerdict.PASS, \
             f"{path.name}: expected PASS, these gates failed: {sorted(failed)}"
@@ -102,8 +107,8 @@ def test_gate_fixture(reg, tool_id, path, must_fail):
 async def test_a_known_bad_fixture_fails_qc_through_post_process(reg):
     """The fixtures are checked against the same path a campaign uses, not a parallel one.
 
-    `_run_spec_gates` mirrors `TaskAgent.post_process`; this runs the real thing once to
-    prove the mirror is faithful. `empty_out_dir.bad.json` is used because its `outputs`
+    `_run_spec_gates` makes the same `gates.evaluate` call `TaskAgent.post_process` does;
+    this runs the real thing once to prove nothing else in post_process changes the verdict. `empty_out_dir.bad.json` is used because its `outputs`
     is `{}`, so `_as_artifacts` is a no-op and no file has to exist on disk.
     """
     from impress_a.tools.agent import TaskRequest
@@ -136,23 +141,31 @@ async def test_the_noodle_fixture_matches_what_the_noodle_agent_produces(reg):
 
 
 def test_ligandmpnn_confidence_header_parsing():
-    """A parser failure is currently reported as a low-confidence design (backlog F4).
+    """An unparsed header reports NO confidence, not a confident-looking zero.
 
-    `_CONF_RE` is module-level and needs nothing installed, so it is the one tool-native
-    artifact in the repo that is testable today - every other extraction path is inline
-    in a `run()` body. When the regex does not match, the loop at
-    `ligandmpnn_agents.py:74-78` leaves `overall = ligand = 0.0` and the agent reports a
-    confident-looking zero. This test pins that: it is a bug report, not an endorsement.
-    See `unparsed_confidence_header.bad.json`.
+    It used to fall through to `overall = ligand = 0.0`, so a parser failure looked like
+    a terrible design and was caught only by thresholds that no longer reset trust
+    (decision 0013). `_parse_confidence` is module-level and needs nothing installed, so
+    the real FASTA headers in `tests/raw/` can be pushed through it directly. See
+    `unparsed_confidence_header.bad.json` for what the gates make of the result.
     """
     from impress_a.tools import ligandmpnn_agents
 
     raw = _tool_dirs()["ligandmpnn_design"] / "tests" / "raw"
-    good = ligandmpnn_agents._CONF_RE.search((raw / "parsed_header.fa").read_text())
-    assert good and good.groups() == ("0.6421", "0.5817")
+    good = ligandmpnn_agents._parse_confidence((raw / "parsed_header.fa").read_text())
+    assert good == {"overall_confidence": 0.642, "ligand_confidence": 0.582}
 
-    bad = ligandmpnn_agents._CONF_RE.search((raw / "unparsed_header.fa").read_text())
-    assert bad is None, "if this ever matches, the 0.0/0.0 fallback fixture is stale"
+    bad = ligandmpnn_agents._parse_confidence((raw / "unparsed_header.fa").read_text())
+    assert bad == {}, "an unreadable header must omit the metrics, never report 0.0"
+
+
+def test_boltz_reports_only_what_boltz_wrote():
+    """No ligand chain means no `ligand_iptm` - and no fallback to `iptm` or 0.0."""
+    from impress_a.tools.boltz_agents import _boltz_metrics
+
+    assert _boltz_metrics({"complex_plddt": 0.88, "iptm": 0.91}) == {"complex_plddt": 0.88}
+    assert _boltz_metrics({"complex_plddt": 0.8213, "ligand_iptm": 0.6071}) == \
+        {"complex_plddt": 0.821, "ligand_iptm": 0.607}
 
 
 def test_count_matches_request_catches_a_fabricated_count():

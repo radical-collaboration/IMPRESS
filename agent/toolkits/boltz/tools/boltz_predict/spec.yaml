@@ -22,10 +22,15 @@ parameters:
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
 metrics: [complex_plddt, ligand_iptm]
+# Integrity gates say the tool worked; acceptance gates say the design is good enough.
+# Only integrity failures reset trust (docs/decisions/0013). Each acceptance threshold is
+# backed by `metrics_reported`, so a value the adapter could not read is an integrity
+# failure, never a low score.
 qc_gates:
   - {id: output_present, params: {key: result}}
-  - {id: metric_in_range, params: {metric: complex_plddt, min: 0.5, max: 1.0}}
-  - {id: metric_in_range, params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
+  - {id: metrics_reported, params: {metrics: [complex_plddt, ligand_iptm]}}
+  - {id: metric_in_range, role: acceptance, params: {metric: complex_plddt, min: 0.5, max: 1.0}}
+  - {id: metric_in_range, role: acceptance, params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
 # Measured on job 22692304 - the first run in which this tool executed at all: 57.8s
 # = 0.0160 h. Declared 0.15 was 9.3x that, the same literature guess the other five
 # carried, and it was left alone in 77a0363 precisely because there was nothing to

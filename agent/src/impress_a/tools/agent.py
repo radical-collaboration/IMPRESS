@@ -109,9 +109,7 @@ class TaskAgent:
 
     async def post_process(self, req: TaskRequest, raw: dict[str, Any]) -> TaskResult:
         """Extract metrics and ENFORCE QC gates. Never skippable."""
-        qc = QCReport()
-        for g in self.spec.qc_gates:
-            qc.add(gates.get(g.id)(raw, g.params))
+        qc = gates.evaluate(self.spec, raw)
         return TaskResult(tool=self.spec.id,
                           outputs=self._as_artifacts(raw.get("outputs", {})),
                           metrics=raw.get("metrics", {}),

@@ -15,9 +15,15 @@ parameters:
   # -ignore_unrecognized_res -ignore_zero_occupancy).
   ligand_params_path: {type: str, default: ""}
 metrics: [shape_complementarity]
+# Integrity gates say the tool worked; acceptance gates say the design is good enough.
+# Only integrity failures reset trust (docs/decisions/0013). Each acceptance threshold is
+# backed by `metrics_reported`, so a value the adapter could not read is an integrity
+# failure, never a low score.
 qc_gates:
   - {id: output_present, params: {key: result}}
-  - {id: metric_in_range, params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
+  - {id: metrics_reported, params: {metrics: [shape_complementarity]}}
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
 # Measured on job 22684607 (NVMe, 1 node): 10.2s = 0.0028 h. Declared 0.05 was
 # 18x that - a literature guess, and on the gpu dimension those guesses summed
 # past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.

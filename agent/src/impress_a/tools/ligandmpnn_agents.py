@@ -19,6 +19,20 @@ from .agent import TaskAgent, TaskRequest
 # >design, id=1, overall_confidence=0.6421, ligand_confidence=0.5817
 _CONF_RE = re.compile(r"overall_confidence=([\d.]+),\s*ligand_confidence=([\d.]+)")
 
+
+def _parse_confidence(fasta_text: str) -> dict[str, float]:
+    """Confidences from the first header that carries them; empty if none parses.
+
+    Empty, not 0.0/0.0: a header `_CONF_RE` cannot read is a parser failure, and
+    reporting it as a zero-confidence design made it indistinguishable from a
+    genuinely bad one. Omitted, the integrity gate `metrics_reported` catches it.
+    """
+    for header in fasta_text.splitlines():
+        if m := _CONF_RE.search(header):
+            return {"overall_confidence": round(float(m.group(1)), 3),
+                    "ligand_confidence": round(float(m.group(2)), 3)}
+    return {}
+
 # Written into the task workdir and run instead of `run.py` itself. Same device as the
 # reference pipeline's `scripts/mpnn_run.py`, and the same device as the `_*_WORKER`
 # constants in `rosetta_agents.py`: a helper script lives here as a string rather than as
@@ -157,16 +171,9 @@ class LigandMPNNDesignAgent(TaskAgent):
         if not fastas or not packed:
             return {"result": None, "count": 0, "outputs": {}, "metrics": {}}
 
-        overall = ligand = 0.0
-        for header in fastas[0].read_text().splitlines():
-            if m := _CONF_RE.search(header):
-                overall, ligand = float(m.group(1)), float(m.group(2))
-                break
-
         return {
             "result": "structure",
             "count": len(packed),
             "outputs": {"structure": packed[0]},
-            "metrics": {"overall_confidence": round(overall, 3),
-                        "ligand_confidence": round(ligand, 3)},
+            "metrics": _parse_confidence(fastas[0].read_text()),
         }

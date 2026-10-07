@@ -7,9 +7,13 @@ the result passed its clash check.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+import math
+from typing import TYPE_CHECKING, Any, Callable
 
-from ..core.qc import GateOutcome, GateResult
+from ..core.qc import GateOutcome, GateResult, QCReport
+
+if TYPE_CHECKING:
+    from .spec import ToolSpec
 
 GateFn = Callable[[dict[str, Any], dict[str, Any]], GateResult]
 _REGISTRY: dict[str, GateFn] = {}
@@ -32,6 +36,18 @@ def known() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def evaluate(spec: ToolSpec, out: dict[str, Any]) -> QCReport:
+    """Run a spec's gates over one raw payload, stamping each result with its role.
+
+    The one place a QCReport is built from a spec - `TaskAgent.post_process` and the
+    fixture tests both call this, so the fixtures test exactly what runs.
+    """
+    qc = QCReport()
+    for g in spec.qc_gates:
+        qc.add(get(g.id)(out, g.params).model_copy(update={"role": g.role}))
+    return qc
+
+
 @gate("output_present")
 def _output_present(out: dict, p: dict) -> GateResult:
     key = p.get("key", "result")
@@ -48,6 +64,26 @@ def _count_matches(out: dict, p: dict) -> GateResult:
                       outcome=GateOutcome.PASS if ok else GateOutcome.FAIL,
                       observed=got, threshold=want,
                       detail="" if ok else f"produced {got}, requested {want}")
+
+
+@gate("metrics_reported")
+def _metrics_reported(out: dict, p: dict) -> GateResult:
+    """Each named metric was actually reported, as a finite number.
+
+    The integrity half of every acceptance threshold. An adapter that could not read a
+    value must omit it rather than report 0.0 - and then this gate, not the threshold,
+    is what catches it. Both real cases were exactly that: Boltz run with no ligand chain
+    (`ligand_iptm` absent, once papered over as 0.0) and an unparsed LigandMPNN header.
+    """
+    names = list(p.get("metrics", []))
+    metrics = out.get("metrics") or {}
+    missing = [n for n in names
+               if not isinstance(metrics.get(n), (int, float))
+               or not math.isfinite(metrics[n])]
+    return GateResult(gate="metrics_reported",
+                      outcome=GateOutcome.FAIL if missing else GateOutcome.PASS,
+                      observed=sorted(set(names) - set(missing)), threshold=names,
+                      detail=f"not reported: {missing}" if missing else "")
 
 
 @gate("metric_in_range")

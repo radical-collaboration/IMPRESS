@@ -19,3 +19,4 @@ Numbered, immutable records of decisions whose rationale should outlive the conv
 | [0010](0010-single-package-with-import-contract.md) | One package, with a CI-enforced import contract | 1C |
 | [0011](0011-toolkits-are-top-level-and-declarative.md) | `toolkits/` is top-level and declarative | 1C |
 | [0012](0012-one-property-two-sources.md) | One property, two sources; forward-declare pattern P8 | 1 |
+| [0013](0013-trust-counts-integrity-not-acceptance.md) | Trust counts integrity gates, not acceptance gates (amends 0003) | — |

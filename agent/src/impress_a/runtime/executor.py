@@ -270,7 +270,7 @@ class CampaignExecutor:
             made.append(node)
             self._log("results", {"node": node.id, "cycle": turn,
                                   "run": decision_id, "lineage": lineage,
-                                  "qc": qc.verdict.value,
+                                  "qc": qc.verdict.value, "failed_gates": qc.failed(),
                                   "metrics": results.metrics_for(task_ids)})
         return made
 
@@ -374,7 +374,7 @@ class CampaignExecutor:
 
         self._log("graphs", {
             "cycle": self.cycle, "graph": graph.id, "run": run_label,
-            "signature": sig, "trusted": scrutiny.trusted,
+            "signature": sig, "trusted": scrutiny.trusted, "scrutiny": scrutiny.model_dump(),
             "nodes": {k: v.tool for k, v in graph.nodes.items()},
             "estimate": self.validator.estimate(graph),
             "unproducible_objectives": orphaned,
@@ -610,14 +610,14 @@ class CampaignExecutor:
                          error=str(err))
 
     def _record_evidence(self, rec: RunRecord, results: ExecutionResults) -> bool:
-        """Feed one run's outcome to the interlock. Returns True if it was a failure.
+        """Feed one run's integrity to the interlock. Returns True if it was a failure.
 
         Kept separate from reaping because a drained run is still evidence: it ran, it
         was paid for, and the pattern either held up or did not. Dropping that at
         teardown would quietly starve the promotion counter.
         """
         sig = rec.signature
-        if results.all_gates_passed and not results.failures:
+        if results.ok and all(r.qc.integrity_ok for r in results.per_task.values()):
             if self.trust.on_clean_run(sig):
                 self._log("transitions", {"event": "pattern_promoted",
                                           "signature": sig})

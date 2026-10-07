@@ -119,7 +119,10 @@ accumulated trust.
 | Dry-run | Standard | Mandatory |
 | Result marking | Normal QC verdict | **Auto-marked `suspect`** regardless of outcome |
 
-Promotion is mechanical — N consecutive clean runs. Demotion is symmetric and immediate on any failure.
+Promotion is mechanical — N consecutive clean runs, where *clean* means no task failed and no **integrity**
+gate failed. Demotion is symmetric and immediate on any integrity failure. **Acceptance** gates (quality
+thresholds) still fail the node and keep it off the front, but say nothing about whether the pattern is
+sound, so they do not touch trust ([decision 0013](../decisions/0013-trust-counts-integrity-not-acceptance.md)).
 The trust ledger is **site-scoped and spans campaigns**, because one campaign may not run a pattern N
 times.
 

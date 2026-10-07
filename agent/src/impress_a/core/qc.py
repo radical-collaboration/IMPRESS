@@ -24,6 +24,11 @@ class GateResult(BaseModel):
     observed: Any = None
     threshold: Any = None
     detail: str = ""
+    # What a FAIL means. "integrity": the tool or the pipeline broke - the evidence the
+    # trust ledger counts. "acceptance": the tool worked and the design fell short - it
+    # still fails the node, but says nothing about whether the pattern is sound. Stamped
+    # from the spec by `gates.evaluate`; defaults to the conservative reading.
+    role: str = "integrity"
 
 
 class QCVerdict(str, Enum):
@@ -47,6 +52,18 @@ class QCReport(BaseModel):
         if r.outcome is GateOutcome.FAIL:
             self.verdict = QCVerdict.FAIL
         return self
+
+    @property
+    def integrity_ok(self) -> bool:
+        """No integrity gate failed. What a clean run means to the trust ledger (0013)."""
+        return not any(g.outcome is GateOutcome.FAIL and g.role == "integrity"
+                       for g in self.gates)
+
+    def failed(self) -> list[dict[str, Any]]:
+        """The failed gates, in the form provenance records them."""
+        return [{"gate": g.gate, "role": g.role, "observed": g.observed,
+                 "threshold": g.threshold, "detail": g.detail}
+                for g in self.gates if g.outcome is GateOutcome.FAIL]
 
     def mark_suspect(self, why: str) -> "QCReport":
         if self.verdict is not QCVerdict.FAIL:

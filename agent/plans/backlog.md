@@ -316,9 +316,10 @@ prove this failure mode is the dominant one; the real tools have no equivalent.
 **B2. No known-bad fixtures — RESOLVED.** Every non-mock tool now carries `tests/*.bad.json` and
 `tests/*.good.json`, run against its own declared gates by `tests/test_gate_fixtures.py`, which also
 fails if a new real tool arrives without one. The payloads are transcribed from each adapter's own
-failure branches, not observed from a run (A1 is still open), and two of them are filed as bug
-reports rather than as reassurance: `ligandmpnn_design/tests/unparsed_confidence_header.bad.json`
-pins a parser failure being reported as 0.0 confidence, and
+failure branches, not observed from a run (A1 is still open). Two were filed as bug reports rather than
+as reassurance. `ligandmpnn_design/tests/unparsed_confidence_header.bad.json` pinned a parser failure
+being reported as 0.0 confidence. That is FIXED: the adapter now omits what it cannot parse, and the
+integrity gate `metrics_reported` catches it (decision 0013). The other is
 `fastrelax/tests/passes_ours_fails_upstream.good.json` is the executable record of G4 — it must move
 to `.bad.json` when G4 closes. What remains unmet is B1: no fixture here is *structural*, because no
 structural gate exists to feed.

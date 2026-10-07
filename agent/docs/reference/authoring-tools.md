@@ -85,9 +85,28 @@ def _my_check(out: dict, params: dict) -> GateResult:
 **Gates are mandatory for non-P6 tools** — gate 2 refuses a tool composed without them. They are the
 boundary at which a tool's output enters campaign state, and the only defence against silent failure.
 
+**Each gate has a `role`** — `integrity` (the default) or `acceptance`:
+
+```yaml
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [complex_plddt]}}                 # integrity
+  - {id: metric_in_range, role: acceptance, params: {metric: complex_plddt, min: 0.5}}
+```
+
+An **integrity** failure means the tool or pipeline broke, and it demotes the composition pattern. An
+**acceptance** failure means the tool worked and the design is not good enough: the node still FAILs, and
+is never rankable, but the trust ledger ignores it (decision 0013). Use acceptance only for a quality
+threshold; anything that detects a *malfunction* stays integrity. Load-time validation enforces one rule
+here: every acceptance `metric_in_range` must have its metric named in an integrity `metrics_reported`
+gate. That rule exists because a value the adapter never read must be an integrity failure, never a low
+score. Adapters therefore **omit** a metric they could not read rather than reporting 0.0.
+
 Write gates against the failure you have actually seen. A gate that has never seen the output it was
 written to catch is an assertion, not a test — so every non-mock tool carries known-bad fixtures under
-`tests/`, and `tests/test_gate_fixtures.py` fails if a new one does not.
+`tests/`, and `tests/test_gate_fixtures.py` fails if a new one does not. A `.bad.json` must fail at least
+one integrity gate; one that records a genuinely weak design, caught only by acceptance, says so with
+`"acceptance_only": true`.
 
 ```
 toolkits/<tk>/tools/<id>/tests/

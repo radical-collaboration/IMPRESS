@@ -1,6 +1,6 @@
 {
   "why": "The `if not fastas or not packed` branch of LigandMPNNDesignAgent.run (src/impress_a/tools/ligandmpnn_agents.py:70-72), verbatim. run.py exited 0 leaving no seqs/*.fa and no packed PDB - the shape a missing checkpoint produces, which is the bug commit 041caba fixed by passing both checkpoints absolute and running with cwd=$MPNN_DIR. Also demonstrates that a MISSING metric is a FAIL and not a skip: `metric_in_range` returns FAIL when the value is None (src/impress_a/tools/gates.py:60), so both confidence gates fire on an empty metrics dict rather than abstaining.",
-  "failing_gates": ["output_present", "metric_in_range[overall_confidence]", "metric_in_range[ligand_confidence]"],
+  "failing_gates": ["output_present", "metrics_reported", "metric_in_range[overall_confidence]", "metric_in_range[ligand_confidence]"],
   "output": {
     "result": null,
     "count": 0,

@@ -1,6 +1,6 @@
 {
   "why": "`rosetta_agents._NO_RESULT` again, for the third Rosetta tool: the worker exited 0 leaving no readable result.json. Repeated per tool rather than shared because each spec's gate list differs, and the fixture records what THIS tool's gates say about it - here output_present plus the single shape_complementarity gate.",
-  "failing_gates": ["output_present", "metric_in_range[shape_complementarity]"],
+  "failing_gates": ["output_present", "metrics_reported", "metric_in_range[shape_complementarity]"],
   "output": {
     "result": null,
     "count": 0,

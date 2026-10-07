@@ -94,7 +94,8 @@ different transport.
   often than they crash, so a zero exit code is never sufficient evidence.
 - **A self-promoting interlock.** Novel workflow shapes are neither blocked nor trusted on sight: they
   run under a cost cap and a forced dry-run, are marked `suspect` regardless of outcome, and promote only
-  after N clean runs — demoting immediately on any failure.
+  after N runs with no *integrity* failure — demoting immediately on one. A design that merely scores
+  below threshold still fails its node, but is not evidence against the workflow (decision 0013).
 - **Append-only state.** A tree of design lineages ranked by a multi-objective Pareto front, with
   non-destructive backtracking and a complete provenance log.
 - **Predicted and measured values are one type.** An objective is declared against a property *name*, so

@@ -37,6 +37,17 @@ def _extract_sequence(pdb_path: str) -> str:
                     for r in chain if r.get_resname() in _THREE_TO_ONE)
 
 
+def _boltz_metrics(conf: dict[str, Any]) -> dict[str, float]:
+    """The metrics a Boltz confidence JSON actually reports - nothing filled in.
+
+    `ligand_iptm` used to fall back to `iptm` and then to 0.0. With no ligand chain in
+    the input, Boltz writes no `ligand_iptm` at all, and the fallback turned "the ligand
+    was never modelled" into "the ligand binds badly" - a broken run reported as a weak
+    design. Omitted, it is caught by the integrity gate `metrics_reported` instead.
+    """
+    return {k: round(conf[k], 3) for k in ("complex_plddt", "ligand_iptm") if k in conf}
+
+
 def _claim_cache(cache: Path) -> int | None:
     """Blocking. Return an fd holding an exclusive lock on `cache`, or None if some
     earlier run already proved the cache complete.
@@ -154,8 +165,5 @@ class BoltzPredictAgent(TaskAgent):
             "result": "complex",
             "count": len(pdb_files),
             "outputs": {"complex": pdb_files[0]},
-            "metrics": {
-                "complex_plddt": round(conf.get("complex_plddt", 0.0), 3),
-                "ligand_iptm": round(conf.get("ligand_iptm", conf.get("iptm", 0.0)), 3),
-            },
+            "metrics": _boltz_metrics(conf),
         }

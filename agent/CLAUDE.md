@@ -69,6 +69,8 @@ Each exists because of a specific failure mode. Details in `docs/reference/archi
 | An **untrusted** pattern has at most one instance in flight | `runtime/executor.py::_admit_once` | Promotion counts *consecutive* clean runs; concurrent instances are one draw sampled N times |
 | The **executor is the only writer** of campaign state, and decides termination | `runtime/executor.py` | Every mutating block is `await`-free, so an observation is never taken mid-absorb. Adding an `await` inside `observe`/`_absorb` reintroduces torn reads |
 | QC gates are deterministic **even for LLM-driven task agents** | `tools/agent.py` | An LLM may author a protocol; it does not judge whether the result passed its clash check |
+| Only **integrity** gate failures count against a pattern's trust; **acceptance** failures still FAIL the node | `runtime/executor._record_evidence`, `tools/spec.py` | Counting quality thresholds made promotion a function of target difficulty - job 22702568 ran 30/30 tasks clean and promoted nothing (decision 0013) |
+| An adapter **omits** a metric it could not read - never reports 0.0 | `metrics_reported` gate + `ToolSpec` validation | A fabricated zero turns "the tool broke" into "the design is weak", which acceptance gates no longer count against trust |
 
 ## Middleware gotchas
 
@@ -207,8 +209,11 @@ reclaimed, running work is not, and you cannot learn which happened. A run's ter
 come from collecting it, never from the fact that cancel was called. Backtracking sidesteps this by
 *branching the tree*. Reclaiming a GPU from an abandoned run remains unsolved.
 
-**QC for the real toolkits leans on self-reported confidence.** Their gates are almost entirely
+**QC for the real toolkits leans on self-reported confidence.** Their quality gates are
 `metric_in_range` against a number the tool chose to report about itself, which is precisely what a
-confidently-wrong tool passes. No structural gates, and no known-bad fixtures anywhere.
+confidently-wrong tool passes. Since decision 0013 those are *acceptance* gates, so trust rests on the
+*integrity* gates alone: presence checks, `has_secondary_structure`, and the Rosetta divergence bounds.
+There are still no structural gates (backlog B1). Known-bad fixtures exist for every real tool, and each
+must fail an integrity gate or declare itself `acceptance_only`.
 
 Full list: `plans/backlog.md`. Shipping-facing summary: `docs/limitations.md`.

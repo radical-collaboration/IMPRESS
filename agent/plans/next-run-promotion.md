@@ -9,7 +9,8 @@ that run with one variable changed.
 
 The run had 5 cycles, and all 30 tasks succeeded. The site ledger nevertheless recorded
 `failure, clean, failure, failure, clean` for pattern `f5b21d82924fbcd0`, so nothing was promoted.
-Reconstructed from the recorded metrics, because provenance logs only the verdict:
+Per-gate results, from the task outcomes in `jobs/ledger.jsonl`. The provenance `results`
+log carried only the verdict, which is why this took digging:
 
 | Run | Verdict | Gates that failed |
 |---|---|---|
@@ -31,52 +32,25 @@ unchanged would mostly buy another 13 minutes of the same evidence.
 FAIL the node and keep it off the front, so that invariant is untouched, but they no longer
 reset trust. The interlock asks "did this composition behave?", not "was this design good?".
 
-## Code change (before the run)
+## The change (implemented on `integrity-gates`; decision 0013)
 
-1. **`tools/spec.py::GateSpec`**: add `role: Literal["integrity", "acceptance"] = "integrity"`.
-   The default is the safe one: a gate nobody classified keeps blocking trust. An unknown role
-   is a load-time error, like every other spec defect.
-2. **`core/qc.py::GateResult`**: add `role: str = "integrity"`. In `tools/agent.py:114`, copy
-   `g.role` onto each result (`.model_copy(update={"role": g.role})`). That edit is line-neutral.
-3. **`exec/dispatch.py`**: add `ExecutionResults.integrity_passed`: no task failures, and no
-   integrity-role gate FAILed. `all_gates_passed` stays as it is, because
-   `policy/explicit.py:76` and `policy/agentic.py:114` use it to judge design quality, which is
-   correct for them.
-4. **`runtime/executor.py::_record_evidence`**: use `integrity_passed`.
-5. **Provenance**:
-   - add `"failed_gates": [{gate, role, observed, threshold}]` to each `results` record, so the
-     next run explains itself rather than needing the reconstruction above;
-   - log the admission's scrutiny (trusted/provisional, forced dry-run, cost cap); today the
-     dry-run skip is not visible anywhere.
-6. **Spec classification.** Mark these five as `role: acceptance`:
-   - ligandmpnn `overall_confidence` and `ligand_confidence`
-   - filter_shape `shape_complementarity`
-   - boltz `complex_plddt` and `ligand_iptm`
-
-   The rest stay integrity: `output_present`, `has_secondary_structure`, packmin
-   `total_score < 1000`, fastrelax `total_score < 0` and `fa_rep < 500`. Those are "the tool
-   broke" bounds, not taste.
-7. **Docs**:
-   - new ADR `docs/decisions/0013`, amending 0003's "clean run";
-   - `docs/reference/architecture.md` (the interlock section);
-   - README lines 95–97;
-   - `docs/reference/authoring-tools.md` (the `role` field);
-   - `docs/limitations.md`: **trust now rests on the structural gates, which are thin**
-     (backlog B). A tool that silently produced confident garbage could already promote; one
-     that produced *low-confidence* garbage now can too.
-8. **Deck**: steps 3–5 move `exec/dispatch.py` and `runtime/executor.py` anchors. Run
-   `slides/check_anchors.py`, fix the anchors in `check_anchors.py`, `build_deck.js` and
-   `CODE_FOR_DECK.md`, then rebuild using the procedure in the `build_deck.js` header.
-
-### Tests
-- **Mock campaign:** a pattern whose only failures are acceptance gates promotes after 3 runs,
-  and its failed nodes are still off the front.
-- **`mock_noodle`:** its `has_secondary_structure` failure is an integrity failure and still
-  demotes. This is the regression that matters.
-- **`test_real_toolkits`:** pin the classification. Exactly the five gates above are acceptance.
-- **Replay:** fold 22702568's recorded metrics through the new rule. It should promote at r0003.
-  That is the offline prediction the run is checked against.
-- **Load errors:** an unknown `role` is rejected, and an omitted `role` means integrity.
+- **Gate roles.** Each QC gate in a spec has a `role`, either `integrity` (the default) or
+  `acceptance`. `_record_evidence` now counts a run as clean when no task failed and no
+  integrity gate failed. Acceptance failures still FAIL the node and keep it off the front.
+- **Reclassified as acceptance**, exactly these five: LigandMPNN `overall_confidence` and
+  `ligand_confidence`, filter_shape `shape_complementarity`, and Boltz `complex_plddt` and
+  `ligand_iptm`. Everything else stays integrity.
+- **Fabricated zeros removed.** Two known-bad fixtures had been caught only by those thresholds,
+  and both recorded a run *breaking*: Boltz with no ligand chain, and an unparsed LigandMPNN
+  header. In both, the adapter wrote 0.0 for a value it never read. Adapters now omit such
+  values. A new integrity gate, `metrics_reported`, catches the omission, and `ToolSpec`
+  validation refuses an acceptance threshold with no presence check behind it.
+- **Provenance.** `results.jsonl` records `failed_gates` (with roles) per node, and
+  `graphs.jsonl` records each admission's full `scrutiny`: forced dry-run, cost cap, and
+  suspect marking.
+- **Replay.** Feeding 22702568's recorded per-task metrics through the new rule
+  (`tests/test_validation.py::test_replaying_job_22702568_promotes_at_its_third_run`) promotes
+  at r0003. The old rule reproduces the recorded fail/pass/fail/fail/pass exactly.
 
 ## The run
 
@@ -99,11 +73,14 @@ sbatch --partition=gpuA100x4-interactive --time=01:00:00 \
 The ledger currently folds to `clean_runs=1`, because its last event was `clean`. Integrity has
 held on every complete run so far, so:
 - r0001 and r0002 are integrity-clean, and `pattern_promoted` is logged after **r0002**;
-- **r0003–r0006 are admitted trusted**: `"trusted": true` in `graphs.jsonl`, the heartbeat shows
-  `trusted`, the scrutiny log shows no forced dry-run and no cost cap;
+- **r0003–r0006 are admitted trusted**. `graphs.jsonl` shows `"trusted": true` with
+  `scrutiny: {force_dry_run: false, cost_cap_fraction: null, mark_suspect: false}`, and the
+  heartbeat shows `trusted`;
 - trusted nodes that pass acceptance get verdict **`pass`**, the first `pass` ever on real
   hardware rather than `suspect`;
-- nodes that miss acceptance are `fail` and absent from the front, with `failed_gates` naming why;
+- nodes that miss acceptance are `fail` and absent from the front, and their `failed_gates`
+  carry only `role: acceptance` entries. Any `role: integrity` entry means the prediction failed
+  (see below);
 - six cycles at ~2.5 min each, plus startup, comes to about 18 minutes.
 
 ### Reading the outcome
