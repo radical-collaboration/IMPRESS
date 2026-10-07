@@ -601,6 +601,12 @@ async def test_pause_actually_holds_admission(reg, tmp_path):
     # Generous budget on purpose: this test is about pause, and a budget that binds
     # first looks exactly like a pause that never lifted.
     s.budget = {"gpu_hours": 200.0, "cpu_hours": 2000.0}
+    # Likewise stagnation, which is the engine's own stop and a correct one here: a
+    # submitter that never reads results stalls the front, and the counter (traced) hits 3
+    # informed non-improving runs at ~1.40s - tens of milliseconds either side of this
+    # test's scripted stop. It passed or failed on scheduling noise. The stop under test
+    # has to be the one that lands.
+    s.stagnation_limit = 1_000
     admitted: list[str] = []
 
     class Submitter:

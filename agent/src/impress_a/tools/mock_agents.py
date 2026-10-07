@@ -18,6 +18,17 @@ def _rng(seed_parts: Any) -> random.Random:
     return random.Random(int(h[:8], 16))
 
 
+def _upstream(inputs: dict[str, Any]) -> list[Any]:
+    """What a mock's draw may depend on: each upstream task's tool, outputs and metrics.
+
+    Not the whole input dict. Inputs also carry each upstream task's QC report, so seeding
+    on `str(inputs)` made the mock's science a function of the QC schema: adding one field
+    to `GateResult` reshuffled every downstream draw and changed the demo campaign's outcome.
+    """
+    return [(k, v.get("tool"), v.get("outputs"), v.get("metrics"))
+            if isinstance(v, dict) else (k, v) for k, v in sorted(inputs.items())]
+
+
 class GenerateAgent(TaskAgent):
     """Backbone generation. Quality improves with diffusion_steps (a real trade-off)."""
 
@@ -36,7 +47,7 @@ class DesignAgent(TaskAgent):
     """Inverse folding. Lower temperature -> higher recovery, less diversity."""
 
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        r = _rng((self.spec.id, params, req.node_id, req.inputs))
+        r = _rng((self.spec.id, params, req.node_id, _upstream(req.inputs)))
         t = params.get("temperature", 0.1)
         recovery = max(0.15, min(0.85, 0.75 - t * 0.9 + r.uniform(-0.04, 0.04)))
         return {"result": "sequence", "count": params.get("num_seqs", 1),
@@ -49,7 +60,7 @@ class FoldAgent(TaskAgent):
     """Structure prediction. Emits the confidence metrics an agent gates on."""
 
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        r = _rng((self.spec.id, params, req.node_id, req.inputs))
+        r = _rng((self.spec.id, params, req.node_id, _upstream(req.inputs)))
         rec = 0.5
         for v in req.inputs.values():
             if isinstance(v, dict):
@@ -64,7 +75,7 @@ class FoldAgent(TaskAgent):
 
 class ScoreAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        r = _rng((self.spec.id, params, req.node_id, req.inputs))
+        r = _rng((self.spec.id, params, req.node_id, _upstream(req.inputs)))
         ddg = round(r.uniform(-3.5, 2.0), 3)
         return {"result": "scores", "count": 1, "outputs": {"metrics": "M"},
                 "metrics": {"ddg": ddg, "clashscore": round(abs(r.gauss(4, 3)), 2)}}

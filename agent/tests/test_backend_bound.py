@@ -136,7 +136,7 @@ async def _executor_with(flow, timeout_s):
 
     spec = CampaignSpec(campaign_id="t-teardown", goal="g", objectives=[],
                         site=SiteCaps(gpu_api="cuda", gpus_per_node=1),
-                        backend="concurrent",
+                        backend="concurrent", root="/tmp/impress_a_tests",
                         backend_shutdown_timeout_s=timeout_s)
     ex = CampaignExecutor(spec, policy=None)
     ex.flow = flow
