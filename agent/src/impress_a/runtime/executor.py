@@ -60,8 +60,8 @@ class CampaignSpec:
     goal: str
     objectives: list[Objective]
     budget: dict[str, float] = field(default_factory=dict)
-    max_cycles: int = 10      # turns of the loop; NOT a bound on work once a turn
-                              # may submit more than one experiment
+    max_cycles: int = 10      # runs a decide-style policy is driven through (a Backtrack
+                              # is not one); a `conduct` reasoner is bounded by max_runs
     max_runs: int = 0         # submissions; 0 = unbounded. See `max_cycles`.
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
@@ -108,7 +108,7 @@ class CampaignSpec:
 @dataclass
 class CampaignResult:
     campaign_id: str
-    cycles: int               # turns of the loop
+    cycles: int               # runs admitted; a Backtrack is not one
     stop_reason: str
     front: list[DesignNode]
     tree: CampaignTree

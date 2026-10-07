@@ -36,7 +36,7 @@ ANCHORS: list[tuple[str, int, str]] = [
     ("runtime/executor.py", 242, "def _absorb"),
     # S4 — the two lanes
     ("runtime/executor.py", 215, "def observe"),
-    ("policy/driver.py", 84, "async def _submit_with_retry"),
+    ("policy/driver.py", 98, "async def _submit_with_retry"),
     ("runtime/executor.py", 304, "async def _admit_once"),
     ("exec/dispatch.py", 165, "def submit"),
     ("runtime/executor.py", 744, "async def pump"),

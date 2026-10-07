@@ -34,8 +34,16 @@ class SequentialPolicyDriver:
 
     async def conduct(self, session: CampaignSession) -> None:
         outstanding: list[str] = []
+        # A cycle is a RUN. `max_turns` used to bound loop iterations, so a Backtrack -
+        # which only chooses where the next run branches from - spent a cycle of its own:
+        # jobs 22702568, 22726105 and 22728140 each asked for 6, backtracked once, and ran
+        # 5, while the executor (counting runs) reported `cycles: 5` beside "max_cycles=6
+        # reached". Backtracks are now free, but not unbounded: two with no run between
+        # them is a policy that is not going to run anything, and the campaign stops.
+        turn = 0
+        backtracked = False
         try:
-            for turn in range(self.max_turns):
+            while turn < self.max_turns:
                 obs = await session.observe()
                 decision = await self.policy.decide(obs)
 
@@ -45,13 +53,19 @@ class SequentialPolicyDriver:
                     return await session.request_human(decision.question,
                                                        decision.context)
                 if isinstance(decision, Backtrack):
+                    if backtracked:
+                        return await session.stop(
+                            "policy backtracked twice without running anything between")
                     await session.backtrack(decision.node_id, decision.rationale)
+                    backtracked = True
                     continue
 
                 assert isinstance(decision, ComposeAndRun)
                 run_id = await self._submit_with_retry(session, decision, turn)
                 if run_id is None:
                     return
+                turn += 1
+                backtracked = False
                 outstanding.append(run_id)
 
                 # Hold at most `concurrency` experiments open. At the default of 1 this

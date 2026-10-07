@@ -370,7 +370,7 @@ The honest flip side is at the bottom. If a person reviewed every graph before i
   const steps = [
     ["OBSERVE", "", "OBSERVE  ::observe:215", "read-only, await-free", "CampaignObservation", "left"],
     ["DECIDE", "the one swappable block", "", "", "", null],
-    ["SUBMIT", "_submit_with_retry:84", "ADMIT  ::_admit_once:304", "compose → gates → interlock\n→ dry-run → reserve", "ExperimentIntent", "right"],
+    ["SUBMIT", "_submit_with_retry:98", "ADMIT  ::_admit_once:304", "compose → gates → interlock\n→ dry-run → reserve", "ExperimentIntent", "right"],
     ["", "", "DISPATCH  Dispatcher.submit:165", "returns a handle, does not await", "", null],
     ["WAIT", "result() / as_completed()", "REAP  ::pump:744 → _reap:629", "collect · QC · _absorb:242\nterminate?", "RunOutcome", "left"],
   ];

@@ -862,3 +862,47 @@ async def test_a_truncated_chain_can_never_move_the_front(reg, tmp_path):
     assert res.front == [], "yet the front is empty: no node carries sc_rmsd or iptm"
     assert res.stop_reason.startswith("stagnation:"), res.stop_reason
     assert res.cycles < s.max_cycles, "the executor stopped it early"
+
+
+class _Backtracker:
+    """Runs the mock chain, branching from its first result before run `backtrack_at` -
+    or before every run after the first, when `always` is set."""
+    name = "backtracker"
+
+    def __init__(self, backtrack_at: int = 1, always: bool = False):
+        self.backtrack_at, self.always = backtrack_at, always
+        self.first_node: str | None = None
+        self.backtracked_before: set[int] = set()
+
+    async def decide(self, obs):
+        from impress_a.core.decision import Backtrack, ComposeAndRun
+        due = self.always or obs.cycle == self.backtrack_at
+        if self.first_node and due and (self.always or obs.cycle not in self.backtracked_before):
+            self.backtracked_before.add(obs.cycle)
+            return Backtrack(node_id=self.first_node, rationale="test")
+        return ComposeAndRun(intent=ExperimentIntent(goal=obs.goal, stages=CHAIN, replicas=1))
+
+    async def interpret(self, outcome, obs):
+        self.first_node = self.first_node or (outcome.nodes[0] if outcome.nodes else None)
+
+    async def on_rejected(self, decision, failure):
+        from impress_a.core.decision import Stop
+        return Stop(reason=f"rejected: {failure.reason}")
+
+
+async def test_a_backtrack_does_not_spend_a_cycle(reg):
+    """max_cycles counts RUNS. Jobs 22702568, 22726105 and 22728140 each asked for 6,
+    backtracked once, and ran 5 - the driver counted the backtrack as a cycle."""
+    s = spec("t-bt-cycles", max_cycles=3)
+    s.stagnation_limit = 3
+    res = await CampaignManager(s, _Backtracker(backtrack_at=1), reg).run()
+    assert res.runs == 3 and res.cycles == 3, (res.runs, res.cycles, res.stop_reason)
+    assert res.stop_reason == "max_cycles=3 reached"
+
+
+async def test_a_policy_that_only_backtracks_is_stopped(reg):
+    """Free backtracks must not mean unbounded ones."""
+    s = spec("t-bt-spin", max_cycles=5)
+    res = await CampaignManager(s, _Backtracker(always=True), reg).run()
+    assert res.stop_reason == "policy backtracked twice without running anything between"
+    assert res.runs == 1
