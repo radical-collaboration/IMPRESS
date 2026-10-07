@@ -14,7 +14,7 @@ Five sources, each labelled in the output so a slide can say where its number ca
   shape     the real six-stage chain composed at 1, 2 and 4 replicas, and its pattern signature
             for each - the evidence for the A10 finding on slide 14
   delta     the four Delta jobs, TRANSCRIBED from plans/first-real-run.md and plans/backlog.md.
-            The raw logs live under $WORK_DIR/impress_a_runs/<job> on Delta, not here; when a
+            The raw logs live under $WORK_DIR/impress_a_runs/<jobid>_<campaign> on Delta, not here; when a
             copy exists locally, read it instead and drop the transcription.
 """
 

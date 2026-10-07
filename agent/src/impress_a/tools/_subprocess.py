@@ -111,9 +111,8 @@ def workdir_for(req: Any, prefix: str) -> Path:
 
     Defaults to the CURRENT WORKING DIRECTORY, because that is where the launcher has
     already put us and the launcher is what knows the machine: `delta_gpu_run.sh` cds
-    into `$WORK_DIR/impress_a_runs/$SLURM_JOB_ID` - a shared filesystem, scoped per
-    job so concurrent campaigns cannot collide. It is also where asyncflow already
-    writes its own session files.
+    into `$WORK_DIR/impress_a_runs/<jobid>_<campaign>` - a shared filesystem, scoped
+    per job so concurrent campaigns cannot collide.
 
     The adapters previously called `tempfile.mkdtemp()`, which put every artifact in the
     system temp dir - NODE-LOCAL. Under Dragon multi-node a downstream task can be

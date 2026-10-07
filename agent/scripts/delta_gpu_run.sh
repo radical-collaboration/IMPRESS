@@ -61,9 +61,54 @@
 #SBATCH --mail-type=ALL
 #SBATCH --output=impress_a_%j.out
 # NOTE: IMPRESS-A log output (including errors) goes to .out, not .err, mirroring the
-#   original IMPRESS scripts' own convention - on failure check impress_a_<jobid>.out.
+#   original IMPRESS scripts' own convention. On exit it is moved to
+#   $WORK_DIR/impress_a_runs/<jobid>_<campaign>/slurm.out; it stays here as
+#   impress_a_<jobid>.out only if the job died before that directory existed.
 
 set -e
+
+# ── Exit handling ─────────────────────────────────────────────────────────────
+# One EXIT handler for everything the job leaves behind, so a run directory ends up
+# self-contained whichever way the job ends (TIMEOUT's SIGTERM included; SIGKILL is not):
+# the foundry /tmp copy goes, empty asyncflow session dirs and Dragon's ddict_orc* files go,
+# the manifest gets its end time and exit code, and this job's SLURM .out moves in beside
+# campaign.log as slurm.out. A job that dies before WORKDIR exists keeps its .out in the
+# submit directory, which is where you would look for it anyway.
+_manifest() {   # _manifest key=value ... - merge into ${WORKDIR}/manifest.json
+    python3 - "${WORKDIR}/manifest.json" "$@" <<'PY'
+import json, sys
+path, *pairs = sys.argv[1:]
+try:
+    with open(path) as f:
+        m = json.load(f)
+except (OSError, ValueError):
+    m = {}
+for kv in pairs:
+    k, _, v = kv.partition("=")
+    m[k] = {"true": True, "false": False}.get(v, int(v) if v.lstrip("-").isdigit() else v)
+with open(path, "w") as f:
+    json.dump(m, f, indent=2)
+    f.write("\n")
+PY
+}
+_finish() {
+    local rc=$?
+    if [ -n "${_FOUNDRY_TMP:-}" ]; then
+        echo "Removing ${_FOUNDRY_TMP}"
+        rm -rf "${_FOUNDRY_TMP}" || true
+    fi
+    if [ -n "${WORKDIR:-}" ] && [ -d "${WORKDIR}" ]; then
+        find "${WORKDIR}" -maxdepth 2 -name 'asyncflow.session.*' -type d -empty -delete || true
+        rm -f "${WORKDIR}"/ddict_orc* || true
+        _manifest "finished=$(date -Iseconds)" "exit_code=${rc}" || true
+        local out="${SLURM_SUBMIT_DIR:-.}/impress_a_${SLURM_JOB_ID:-}.out"
+        if [ -n "${SLURM_JOB_ID:-}" ] && [ -f "${out}" ]; then
+            echo "Moving ${out} -> ${WORKDIR}/slurm.out"
+            cp "${out}" "${WORKDIR}/slurm.out" && rm -f "${out}" || true
+        fi
+    fi
+}
+trap _finish EXIT
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
@@ -169,9 +214,7 @@ if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     echo "Extracting foundry sandbox from ${FOUNDRY_TAR} to ${_FOUNDRY_TMP} ..."
     mkdir -p "${_FOUNDRY_TMP}"
     tar -xzf "${FOUNDRY_TAR}" -C "${_FOUNDRY_TMP}" --strip-components=1
-    export FOUNDRY_SIF_PATH="${_FOUNDRY_TMP}"
-    # shellcheck disable=SC2064
-    trap "echo 'Removing ${_FOUNDRY_TMP}'; rm -rf '${_FOUNDRY_TMP}'" EXIT
+    export FOUNDRY_SIF_PATH="${_FOUNDRY_TMP}"     # removed by _finish
 fi
 
 echo "WORK_DIR:          ${WORK_DIR}"
@@ -198,16 +241,29 @@ fi
 CAMPAIGN="$(realpath "${CAMPAIGN}")"
 
 # ── Working directory ─────────────────────────────────────────────────────────
-# No IMPRESS_WORK_DIR/IMPRESS_SESSION_DIR indirection here (unlike the old scripts) -
-# impress_a's CampaignSpec.root and asyncflow's own session dir both resolve relative to
-# the process CWD (see CLAUDE.md's asyncflow-writes-into-CWD gotcha), so `cd`ing into a
-# per-job scratch directory before launch is sufficient.
-WORKDIR="${IMPRESS_A_WORKDIR:-${WORK_DIR}/impress_a_runs/${SLURM_JOB_ID:-manual}}"
+# One directory per job, named <jobid>_<campaign> so a listing says what each run was:
+#   manifest.json  campaign.log  slurm.out  <campaign_id>-<model>/{provenance,jobs}
+#   work/ (tool workdirs)  runinfo/ (Dragon's)
+# IMPRESS_A_RUN_ROOT puts provenance directly in here rather than under campaigns/_runs,
+# and the executor puts asyncflow's session dir under the same root. Tool workdirs and
+# campaign.log still resolve against the CWD, hence the cd.
+CAMPAIGN_STEM="$(basename "${CAMPAIGN}" .yaml)"
+RUN_ID="${SLURM_JOB_ID:-manual-$(date +%Y%m%d-%H%M%S)}"
+WORKDIR="${IMPRESS_A_WORKDIR:-${WORK_DIR}/impress_a_runs/${RUN_ID}_${CAMPAIGN_STEM}}"
 mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
+export IMPRESS_A_RUN_ROOT="${WORKDIR}"
 
 # ── Model ────────────────────────────────────────────────────────────
 MODEL="${IMPRESS_A_MODEL:-D}"
+GIT_SHA="$(git -C "${IMPRESS_A_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_DIRTY=false
+if [ -n "$(git -C "${IMPRESS_A_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    GIT_DIRTY=true
+fi
+_manifest "job_id=${RUN_ID}" "campaign=${CAMPAIGN_STEM}" "campaign_path=${CAMPAIGN}" \
+          "model=${MODEL}" "nodes=${SLURM_NNODES:-1}" "git_sha=${GIT_SHA}" \
+          "git_dirty=${GIT_DIRTY}" "started=$(date -Iseconds)"
 echo "Campaign:          ${CAMPAIGN}"
 echo "Model:             ${MODEL}"
 echo "Working directory: ${WORKDIR}"

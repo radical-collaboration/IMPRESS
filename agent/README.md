@@ -136,6 +136,28 @@ $ impress-a run campaigns/mock-stabilize.yaml --model A
     n000006 qc=pass  sc_rmsd=2.116 iptm=0.607 ddg=0.073
 ```
 
+### On Delta
+
+```bash
+export WORK_DIR=/work/nvme/<project>/$USER     # NVMe, not /work/hdd - see docs/limitations.md
+impress-a preflight campaigns/delta-small-molecule-smoke.yaml
+sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml
+```
+
+Each job writes one self-contained directory, `$WORK_DIR/impress_a_runs/<jobid>_<campaign>/`:
+
+```
+manifest.json            job id, campaign, model, nodes, git sha (+dirty), start/end, exit code
+slurm.out                the job's SLURM output, moved here on exit
+campaign.log             the campaign transcript
+<campaign_id>-<model>/   provenance/*.jsonl and jobs/ledger.jsonl
+work/                    one directory per tool task, with its real outputs
+runinfo/                 Dragon's own
+```
+
+The trust ledger is site-scoped and lives outside it, in `$WORK_DIR/_trust/`.
+`$WORK_DIR/impress_a_runs/INDEX.md` records which jobs were kept and what each one showed.
+
 ## Defining a campaign
 
 ```yaml

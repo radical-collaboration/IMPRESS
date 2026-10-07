@@ -94,10 +94,10 @@ async def make_backend(kind: str, config: dict[str, Any] | None = None):
     return await _init_backend(_construct_backend_sync(kind, config))
 
 
-async def make_engine(kind: str, config: dict[str, Any] | None = None):
+async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir: str = ""):
     from radical.asyncflow import WorkflowEngine
     backend = await make_backend(kind, config)
-    return await WorkflowEngine.create(backend=backend), backend
+    return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
 
 
 def _construct_backend_in_thread(kind: str, config: dict[str, Any] | None,
@@ -126,7 +126,7 @@ def _construct_backend_in_thread(kind: str, config: dict[str, Any] | None,
 
 
 async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
-                              timeout_s: float, heartbeat_s: float):
+                              timeout_s: float, heartbeat_s: float, work_dir: str = ""):
     """`make_engine`, bounded by a wall-clock timeout with progress logging.
 
     `timeout_s <= 0` disables the bound entirely and calls `make_engine` directly - this
@@ -138,7 +138,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
     that is the loop that will submit to them.
     """
     if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS:
-        return await make_engine(kind, config)
+        return await make_engine(kind, config, work_dir)
 
     fut: Future = Future()
     threading.Thread(target=_construct_backend_in_thread, args=(kind, config, fut),
@@ -172,7 +172,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
         async def _finish():
             from radical.asyncflow import WorkflowEngine
             backend = await _init_backend(be)
-            return await WorkflowEngine.create(backend=backend), backend
+            return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
 
         try:
             if remaining <= 0:

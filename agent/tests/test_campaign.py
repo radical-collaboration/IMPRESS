@@ -26,6 +26,7 @@ from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
 from impress_a.tools.registry import Registry
 
+ROOT = "/tmp/impress_a_tests"   # campaign root, and where direct engines put their sessions
 CHAIN = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
 OBJS = [Objective(name="sc_rmsd", direction=Direction.MIN, max=3.0),
         Objective(name="iptm", direction=Direction.MAX, min=0.55),
@@ -38,7 +39,7 @@ def spec(cid, **kw):
                         max_cycles=kw.pop("max_cycles", 4),
                         site=SiteCaps(gpu_api="cuda", gpus_per_node=1),
                         backend="concurrent", backend_config={"workers": 2},
-                        root="/tmp/impress_a_tests", **kw)
+                        root=ROOT, **kw)
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +65,20 @@ async def test_null_policy_stops_immediately(reg):
     assert res.cycles == 0 and len(res.tree) == 0
 
 
+async def test_a_campaign_writes_nothing_into_the_cwd(reg, tmp_path, monkeypatch):
+    """asyncflow puts its session dir in the CWD unless told otherwise. That is how 516
+    empty `asyncflow.session.*` dirs piled up in the checkout, and on Delta it scattered
+    them beside, rather than inside, each campaign's own output."""
+    cwd, root = tmp_path / "cwd", tmp_path / "root"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    s = spec("t-cwd", max_cycles=1)
+    s.root = str(root)
+    await CampaignManager(s, ThresholdPolicy(), reg).run()
+    assert not list(cwd.iterdir()), f"left in the CWD: {sorted(cwd.iterdir())}"
+    assert list((root / "t-cwd").glob("asyncflow.session.*"))
+
+
 async def test_lying_tool_is_caught_by_qc(reg):
     """mock_noodle completes successfully and reports confident `designability`
     while producing no secondary structure. Only the QC gate catches it - the
@@ -73,7 +88,7 @@ async def test_lying_tool_is_caught_by_qc(reg):
     from impress_a.exec.dispatch import Dispatcher
 
     g = Composer(reg).compose(ExperimentIntent(goal="g", stages=["mock_noodle"]))
-    flow, _ = await make_engine("concurrent", {"workers": 1})
+    flow, _ = await make_engine("concurrent", {"workers": 1}, work_dir=ROOT)
     try:
         res = await Dispatcher(flow, reg).run(g)
     finally:
@@ -170,7 +185,7 @@ async def test_concurrent_runs_of_one_intent_are_independent(reg):
     g1, g2 = comp.compose(intent, "r0001"), comp.compose(intent, "r0002")
     assert sorted(g1.nodes) == sorted(g2.nodes), "task ids are graph-local - the setup"
 
-    flow, _ = await make_engine("concurrent", {"workers": 4})
+    flow, _ = await make_engine("concurrent", {"workers": 4}, work_dir=ROOT)
     try:
         d = Dispatcher(flow, reg)
         r1, r2 = await asyncio.gather(d.run(g1, invocation="r0001"),
@@ -326,7 +341,7 @@ async def test_cancel_is_advisory_and_the_outcome_still_comes_from_collect(reg):
 
     g = Composer(reg).compose(
         ExperimentIntent(goal="g", stages=CHAIN, replicas=4), "r0009")
-    flow, _ = await make_engine("concurrent", {"workers": 2})
+    flow, _ = await make_engine("concurrent", {"workers": 2}, work_dir=ROOT)
     try:
         d = Dispatcher(flow, reg)
         h = d.submit(g, run_id="r0009")
@@ -348,7 +363,7 @@ async def test_run_labels_tag_tasks_so_concurrent_graphs_stay_distinguishable(re
     from impress_a.exec.backend import make_engine
     from impress_a.exec.dispatch import Dispatcher
 
-    flow, _ = await make_engine("concurrent", {"workers": 2})
+    flow, _ = await make_engine("concurrent", {"workers": 2}, work_dir=ROOT)
     try:
         d = Dispatcher(flow, reg)
         hs = [d.submit(Composer(reg).compose(

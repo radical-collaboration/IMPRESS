@@ -96,7 +96,10 @@ Full notes in `docs/reference/middleware-integration.md`. The ones that cost the
   `asyncio.gather` awaits *independent* work.
 - **Resource shapes are not portable** across backends; `exec/resources.py` owns the translation.
 - **No retry primitive, no durable job state** in asyncflow. Both are ours (`exec/ledger.py`).
-- asyncflow writes `asyncflow.session.*` into the CWD on every engine run. Gitignored; clean periodically.
+- asyncflow writes `asyncflow.session.*` into the CWD on every engine run *unless given a `work_dir`*.
+  `make_engine`/`make_engine_bounded` take one, and the executor passes the campaign root, so sessions
+  land beside provenance. Any new direct engine construction (tests included) must pass it too, or the
+  checkout fills up again - 516 empty ones had to be deleted.
 
 ## Adding a tool
 

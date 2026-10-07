@@ -135,8 +135,8 @@ def test_trust_ledger_survives_concurrent_writers(tmp_path):
 def test_trust_survives_a_campaign_running_from_a_different_directory(tmp_path, monkeypatch):
     """Promotion has to accumulate across JOBS, and on HPC every job is a fresh CWD.
 
-    `spec.root` defaults to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into
-    `$WORK_DIR/impress_a_runs/$SLURM_JOB_ID` before launching - so the ledger resolved inside
+    `spec.root` defaulted to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into a
+    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger resolved inside
     each job's own directory and started empty every time. On disk after two real runs:
 
         22684607/campaigns/_runs/_trust/cuda.jsonl   0 clean
@@ -193,6 +193,25 @@ def test_trust_root_overrides_the_campaign_root(tmp_path, monkeypatch):
                                        site=SiteCaps(gpu_api="cuda")), policy=None)
     assert pathlib.Path(ex.trust.path) == pathlib.Path("campaigns/_runs/_trust/cuda.jsonl"), \
         "the default is relative on purpose - stable CWD, and tests rely on it"
+
+
+def test_run_root_comes_from_the_environment_unless_the_yaml_names_one(tmp_path, monkeypatch):
+    """`delta_gpu_run.sh` exports IMPRESS_A_RUN_ROOT as the job's own directory, so
+    provenance lands beside campaign.log. A `root:` written in the YAML still wins, and with
+    neither the laptop default must not move."""
+    from impress_a.cli import load_spec
+
+    src = pathlib.Path("campaigns/mock-stabilize.yaml").read_text()
+    plain = tmp_path / "plain.yaml"
+    plain.write_text(src)
+    pinned = tmp_path / "pinned.yaml"
+    pinned.write_text(src + "\nroot: /from/yaml\n")
+
+    monkeypatch.delenv("IMPRESS_A_RUN_ROOT", raising=False)
+    assert load_spec(plain).root == "campaigns/_runs"
+    monkeypatch.setenv("IMPRESS_A_RUN_ROOT", "/from/env")
+    assert load_spec(plain).root == "/from/env"
+    assert load_spec(pinned).root == "/from/yaml"
 
 
 def test_trust_ledger_without_a_path_persists_nothing():

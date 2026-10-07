@@ -19,7 +19,8 @@ all four objectives valued. One lineage, one cycle, one draw - see A1 for what t
 (`delta-small-molecule-smoke`, model D, one lineage) reached Delta on 2026-09-29:
 
 - `rfd3_design` **executed and succeeded** - roughly 3 minutes wall-clock, real output in
-  `impress_a_runs/22536706/work/rfd3_r0001_r0_s0_rfd3_design/`. The Hydra contract rewrite (A3) is
+  `impress_a_runs/22536706/work/rfd3_r0001_r0_s0_rfd3_design/` (no longer retained: the archived
+  `22536706_delta-small-molecule-smoke/` keeps logs and provenance only). The Hydra contract rewrite (A3) is
   confirmed against the real CLI by execution, not by reading. The output shape is confirmed too
   (A4) - and reading it found a real defect in our own adapter, below.
 - `ligandmpnn_design` **failed**, having written nothing into its work dir. *Why* is unknown and

@@ -44,7 +44,7 @@ Slide 11 carries the smaller version of the same point: of the eight compute pat
 member, so three of the taxonomy's dispatch paths have never been taken by any tool.
 
 **Second: the Delta durations on slide 12 are transcribed**, from `plans/first-real-run.md` and
-`plans/backlog.md`. The raw logs live under `$WORK_DIR/impress_a_runs/<job>` on Delta, not in this
+`plans/backlog.md`. The raw logs live under `$WORK_DIR/impress_a_runs/<jobid>_<campaign>` on Delta, not in this
 checkout. `run.json` labels them, and the slide's footer says so. Everything else on the slides —
 code statistics, the mock campaign, the three pattern signatures — is computed live by
 `run_model.py` against this checkout.

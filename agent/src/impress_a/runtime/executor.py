@@ -75,7 +75,7 @@ class CampaignSpec:
     # Where the SITE-scoped trust ledger lives, independent of `root`. Empty keeps the
     # historical `root/_trust`, which is right wherever CWD is stable - a laptop, the test
     # tier. It is wrong the moment something cds per run: `delta_gpu_run.sh` cds into
-    # $WORK_DIR/impress_a_runs/$SLURM_JOB_ID, so a relative path resolved INSIDE each job
+    # a per-job dir under $WORK_DIR/impress_a_runs, so a relative path resolved per job
     # and the ledger started empty every time. Promotion counts consecutive clean runs
     # within one file, so it was unreachable on Delta from the first run onward and the
     # trusted code path had never executed. `cli.load_spec` fills this from
@@ -728,8 +728,8 @@ class CampaignExecutor:
         log.info("engine: constructing %s backend (config=%s)",
                  self.spec.backend, self.spec.backend_config or {})
         self.flow, self._backend = await make_engine_bounded(
-            self.spec.backend, self.spec.backend_config,
-            self.spec.backend_startup_timeout_s, self.spec.backend_startup_heartbeat_s)
+            self.spec.backend, self.spec.backend_config, self.spec.backend_startup_timeout_s,
+            self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
         log.info("engine: %s backend ready", self.spec.backend)
         self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend)
         self.jobs.record(event="campaign_started",

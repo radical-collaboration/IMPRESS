@@ -26,15 +26,15 @@ from impress_a.exec.backend import BackendConstructionTimeout, make_engine_bound
 async def test_disabled_by_default_calls_make_engine_directly(monkeypatch):
     calls = []
 
-    async def fake_make_engine(kind, config):
-        calls.append((kind, config))
+    async def fake_make_engine(kind, config, work_dir=""):
+        calls.append((kind, config, work_dir))
         return ("flow", "backend")
 
     monkeypatch.setattr(backend_mod, "make_engine", fake_make_engine)
     result = await make_engine_bounded("concurrent", {"workers": 1}, timeout_s=0,
-                                       heartbeat_s=30)
+                                       heartbeat_s=30, work_dir="/run/root")
     assert result == ("flow", "backend")
-    assert calls == [("concurrent", {"workers": 1})]
+    assert calls == [("concurrent", {"workers": 1}, "/run/root")]
 
 
 async def test_a_stalled_construction_times_out_loudly_instead_of_hanging(monkeypatch,
@@ -60,7 +60,7 @@ async def test_a_stalled_construction_times_out_loudly_instead_of_hanging(monkey
         "the heartbeat must fire even while construction is stalled"
 
 
-async def test_a_bounded_engine_actually_runs_a_task():
+async def test_a_bounded_engine_actually_runs_a_task(tmp_path):
     """A bounded engine must be a LIVE engine - built on the caller's own loop.
 
     Fails against the pre-fix `make_engine_bounded`, which built the engine on a
@@ -69,10 +69,12 @@ async def test_a_bounded_engine_actually_runs_a_task():
     """
     flow, _backend = await make_engine_bounded(
         "concurrent", {"executor": "thread", "workers": 2},
-        timeout_s=30, heartbeat_s=5)
+        timeout_s=30, heartbeat_s=5, work_dir=str(tmp_path))
     try:
         assert flow.loop is asyncio.get_running_loop(), \
             "the engine must belong to the loop that will submit to it"
+        assert list(tmp_path.glob("asyncflow.session.*")), \
+            "the session dir belongs under work_dir, not in whatever the CWD happens to be"
 
         @flow.function_task
         async def forty_two():                    # asyncflow requires `async def`
@@ -83,7 +85,8 @@ async def test_a_bounded_engine_actually_runs_a_task():
         await flow.shutdown()
 
 
-async def test_a_bounded_non_cheap_backend_is_still_built_on_the_caller_loop(monkeypatch):
+async def test_a_bounded_non_cheap_backend_is_still_built_on_the_caller_loop(monkeypatch,
+                                                                          tmp_path):
     """The offloaded path (a real `dragon`-like kind) must end up on our loop too.
 
     `concurrent` short-circuits to `make_engine`, so it never exercises the daemon
@@ -99,9 +102,11 @@ async def test_a_bounded_non_cheap_backend_is_still_built_on_the_caller_loop(mon
     monkeypatch.setattr(backend_mod, "_construct_backend_sync", fake_sync)
 
     flow, _backend = await make_engine_bounded("pretend_dragon", {}, timeout_s=30,
-                                               heartbeat_s=5)
+                                               heartbeat_s=5, work_dir=str(tmp_path))
     try:
         assert flow.loop is asyncio.get_running_loop()
+        assert list(tmp_path.glob("asyncflow.session.*")), \
+            "the threaded path must honour work_dir too - it builds its own engine"
 
         @flow.function_task
         async def hello():
