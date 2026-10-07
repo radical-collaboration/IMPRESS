@@ -254,6 +254,14 @@ does anything. Every real run so far has been `replicas: 1`.
   `budget.gpu_hours` for a replicas-4 campaign specifically (8.0 gives a 0.80 cap). **(c)** Run
   `replicas: 2` (0.34, fits today) and accept a weaker version of the check.
 
+  **Correction (2026-10-07): route (a) does not work.** The pattern signature includes replica
+  multiplicity (`f5b21d82…` at 1, `f8bcefed…` at 2, `78e730c6…` at 4), so trust earned at
+  width 1 does not transfer, and width 4 can never be admitted untrusted at a 6.0 GPU-h budget,
+  so it can never earn trust there either. Width 4 needs route (b), or a deliberate ruling on
+  whether multiplicity belongs in the signature. Separately, concurrent GPU tasks are not pinned:
+  every task sees `CUDA_VISIBLE_DEVICES=0,1,2,3`, and `exec/resources.to_backend_description` is
+  called by nothing. `plans/next-run-replicas.md` pins lineages to GPUs before running width 2.
+
 **A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
 `rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
 shape, same parameters. Every `cost_model` figure now in the specs comes from one or two
@@ -294,8 +302,11 @@ runs: `22684607/campaigns/_runs/_trust/cuda.jsonl` with 0 clean events and
   the first time that path executed. r0004 was demoted by packmin's `total_score <= 1000`
   integrity bound over +1064.5, a pose that relaxed normally to -336.0; the bound was removed and
   fastrelax convergence now judges an exploded pose (see `toolkits/rosetta/SKILL.md`).
-  **Still open:** a *sustained* trusted run (four consecutive trusted cycles with no demotion),
-  and the first node to reach plain `pass`. `plans/next-run-sustained-trust.md`.
+  **Sustained trust - DONE.** Job 22728140 promoted after r0002 and ran r0003-r0005 trusted, with
+  no demotion and no integrity failure (it asked for 6 cycles and got 5, because of a driver
+  off-by-one that has since been fixed). **Still open:** the first node to reach plain `pass`. All
+  five trusted nodes so far missed an acceptance threshold, at a ~31% acceptance rate, so this
+  wants more trusted draws, not code. `plans/next-run-sustained-trust.md`.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

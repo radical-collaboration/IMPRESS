@@ -49,8 +49,9 @@ were never the defect; the storage was.
   is pack+min with no constraints, so its score measures how much relaxing is left, not
   breakage. Both bounds it once had were wrong: `max: 0.0` failed a healthy +145.3 (job
   22684607), and `max: 1000.0` demoted a trusted pattern over a +1064.5 pose that relaxed
-  normally to -336.0 (job 22726105 r0004). Ten real packmin scores span -7.6 to +1064.5,
-  all of which relaxed. Upstream gates nothing on packmin either.
+  normally to -336.0 (job 22726105 r0004). Fifteen real packmin scores (jobs 22702568,
+  22726105, 22728140) span -95.8 to +1064.5, and every one relaxed: fastrelax -503.1 to -200.1,
+  `fa_rep` 71–196. Upstream gates nothing on packmin either.
 - `filter_shape`'s `shape_complementarity` gate threshold (`min: 0.55`) is a starting
   point copied from common interface-design practice, not calibrated against this
   project's own designs yet - expect to retune after the first live campaign.

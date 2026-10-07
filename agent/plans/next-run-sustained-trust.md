@@ -89,6 +89,30 @@ minutes.
   `toolkits/rosetta/SKILL.md`. That widens the evidence behind the fastrelax bounds, which are
   now the only integrity judgement on a pose.
 
+## Outcome: job 22728140 (2026-10-07, 13m37s, COMPLETED 0:0, commit e9f44cd)
+
+| Run | Admitted | Tasks | QC | Failed gates (all acceptance) |
+|---|---|---|---|---|
+| r0001 | provisional | 6/6 | suspect | none |
+| r0002 | provisional, then **promoted** | 6/6 | fail | ipTM 0.395 |
+| r0003 | **trusted** | 6/6 | fail | LigandMPNN confidence 0.394/0.391, shape complementarity 0.471 |
+| r0004 | **trusted** | 6/6 | fail | pLDDT 0.364, ipTM 0.349 |
+| r0005 | **trusted** | 6/6 | fail | LigandMPNN confidence 0.397, pLDDT 0.494, ipTM 0.360 |
+
+- **Held:** promotion after r0002, three consecutive trusted cycles (no forced dry run, no
+  cost cap), **no demotion**, and not one integrity failure. **Sustained trust is shown.**
+- **The packmin change did its job:** r0005's packmin scored +808.5 and relaxed to -200.1. All
+  five relaxes converged (fastrelax -493.7 to -200.1, `fa_rep` 75–190).
+- **Missed: no plain `pass`.** All three trusted nodes fell short on quality. That was given
+  ~80%, so it is a draw, not a defect. The acceptance rate is now 5 of 16 complete runs (~31%).
+  The front is r0001's node, which cleared every gate but was `suspect`.
+- **Missed: 5 cycles, not 6.** Not a draw: an **off-by-one**. The driver counted a Backtrack
+  (one in every trust run) as a cycle, so `max_cycles: 6` gave 5 runs while the executor,
+  counting runs, reported `cycles: 5`. Fixed in `policy/driver.py` (backtracks are free, but two
+  in a row with no run between them stop the campaign), and pinned by
+  `test_a_backtrack_does_not_spend_a_cycle`. Every earlier trust plan assumed 6 runs; that was
+  wrong for all three jobs.
+
 ## Queued after (one variable each)
 
 1. **`replicas: 2`**, same spec otherwise. This exercises the N-independent-lineages invariant,
