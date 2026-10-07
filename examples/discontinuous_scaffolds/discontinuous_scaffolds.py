@@ -24,9 +24,9 @@ STEP_ANALYSIS          = 8   # analysis.py + plot_campaign.py
 
 # ── Default paths ───────────────────────────────────────────────────────────
 
-DEFAULT_SCRIPTS_PATH     = "/home/mason/exdrive/rad/discontinuous_scaffolds/rfd3-islands-validation"
-DEFAULT_FOUNDRY_SIF      = "/ocean/projects/dmr170002p/hooten/foundry.sif"
-DEFAULT_MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
+DEFAULT_SCRIPTS_PATH     = "<path to rfd3-islands-validation>"
+DEFAULT_FOUNDRY_SIF      = "/ocean/projects/<project>/<user>/foundry.sif"
+DEFAULT_MPNN_DIR         = "/ocean/projects/<project>/<user>/LigandMPNN"
 DEFAULT_RFD_INPUT        = "mcsa_mod8-5.json"
 DEFAULT_RMSD_THRESHOLD   = 1.5
 DEFAULT_DIFFUSION_BATCH_SIZE = 10

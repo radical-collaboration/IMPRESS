@@ -12,7 +12,7 @@ mcsa_pdb_dir="$5"
 island_counts_csv="$6"
 rmsd_threshold="$7"
 
-source /anvil/projects/x-nairr240405/mason/IMPRESS/.venv/bin/activate
+source /anvil/projects/${PROJECT:?set PROJECT to your allocation}/$USER/IMPRESS/.venv/bin/activate
 
 python3 "$scripts_path/analysis.py" \
     "$chai_out_dir" \

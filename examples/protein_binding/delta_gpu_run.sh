@@ -4,7 +4,7 @@
 #
 # Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export WORK_DIR=/work/nvme/bdyk/$USER
+#   export WORK_DIR=/work/nvme/<project>/$USER
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -38,7 +38,7 @@ echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
 if [ -z "${WORK_DIR:-}" ]; then
     echo "ERROR: WORK_DIR is not set."
-    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
+    echo "       export WORK_DIR=/work/nvme/<project>/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 

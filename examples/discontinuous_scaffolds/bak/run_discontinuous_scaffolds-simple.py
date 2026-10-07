@@ -16,9 +16,9 @@ from discontinuous_scaffolds import (
 
 # ── Configurable parameters ─────────────────────────────────────────────────
 
-SCRIPTS_PATH     = "/ocean/projects/dmr170002p/hooten/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
-FOUNDRY_SIF_PATH = "/ocean/projects/dmr170002p/hooten/foundry.sif"
-MPNN_DIR         = "/ocean/projects/dmr170002p/hooten/LigandMPNN"
+SCRIPTS_PATH     = "/ocean/projects/<project>/<user>/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
+FOUNDRY_SIF_PATH = "/ocean/projects/<project>/<user>/foundry.sif"
+MPNN_DIR         = "/ocean/projects/<project>/<user>/LigandMPNN"
 
 RFD_INPUT_FILEPATH   = f"{SCRIPTS_PATH}/mcsa_41_one.json"
 LMPNN_PDB_MULTI_JSON = f"{SCRIPTS_PATH}/lmpnn_batch_jsons/batch_pdbs_one.json"

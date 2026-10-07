@@ -13,7 +13,7 @@ lmpnn_fixed_res_json="$4"
 num_batches="$5"
 
 module load cuda/12.8.0
-source /anvil/projects/x-nairr240405/mason/LigandMPNN/.venv/bin/activate
+source /anvil/projects/${PROJECT:?set PROJECT to your allocation}/$USER/LigandMPNN/.venv/bin/activate
 
 python "$mpnn_dir/run.py" \
     --model_type ligand_mpnn \

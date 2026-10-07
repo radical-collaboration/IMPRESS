@@ -5,7 +5,7 @@
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
 # Usage:
-#   export WORK_DIR=/work/nvme/bdyk/$USER
+#   export WORK_DIR=/work/nvme/<project>/$USER
 #   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
 #
 # Defaults:
@@ -26,7 +26,7 @@ fi
 # ── Require WORK_DIR ──────────────────────────────────────────────────────────
 if [[ -z "${WORK_DIR:-}" ]]; then
     echo "ERROR: set WORK_DIR to your nvme work root, e.g.:"
-    echo "  export WORK_DIR=/work/nvme/bdyk/\$USER"
+    echo "  export WORK_DIR=/work/nvme/<project>/\$USER"
     echo "  bash delta_env_setup.sh"
     exit 1
 fi

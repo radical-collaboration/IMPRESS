@@ -11,7 +11,7 @@
 #SBATCH --mail-type=ALL
 
 set -e
-source /jet/home/hooten/.bashrc
+source $HOME/.bashrc
 
 
 # 1 2 3 4
@@ -19,9 +19,9 @@ CHUNKNUM=5
 
 
 # Step 1) Backbone generation
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/IMPRESS/.venv/bin/activate
 
-FOUNDRYFILEPATH=/ocean/projects/dmr170002p/hooten/foundry.sif
+FOUNDRYFILEPATH=/ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/foundry.sif
 RFDINPUTFILEPATH=mcsa_mod8-$CHUNKNUM.json
 RFDOUTPUTDIR=outputs_rfd3
 
@@ -34,16 +34,16 @@ diffusion_batch_size=10
 
 
 # Step 2) Backbone postprocessing
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/IMPRESS/.venv/bin/activate
 
 python cif_to_pdb.py --input-dir outputs_rfd3/ --output-dir outputs_rfd3/
 
 
 # Step 3) Sequence prediction
-source /ocean/projects/dmr170002p/hooten/LigandMPNN/.venv/bin/activate
+source /ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/LigandMPNN/.venv/bin/activate
 
 LMPNNOUTPUTDIR=outputs_lmpnn
-MPNNDIR=/ocean/projects/dmr170002p/hooten/LigandMPNN
+MPNNDIR=/ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/LigandMPNN
 
 python $MPNNDIR/run.py \
 --model_type "ligand_mpnn" \
@@ -60,14 +60,14 @@ python $MPNNDIR/run.py \
 
 
 # Step 4) Sequence postprocessing
-source /ocean/projects/dmr170002p/hooten/IMPRESS/.venv/bin/activate
+source /ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/IMPRESS/.venv/bin/activate
 
 python split_seqs.py --input_dir outputs_lmpnn/seqs/ --output_dir outputs_lmpnn/seqs_split/
 
 
 
 # Step 5) Fold prediction
-source /ocean/projects/dmr170002p/hooten/chai-lab/.venv/bin/activate
+source /ocean/projects/${PROJECT:?set PROJECT to your allocation}/$USER/chai-lab/.venv/bin/activate
 
 CHAIINPUTDIR=outputs_lmpnn/seqs_split/
 CHAIOUTPUTDIR=chai1_outputs

@@ -23,9 +23,9 @@ rhapsody.enable_logging(level=logging.DEBUG)
 
 # ── Configurable parameters ─────────────────────────────────────────────────
 
-SCRIPTS_PATH     = "/anvil/projects/x-nairr240405/mason/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
-FOUNDRY_SIF_PATH = "/anvil/projects/x-nairr240405/mason/foundry.sif"
-MPNN_DIR         = "/anvil/projects/x-nairr240405/mason/LigandMPNN"
+SCRIPTS_PATH     = "/anvil/projects/<project>/<user>/discontinuous_scaffolds/IMPRESS/examples/discontinuous_scaffolds/scripts"
+FOUNDRY_SIF_PATH = "/anvil/projects/<project>/<user>/foundry.sif"
+MPNN_DIR         = "/anvil/projects/<project>/<user>/LigandMPNN"
 
 RFD_INPUT_FILENAME   = f"mcsa_mod8-1.json"
 RFD_INPUT_FILENAME1   = f"mcsa_mod8-1.json"
