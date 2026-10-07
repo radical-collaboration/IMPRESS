@@ -23,8 +23,8 @@ DECK = HERE / "build_deck.js"
 OUT = HERE / "DECK_SCRIPT.md"
 WPM = 155
 # Slides that may be dropped for a shorter running order, by leading number.
-CUT_B = {"6", "10"}            # the two designated cuts
-CUT_C = CUT_B | {"14"}         # and the how-to-run slide, for a hard 20
+CUT_B = {"6", "10", "11"}      # the designated cuts: typed dataflow, and the tools pair
+CUT_C = CUT_B | {"15"}         # and the how-to-run slide, for a hard 20
 
 
 def spoken_words(notes: str) -> int:
@@ -91,27 +91,28 @@ realistic rate for technical material delivered with pauses.
         "a 25-minute slot, or 20 with questions strictly held to the end |"
     )
     head.append(
-        f"| **B · default** | drop 6 (typed dataflow) and 10 (tools) | "
+        f"| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | "
         f"**{cut_b / WPM:.1f}** | a 20-minute slot with a few questions taken inline |"
     )
     head.append(
-        f"| **C · hard twenty** | B, and drop 14 (how to run it — it is in the README) | "
+        f"| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | "
         f"**{cut_c / WPM:.1f}** | a hard 20 that leaves real room for discussion |"
     )
     head.append(
         """
-**Protect 8, 9, 13 and 16.** Those are the two seam slides, the trust findings and the asks, and
-they are what this room came for. Slides 6 and 10 are the designated cuts: the typed-dataflow strip
-is recoverable in one sentence on slide 4, and the tool-spec slide is recoverable on slide 7.
-Order C drops 14 as well — how to run it is in the README, and this audience will read that rather
+**Protect 8, 9, 14 and 17.** Those are the two seam slides, the trust findings and the asks, and
+they are what this room came for. Slides 6, 10 and 11 are the designated cuts: the typed-dataflow
+strip is recoverable in one sentence on slide 4, the tool-spec slide is recoverable on slide 7, and
+the pattern taxonomy is recoverable in the one sentence on slide 10 that reads the `pattern:` field.
+Order C drops 15 as well — how to run it is in the README, and this audience will read that rather
 than watch it.
 
-Do **not** compress 15 (status). An audience that catches you overclaiming stops believing the rest,
+Do **not** compress 16 (status). An audience that catches you overclaiming stops believing the rest,
 and this deck's credibility rests on the caveats being volunteered rather than extracted.
 
 **Three things to say out loud even if nothing prompts them:** `replicas > 1` has never executed
-(slide 15), nothing has ever been promoted by the trust ledger so the trusted path has never run
-(slide 13), and the Delta durations on slide 11 are transcribed from `plans/first-real-run.md`
+(slide 16), nothing has ever been promoted by the trust ledger so the trusted path has never run
+(slide 14), and the Delta durations on slide 12 are transcribed from `plans/first-real-run.md`
 rather than read from a log on this machine.
 """
     )

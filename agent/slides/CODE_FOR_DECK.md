@@ -33,17 +33,18 @@ no block says the code does something it does not do.
 | S10-A | 10 | `toolkits/rosetta/tools/filter_shape/spec.yaml` | **EDITED** | comments and `toolkit:`/`version:` dropped; `inputs`/`outputs` folded to one line each |
 | S10-B | 10 | `tools/mock_agents.py:73–84` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
 | S10-C | 10 | `tests/test_campaign.py:81–83` | **EDITED** | one assertion message wrapped across two lines to fit |
-| S13-A | 13 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
-| S13-B | 13 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
-| S14-A | 14 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
+| S11-A | 11 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:106` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
+| S14-A | 14 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
+| S14-B | 14 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
+| S15-A | 15 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
 
 ---
 
-## The three blocks that carry the argument
+## The four blocks that carry the argument
 
 Quoted in full here because the slide text must not be the only record of them.
 
-### S13-B — the pattern signature · **VERBATIM**
+### S14-B — the pattern signature · **VERBATIM**
 
 `src/impress_a/compose/graph.py:51–61`. The only thing added on the slide is the trailing comment
 on the first line.
@@ -67,6 +68,62 @@ hash moves with the replica count — while the docstring's stated intent is tha
 Parameters are excluded on purpose; breadth is not, and nothing says whether that was a decision.
 Verified against this checkout by `run_model.py`, which composes the real six-stage chain at 1, 2 and
 4 replicas and records the three signatures in `run.json` under `shape`.
+
+### S11-A — the compute-pattern taxonomy, and every site that consults it · **EDITED**
+
+Four excerpts from three files. The slide stacks them because the point is how *few* there are: the
+taxonomy has eight members, and the entire set of places that branch on one fits on a slide.
+
+```python
+# src/impress_a/core/types.py:12-32 - the enum and its two derived rules
+class Pattern(str, Enum):
+    """Compute patterns. Dispatch depends on these, not on what a tool computes."""
+
+    P1 = "P1"  # GPU-node-local, in-job
+    P2 = "P2"  # CPU-parallel fan-out, in-job
+    P3 = "P3"  # MPI multi-node, in-job
+    P4 = "P4"  # external HPC job - durable ledger, outlives the agent
+    P5 = "P5"  # network service over HTTPS
+    P6 = "P6"  # in-process - MUST NEVER be scheduled
+    P7 = "P7"  # composite pipeline
+    P8 = "P8"  # external experiment (robotic lab) - forward-declared, unused
+
+    @property
+    def is_inline(self) -> bool:
+        return self is Pattern.P6
+
+    @property
+    def is_external(self) -> bool:
+        return self in (Pattern.P4, Pattern.P8)
+
+# src/impress_a/compose/composer.py:45 - a P6 stage never becomes a node
+stages = [t for t in intent.stages
+          if self.reg.get(t).pattern is not Pattern.P6]
+
+# src/impress_a/compose/validate.py:106 - gate 4 refuses one that did
+if spec.pattern is Pattern.P6:
+    return ValidationFailure(
+        gate="resource", node=tid,
+        reason=f"{node.tool} is P6 and must be inlined, never scheduled")
+
+# src/impress_a/tools/spec.py:106 - load time, not run time
+if self.pattern is Pattern.P1 and self.resources.gpus == 0:
+    raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
+```
+
+**What was edited.** The slide shows the class line and the two properties only: all eight members
+are dropped, because the slide's table carries each one with its scheduling consequence, and
+repeating them in the code block would say the same thing twice at half the legible size.
+`@property`, the docstrings and the `-> bool` annotations go for width; gate 4's keyword arguments
+collapse to `reason=...`. No condition is altered.
+
+**Why it is on a slide.** It is the honest version of the docstring's claim. `is_external` exists for
+the P4 durable-ledger path and is consulted only by gate 4's `allow_external` check — no registered
+tool is P4, so it has never fired in anger. And nothing under `exec/` or `runtime/` consults a
+pattern at all: `exec/dispatch.py` builds the same closure for every node and `exec/resources.py`
+translates `ResourceShape`, not `Pattern`. `run_model.py`'s pattern census greps `src/` for every
+such site and records them in `run.json` under `patterns.consulted_in`, so the slide's "four sites,
+none in `exec/`" is mined, and a fifth site appearing anywhere falsifies it loudly.
 
 ### S8-A / S8-B — the generic factory and the non-blocking submit
 

@@ -16,35 +16,37 @@ realistic rate for technical material delivered with pauses.
 
 | Slide | Spoken | | Slide | Spoken |
 |---|---|---|---|---|
-| 1. Title | 0.9 min | | 9. The seam: the engine | 1.6 |
-| 2. What it does | 1.1 | | 10. Tools are data | 1.3 |
-| 3. The constraint | 1.1 | | 11. Four jobs (F3) | 1.3 |
-| 4. The loop (F1) | 1.3 | | 12. Four defects | 1.5 |
-| 5. Architecture (F2) | 1.1 | | 13. The trust ledger | 2.1 |
-| 6. One experiment, typed | 1.1 | | 14. Running it | 0.9 |
-| 7. Admission | 1.4 | | 15. Status | 1.1 |
-| 8. The seam: dispatch | 1.4 | | 16. Asks | 1.5 |
+| 1. Title | 0.9 min | | 10. Tools are data | 1.3 |
+| 2. What it does | 1.1 | | 11. Compute patterns | 1.3 |
+| 3. The constraint | 1.1 | | 12. Four jobs (F3) | 1.3 |
+| 4. The loop (F1) | 1.3 | | 13. Four defects | 1.5 |
+| 5. Architecture (F2) | 1.1 | | 14. The trust ledger | 2.1 |
+| 6. One experiment, typed | 1.1 | | 15. Running it | 0.9 |
+| 7. Admission | 1.4 | | 16. Status | 1.1 |
+| 8. The seam: dispatch | 1.4 | | 17. Asks | 1.5 |
+| 9. The seam: the engine | 1.6 | | | |
 
-**Main path: 3210 words = 20.7 minutes of speech.** Backups add 2.6 min if used.
+**Main path: 3417 words = 22.0 minutes of speech.** Backups add 2.6 min if used.
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **20.7** | a 25-minute slot, or 20 with questions strictly held to the end |
-| **B · default** | drop 6 (typed dataflow) and 10 (tools) | **18.3** | a 20-minute slot with a few questions taken inline |
-| **C · hard twenty** | B, and drop 14 (how to run it — it is in the README) | **17.4** | a hard 20 that leaves real room for discussion |
+| **A · full** | every main slide | **22.0** | a 25-minute slot, or 20 with questions strictly held to the end |
+| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | **18.3** | a 20-minute slot with a few questions taken inline |
+| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | **17.4** | a hard 20 that leaves real room for discussion |
 
-**Protect 8, 9, 13 and 16.** Those are the two seam slides, the trust findings and the asks, and
-they are what this room came for. Slides 6 and 10 are the designated cuts: the typed-dataflow strip
-is recoverable in one sentence on slide 4, and the tool-spec slide is recoverable on slide 7.
-Order C drops 14 as well — how to run it is in the README, and this audience will read that rather
+**Protect 8, 9, 14 and 17.** Those are the two seam slides, the trust findings and the asks, and
+they are what this room came for. Slides 6, 10 and 11 are the designated cuts: the typed-dataflow
+strip is recoverable in one sentence on slide 4, the tool-spec slide is recoverable on slide 7, and
+the pattern taxonomy is recoverable in the one sentence on slide 10 that reads the `pattern:` field.
+Order C drops 15 as well — how to run it is in the README, and this audience will read that rather
 than watch it.
 
-Do **not** compress 15 (status). An audience that catches you overclaiming stops believing the rest,
+Do **not** compress 16 (status). An audience that catches you overclaiming stops believing the rest,
 and this deck's credibility rests on the caveats being volunteered rather than extracted.
 
 **Three things to say out loud even if nothing prompts them:** `replicas > 1` has never executed
-(slide 15), nothing has ever been promoted by the trust ledger so the trusted path has never run
-(slide 13), and the Delta durations on slide 11 are transcribed from `plans/first-real-run.md`
+(slide 16), nothing has ever been promoted by the trust ledger so the trusted path has never run
+(slide 14), and the Delta durations on slide 12 are transcribed from `plans/first-real-run.md`
 rather than read from a log on this machine.
 
 ---
@@ -169,7 +171,17 @@ On the right, the tool that lies: it succeeds, reports designability of 0.91, an
 
 And the honest gap. The real toolkits have no equivalent. Their gates are thresholds on each tool's own opinion of itself, which is precisely what a confidently-wrong tool passes.
 
-## 11. Four jobs (F3) — *1.3 min*
+## 11. Compute patterns — *1.3 min*
+
+[1:15] One field in that spec decides how the work reaches the middleware, and it is the compute pattern.
+
+Eight of them, and what matters is what they are organised by: not what the tool computes, but what the orchestrator has to do differently. A tool is P4 because of where it must be submitted, not because it runs MD. P6 is the sharpest — an in-process call of thirty milliseconds. Schedule that and you pay serialization and filesystem cost orders of magnitude above the work. So the composer drops P6 stages before they ever become nodes, and gate four refuses one that got through anyway. A scheduled P6 is a composer bug, and it is caught as one.
+
+Two honest things. The last column is the census: all eleven tools are P1 or P2. P3 through P8 have no member, so the inline path, the P4 ledger and the P5 service path are contracts the suite asserts and nothing has ever taken.
+
+And the enum's own docstring says dispatch depends on these. It does not, yet — every consequence is enforced at load time or at a gate, which is composition time, not dispatch. That is the cheaper place for it, but the docstring is ahead of the code.
+
+## 12. Four jobs (F3) — *1.3 min*
 
 [1:15] Four jobs to a completed campaign, and the figure is really about one variable.
 
@@ -183,7 +195,7 @@ It nearly caused a second bug, which is the more useful half. The queued fix was
 
 Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 seconds in one job and 45 in the next — same campaign, same parameters. These numbers feed gates that refuse graphs, so they sit deliberately above measurement and must not be tightened toward equality.
 
-## 12. Four defects — *1.5 min*
+## 13. Four defects — *1.5 min*
 
 [1:20] Four defects reached real hardware, each invisible to a dry run. The pattern across them is more useful than any one.
 
@@ -197,7 +209,7 @@ And the subtle one: an estimate that refuses work. Our cost models were literatu
 
 Two things to carry away. Checked against the binary is not executed. And a plausible explanation is not a diagnosis — the trajectory bug was a convincing cause for a failure it had nothing to do with, and only recovering the real stderr separated them.
 
-## 13. The trust ledger — *2.1 min*
+## 14. The trust ledger — *2.1 min*
 
 [1:35] Two findings about the trust ledger, and the second is new as of building this deck.
 
@@ -211,7 +223,7 @@ The cost is concrete. The cheapest route to exercising four independent lineages
 
 So, genuinely open: is trust earned at one lineage evidence about four, when the cap it would lift exists to bound blast radius?
 
-## 14. Running it — *0.9 min*
+## 15. Running it — *0.9 min*
 
 [0:45] The command worth pointing at is preflight: it checks the container path, the checkpoints, the Boltz cache, whether PyRosetta imports, and whether the virtual environment is still on slow storage — all on a login node, before you spend a queue slot.
 
@@ -219,7 +231,7 @@ The split that matters is that the entire local tier runs on a laptop in about f
 
 One convention I would steal for other projects: a magic number in a test is often a bug report. A stagnation limit of ten thousand appeared in three separate tests before anyone noticed the defect was in the engine, not the test setup.
 
-## 15. Status — *1.1 min*
+## 16. Status — *1.1 min*
 
 [1:00] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else you said.
 
@@ -229,7 +241,7 @@ Right, what has never run. Replicas greater than one — the invariant most like
 
 One campaign has completed. One lineage, one cycle, one draw.
 
-## 16. Asks — *1.5 min*
+## 17. Asks — *1.5 min*
 
 [1:20] I would rather end on questions than a summary, and these are the six I actually want answers to.
 
@@ -239,7 +251,7 @@ Two: Batch stalled for two full hours and we still do not know why. It is bounde
 
 Three: can a running task's GPU ever be reclaimed? Four: workflow_id tags every task but nothing looks tasks up by it, so our own handle stays the only answer to what belongs to a run.
 
-Five is for everyone — the one from slide thirteen. Does breadth belong in a pattern's identity?
+Five is for everyone — the one from slide fourteen. Does breadth belong in a pattern's identity?
 
 Six is for the domain people. Every real gate we have is a threshold on a number the tool reports about itself. RFD3 hands us clash counts in a file we already open; for Rosetta, upstream gates on an interaction energy we do not compute. If you were adding one structural gate, where would you start?
 

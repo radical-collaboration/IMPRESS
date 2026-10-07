@@ -1,6 +1,6 @@
 {
  "code": {
-  "head": "a810d67",
+  "head": "3e64ba6",
   "packages": {
    "tools": 1435,
    "runtime": 1027,
@@ -40,10 +40,10 @@
    "  cycles   : 3",
    "  stop     : target front size 3 reached",
    "  nodes    : 6  front: 4",
-   "    n000001-f6e5 qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
-   "    n000004-f6e5 qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
-   "    n000005-f6e5 qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
-   "    n000006-f6e5 qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
+   "    n000001-af31 qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
+   "    n000004-af31 qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
+   "    n000005-af31 qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
+   "    n000006-af31 qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
   ],
   "admissions": [
    {
@@ -99,7 +99,7 @@
   ],
   "nodes": [
    {
-    "node": "n000001-f6e5",
+    "node": "n000001-af31",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
@@ -115,7 +115,7 @@
     }
    },
    {
-    "node": "n000002-f6e5",
+    "node": "n000002-af31",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
@@ -131,7 +131,7 @@
     }
    },
    {
-    "node": "n000003-f6e5",
+    "node": "n000003-af31",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
@@ -147,7 +147,7 @@
     }
    },
    {
-    "node": "n000004-f6e5",
+    "node": "n000004-af31",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
@@ -163,7 +163,7 @@
     }
    },
    {
-    "node": "n000005-f6e5",
+    "node": "n000005-af31",
     "run": "r0004",
     "lineage": 0,
     "qc": "suspect",
@@ -179,7 +179,7 @@
     }
    },
    {
-    "node": "n000006-f6e5",
+    "node": "n000006-af31",
     "run": "r0004",
     "lineage": 1,
     "qc": "suspect",
@@ -196,10 +196,10 @@
    }
   ],
   "front": [
-   "n000001-f6e5",
-   "n000004-f6e5",
-   "n000005-f6e5",
-   "n000006-f6e5"
+   "n000001-af31",
+   "n000004-af31",
+   "n000005-af31",
+   "n000006-af31"
   ],
   "stop": "target front size 3 reached",
   "cycles": 3,
@@ -229,6 +229,92 @@
    }
   ],
   "ledger_records": 10
+ },
+ "patterns": {
+  "declared": [
+   "P1",
+   "P2",
+   "P3",
+   "P4",
+   "P5",
+   "P6",
+   "P7",
+   "P8"
+  ],
+  "members": {
+   "P1": [
+    "boltz_predict",
+    "ligandmpnn_design",
+    "mock_design",
+    "mock_fold",
+    "mock_generate",
+    "mock_noodle",
+    "rfd3_design"
+   ],
+   "P2": [
+    "fastrelax",
+    "filter_shape",
+    "mock_score",
+    "packmin"
+   ],
+   "P3": [],
+   "P4": [],
+   "P5": [],
+   "P6": [],
+   "P7": [],
+   "P8": []
+  },
+  "counts": {
+   "P1": 7,
+   "P2": 4,
+   "P3": 0,
+   "P4": 0,
+   "P5": 0,
+   "P6": 0,
+   "P7": 0,
+   "P8": 0
+  },
+  "in_use": [
+   "P1",
+   "P2"
+  ],
+  "unused": [
+   "P3",
+   "P4",
+   "P5",
+   "P6",
+   "P7",
+   "P8"
+  ],
+  "inline": [
+   "P6"
+  ],
+  "external": [
+   "P4",
+   "P8"
+  ],
+  "consulted_in": [
+   {
+    "file": "compose/composer.py",
+    "lines": [
+     46
+    ]
+   },
+   {
+    "file": "compose/validate.py",
+    "lines": [
+     79,
+     106,
+     110
+    ]
+   },
+   {
+    "file": "tools/spec.py",
+    "lines": [
+     106
+    ]
+   }
+  ]
  },
  "shape": {
   "1": {

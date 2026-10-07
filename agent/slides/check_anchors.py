@@ -70,7 +70,15 @@ ANCHORS: list[tuple[str, int, str]] = [
     ("tools/agent.py", 55, "async def pre_process"),
     ("tools/agent.py", 58, "def parameterize"),
     ("tools/agent.py", 79, "async def run"),
-    # S13 — the pattern signature
+    # S11 — the taxonomy and the three enforcement sites the slide quotes. The slide also
+    # states a COUNT of consulting sites, which run_model.py's pattern census greps out of
+    # src/ rather than asserting here — so a new one appearing under exec/ or runtime/
+    # falsifies the slide's claim loudly instead of letting these four anchors stay green.
+    ("core/types.py", 12, "class Pattern(str, Enum)"),
+    ("compose/composer.py", 45, "stages = [t for t in intent.stages"),
+    ("compose/validate.py", 106, "if spec.pattern is Pattern.P6"),
+    ("tools/spec.py", 106, "if self.pattern is Pattern.P1"),
+    # S14 — the pattern signature
     ("compose/graph.py", 51, "def pattern_signature"),
     ("runtime/executor.py", 155, "trust_dir = Path(spec.trust_root)"),
 ]

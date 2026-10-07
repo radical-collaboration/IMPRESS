@@ -784,7 +784,7 @@ Both ends are bounded now, and a stuck teardown is abandoned with a warning rath
 // ================================================================ 10. Tools are data
 {
   const s = pres.addSlide(); s.background = { color: C.white };
-  title(s, "A tool is a spec file, and loading it is validating it", "Tools · cuttable");
+  title(s, "A tool is a spec file, and loading it is validating it", "Tools · 1 of 2 · cuttable");
 
   code(s, [
     'id: filter_shape',
@@ -872,7 +872,83 @@ On the right, the tool that lies: it succeeds, reports designability of 0.91, an
 And the honest gap. The real toolkits have no equivalent. Their gates are thresholds on each tool's own opinion of itself, which is precisely what a confidently-wrong tool passes.`);
 }
 
-// ================================================================ 11. Four jobs (F3)
+// ================================================================ 11. Compute patterns
+{
+  const s = pres.addSlide(); s.background = { color: C.white };
+  title(s, "Eight compute patterns, and what each one forbids", "Tools · 2 of 2 · cuttable");
+
+  const PAT = R.patterns, PC = PAT.counts;
+  const n = p => (PC[p] ? String(PC[p]) : "—");
+  const UNUSED = `${PAT.unused[0]}–${PAT.unused[PAT.unused.length - 1]}`;
+
+  label(s, "core/types.py:12 — organised by scheduling implication, never by science",
+    M, 1.46, 8.33, { mono: true, align: "left", fontSize: 9.5 });
+  tbl(s, ["", "What it is", "What it forces on the orchestrator", "Tools here"], [
+    ["P1", "GPU-node-local, in-job", "must declare a GPU — a load-time error if not", n("P1")],
+    ["P2", "CPU-parallel fan-out, in-job", "cores, not ranks; no topology to reserve", n("P2")],
+    ["P3", "MPI multi-node, in-job", "a reserved rank layout; no resize mid-run", n("P3")],
+    ["P4", "external HPC job", "durable job state — it outlives the agent", n("P4")],
+    ["P5", "network service over HTTPS", "no local cost; quota, latency and outage", n("P5")],
+    ["P6", "in-process library call", "never a scheduled node — inlined, or refused", n("P6")],
+    ["P7", "composite pipeline", "parameterize and observe; stages not steered", n("P7")],
+    ["P8", "external experiment (lab)", "completes out of band, days later", n("P8")],
+  ], M, 1.74, [0.75, 2.4, 3.5, 1.68],
+    { mono: [0, 3], center: [0, 3], fs: 10, mfs: 10, rowH: 0.31, hfs: 10,
+      cell: (i, j) => (j !== 3 ? {}
+        : PC[PAT.declared[i]] ? { color: C.good, bold: true } : { color: C.fail }) });
+
+  code(s, [
+    'class Pattern(str, Enum):      # 8 members, and only 2 rules derived from them',
+    '    def is_inline(self):   return self is Pattern.P6',
+    '    def is_external(self): return self in (Pattern.P4, Pattern.P8)',
+    '',
+    'stages = [t for t in intent.stages            # composer.py - P6 never a node',
+    '          if self.reg.get(t).pattern is not Pattern.P6]',
+    'if spec.pattern is Pattern.P6:                # validate.py - gate 4 refuses one',
+    '    return ValidationFailure(gate="resource", node=tid, reason=...)',
+    'if self.pattern is Pattern.P1 and self.resources.gpus == 0:  # spec.py - at LOAD',
+    '    raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")',
+  ], M, 4.78, 8.33, 2.05,
+    { anchor: "composer.py:45 · validate.py:106 · spec.py:106  ·  EDITED — @property elided",
+      fs: 10 });
+
+  const rx = M + 8.63, rwd = W - M - rx;
+  const SITES = PAT.consulted_in.reduce((a, c) => a + c.lines.length, 0);
+  card(s, rx, 1.46, rwd, 1.72, "Organised by what it forces", [
+    "Not by what the tool computes. A tool is P4 for where it must be submitted, not " +
+      "because it runs MD.",
+    "Which is why one generic factory serves every node: the differences that would have " +
+      "needed branching were settled before dispatch.",
+  ], { fill: C.panel, fs: 9.5, hfs: 12 });
+  card(s, rx, 3.28, rwd, 1.80, "Two of the eight are in use", [
+    `All ${CODE.n_tools} registered tools are P1 (${PC.P1}) or P2 (${PC.P2}). ` +
+      `${UNUSED} have no member.`,
+    "So the P6-inline path, the P4 ledger and the P5 service path are contracts the " +
+      "suite asserts and no tool has taken.",
+    "exec/ledger.py has existed since the first prototype; nothing has written a P4 record.",
+  ], { fill: C.failTint, hc: C.fail, fs: 9.5, hfs: 12 });
+  card(s, rx, 5.20, rwd, 1.80, "Dispatch does not branch on it", [
+    'The docstring says "dispatch depends on these." It does not, yet: ' +
+      "exec/dispatch.py builds one closure per node, and exec/resources.py translates " +
+      "ResourceShape.",
+    `So every consequence is enforced at load time or by a gate — ${SITES} sites in ` +
+      `${PAT.consulted_in.length} files, none under exec/ or runtime/.`,
+  ], { fill: C.failTint, hc: C.fail, fs: 9.5, hfs: 12 });
+
+  footer(s, "Two senses of one word: a compute pattern is per tool, and is this slide; a " +
+    "composition pattern is a graph's shape (compose/graph.py:51) — that is what the trust " +
+    "ledger scores.");
+  s.addNotes(
+`[1:15] One field in that spec decides how the work reaches the middleware, and it is the compute pattern.
+
+Eight of them, and what matters is what they are organised by: not what the tool computes, but what the orchestrator has to do differently. A tool is P4 because of where it must be submitted, not because it runs MD. P6 is the sharpest — an in-process call of thirty milliseconds. Schedule that and you pay serialization and filesystem cost orders of magnitude above the work. So the composer drops P6 stages before they ever become nodes, and gate four refuses one that got through anyway. A scheduled P6 is a composer bug, and it is caught as one.
+
+Two honest things. The last column is the census: all eleven tools are P1 or P2. P3 through P8 have no member, so the inline path, the P4 ledger and the P5 service path are contracts the suite asserts and nothing has ever taken.
+
+And the enum's own docstring says dispatch depends on these. It does not, yet — every consequence is enforced at load time or at a gate, which is composition time, not dispatch. That is the cheaper place for it, but the docstring is ahead of the code.`);
+}
+
+// ================================================================ 12. Four jobs (F3)
 {
   const s = pres.addSlide(); s.background = { color: C.white };
   title(s, `Four jobs to one completed campaign`, "Measured · F3");
@@ -961,7 +1037,7 @@ It nearly caused a second bug, which is the more useful half. The queued fix was
 Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 seconds in one job and 45 in the next — same campaign, same parameters. These numbers feed gates that refuse graphs, so they sit deliberately above measurement and must not be tightened toward equality.`);
 }
 
-// ================================================================ 12. Four defects
+// ================================================================ 13. Four defects
 {
   const s = pres.addSlide(); s.background = { color: C.white };
   title(s, "Four defects that reached real hardware", "What a dry run cannot see");
@@ -1016,7 +1092,7 @@ And the subtle one: an estimate that refuses work. Our cost models were literatu
 Two things to carry away. Checked against the binary is not executed. And a plausible explanation is not a diagnosis — the trajectory bug was a convincing cause for a failure it had nothing to do with, and only recovering the real stderr separated them.`);
 }
 
-// ================================================================ 13. The trust ledger
+// ================================================================ 14. The trust ledger
 {
   const s = pres.addSlide(); s.background = { color: C.white };
   title(s, "The ledger that forgot — and what it still forgets", "Trust");
@@ -1107,7 +1183,7 @@ The cost is concrete. The cheapest route to exercising four independent lineages
 So, genuinely open: is trust earned at one lineage evidence about four, when the cap it would lift exists to bound blast radius?`);
 }
 
-// ================================================================ 14. Running it
+// ================================================================ 15. Running it
 {
   const s = pres.addSlide(); s.background = { color: C.white };
   title(s, "Running it, and what the test tiers actually cover", "How to run it");
@@ -1163,7 +1239,7 @@ The split that matters is that the entire local tier runs on a laptop in about f
 One convention I would steal for other projects: a magic number in a test is often a bug report. A stagnation limit of ten thousand appeared in three separate tests before anyone noticed the defect was in the engine, not the test setup.`);
 }
 
-// ================================================================ 15. Status
+// ================================================================ 16. Status
 {
   const s = pres.addSlide(); s.background = { color: C.white };
   title(s, "What is real, and what is not", "Status");
@@ -1228,7 +1304,7 @@ Right, what has never run. Replicas greater than one — the invariant most like
 One campaign has completed. One lineage, one cycle, one draw.`);
 }
 
-// ================================================================ 16. Asks
+// ================================================================ 17. Asks
 {
   const s = pres.addSlide(); s.background = { color: C.ink };
   text(s, "DISCUSSION", M, 0.5, 6, 0.35,
@@ -1255,7 +1331,7 @@ One campaign has completed. One lineage, one cycle, one draw.`);
        "draining both need. Is a lookup API wanted upstream, or is the tag meant to stay a label?",
      C.radical],
     ["5", "Does breadth belong in a pattern's identity?",
-     "Slide 13. Parameters are deliberately excluded from the signature; replica count is not. " +
+     "Slide 14. Parameters are deliberately excluded from the signature; replica count is not. " +
        "Is trust earned at one lineage evidence about four, when the cap it would lift exists to " +
        "bound blast radius?", C.compose],
     ["6", "What is the cheapest real structural gate?",
@@ -1291,7 +1367,7 @@ Two: Batch stalled for two full hours and we still do not know why. It is bounde
 
 Three: can a running task's GPU ever be reclaimed? Four: workflow_id tags every task but nothing looks tasks up by it, so our own handle stays the only answer to what belongs to a run.
 
-Five is for everyone — the one from slide thirteen. Does breadth belong in a pattern's identity?
+Five is for everyone — the one from slide fourteen. Does breadth belong in a pattern's identity?
 
 Six is for the domain people. Every real gate we have is a threshold on a number the tool reports about itself. RFD3 hands us clash counts in a file we already open; for Rosetta, upstream gates on an interaction energy we do not compute. If you were adding one structural gate, where would you start?`);
 }

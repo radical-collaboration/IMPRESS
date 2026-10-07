@@ -3,14 +3,16 @@
 
     python slides/run_model.py          # with the project venv active
 
-Four sources, each labelled in the output so a slide can say where its number came from:
+Five sources, each labelled in the output so a slide can say where its number came from:
 
   code      line counts per package and the collected test count, read from this checkout
   mock      a real mock-toolkit campaign (`campaigns/mock-stabilize.yaml --model D`), run in a
             temporary directory so neither `asyncflow.session.*` nor `campaigns/_runs` lands in
             the repo, then mined from its own provenance, ledger and trust files
+  patterns  which of the eight compute patterns the registered tools actually declare, and every
+            site in src/ that consults one - the census and the claim on slide 11
   shape     the real six-stage chain composed at 1, 2 and 4 replicas, and its pattern signature
-            for each - the evidence for the A10 finding on slide 13
+            for each - the evidence for the A10 finding on slide 14
   delta     the four Delta jobs, TRANSCRIBED from plans/first-real-run.md and plans/backlog.md.
             The raw logs live under $WORK_DIR/impress_a_runs/<job> on Delta, not here; when a
             copy exists locally, read it instead and drop the transcription.
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,6 +96,46 @@ def mock_campaign() -> dict:
     }
 
 
+def pattern_census() -> dict:
+    """Which compute patterns the eleven registered tools actually declare, and who asks.
+
+    Both halves of slide 11 are mined rather than remembered. The census exists because the
+    taxonomy has eight members and the registry exercises two of them, and a slide that lists
+    eight patterns without saying so reads as if all eight were in service. `consulted_in` is
+    the other half: it is the complete set of places that branch on a pattern, which is how
+    the slide can claim nothing in exec/ or runtime/ does.
+    """
+    sys.path.insert(0, str(SRC))
+    from impress_a.core.types import Pattern
+    from impress_a.tools.registry import Registry
+
+    reg = Registry().load()
+    members: dict[str, list[str]] = {p.value: [] for p in Pattern}
+    for tid in reg.ids():
+        members[reg.get(tid).pattern.value].append(tid)
+
+    consulted: list[dict] = []
+    for f in sorted((SRC / "impress_a").rglob("*.py")):
+        rel = f.relative_to(SRC / "impress_a").as_posix()
+        if rel == "core/types.py":          # the definition, not a consumer
+            continue
+        hits = [i + 1 for i, line in enumerate(f.read_text(errors="replace").splitlines())
+                if re.search(r"\bPattern\.P[1-8]\b|\.is_inline\b|\.is_external\b", line)]
+        if hits:
+            consulted.append({"file": rel, "lines": hits})
+
+    return {
+        "declared": [p.value for p in Pattern],
+        "members": {k: sorted(v) for k, v in members.items()},
+        "counts": {k: len(v) for k, v in members.items()},
+        "in_use": sorted(k for k, v in members.items() if v),
+        "unused": sorted(k for k, v in members.items() if not v),
+        "inline": [p.value for p in Pattern if p.is_inline],
+        "external": [p.value for p in Pattern if p.is_external],
+        "consulted_in": consulted,
+    }
+
+
 def shape_signatures() -> dict:
     sys.path.insert(0, str(SRC))
     from impress_a.compose.composer import Composer
@@ -149,8 +192,8 @@ DELTA = {
 
 
 def main() -> int:
-    run = {"code": code_stats(), "mock": mock_campaign(), "shape": shape_signatures(),
-           "delta": DELTA}
+    run = {"code": code_stats(), "mock": mock_campaign(), "patterns": pattern_census(),
+           "shape": shape_signatures(), "delta": DELTA}
     OUT.write_text(json.dumps(run, indent=1) + "\n")
     m = run["mock"]
     print(f"wrote {OUT}")
@@ -158,6 +201,10 @@ def main() -> int:
           f" {run['code']['n_tools']} tools @ {run['code']['head']}")
     print(f"  mock: {len(m['admissions'])} admissions, {len(m['nodes'])} nodes, "
           f"front {len(m['front'])}, promoted {m['promoted']}")
+    pat = run["patterns"]
+    print("  patterns: " + ", ".join(f"{k}={pat['counts'][k]}" for k in pat["declared"])
+          + f"  ({len(pat['in_use'])}/8 in use; consulted in "
+          + ", ".join(c["file"] for c in pat["consulted_in"]) + ")")
     print("  shape: " + ", ".join(f"r{k}={v['signature']}" for k, v in run["shape"].items()))
     return 0
 
