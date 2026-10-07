@@ -33,7 +33,7 @@ no block says the code does something it does not do.
 | S10-A | 10 | `toolkits/rosetta/tools/filter_shape/spec.yaml` | **EDITED** | comments and `toolkit:`/`version:` dropped; `inputs`/`outputs` folded to one line each |
 | S10-B | 10 | `tools/mock_agents.py:73–84` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
 | S10-C | 10 | `tests/test_campaign.py:81–83` | **EDITED** | one assertion message wrapped across two lines to fit |
-| S11-A | 11 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:106` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
+| S11-A | 11 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:107` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
 | S14-A | 14 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
 | S14-B | 14 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
 | S15-A | 15 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
@@ -106,7 +106,7 @@ if spec.pattern is Pattern.P6:
         gate="resource", node=tid,
         reason=f"{node.tool} is P6 and must be inlined, never scheduled")
 
-# src/impress_a/tools/spec.py:106 - load time, not run time
+# src/impress_a/tools/spec.py:107 - load time, not run time
 if self.pattern is Pattern.P1 and self.resources.gpus == 0:
     raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
 ```

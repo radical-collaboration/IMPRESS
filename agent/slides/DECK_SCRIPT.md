@@ -21,18 +21,18 @@ realistic rate for technical material delivered with pauses.
 | 3. The constraint | 1.1 | | 12. Four jobs (F3) | 1.3 |
 | 4. The loop (F1) | 1.3 | | 13. Four defects | 1.5 |
 | 5. Architecture (F2) | 1.1 | | 14. The trust ledger | 2.1 |
-| 6. One experiment, typed | 1.1 | | 15. Running it | 0.9 |
-| 7. Admission | 1.4 | | 16. Status | 1.1 |
+| 6. One experiment, typed | 1.2 | | 15. Running it | 0.9 |
+| 7. Admission | 1.7 | | 16. Status | 1.1 |
 | 8. The seam: dispatch | 1.4 | | 17. Asks | 1.5 |
 | 9. The seam: the engine | 1.6 | | | |
 
-**Main path: 3417 words = 22.0 minutes of speech.** Backups add 2.6 min if used.
+**Main path: 3476 words = 22.4 minutes of speech.** Backups add 2.6 min if used.
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **22.0** | a 25-minute slot, or 20 with questions strictly held to the end |
-| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | **18.3** | a 20-minute slot with a few questions taken inline |
-| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | **17.4** | a hard 20 that leaves real room for discussion |
+| **A · full** | every main slide | **22.4** | a 25-minute slot, or 20 with questions strictly held to the end |
+| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | **18.6** | a 20-minute slot with a few questions taken inline |
+| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | **17.7** | a hard 20 that leaves real room for discussion |
 
 **Protect 8, 9, 14 and 17.** Those are the two seam slides, the trust findings and the asks, and
 they are what this room came for. Slides 6, 10 and 11 are the designated cuts: the typed-dataflow
@@ -105,17 +105,17 @@ It is enforced. A test walks the package with ast and checks every internal impo
 
 Writing that test found two edges nobody had documented. Both are in the table now.
 
-## 6. One experiment, typed — *1.1 min*
+## 6. One experiment, typed — *1.2 min*
 
 [1:00] One experiment, left to right, naming the type at each hop — the types are the contract between layers.
 
 The executor builds an observation. The policy returns a decision carrying an experiment intent: tool ids, parameters, a replica count. It is abstract, there is no DAG in it. The composer turns it into a typed graph, which is plain data. Dispatch registers that graph and hands back a handle without awaiting. What comes back is a run outcome, serializable and core-typed, so a reasoner in another process can hold it.
 
-Underneath is an actual run on this laptop. Four admissions over three cycles. The first row was refused by the interlock — a provisional pattern is capped at ten percent of available budget and three lineages did not fit. The policy shrank to two and resubmitted. That is the retry doing its job: a refusal costs an attempt, not the experiment.
+Underneath is an actual run on this laptop. The first row was refused by the interlock — a provisional pattern is capped at ten percent of available budget and three lineages did not fit. The policy shrank to two and resubmitted. That is the retry doing its job: a refusal costs an attempt, not the experiment.
 
-Six design nodes, every one marked suspect, because the shape stayed provisional until the third clean run promoted it.
+Every design node is marked suspect, because the shape is provisional while it runs. Promotion takes three clean runs, and the card on the right says whether this one got there before the front target stopped it.
 
-## 7. Admission — *1.4 min*
+## 7. Admission — *1.7 min*
 
 [1:15] This is the answer to "you let a machine invent workflows?"
 
@@ -125,7 +125,7 @@ Then three things that are not gates. The interlock. A dry-run, where every agen
 
 Reserve is last for a reason: the dry-run awaits, and by the time it returns another submission may have claimed the budget gate five saw. Reserve re-checks against available budget and is the authoritative decision.
 
-On the right, the trust half. A pattern is the graph's shape — tool ids and typed edges, hashed, parameter values deliberately excluded so tuning a parameter does not reset trust. A provisional shape is capped, forced through a dry-run, marked suspect whatever it scores, and may have only one instance in flight, because promotion counts consecutive clean runs and N concurrent copies are one draw sampled N times.
+On the right, the trust half. A pattern is the graph's shape — tool ids and typed edges, hashed, parameter values deliberately excluded so tuning a parameter does not reset trust. A provisional shape is capped, forced through a dry-run, marked suspect whatever it scores, and may have only one instance in flight, because promotion counts consecutive clean runs and N concurrent copies are one draw sampled N times. Clean means no integrity gate failed: the tool ran and reported real numbers. A design that merely scores below a quality threshold still fails its node, but it is not evidence against the shape. Counting it was why our five-cycle trust run on Delta promoted nothing.
 
 The limit, from our own limitations doc: this buys examination and delay, not soundness. A consistent novel silent failure promotes.
 

@@ -1,11 +1,11 @@
 {
  "code": {
-  "head": "79e539f",
+  "head": "7acce29",
   "packages": {
-   "tools": 1434,
+   "tools": 1506,
    "runtime": 1027,
    "control": 928,
-   "core": 831,
+   "core": 848,
    "policy": 755,
    "exec": 512,
    "compose": 433,
@@ -14,9 +14,9 @@
    "__main__.py": 3,
    "__init__.py": 0
   },
-  "src_total": 6461,
-  "test_lines": 3515,
-  "tests_collected": 154,
+  "src_total": 6550,
+  "test_lines": 3693,
+  "tests_collected": 162,
   "tools": [
    "boltz_predict",
    "fastrelax",
@@ -37,13 +37,12 @@
   "stdout_tail": [
    "campaign : mock-stabilize-D",
    "  policy   : rulecorrectionspolicy(threshold)",
-   "  cycles   : 3",
+   "  cycles   : 2",
    "  stop     : target front size 3 reached",
-   "  nodes    : 6  front: 4",
-   "    n000001-edde qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
-   "    n000004-edde qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
-   "    n000005-edde qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
-   "    n000006-edde qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
+   "  nodes    : 4  front: 3",
+   "    n000001-41a4 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
+   "    n000003-41a4 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
+   "    n000004-41a4 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
   ],
   "admissions": [
    {
@@ -84,128 +83,82 @@
     },
     "trusted": false,
     "rejected": null
-   },
-   {
-    "run": "r0004",
-    "signature": "66bb492308e3d238",
-    "nodes": 8,
-    "estimate": {
-     "gpu_hours": 0.11,
-     "cpu_hours": 1.0
-    },
-    "trusted": false,
-    "rejected": null
    }
   ],
   "nodes": [
    {
-    "node": "n000001-edde",
+    "node": "n000001-41a4",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
     "metrics": {
-     "ss_fraction": 0.675,
+     "ss_fraction": 0.64,
      "designability": 0.95,
-     "seq_recovery": 0.544,
+     "seq_recovery": 0.54,
      "diversity": 0.35,
-     "iptm": 0.751,
-     "sc_rmsd": 1.204,
-     "ddg": -2.119,
-     "clashscore": 2.95
+     "iptm": 0.681,
+     "sc_rmsd": 2.382,
+     "ddg": -2.027,
+     "clashscore": 3.38
     }
    },
    {
-    "node": "n000002-edde",
+    "node": "n000002-41a4",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
     "metrics": {
-     "ss_fraction": 0.499,
+     "ss_fraction": 0.545,
      "designability": 0.943,
-     "seq_recovery": 0.508,
+     "seq_recovery": 0.56,
      "diversity": 0.35,
-     "iptm": 0.398,
-     "sc_rmsd": 4.086,
-     "ddg": 0.068,
-     "clashscore": 0.27
+     "iptm": 0.489,
+     "sc_rmsd": 3.203,
+     "ddg": 1.828,
+     "clashscore": 2.57
     }
    },
    {
-    "node": "n000003-edde",
+    "node": "n000003-41a4",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
     "metrics": {
-     "ss_fraction": 0.594,
+     "ss_fraction": 0.65,
      "designability": 0.649,
-     "seq_recovery": 0.696,
+     "seq_recovery": 0.699,
      "diversity": 0.07,
-     "iptm": 0.589,
-     "sc_rmsd": 2.643,
-     "ddg": 0.605,
-     "clashscore": 6.2
+     "iptm": 0.7,
+     "sc_rmsd": 2.3,
+     "ddg": -1.079,
+     "clashscore": 5.61
     }
    },
    {
-    "node": "n000004-edde",
+    "node": "n000004-41a4",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
     "metrics": {
-     "ss_fraction": 0.643,
+     "ss_fraction": 0.623,
      "designability": 0.67,
-     "seq_recovery": 0.726,
+     "seq_recovery": 0.685,
      "diversity": 0.07,
-     "iptm": 0.686,
-     "sc_rmsd": 2.13,
-     "ddg": 1.817,
-     "clashscore": 2.27
-    }
-   },
-   {
-    "node": "n000005-edde",
-    "run": "r0004",
-    "lineage": 0,
-    "qc": "suspect",
-    "metrics": {
-     "ss_fraction": 0.639,
-     "designability": 0.72,
-     "seq_recovery": 0.684,
-     "diversity": 0.07,
-     "iptm": 0.678,
-     "sc_rmsd": 2.258,
-     "ddg": 0.877,
-     "clashscore": 1.49
-    }
-   },
-   {
-    "node": "n000006-edde",
-    "run": "r0004",
-    "lineage": 1,
-    "qc": "suspect",
-    "metrics": {
-     "ss_fraction": 0.659,
-     "designability": 0.663,
-     "seq_recovery": 0.678,
-     "diversity": 0.07,
-     "iptm": 0.719,
-     "sc_rmsd": 1.584,
-     "ddg": -2.909,
-     "clashscore": 3.02
+     "iptm": 0.645,
+     "sc_rmsd": 2.439,
+     "ddg": -2.462,
+     "clashscore": 4.2
     }
    }
   ],
   "front": [
-   "n000001-edde",
-   "n000004-edde",
-   "n000005-edde",
-   "n000006-edde"
+   "n000001-41a4",
+   "n000003-41a4",
+   "n000004-41a4"
   ],
   "stop": "target front size 3 reached",
-  "cycles": 3,
-  "promoted": [
-   "66bb492308e3d238"
-  ],
+  "cycles": 2,
+  "promoted": [],
   "trust_events": [
    {
     "event": "seen",
@@ -222,13 +175,9 @@
    {
     "event": "clean",
     "signature": "66bb492308e3d238"
-   },
-   {
-    "event": "clean",
-    "signature": "66bb492308e3d238"
    }
   ],
-  "ledger_records": 10
+  "ledger_records": 7
  },
  "patterns": {
   "declared": [
@@ -311,7 +260,7 @@
    {
     "file": "tools/spec.py",
     "lines": [
-     106
+     107
     ]
    }
   ]

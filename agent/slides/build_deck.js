@@ -316,7 +316,7 @@ Treat it as a floor. What it proves is that the plumbing survives contact with r
      "Five gates, then every task agent parameterizes without executing. Rejection is cheap and structured, so free composition is affordable to get wrong.",
      "compose/validate.py:30, :143"],
     ["Trust is scored on shape, and earned",
-     "A novel graph shape runs under a cost cap, a forced dry-run, and is marked suspect whatever it scores. Promotion is N consecutive clean runs; demotion is immediate.",
+     "A novel graph shape runs under a cost cap, a forced dry-run, and is marked suspect whatever it scores. Promotion is N consecutive integrity-clean runs; demotion is immediate.",
      "compose/interlock.py:146"],
     ["Exit code is never evidence",
      "Every non-P6 tool declares mandatory QC gates, and a node whose verdict is FAIL is never eligible for the Pareto front, whatever it scored.",
@@ -519,6 +519,16 @@ Writing that test found two edges nobody had documented. Both are in the table n
 
   const adm = MOCK.admissions;
   const rej = adm.filter(a => a.rejected);
+  // The mock run is mined live, so its story is too: whether the pattern promoted depends on
+  // how many clean runs it took to hit the front target, which a reseeded mock can change.
+  const clean = adm.length - rej.length;
+  const W = n => ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten"][n] ?? String(n);
+  const trustLine = MOCK.promoted.length
+    ? `the pattern was provisional until the third clean run promoted it ` +
+      `(${MOCK.promoted.length} promotion, in trust_events)`
+    : `the pattern stayed provisional: the front target was met after ${W(clean)} clean ` +
+      `run${clean === 1 ? "" : "s"}, before the third that would promote it`;
   code(s, [
     `$ impress-a run campaigns/mock-stabilize.yaml --model D`,
     ``,
@@ -544,8 +554,7 @@ Writing that test found two edges nobody had documented. Both are in the table n
   ], { fill: C.failTint, hc: C.fail, fs: 10.5 });
   card(s, M + 6.5, 5.05, 6.33, 1.55, "And what the rest of the run shows", [
     `${MOCK.nodes.length} design nodes over ${MOCK.cycles} cycles, every one marked ` +
-      `${MOCK.nodes[0].qc} — the pattern was provisional until the third clean run promoted it ` +
-      `(${MOCK.promoted.length} promotion, in trust_events).`,
+      `${MOCK.nodes[0].qc} — ${trustLine}.`,
     `Front of ${MOCK.front.length}; the campaign stopped on "${MOCK.stop}" rather than on budget.`,
   ], { fill: C.panel, fs: 10.5 });
 
@@ -556,9 +565,9 @@ Writing that test found two edges nobody had documented. Both are in the table n
 
 The executor builds an observation. The policy returns a decision carrying an experiment intent: tool ids, parameters, a replica count. It is abstract, there is no DAG in it. The composer turns it into a typed graph, which is plain data. Dispatch registers that graph and hands back a handle without awaiting. What comes back is a run outcome, serializable and core-typed, so a reasoner in another process can hold it.
 
-Underneath is an actual run on this laptop. Four admissions over three cycles. The first row was refused by the interlock — a provisional pattern is capped at ten percent of available budget and three lineages did not fit. The policy shrank to two and resubmitted. That is the retry doing its job: a refusal costs an attempt, not the experiment.
+Underneath is an actual run on this laptop. The first row was refused by the interlock — a provisional pattern is capped at ten percent of available budget and three lineages did not fit. The policy shrank to two and resubmitted. That is the retry doing its job: a refusal costs an attempt, not the experiment.
 
-Six design nodes, every one marked suspect, because the shape stayed provisional until the third clean run promoted it.`);
+Every design node is marked suspect, because the shape is provisional while it runs. Promotion takes three clean runs, and the card on the right says whether this one got there before the front target stopped it.`);
 }
 
 // ================================================================ 7. Admission
@@ -609,7 +618,7 @@ Six design nodes, every one marked suspect, because the shape stayed provisional
       cell: (i, j) => j === 2 ? { color: C.fail } : (j === 1 ? { color: C.good } : {}) });
 
   card(s, tx, 4.5, tw, 1.55, "Promotion is mechanical", [
-    "N consecutive clean runs promote; any failure demotes immediately and resets the counter.",
+    "N consecutive integrity-clean runs promote; any integrity failure demotes and resets the counter.",
     "An untrusted shape may have only ONE instance in flight — N concurrent copies are one " +
       "draw sampled N times, not N pieces of evidence.",
   ], { fill: C.panel, fs: 10 });
@@ -631,7 +640,7 @@ Then three things that are not gates. The interlock. A dry-run, where every agen
 
 Reserve is last for a reason: the dry-run awaits, and by the time it returns another submission may have claimed the budget gate five saw. Reserve re-checks against available budget and is the authoritative decision.
 
-On the right, the trust half. A pattern is the graph's shape — tool ids and typed edges, hashed, parameter values deliberately excluded so tuning a parameter does not reset trust. A provisional shape is capped, forced through a dry-run, marked suspect whatever it scores, and may have only one instance in flight, because promotion counts consecutive clean runs and N concurrent copies are one draw sampled N times.
+On the right, the trust half. A pattern is the graph's shape — tool ids and typed edges, hashed, parameter values deliberately excluded so tuning a parameter does not reset trust. A provisional shape is capped, forced through a dry-run, marked suspect whatever it scores, and may have only one instance in flight, because promotion counts consecutive clean runs and N concurrent copies are one draw sampled N times. Clean means no integrity gate failed: the tool ran and reported real numbers. A design that merely scores below a quality threshold still fails its node, but it is not evidence against the shape. Counting it was why our five-cycle trust run on Delta promoted nothing.
 
 The limit, from our own limitations doc: this buys examination and delay, not soundness. A consistent novel silent failure promotes.`);
 }
@@ -916,7 +925,7 @@ And the honest gap. The real toolkits have no equivalent. Their gates are thresh
     'if self.pattern is Pattern.P1 and self.resources.gpus == 0:  # spec.py - at LOAD',
     '    raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")',
   ], M, 4.78, 8.33, 2.05,
-    { anchor: "composer.py:45 · validate.py:106 · spec.py:106  ·  EDITED — @property elided",
+    { anchor: "composer.py:45 · validate.py:106 · spec.py:107  ·  EDITED — @property elided",
       fs: 10 });
 
   const rx = M + 8.63, rwd = W - M - rx;

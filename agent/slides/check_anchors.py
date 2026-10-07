@@ -77,7 +77,7 @@ ANCHORS: list[tuple[str, int, str]] = [
     ("core/types.py", 12, "class Pattern(str, Enum)"),
     ("compose/composer.py", 45, "stages = [t for t in intent.stages"),
     ("compose/validate.py", 106, "if spec.pattern is Pattern.P6"),
-    ("tools/spec.py", 106, "if self.pattern is Pattern.P1"),
+    ("tools/spec.py", 107, "if self.pattern is Pattern.P1"),
     # S14 — the pattern signature
     ("compose/graph.py", 51, "def pattern_signature"),
     ("runtime/executor.py", 155, "trust_dir = Path(spec.trust_root)"),
