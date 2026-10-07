@@ -1,4 +1,5 @@
 
+import asyncio
 import copy
 import functools
 import gzip
@@ -643,6 +644,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         # Set before super().__init__, which registers the tasks and so
         # builds their task descriptions.
         self.gpu_index = kwargs.get("gpu_index", None)
+        # Seconds run() waits before its first stage (set by the runner when
+        # several pipelines share a GPU, to spread out the first rfd3 wave).
+        self.start_delay = kwargs.get("start_delay", 0)
 
         super().__init__(name, flow, **configs, **kwargs)
 
@@ -1386,6 +1390,9 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.state.setdefault('fastrelax_prev_metrics', None)
         self.state.setdefault('interface_prev_metrics', None)
         self.state.setdefault('backbone_guided_fail_count', 0)
+        if self.start_delay:
+            self.logger.pipeline_log(f"start delayed {self.start_delay}s (staggered start)")
+            await asyncio.sleep(self.start_delay)
         self.logger.pipeline_log("SmallMoleculeBindingPipeline starting (state machine)")
 
         while self.next_step != STEP_DONE:

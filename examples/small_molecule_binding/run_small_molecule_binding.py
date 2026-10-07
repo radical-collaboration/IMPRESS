@@ -152,6 +152,24 @@ def _node_gpus() -> List[int]:
         return []
 
 
+def _n_nodes() -> int:
+    """Nodes in the allocation (1 off Dragon)."""
+    if BACKEND == "dragon":
+        from dragon.native.machine import System
+        return System().nnodes
+    return 1
+
+
+# Delay between start groups when several pipelines share a GPU.  Every
+# pipeline begins with rfd3, and a running rfd3 holds ~9.5 GB of host RAM for
+# its whole run, so N pipelines starting together put N rfd3 in memory at once:
+# 16 on one node took host RAM 13% -> 61% within 45 s (job 22714866), and 32
+# hit the 240 GB --mem limit in 2 minutes (22714785, OUT_OF_MEMORY).  After the
+# first wave the starts drift apart and memory stays far lower.  Staggering
+# groups of one-pipeline-per-GPU by this many seconds caps the overlap.
+START_STAGGER_S = 60
+
+
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
     """Adaptive callback: picks pipeline.next_step from the last analysis.
 
@@ -454,9 +472,19 @@ async def impress_smallmol_bind() -> None:
     gpus = _node_gpus()
     def _gpu_for(i: int):
         return gpus[(i - 1) % len(gpus)] if gpus else None
+    # Staggered start, only when pipelines outnumber the allocation's GPUs:
+    # each group of one-pipeline-per-GPU starts START_STAGGER_S after the last,
+    # so at one pipeline per GPU every delay is 0.
+    slots = max(1, len(gpus) * _n_nodes())
+    def _delay_for(i: int) -> int:
+        return ((i - 1) // slots) * START_STAGGER_S
     print(f"[GPU] devices per node: {gpus or 'none'}; pipeline -> GPU: "
           + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
           flush=True)
+    if any(_delay_for(i) for i in range(1, cfg.n_pipelines + 1)):
+        print(f"[GPU] staggered start ({slots} GPU slots, {START_STAGGER_S}s per group): "
+              + ", ".join(f"p{i}:{_delay_for(i)}s" for i in range(1, cfg.n_pipelines + 1)),
+              flush=True)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -481,6 +509,7 @@ async def impress_smallmol_bind() -> None:
                 "rfd3_partial_t":            cfg.rfd3_partial_t,
                 "max_tasks":                 cfg.max_tasks,
                 "gpu_index":                 _gpu_for(i),
+                "start_delay":               _delay_for(i),
             }
         )
         for i in range(1, cfg.n_pipelines + 1)

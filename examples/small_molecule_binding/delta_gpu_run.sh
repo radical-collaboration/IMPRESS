@@ -246,6 +246,23 @@ RUNNER="${1:-run_small_molecule_binding.py}"
 # Run config forwarded as argv (see the comment at the dragon invocations below).
 RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_DIR}" )
 
+# The runner records how it ended here; see the check after the run.
+RUNNER_STATUS_FILE="${IMPRESS_WORK_DIR}/runner_status"
+rm -f "${RUNNER_STATUS_FILE}"
+
+# Per-GPU utilisation and memory every 10 s.  Telemetry has gpu_percent but no
+# GPU memory, and memory is what limits packing more tools onto a GPU.  This
+# runs on the batch node only, so a multi-node job logs just that node.  It is
+# stopped after the run; on an early exit or TIMEOUT Slurm reaps it with the job.
+NVSMI_PID=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used,memory.total \
+               --format=csv,noheader,nounits -l 10 \
+               > "${IMPRESS_WORK_DIR}/nvsmi.csv" 2>&1 &
+    NVSMI_PID=$!
+    echo "GPU log:           ${IMPRESS_WORK_DIR}/nvsmi.csv (pid ${NVSMI_PID})"
+fi
+
 if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
     rm -f ddict_orc*
     if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
@@ -303,4 +320,19 @@ else
     python3 "${RUNNER}"
 fi
 
-echo "=== Small Molecule Binding pipeline done: $(date) ==="
+# `dragon` exits 0 even when the runner dies with a traceback (job 22692267
+# was recorded COMPLETED), so set -e never fires on a failed run.  Take the
+# job's exit status from the runner's own record instead.  A missing record
+# means the runner died before reaching its __main__ block (e.g. an import
+# error), which only run_small_molecule_binding.py writes, so the other
+# runners are only warned about.
+[ -n "${NVSMI_PID}" ] && kill "${NVSMI_PID}" 2>/dev/null || true
+RUNNER_STATUS="$(cat "${RUNNER_STATUS_FILE}" 2>/dev/null || echo missing)"
+echo "=== Small Molecule Binding pipeline done: $(date) (runner status: ${RUNNER_STATUS}) ==="
+if [ "${RUNNER_STATUS}" != "ok" ]; then
+    if [ "${RUNNER_STATUS}" != "missing" ] || [ "$(basename "${RUNNER}")" = "run_small_molecule_binding.py" ]; then
+        echo "ERROR: runner did not finish cleanly; exiting 1 so Slurm records FAILED"
+        exit 1
+    fi
+    echo "WARNING: ${RUNNER} wrote no ${RUNNER_STATUS_FILE}; exit status unknown"
+fi
