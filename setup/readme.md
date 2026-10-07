@@ -65,7 +65,7 @@ Platform specific acquiring resources using an interactive job:
 - **Delta**
   ```shell
   srun --time=00:10:00 --nodes=1 --tasks-per-node=1 --cpus-per-task=64 \
-       --exclusive --account=bblj-delta-gpu --partition=gpuA100x4 --gpus=4 \
+       --exclusive --account=<project>-delta-gpu --partition=gpuA100x4 --gpus=4 \
        --mem=0 --pty /bin/bash
   # load python module
   module load anaconda3_gpu

@@ -21,7 +21,7 @@
 #   sbatch delta_gpu_run.sh run_nonadaptive.py   # non-adaptive runner
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
-#SBATCH --account=bdyk-delta-gpu
+##SBATCH --account=<project>-delta-gpu
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
@@ -56,7 +56,7 @@
 #     and 8h would leave only a 1.18x margin over expected compute.
 # Override nodes per run without editing this file:  sbatch --nodes=2 ...
 #SBATCH --job-name=impress_sm_binding
-#SBATCH --mail-user=mh1314@scarletmail.rutgers.edu
+##SBATCH --mail-user=you@example.edu
 #SBATCH --mail-type=ALL
 #SBATCH --output=impress_%j.out
 ##SBATCH --error=logs/impress_%j.err

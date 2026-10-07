@@ -7,7 +7,7 @@
 #SBATCH -A 
 #SBATCH --time=16:00:00
 #SBATCH --job-name isles
-#SBATCH --mail-user=mh1314@scarletmail.rutgers.edu
+##SBATCH --mail-user=you@example.edu
 #SBATCH --mail-type=ALL
 
 set -e

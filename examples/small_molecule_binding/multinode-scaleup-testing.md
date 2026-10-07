@@ -37,14 +37,14 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
 | 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | `22534628` | **SUBMITTED** (2026-09-28, `PD`) | telemetry wired; trajectories dropped; walltime right-sized. Est. start 2026-10-04 |
 
-Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
+Cost context: Stage 3 is a small fraction of the allocation balance.
 Billing accrues on **elapsed**, not requested, time.
 
 ### Commands
 
 ```bash
-export SCRATCH=/scratch/bdyk/hooten1
-cd /scratch/bdyk/hooten1/IMPRESS/examples/small_molecule_binding
+export SCRATCH=/scratch/<project>/$USER
+cd /scratch/<project>/$USER/IMPRESS/examples/small_molecule_binding
 
 # Stage 1b — submitted as 22466127 (same command; the launcher now picks the
 # ssh/TCP path internally whenever SLURM_NNODES > 1)

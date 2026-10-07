@@ -2,7 +2,7 @@
 
 **Severity:** critical · **Status:** fixed on `scaling-wide`, unvalidated at scale
 **Evidence:** job `22534628`, 8 nodes / 32 pipelines, `TIMEOUT` at `Elapsed=12:00:10`
-**Artifacts:** `/work/hdd/bdyk/hooten1/impress-data-after-fixes/smb_8node/small_molecule_binding/`
+**Artifacts:** `<hdd work dir>/impress-data-after-fixes/smb_8node/small_molecule_binding/`
 
 ## Symptom
 

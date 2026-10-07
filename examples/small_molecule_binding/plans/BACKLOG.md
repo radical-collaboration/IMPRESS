@@ -7,7 +7,7 @@ confirms it.
 Source of most entries below: the 8-node / 32-pipeline campaign **job `22534628`**
 (2026-09-29 23:23:40 → 2026-09-30 11:23:50, `State=TIMEOUT`, `Elapsed=12:00:10`).
 Run artifacts archived at
-`/work/hdd/bdyk/hooten1/impress-data-after-fixes/smb_8node/small_molecule_binding/`.
+`<hdd work dir>/impress-data-after-fixes/smb_8node/small_molecule_binding/`.
 
 | # | Item | Severity | Status | Doc |
 |---|---|---|---|---|

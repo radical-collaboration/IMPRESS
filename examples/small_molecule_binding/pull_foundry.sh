@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=bblj-delta-gpu
+##SBATCH --account=<project>-delta-gpu
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
