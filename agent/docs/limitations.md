@@ -215,9 +215,9 @@ it is important not to read it as more than one draw:
   path inside each job's working directory, so every SLURM job started with an empty one and
   promotion - three *consecutive* clean runs in one file - was unreachable on Delta from the
   first run onward. Fixed; the path is now site-scoped and logged absolutely at campaign start.
-  The consequence stands either way: the *trusted* code path (no forced dry-run, no 10% cost cap,
-  concurrent instances of one pattern) has still never executed, and that cap is what truncated
-  `boltz_predict` off the chain twice. The node is `suspect` rather than `pass` for this reason.
+  The *trusted* code path (no forced dry-run, no 10% cost cap) has now executed - two cycles of
+  job 22726105 - but has not yet run sustained, and no real node has reached plain `pass`:
+  untrusted nodes are always `suspect`, and both trusted ones missed an acceptance threshold.
 - **No measurement has superseded a prediction.** `ingest_measurement` and the whole
   predicted-vs-measured calibration story still have no real assay data behind them.
 - **The QC thresholds have one or two observations each.** `complex_plddt` cleared its 0.5 bound

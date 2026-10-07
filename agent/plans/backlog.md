@@ -54,9 +54,8 @@ that moves this item, and it should now surface the real LigandMPNN error instea
   **Read it as a floor.** One lineage, one cycle, one draw. The node is `suspect` rather than
   `pass` because the pattern is provisional (`executor.py:245`), which is the interlock working.
   What this run does NOT cover, and what should replace this item on the list: `replicas > 1` has
-  never run (A10); nothing has been promoted by the trust ledger - one clean run recorded, three
-  needed, and `max_cycles: 1` gives one run per campaign - so the trusted path has never executed;
-  and no measurement has superseded a prediction, so calibration is untested.
+  never run (A10); and no measurement has superseded a prediction, so calibration is untested.
+  (Promotion has since happened: job 22726105, see A12.)
 
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
@@ -289,9 +288,14 @@ runs: `22684607/campaigns/_runs/_trust/cuda.jsonl` with 0 clean events and
   end: two runs from different directories reported `0 patterns known, 0 trusted` then
   `2 patterns known, 1 trusted`.
 
-  **Still open:** nothing has actually been promoted on Delta yet. Three clean runs do it, and
-  `max_cycles: 4` in one campaign would promote on the third and admit the fourth graph as
-  trusted - the first time that path would ever run.
+  **Promotion on Delta - DONE, with two follow-ups.** Job 22702568 (6 cycles) promoted nothing,
+  but not because of the ledger: every reset was a quality threshold, which decision 0013 stopped
+  counting against trust. Job 22726105 then promoted after r0002 and ran r0003-r0004 **trusted** -
+  the first time that path executed. r0004 was demoted by packmin's `total_score <= 1000`
+  integrity bound over +1064.5, a pose that relaxed normally to -336.0; the bound was removed and
+  fastrelax convergence now judges an exploded pose (see `toolkits/rosetta/SKILL.md`).
+  **Still open:** a *sustained* trusted run (four consecutive trusted cycles with no demotion),
+  and the first node to reach plain `pass`. `plans/next-run-sustained-trust.md`.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 

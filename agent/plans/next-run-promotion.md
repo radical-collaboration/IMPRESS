@@ -96,7 +96,35 @@ This is also the first real use of the new run-directory layout
 (`<jobid>_<campaign>/manifest.json`, `slurm.out` moved in on exit). Check it, but it is
 infrastructure, not the variable under test.
 
+## Outcome: job 22726105 (2026-10-07, 13m41s, COMPLETED 0:0, commit 5629a9a)
+
+| Run | Admitted | Tasks | QC | Failed gates | Ledger |
+|---|---|---|---|---|---|
+| r0001 | provisional | 6/6 | suspect | none | clean |
+| r0002 | provisional | 6/6 | fail | Boltz pLDDT 0.475, ipTM 0.389 (acceptance) | clean, **promoted** |
+| r0003 | **trusted** | 6/6 | fail | LigandMPNN confidence 0.377 (acceptance) | - |
+| r0004 | **trusted** | 6/6 | fail | **packmin total_score 1064.5 (integrity)**, pLDDT 0.498 | failure, **demoted** |
+| r0005 | provisional | 6/6 | fail | pLDDT 0.417, ipTM 0.382 (acceptance) | clean |
+
+- **Held:** promotion after r0002, exactly as predicted. **The trusted path executed for the
+  first time** (r0003, r0004), with `scrutiny` confirming no forced dry-run and no cost cap.
+- **Missed:** r0005 and r0006 were predicted trusted. r0004 tripped an integrity gate.
+- **Missed:** no plain `pass`. The only node to clear every gate (r0001) was untrusted, so it was
+  `suspect`. The front is that single node.
+- **Diagnosis:** the integrity failure was packmin's `total_score <= 1000` bound over a
+  +1064.5 pre-relax pose that fastrelax took to -336.0 (`fa_rep` 119.1). It was a false alarm
+  from a bound set one observation wide. **Fix:** packmin no longer bounds its own score, and an
+  exploded pose is judged by fastrelax converging (its two integrity gates). Replaying this job
+  with the fix stays trusted from r0002 on
+  (`test_replaying_job_22726105_stays_trusted_once_promoted`).
+- **Infrastructure:** the first real use of the new run layout. The manifest carried the real
+  commit (clean) and exit 0, and `slurm.out` was moved in. Provenance `failed_gates` and
+  `scrutiny` made the diagnosis possible from the logs alone.
+
 ## After this
+
+Next: `plans/next-run-sustained-trust.md`. The items below are queued behind it.
+
 
 These are queued, one variable each, not folded into this run:
 

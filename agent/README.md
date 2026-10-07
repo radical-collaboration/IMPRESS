@@ -213,7 +213,7 @@ Reference implementation, exercised end to end on a laptop and not yet on real h
 | Concurrent experiments, durable runs, reattach after restart | works |
 | Control plane — in-process and HTTP+SSE adapters | works |
 | Mock toolkit campaign | works |
-| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | wired, CLI contracts verified against real installs, **never executed** |
+| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | six-stage chain executed end to end on Delta; trusted path reached (job 22726105); `replicas > 1` never run |
 
 `pytest tests -q` — ~10s, no allocation. A complete campaign runs on a laptop with stubbed
 science, which is deliberate: HPC iteration is slow and expensive, so almost everything is verifiable

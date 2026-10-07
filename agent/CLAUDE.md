@@ -151,12 +151,17 @@ one-node Pareto front. All four campaign objectives carry real values (`total_sc
 measured for all six.
 
 Read that as a floor, not a result. It is **one lineage, one cycle, one draw**: `replicas > 1`
-has never run, so the independence invariant is unexercised; nothing has ever been promoted by the
-trust ledger — and until `f509c80`+ it *could* not be, because the ledger resolved inside each
-job's working directory and started empty every run (backlog A12), so the trusted path has never
-executed; and no measurement has ever superseded a
-prediction, so the calibration machinery is untested against reality. The node is `suspect`
-rather than `pass` because the pattern is provisional — that is the interlock working.
+has never run, so the independence invariant is unexercised; and no measurement has ever
+superseded a prediction, so the calibration machinery is untested against reality.
+
+**The trusted path has executed, twice.** Job 22726105 promoted the six-stage pattern after r0002,
+exactly as predicted from a replay of 22702568's metrics, and admitted r0003 and r0004 trusted -
+no forced dry-run, no cost cap, normal QC verdict. It took decision 0013 to get there: under the
+old all-gates rule, 22702568 ran 30/30 tasks clean and promoted nothing. r0004 was then demoted by
+packmin's `total_score <= 1000` integrity bound over a +1064.5 pose that relaxed normally, so that
+bound is gone: whether a pose exploded is fastrelax's call, by whether it converges. What has
+still never happened is a sustained trusted run, or a node reaching plain `pass` - every trusted
+node so far missed an acceptance threshold. See `plans/next-run-promotion.md`.
 
 **Wall time is not stable, and cost models must not be tuned as if it were.** `rfd3_design` took
 145.7s in job 22684607 and 45.0s in 22692304 — same campaign, same allocation, same parameters,
