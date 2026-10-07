@@ -19,18 +19,23 @@ parameters:
 metrics: [total_score]
 qc_gates:
   - {id: output_present, params: {key: result}}
-  # A LOOSE sanity bound, not a quality threshold. This gate used to read `max: 0.0`,
-  # which is the reference pipeline's `fastrelax_max_total_score`
-  # (small_molecule_binding.py:678) copied onto the wrong stage - upstream gates that
-  # value on fastrelax and gates nothing on packmin. packmin is PackRotamersMover +
-  # MinMover with no constraints: it PREPARES a structure for relaxation, and expecting
-  # it to reach a negative Rosetta score is expecting it to be fastrelax. Job 22684607
-  # measured +145.3 here and -322.6 from fastrelax on that same structure one stage
-  # later, so the old gate would have failed a run that was going fine. A gate that
-  # always fires carries no information, which is worse than no gate.
-  # 1000.0 catches a structure that blew up. It is ONE observation wide - recalibrate
-  # once several real runs exist.
-  - {id: metric_in_range, params: {metric: total_score, max: 1000.0}}
+  # No threshold on packmin's own score. Whether a pose blew up is judged one stage later,
+  # by whether fastrelax CONVERGES (its integrity gates: total_score <= 0, fa_rep <= 500) -
+  # which is where the reference pipeline gates too (small_molecule_binding.py:678), with
+  # nothing on packmin. packmin is PackRotamersMover + MinMover with no constraints: it
+  # prepares a pose for relaxation, and its score says how much relaxing is left to do.
+  #
+  # History, because both earlier bounds were wrong in the same way. `max: 0.0` was
+  # upstream's fastrelax threshold on the wrong stage (job 22684607: +145.3 here, -322.6
+  # from fastrelax on the same structure). `max: 1000.0` replaced it, one observation wide,
+  # and its first real trip was a false alarm: job 22726105 r0004 scored +1064.5 here and
+  # relaxed normally to -336.0 with fa_rep 119.1 - and because this gate was integrity,
+  # it demoted a trusted pattern that had done nothing wrong. Ten real packmin scores span
+  # -7.6 to +1064.5, all of them relaxed. A bound inside the normal spread of a pre-relax
+  # score carries no information about breakage.
+  #
+  # What stays: the score must be REPORTED. A worker that exits without one has broken.
+  - {id: metrics_reported, params: {metrics: [total_score]}}
 # Measured on job 22684607 (NVMe, 1 node): 15.9s = 0.0044 h. Declared 0.2 was
 # 45x that - a literature guess, and on the gpu dimension those guesses summed
 # past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.

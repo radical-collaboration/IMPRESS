@@ -21,8 +21,9 @@ gate before the structure is handed to Boltz-2 for independent co-folding confir
 
 ## Cost posture
 `fastrelax` dominates CPU cost in this toolkit (full relax protocol, `nstruct` scales it
-linearly); `packmin` and `filter_shape` are comparatively cheap. Do not raise `nstruct` on
-`fastrelax` for candidates that have not already cleared `packmin`'s gate.
+linearly); `packmin` and `filter_shape` are comparatively cheap. Raising `nstruct` on
+`fastrelax` buys more relax trajectories per candidate; it does not rescue a candidate whose
+relax does not converge.
 
 **Measured on job 22684607** (one lineage, NVMe): packmin **15.9s**, fastrelax **25.9s**,
 filter_shape **10.2s**, each including a fresh PyRosetta start. The cost models were
@@ -41,15 +42,15 @@ were never the defect; the storage was.
 - Rosetta energies are lower-is-better and can be large negative numbers; the
   `total_score`-based QC gates here only enforce an upper bound, not a lower one - a very
   negative score is not itself suspicious.
-- **The two `total_score` bounds are not the same kind of thing.** `fastrelax` gates at
-  `max: 0.0`, which is upstream's `fastrelax_max_total_score` and a real quality threshold:
-  a relaxed pose that cannot reach a negative score has not relaxed. `packmin` gates at
-  `max: 1000.0`, which is only a sanity bound on an exploded structure. packmin is
-  pack+min with no constraints - it prepares a pose for relaxation, and expecting it to
-  score negative is expecting it to be fastrelax. It carried `max: 0.0` until job 22684607
-  measured +145.3 from a healthy run whose fastrelax then reached -322.6; as written that
-  gate would have failed essentially every packmin output, and a gate that always fires
-  carries no information. 1000.0 is one observation wide and wants recalibrating.
+- **Only `fastrelax` bounds `total_score`, and it judges both stages.** `fastrelax` gates at
+  `max: 0.0` and `fa_rep <= 500`, both integrity: a relax that cannot reach a negative score,
+  or leaves heavy repulsion, has not converged - and that is also how an exploded `packmin`
+  pose shows up. `packmin` bounds nothing on its own score (it must still *report* one). It
+  is pack+min with no constraints, so its score measures how much relaxing is left, not
+  breakage. Both bounds it once had were wrong: `max: 0.0` failed a healthy +145.3 (job
+  22684607), and `max: 1000.0` demoted a trusted pattern over a +1064.5 pose that relaxed
+  normally to -336.0 (job 22726105 r0004). Ten real packmin scores span -7.6 to +1064.5,
+  all of which relaxed. Upstream gates nothing on packmin either.
 - `filter_shape`'s `shape_complementarity` gate threshold (`min: 0.55`) is a starting
   point copied from common interface-design practice, not calibrated against this
   project's own designs yet - expect to retune after the first live campaign.

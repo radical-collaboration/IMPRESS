@@ -380,3 +380,57 @@ def test_the_lying_mock_never_earns_trust(reg, tmp_path):
         assert ex._record_evidence(SimpleNamespace(signature="sig"),
                                    _results(reg, {"mock_noodle": bad["metrics"]})) is True
     assert not ex.trust.is_trusted("sig")
+
+
+# Per-task metrics of job 22726105, from its jobs/ledger.jsonl. It promoted after r0002 as
+# predicted, ran r0003-r0004 trusted - the first trusted runs on Delta - and was then demoted
+# by packmin's old `total_score <= 1000` integrity bound over r0004's +1064.5, a pose that
+# relaxed normally to -336.0. That bound is gone; fastrelax converging is the judgement.
+_JOB_22726105 = {
+    "r0001": {"rfd3_design": {"ss_fraction": 0.878},
+              "ligandmpnn_design": {"overall_confidence": 0.455, "ligand_confidence": 0.479},
+              "packmin": {"total_score": 261.318},
+              "fastrelax": {"total_score": -295.038, "fa_rep": 121.822},
+              "filter_shape": {"shape_complementarity": 0.681},
+              "boltz_predict": {"complex_plddt": 0.533, "ligand_iptm": 0.421}},
+    "r0002": {"rfd3_design": {"ss_fraction": 0.868},
+              "ligandmpnn_design": {"overall_confidence": 0.45, "ligand_confidence": 0.509},
+              "packmin": {"total_score": 482.7},
+              "fastrelax": {"total_score": -466.109, "fa_rep": 175.197},
+              "filter_shape": {"shape_complementarity": 0.651},
+              "boltz_predict": {"complex_plddt": 0.475, "ligand_iptm": 0.389}},
+    "r0003": {"rfd3_design": {"ss_fraction": 0.854},
+              "ligandmpnn_design": {"overall_confidence": 0.377, "ligand_confidence": 0.431},
+              "packmin": {"total_score": 45.634},
+              "fastrelax": {"total_score": -502.67, "fa_rep": 191.993},
+              "filter_shape": {"shape_complementarity": 0.577},
+              "boltz_predict": {"complex_plddt": 0.545, "ligand_iptm": 0.569}},
+    "r0004": {"rfd3_design": {"ss_fraction": 0.849},
+              "ligandmpnn_design": {"overall_confidence": 0.507, "ligand_confidence": 0.589},
+              "packmin": {"total_score": 1064.49},
+              "fastrelax": {"total_score": -336.022, "fa_rep": 119.133},
+              "filter_shape": {"shape_complementarity": 0.582},
+              "boltz_predict": {"complex_plddt": 0.498, "ligand_iptm": 0.448}},
+    "r0005": {"rfd3_design": {"ss_fraction": 0.875},
+              "ligandmpnn_design": {"overall_confidence": 0.432, "ligand_confidence": 0.475},
+              "packmin": {"total_score": 37.245},
+              "fastrelax": {"total_score": -211.53, "fa_rep": 80.048},
+              "filter_shape": {"shape_complementarity": 0.677},
+              "boltz_predict": {"complex_plddt": 0.417, "ligand_iptm": 0.382}},
+}
+
+
+def test_replaying_job_22726105_stays_trusted_once_promoted(reg, tmp_path):
+    from types import SimpleNamespace
+
+    ex = _executor_with_memory_ledger(tmp_path)
+    ex.trust.on_clean_run("sig")      # the site ledger going in: one clean run (22702568 r0005)
+    trusted_after = {}
+    for run_id, metrics in _JOB_22726105.items():
+        assert ex._record_evidence(SimpleNamespace(signature="sig"),
+                                   _results(reg, metrics)) is False, \
+            f"{run_id}: every tool worked and every relax converged"
+        trusted_after[run_id] = ex.trust.is_trusted("sig")
+    assert trusted_after == {"r0001": False, "r0002": True, "r0003": True,
+                             "r0004": True, "r0005": True}, \
+        "promoted after r0002 as observed - and no longer demoted by r0004's pre-relax score"

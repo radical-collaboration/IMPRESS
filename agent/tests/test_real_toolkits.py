@@ -938,27 +938,27 @@ def test_the_six_stage_chain_fits_the_untrusted_pattern_cap(reg):
 
 
 def test_packmin_does_not_gate_on_a_relaxed_score(reg):
-    """`max: 0.0` on packmin was `fastrelax_max_total_score` ported onto the wrong stage.
+    """Whether a pose blew up is fastrelax's call, made by whether it converges.
 
-    Upstream (`small_molecule_binding.py:678`) applies that threshold to fastrelax and
-    gates nothing on packmin. Ours is PackRotamersMover + MinMover with no constraints -
-    a preparation step. Job 22684607 measured +145.3 from packmin and -322.6 from
-    fastrelax on that same structure one stage later, so the old gate failed a run that
-    was going fine. fastrelax keeps the <= 0.0 gate, which is where it belongs.
+    Both bounds packmin ever had were wrong the same way. `max: 0.0` was upstream's
+    fastrelax threshold on the wrong stage (job 22684607: +145.3 here, -322.6 from
+    fastrelax). `max: 1000.0` replaced it and, as an integrity gate, demoted a trusted
+    pattern on its first trip: job 22726105 r0004 scored +1064.5 and relaxed to -336.0.
+    Upstream (`small_molecule_binding.py:678`) gates nothing on packmin either.
     """
-    def score_bound(tool):
-        for g in reg.get(tool).qc_gates:
-            if g.id == "metric_in_range" and g.params.get("metric") == "total_score":
-                return g.params.get("max")
-        return None
+    def bounds(tool):
+        return {g.params["metric"]: (g.params.get("max"), g.role)
+                for g in reg.get(tool).qc_gates if g.id == "metric_in_range"}
 
-    assert score_bound("fastrelax") == 0.0, \
-        "fastrelax is where upstream puts the <= 0.0 threshold, and it passed there"
-    packmin_max = score_bound("packmin")
-    assert packmin_max is not None and packmin_max > 145.3, \
-        "packmin measured +145.3 on a healthy run; a bound at or below that rejects " \
-        "every normal pre-relax score, and a gate that always fires carries no " \
-        "information"
+    assert "total_score" not in bounds("packmin"), \
+        "a bound inside the normal spread of a pre-relax score carries no information"
+    assert any(g.id == "metrics_reported" and "total_score" in g.params["metrics"]
+               and g.role == "integrity" for g in reg.get("packmin").qc_gates), \
+        "packmin must still REPORT a score - a worker that exits without one has broken"
+    assert bounds("fastrelax") == {"total_score": (0.0, "integrity"),
+                                   "fa_rep": (500.0, "integrity")}, \
+        "fastrelax converging is now the only judgement of an exploded pose, so both " \
+        "of its gates must stay integrity"
 
 
 async def test_run_cmd_keeps_what_a_timed_out_process_already_said():

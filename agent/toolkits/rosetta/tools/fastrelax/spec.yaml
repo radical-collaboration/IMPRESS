@@ -20,6 +20,10 @@ parameters:
 metrics: [total_score, fa_rep]
 qc_gates:
   - {id: output_present, params: {key: result}}
+  # Convergence, and integrity on purpose: a relax that cannot reach a negative score, or
+  # leaves heavy repulsion, has not relaxed. These two gates are also the ONLY judgement of
+  # whether packmin's pose blew up - packmin no longer bounds its own pre-relax score
+  # (see packmin/spec.yaml, job 22726105 r0004).
   - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
   - {id: metric_in_range, params: {metric: fa_rep, max: 500.0}}
 # Measured on job 22684607 (NVMe, 1 node): 25.9s = 0.0072 h. Declared 0.5 was
