@@ -2,6 +2,13 @@
 //
 //   python slides/run_model.py                       # regenerate slides/run.json first
 //   NODE_PATH=<dir with pptxgenjs> node slides/build_deck.js
+//   soffice --headless --convert-to pdf --outdir slides slides/impress-a-codewalk.pptx
+//
+// Neither node nor LibreOffice is on Delta: `pixi exec --spec nodejs` provides node, and
+// docker://linuxserver/libreoffice under apptainer provides soffice. The deck's Calibri /
+// Cambria / Consolas are absent on Linux, so the PDF pins them with a fontconfig alias to
+// DejaVu Sans / Serif / Sans Mono - the substitution the first PDF was rendered with. Without
+// it the container picks Noto and every slide's metrics shift.
 //
 // Every diagram is native, editable PowerPoint shapes - never an image. One visual
 // vocabulary throughout, shared with the designagent deck so the two read as siblings:
@@ -707,7 +714,7 @@ Right-hand side, measured rather than assumed. Cancellation is advisory. Cancel 
   title(s, "★ Building the engine on the loop that will use it", "The seam · 2 of 2");
 
   code(s, [
-    'async def make_engine_bounded(kind, config, timeout_s, heartbeat_s):',
+    'async def make_engine_bounded(kind, config, timeout_s, heartbeat_s, work_dir):',
     '    if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS:',
     '        return await make_engine(kind, config)',
     '',
@@ -718,7 +725,7 @@ Right-hand side, measured rather than assumed. Cancellation is advisory. Cancel 
     '',
     '    async def _finish():                   # on OUR loop, deliberately',
     '        backend = await _init_backend(be)  # __await__ registers states',
-    '        return await WorkflowEngine.create(backend=backend), backend',
+    '        return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend',
   ], M, 1.5, 7.3, 1.85, { anchor: "exec/backend.py:128–176  ·  EDITED — condensed, see CODE_FOR_DECK.md", fs: 10 });
 
   const rows = [

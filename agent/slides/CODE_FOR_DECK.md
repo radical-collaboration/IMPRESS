@@ -188,7 +188,7 @@ loop.
         async def _finish():
             from radical.asyncflow import WorkflowEngine
             backend = await _init_backend(be)
-            return await WorkflowEngine.create(backend=backend), backend
+            return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
 ```
 
 The docstring on `_construct_backend_in_thread` is worth reading aloud if anyone asks why not

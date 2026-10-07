@@ -1,22 +1,22 @@
 {
  "code": {
-  "head": "3e64ba6",
+  "head": "79e539f",
   "packages": {
-   "tools": 1435,
+   "tools": 1434,
    "runtime": 1027,
    "control": 928,
    "core": 831,
    "policy": 755,
    "exec": 512,
    "compose": 433,
-   "cli": 420,
+   "cli": 423,
    "manager.py": 115,
    "__main__.py": 3,
    "__init__.py": 0
   },
-  "src_total": 6459,
-  "test_lines": 3476,
-  "tests_collected": 152,
+  "src_total": 6461,
+  "test_lines": 3515,
+  "tests_collected": 154,
   "tools": [
    "boltz_predict",
    "fastrelax",
@@ -40,10 +40,10 @@
    "  cycles   : 3",
    "  stop     : target front size 3 reached",
    "  nodes    : 6  front: 4",
-   "    n000001-af31 qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
-   "    n000004-af31 qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
-   "    n000005-af31 qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
-   "    n000006-af31 qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
+   "    n000001-edde qc=suspect  sc_rmsd=1.204 iptm=0.751 ddg=-2.119 clashscore=2.95",
+   "    n000004-edde qc=suspect  sc_rmsd=2.13 iptm=0.686 ddg=1.817 clashscore=2.27",
+   "    n000005-edde qc=suspect  sc_rmsd=2.258 iptm=0.678 ddg=0.877 clashscore=1.49",
+   "    n000006-edde qc=suspect  sc_rmsd=1.584 iptm=0.719 ddg=-2.909 clashscore=3.02"
   ],
   "admissions": [
    {
@@ -99,7 +99,7 @@
   ],
   "nodes": [
    {
-    "node": "n000001-af31",
+    "node": "n000001-edde",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
@@ -115,7 +115,7 @@
     }
    },
    {
-    "node": "n000002-af31",
+    "node": "n000002-edde",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
@@ -131,7 +131,7 @@
     }
    },
    {
-    "node": "n000003-af31",
+    "node": "n000003-edde",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
@@ -147,7 +147,7 @@
     }
    },
    {
-    "node": "n000004-af31",
+    "node": "n000004-edde",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
@@ -163,7 +163,7 @@
     }
    },
    {
-    "node": "n000005-af31",
+    "node": "n000005-edde",
     "run": "r0004",
     "lineage": 0,
     "qc": "suspect",
@@ -179,7 +179,7 @@
     }
    },
    {
-    "node": "n000006-af31",
+    "node": "n000006-edde",
     "run": "r0004",
     "lineage": 1,
     "qc": "suspect",
@@ -196,10 +196,10 @@
    }
   ],
   "front": [
-   "n000001-af31",
-   "n000004-af31",
-   "n000005-af31",
-   "n000006-af31"
+   "n000001-edde",
+   "n000004-edde",
+   "n000005-edde",
+   "n000006-edde"
   ],
   "stop": "target front size 3 reached",
   "cycles": 3,
