@@ -24,6 +24,10 @@ Run artifacts archived at
 | 15 | A failed stage kills its whole pipeline: after a `TaskFailed`, the pipeline dies with `'NoneType' object is not subscriptable` (`22714866` p7/p15) instead of retrying or escalating | medium | open | [gpu-saturation](2026-10-07-gpu-saturation.md) |
 | 16 | rfd3 reported `TaskFailed` (`error_type=unknown`) after writing all its outputs (`22714866` p7/p15, both on GPU 2, unstaggered run) | low | open; not seen in the staggered runs (0 failures at 2/6/8 per GPU). Watch for recurrence | [gpu-saturation](2026-10-07-gpu-saturation.md) |
 | 17 | Operating point is 6–8 pipelines per GPU (5.5× per-node rfd3 at 8/GPU, GPUs pegged 55–63 % of the time), but `delta_gpu_run.sh` still defaults to 1 per GPU and needs one `p*_in` dir per pipeline. Also restate the per-pipeline throughput gate (11 rfd3/pipeline-h) per node | medium | open; being exercised by the 8-node / 256-pipeline run | [gpu-saturation](2026-10-07-gpu-saturation.md) |
+| 18 | mpnn keeps every candidate's `packed/` and `backbones/` PDB (~26 each per task, ~90% of run bytes) but only `best_packed_pdb` is read later. `22726386` lost 174 tasks to the shared inode quota (`Errno 122`) | high | open; blocks the `22726386` rerun | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
+| 19 | No per-job packing: run dirs stay as 20k–400k loose files each after the job ends | medium | open | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
+| 20 | Runner does not exit when every pipeline has failed: `22726386` idled from 03:39 to its 06:59 `TIMEOUT` (~27 node-h), no `runner_status` written. Related to 2 | high | open | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
+| 21 | Job evidence split across the submit dir: `impress_%j.out`, `asyncflow.session.*`, `ddict_orc_*` land outside `IMPRESS_WORK_DIR` | low | open | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
 
 ## Closed 2026-10-06 by the 32-pipeline scale gate (`22701168`; [scale-gate](2026-10-06-scale-gate.md))
 
