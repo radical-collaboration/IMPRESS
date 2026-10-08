@@ -1,6 +1,6 @@
 # GPU saturation: pipelines-per-GPU ladder, staggered start, GPU logger
 
-**Status:** ladder done (2026-10-06/07). The GPUs saturate at about **8 pipelines per GPU**. The 8-node production-scale follow-up is job `22747xxx` (see the end of this doc).
+**Status:** ladder done (2026-10-06/07). The GPUs saturate at about **8 pipelines per GPU**. The 8-node production-scale follow-up, job `22726386`, **failed**: 245 of 256 pipelines died, most of them on the project's inode quota (see the end of this doc).
 **Evidence:** jobs `22714785`, `22714866`, `22716150`, `22717753`, `22718758`; reference `22692293`.
 
 ## Why
@@ -80,3 +80,22 @@ Production-scale check of the operating point:
 - **Dragon's worker pool:** 32 per node × 8 = 256, exactly one per pipeline.
 - **The primary:** it carries all 256 pipelines' in-process analysis and adaptive work. That projects to ~8 % of the event loop each.
 - **nvsmi:** logs only the batch node.
+
+### Result: `22726386` failed on the inode quota, then hung (recorded 2026-10-08)
+
+Run from this checkout while it was still on `scaling-wide`. The checkout has since moved to `main`, which now contains the `scaling-wide` work (PR #70).
+
+- **Ran** 02:59–06:59 on 2026-10-08: 8 nodes, `TIMEOUT` at 04:00:19. The log goes silent at about 03:39. The runner never wrote `runner_status`, so the job held all 8 nodes for about 3 h 20 min doing nothing (about 27 node-hours).
+- **245 of 256 pipelines failed**, from 234 task failures:
+
+| When | Cause | Tasks |
+|---|---|---|
+| 03:06–03:13 (ramp) | CUDA OOM / `CUBLAS_STATUS_ALLOC_FAILED`: rfd3, boltz, mpnn on a GPU already holding several models | 59 |
+| 03:36–03:39 | `OSError: [Errno 122] Disk quota exceeded` writing under `logs/22726386/` | 174 |
+| – | other | 1 |
+
+- **The quota hit was on inodes, not bytes.** On 2026-10-08 the `<allocation A>` project held about 2.77M files against a 2.55M soft and 2.805M hard limit (`quota`). The count is shared by its `/work/nvme` and `/work/hdd` directories. The run dirs in the nvme checkout alone held about 1.03M files. One 8-node, 4 h run writes about 230k files, 90% of the bytes in mpnn `packed/` and `backbones/` PDBs.
+- **The ramp OOMs** show that 8 pipelines per GPU with the 7-minute stagger still overcommits GPU memory on some GPUs. That is consistent with the "Dragon placement" risk above. The ladder rungs ran on one node and never saw it.
+- **Next:** before any rerun, free inodes (done 2026-10-08: the run dirs were archived to `<hdd work dir>/impress_run_archive/`, and the inode count is now about 1.66M). Then land BACKLOG 18–21 ([run-storage-footprint](2026-10-08-run-storage-footprint.md)): keep only the selected mpnn PDBs, pack each job's dir when it ends, exit when every pipeline has failed, and keep each job's files in one dir.
+
+Evidence: `impress_run_archive/22726386_nvme.tar.gz` (the `.out`, the `asyncflow.session.94bf7d31/task.*.stderr` files and `nvsmi.csv`).
