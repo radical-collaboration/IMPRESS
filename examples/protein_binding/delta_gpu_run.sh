@@ -2,10 +2,9 @@
 #
 # Protein Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -37,9 +36,9 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
+if [ -z "${WORK_DIR:-}" ]; then
+    echo "ERROR: WORK_DIR is not set."
+    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 
@@ -50,28 +49,26 @@ export FAB_LIB=/opt/cray/libfabric/1.22.0/lib64
 export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${MPI_LIB}:${FAB_LIB}:${LD_LIBRARY_PATH:-}
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress_A}"
+IMPRESS_VENV="${IMPRESS_VENV:-${WORK_DIR}/ve/impress}"
 unset SLURM_EXPORT_ENV
 source "${IMPRESS_VENV}/bin/activate"
 dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (adjust for your allocation) ───────────────────────────────────
-export MPNN_PATH="${MPNN_PATH:-${SCRATCH}/${USER}/ProteinMPNN}"
-export AF2_DATABASE="${AF2_DATABASE:-${SCRATCH}/${USER}/alphafold_database}"
-export AF2_SIF="${AF2_SIF:-${SCRATCH}/${USER}/alphafold.sif}"
+export MPNN_PATH="${MPNN_PATH:-${WORK_DIR}/ProteinMPNN}"
+export AF2_DATABASE="${AF2_DATABASE:-${WORK_DIR}/alphafold_database}"
+export AF2_SIF="${AF2_SIF:-${WORK_DIR}/alphafold.sif}"
 # Boltz lives in a separate Python 3.12 conda env (boltz 2.x requires numpy<2.0,
 # scipy==1.13.1 etc. which have no Python 3.13 wheels).
 export BOLTZ_VENV="${BOLTZ_VENV:-${HOME}/ve/boltz}"
-# Boltz model weight cache — kept in home dir; scratch inode quota can't hold
-# the 45K CCD molecule files that boltz extracts from mols.tar on first run.
-export BOLTZ_CACHE_DIR="${BOLTZ_CACHE_DIR:-${HOME}/boltz}"
+export BOLTZ_CACHE_DIR="${BOLTZ_CACHE_DIR:-${WORK_DIR}/boltz}"
 mkdir -p "${BOLTZ_CACHE_DIR}"
 
 # ── IMPRESS paths ─────────────────────────────────────────────────────────────
-export IMPRESS_SCRIPTS_DIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/protein_binding}"
+export IMPRESS_SCRIPTS_DIR="${IMPRESS_SCRIPTS_DIR:-${WORK_DIR}/IMPRESS/examples/protein_binding}"
 # IMPRESS_BASE_DIR: parent of prod_in/ — pipeline builds prod_in/<name>_in from here
-export IMPRESS_BASE_DIR="${IMPRESS_BASE_DIR:-${SCRATCH}/${USER}/IMPRESS_inputs}"
-export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${SCRATCH}/${USER}/IMPRESS_outputs}"
+export IMPRESS_BASE_DIR="${IMPRESS_BASE_DIR:-${WORK_DIR}/IMPRESS_inputs}"
+export IMPRESS_OUTPUT_DIR="${IMPRESS_OUTPUT_DIR:-${WORK_DIR}/IMPRESS_outputs}"
 
 # IMPRESS_BACKEND: "dragon" (default, multi-node HPC) or "local" (single-node,
 # ProcessPoolExecutor — useful for development / non-Dragon clusters).

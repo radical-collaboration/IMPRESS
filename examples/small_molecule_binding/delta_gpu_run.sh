@@ -2,10 +2,9 @@
 #
 # Small Molecule Binding Pipeline — SLURM batch script (Delta HPC / GPU)
 #
-# Set before calling sbatch (only SBATCH_ACCOUNT and SCRATCH are required;
-# the rest default to standard Delta locations):
+# Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export SCRATCH=/scratch/<allocation>
+#   export WORK_DIR=/work/nvme/bdyk/$USER
 #
 # Optional overrides (all have defaults based on $SCRATCH, which on Delta is
 # already per-user, e.g. /scratch/<alloc>/<user> -- do not add $USER again):
@@ -13,10 +12,10 @@
 #   export BOLTZ_CACHE=/path/to/boltz_cache
 #
 # Foundry container (RFD3):
-#   The foundry sandbox is stored as a .tar.gz on scratch (built by pull_foundry.sh).
-#   This script extracts it to /tmp at job start (no scratch quota cost) and removes
-#   it on exit.  Override FOUNDRY_TAR to point to a different archive, or set
-#   FOUNDRY_SIF_PATH directly to skip extraction entirely (e.g. a pre-extracted dir).
+#   Stored as a .tar.gz under WORK_DIR (built by pull_foundry.sh).
+#   Extracted to /tmp at job start and removed on exit.
+#   Override FOUNDRY_TAR to point to a different archive, or set
+#   FOUNDRY_SIF_PATH directly to skip extraction entirely.
 #
 # Example:
 #   sbatch delta_gpu_run.sh
@@ -65,9 +64,9 @@ if [ -z "${SBATCH_ACCOUNT:-}${SLURM_JOB_ACCOUNT:-}" ]; then
 fi
 echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
-if [ -z "${SCRATCH:-}" ]; then
-    echo "ERROR: SCRATCH is not set."
-    echo "       export SCRATCH=/scratch/<allocation> && sbatch delta_gpu_run.sh"
+if [ -z "${WORK_DIR:-}" ]; then
+    echo "ERROR: WORK_DIR is not set."
+    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 
@@ -136,8 +135,8 @@ mkdir -p "${BOLTZ_CACHE}"
 # space that is not quota-counted.  If FOUNDRY_SIF_PATH is already set (e.g.
 # a pre-built .sif or a persistent sandbox on a large allocation), extraction
 # is skipped entirely.
-if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${SCRATCH}/foundry.sif" ]; then
-    export FOUNDRY_SIF_PATH="${SCRATCH}/foundry.sif"
+if [ -z "${FOUNDRY_SIF_PATH:-}" ] && [ -f "${WORK_DIR}/foundry.sif" ]; then
+    export FOUNDRY_SIF_PATH="${WORK_DIR}/foundry.sif"
 fi
 if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
     # The /tmp sandbox is extracted on THIS node only, so a multi-node job would
@@ -180,8 +179,7 @@ if [ ! -d "${MPNN_DIR}" ]; then
 fi
 
 # ── Working directory ─────────────────────────────────────────────────────────
-#WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/${USER}/IMPRESS/examples/small_molecule_binding}"
-WORKDIR="${IMPRESS_SCRIPTS_DIR:-${SCRATCH}/IMPRESS/examples/small_molecule_binding}"
+WORKDIR="${IMPRESS_SCRIPTS_DIR:-${WORK_DIR}/IMPRESS/examples/small_molecule_binding}"
 cd "${WORKDIR}"
 mkdir -p logs
 

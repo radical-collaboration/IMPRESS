@@ -1,6 +1,6 @@
-# IMPRESS Adaptive Pipeline - Walkthrough
+# Adaptive Pipeline Walkthrough
 
-This documentation walks through the adaptive capabilities of the IMPRESS pipeline framework, focusing specifically on how pipelines can dynamically spawn child pipelines during execution.
+This documentation walks through the adaptive capabilities of the IMPRESS pipeline framework, focusing specifically on how pipelines can dynamically spawn child pipelines during execution. For a conceptual overview of the underlying protocol, see [Architecture](architecture.md); for real-world adaptive workflows, see [Examples](../examples/protein-binding.md).
 
 ## Adaptive Pipeline Components
 
