@@ -273,6 +273,15 @@ from a distribution once several runs exist, and treat a single fast run as the 
 input. Pinned by `test_cost_models_are_within_an_order_of_magnitude_of_measurement`, which asserts
 a band rather than a value for exactly this reason.
 
+  **Now a distribution (2026-10-08, `performance_analysis` C1/C2):** 101 timed tasks over 5 jobs.
+  Every declared figure is ≥2.25x the *worst* observed task, so no observed draw would have been
+  refused. The 3.2x swing is one outlier: rfd3 is 40-45s in 16 of its 17 tasks, and 145.7s only in
+  22684607. Each job's first run is slower on four stages (ligandmpnn +8.6s, packmin +10.5s, Boltz
+  +7.8s, rfd3 +4.3s), which looks like warm-up. Measured GPU per six-stage chain is 0.029 GPU-h
+  (median) against 0.17 declared. At p90 x 3 the chain would be 0.105, which admits **5**
+  untrusted lineages under the 0.60 cap instead of 3. Not applied: changing the specs changes what
+  admission refuses, so that is a decision, not a cleanup.
+
 **A12. The trust ledger reset every job, so promotion was unreachable on Delta — RESOLVED.**
 `executor.py` loaded it from `Path(spec.root) / "_trust"`, and `spec.root` defaults to the
 *relative* `campaigns/_runs`. `delta_gpu_run.sh` cds into `$WORK_DIR/impress_a_runs/$SLURM_JOB_ID`
@@ -550,6 +559,34 @@ The LigandMPNN stderr, the actual failure, was lost with it.
   report, not a vendored patch. We have no per-run wall-clock bound that would catch the hang
   either, so any third-party exception with the same shape (a required-arg `__init__` that does
   not forward those args to `super()`) reproduces it.
+
+**G7. A run's seed comes from its run label, so every job samples the same five designs.**
+`_replica_seed(run_label, lineage)`, and labels restart at r0001 in every job. Found by
+`performance_analysis` S5/S6 (2026-10-08), over 17 designs from 5 jobs:
+- **The seed fixes the design's length.** All 21 same-label pairs share a length, and no pair
+  with different labels does.
+- **The seed biases the fold:** median TM-score 0.82 for same-label pairs against 0.28 for the rest.
+- **The seed does not reproduce the coordinates:** 0 of 21 backbones are byte-identical, with a
+  median Cα RMSD of 2.4 Å.
+
+So the 17 designs are **5 independent folds**, sampled about 3 times each. That has two
+consequences:
+- every trust job re-explores r0001-r0005's folds instead of new ones;
+- a rerun cannot reproduce a design, which is the other half of the replicas plan's
+  "independent, REPRODUCIBLE draw".
+
+The fix is a decision: salt the seed per campaign instance, for example with the job id, and
+record the salt. Making rfd3 deterministic is a separate question, probably GPU nondeterminism.
+
+**G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.**
+- **The `cost` field:** each run's ledger `cost` repeats its admission estimate (0.17 in every
+  trust run). Measured task time exists only as asyncflow state lines in `campaign.log`, which
+  is what `performance_analysis/timeline.py` parses.
+- **GPU use:** nothing samples it. C3 bounds the GPU-busy share at **≤17%** of billed GPU time
+  in every job, because one GPU works at a time and three sit idle, and CPU efficiency is ~42%.
+  The reference IMPRESS pipeline already writes a per-job `<jobid>.gpusample.txt`
+  (`IMPRESS/examples/small_molecule_binding/logs/`), so check it before building a sampler
+  here.
 
 ---
 

@@ -136,3 +136,7 @@ on the front, and a trusted plain `pass` becomes more likely than before.
   never earn trust there either. Width 4 needs a bigger budget (route b) or a deliberate ruling
   that multiplicity should not change the signature, which is a design decision, not a fix.
 - **Backlog:** the dead `to_backend_description` and the shared-core pinning.
+- **Backlog G7 (found by `performance_analysis`, 2026-10-08):** the same run label gives the same
+  seed in every job. That fixes a design's length and fold but not its coordinates. So this
+  run's r0001-r0006 will re-sample the trust jobs' folds, and "lineages differ" shows only that
+  lineage seeds differ. It does not show the run is reproducible.
