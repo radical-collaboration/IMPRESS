@@ -4,10 +4,11 @@ Every code block that appears on a slide, keyed by snippet ID, anchored, and mar
 Companion to [`DECK_OUTLINE.md`](DECK_OUTLINE.md) and `build_deck.js`; slide numbers and snippet IDs
 match across all three.
 
-**Derived against `main` @ `a810d67`.** Every anchor below is checked mechanically:
+**Derived against `main` @ `2debd76`.** Every anchor below is checked mechanically, and the
+script reports the count rather than this file restating it:
 
 ```sh
-python3 slides/check_anchors.py      # 40/40
+python3 slides/check_anchors.py
 ```
 
 **Fidelity marking, on every block:**

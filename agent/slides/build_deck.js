@@ -27,6 +27,11 @@ const pptxgen = require("pptxgenjs");
 
 const R = JSON.parse(fs.readFileSync(path.join(__dirname, "run.json"), "utf8"));
 const CODE = R.code, MOCK = R.mock, SHAPE = R.shape, D = R.delta, DONE = R.delta.completed;
+const TRUST = R.delta.trust;
+// Rows are [run, admitted, tasks, qc, failed_gates, ledger]. The deck never restates a
+// count the table itself carries.
+const TRUSTED_NODES = ["22726105", "22728140"]
+  .flatMap(j => TRUST[j].rows).filter(r => r[1] === "trusted").length;
 
 const C = {
   ink: "16222B", text: "22303C", muted: "5E6B75", rule: "C9D1D8", panel: "EEF2F5",
@@ -204,20 +209,21 @@ function tbl(s, hdr, rows, x, y, cw, o = {}) {
     { fontSize: 14, bold: true, color: "8FB8C9", charSpacing: 3 });
   text(s, "An agent that composes its own workflows", M + 0.3, 1.95, 7.1, 1.35,
     { fontFace: HF, fontSize: 34, bold: true, color: C.white });
-  text(s, "— and what its first completed campaign on Delta did, and did not, prove",
-    M + 0.3, 3.5, 7.1, 0.9, { fontSize: 17, color: "D5DEE5" });
+  text(s, "— and what its first completed campaign, and its first trusted ones, did and did " +
+    "not prove", M + 0.3, 3.5, 7.1, 0.9, { fontSize: 17, color: "D5DEE5" });
   text(s, `Job ${DONE.job}: six stages, 6/6 tasks ok in ${DONE.wall}, admitted on the first ` +
-    `attempt, a one-node Pareto front carrying all four objectives`,
+    `attempt, all four objectives valued. Job 22728140: the same shape promoted, then ` +
+    `${TRUST["22728140"].trusted_cycles} consecutive trusted cycles with no demotion`,
     M + 0.3, 4.6, 7.1, 0.7, { fontSize: 13, color: "9FB0BD" });
   text(s, `Lab code walk · main @ ${CODE.head} · ${(CODE.src_total / 1000).toFixed(1)}k lines of ` +
     `source, ${CODE.tests_collected} tests, ${CODE.n_tools} tools in 5 toolkits`,
     M + 0.3, 6.45, 8.5, 0.3, { fontSize: 12, color: "7E8F9C" });
   s.addNotes(
-`[0:45] A code walk, not a results talk. IMPRESS-A runs protein design campaigns on HPC: you give it a goal and a budget, and it decides what experiment to run next, composes a workflow out of a tool registry, runs it through asyncflow and rhapsody, and updates a population of candidates.
+`[1:00] A code walk, not a results talk. IMPRESS-A runs protein design campaigns on HPC: you give it a goal and a budget, and it decides what experiment to run next, composes a workflow out of a tool registry, runs it through asyncflow and rhapsody, and updates a population of candidates.
 
 The word doing the work is composes. There is no fixed pipeline anywhere in this repository. Every experiment is a new graph no human has reviewed, and most of the code I will show you exists because of that one fact.
 
-When some of you last saw this, nothing real had ever run. Since then a six-stage campaign completed on Delta. I will walk the seam, show what four jobs cost us, and be precise about how little one completed campaign proves.`);
+When some of you last saw this, nothing real had ever run. Since then a six-stage campaign completed on Delta, and the shape it ran earned enough trust to be admitted without a safety net. I will walk the seam, show what seven jobs cost us, and be precise about what that trust does and does not cover.`);
 }
 
 // ================================================================ 2. What it does
@@ -264,11 +270,12 @@ When some of you last saw this, nothing real had ever run. Since then a six-stag
     "per-tool cost measured for all six, and the specs corrected from it",
   ], { fill: C.panel, fs: 11 });
 
-  card(s, M + 6.58, 3.5, 6.25, 2.25, "And what one completed campaign is not", [
-    "One lineage, one cycle, one draw. replicas > 1 has never executed, so the independence " +
+  card(s, M + 6.58, 3.5, 6.25, 2.25, "And what the real path still is not", [
+    "Every run so far is ONE lineage. replicas > 1 has never executed, so the independence " +
       "invariant is unexercised.",
-    `The node is ${DONE.qc}, not pass — the composition pattern is provisional. Nothing has ever ` +
-      "been promoted on Delta, so the trusted path has never run.",
+    `No node has reached plain pass. This one is ${DONE.qc} because its pattern was still ` +
+      `provisional; all ${TRUSTED_NODES} trusted nodes since missed an acceptance threshold ` +
+      "instead.",
     "No measurement has ever superseded a prediction, so the calibration machinery is untested " +
       "against reality.",
   ], { fill: C.failTint, hc: C.fail, fs: 11 });
@@ -288,7 +295,7 @@ Across the top: a goal, a reasoner that decides, a composer that turns that into
 
 Left card, all measured. Six stages end to end in under three minutes: diffusion, sequence design, two Rosetta stages, a shape filter, a Boltz prediction. All four objectives came back with real values, admitted on the first attempt, cost measured per stage.
 
-Right card, because you would ask and I would rather say it first. One lineage, one cycle, one draw. Replicas greater than one has never run. The node is marked suspect rather than pass, because the pattern is still provisional — the interlock working, not a failure. And no measurement has ever superseded a prediction.
+Right card, because you would ask and I would rather say it first. Every run we have ever done is a single lineage. This node is suspect rather than pass because its pattern was provisional — the interlock working, not a failure — and no node has reached a plain pass since either, trusted ones included. And no measurement has ever superseded a prediction.
 
 Treat it as a floor. What it proves is that the plumbing survives contact with real tools.`);
 }
@@ -964,10 +971,10 @@ Two honest things. The last column is the census: all eleven tools are P1 or P2.
 And the enum's own docstring says dispatch depends on these. It does not, yet — every consequence is enforced at load time or at a gate, which is composition time, not dispatch. That is the cheaper place for it, but the docstring is ahead of the code.`);
 }
 
-// ================================================================ 12. Four jobs (F3)
+// ================================================================ 12. Seven jobs (F3)
 {
   const s = pres.addSlide(); s.background = { color: C.white };
-  title(s, `Four jobs to one completed campaign`, "Measured · F3");
+  title(s, `Seven jobs: what storage bought, and what trust cost`, "Measured · F3");
 
   const SC = { rfd3_design: C.radical, ligandmpnn_design: C.reason, packmin: C.exec,
                fastrelax: C.compose, filter_shape: C.tool, boltz_predict: "8C6D1F" };
@@ -1037,10 +1044,46 @@ And the enum's own docstring says dispatch depends on these. It does not, yet �
       "measurement on purpose.",
   ], { fill: C.composeTint, hc: C.compose, fs: 10, hfs: 11.5 });
 
-  footer(s, "Durations transcribed from plans/first-real-run.md — the raw logs live under " +
-    "$WORK_DIR/impress_a_runs on Delta. Bars are tool time; campaign wall clock is slightly longer.");
+  // --- the three trust runs. No per-stage durations were recorded for these, only per-run
+  // wall times, so they get a run-level table rather than a bar they cannot honestly fill.
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 4.28, w: 9.0, h: 0.32,
+    fill: { color: C.compose }, line: { color: C.compose } });
+  text(s, "Then three jobs about the SHAPE, not the science — 15 runs, 6/6 tasks every time",
+    M + 0.12, 4.28, 8.8, 0.32,
+    { fontSize: 11, bold: true, color: C.white, valign: "middle" });
+
+  // One short cell per run, derived from the transcribed row rather than retyped.
+  const outcome = r => {
+    const [, adm, , , gates, led] = r;
+    if (led.includes("PROMOTED")) return `${adm} · clean → PROMOTED`;
+    if (led.includes("DEMOTED")) return `${adm} · INTEGRITY fail → demoted`;
+    if (gates === "none") return `${adm} · clean`;
+    return `${adm} · fail (acceptance)`;
+  };
+  const A = TRUST["22726105"].rows, B = TRUST["22728140"].rows;
+  tbl(s, ["run", `22726105 · ${TRUST["22726105"].wall}`, `22728140 · ${TRUST["22728140"].wall}`],
+    A.map((r, i) => [r[0], outcome(r), outcome(B[i])]),
+    M, 4.64, [0.8, 4.1, 4.1],
+    { fs: 10, hfs: 10, rowH: 0.26, hfill: C.compose,
+      cell: (i, j, c) => String(c).includes("demoted") ? { color: C.fail, bold: true }
+        : String(c).startsWith("trusted") ? { color: C.good, bold: true } : {} });
+
+  text(s, [
+    { text: "22702568 ran 30/30 tasks clean and promoted nothing", options: { bold: true } },
+    { text: " — the all-gates rule made promotion a function of target difficulty " +
+      "(decision 0013). Two defects, both fixed: packmin's " +
+      `total_score <= 1000 bound was ONE observation wide and demoted r0004 over a +` +
+      `${TRUST.packmin_bound.tripped_on} pose fastrelax took to ` +
+      `${TRUST.packmin_bound.relaxed_to}, and the driver counted a Backtrack as a cycle, so ` +
+      `every job asked for ${TRUST.cycle_off_by_one.asked} runs and ran ` +
+      `${TRUST.cycle_off_by_one.ran}.` },
+  ], M, 6.48, 9.0, 0.56, { fontSize: 9.5, color: C.text });
+
+  footer(s, "Durations transcribed from plans/first-real-run.md; the trust runs from " +
+    "plans/next-run-promotion.md and plans/next-run-sustained-trust.md — the raw logs live " +
+    "under $WORK_DIR/impress_a_runs on Delta. Bars are tool time.");
   s.addNotes(
-`[1:15] Four jobs to a completed campaign, and the figure is really about one variable.
+`[1:35] Seven jobs, and the figure at the top is really about one variable.
 
 Top row, the HDD baseline. Diffusion 137 seconds, sequence design 293, and then packmin could not finish importing PyRosetta inside its three-hundred-second budget, so nothing downstream ran at all.
 
@@ -1048,9 +1091,9 @@ Middle row, the same campaign with one thing changed: the virtual environment mo
 
 The reason is on the right. Importing PyRosetta off that filesystem costs 471 seconds — a 598-megabyte shared object, demand-paged. Torch is another 280. On NVMe both are seconds. That was the single largest cost this project was paying, and it was invisible because it looked like a tool timing out.
 
-It nearly caused a second bug, which is the more useful half. The queued fix was to raise three walltimes six-fold, which would have hidden the real cost behind timeouts far too large.
+Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 seconds in one job and 45 in the next — same campaign, same parameters. These numbers feed gates that refuse graphs, so they sit deliberately above measurement and must not be tightened toward equality.
 
-Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 seconds in one job and 45 in the next — same campaign, same parameters. These numbers feed gates that refuse graphs, so they sit deliberately above measurement and must not be tightened toward equality.`);
+The table underneath is three later jobs that changed nothing about the science and asked one question: does the shape earn trust. The first ran thirty tasks out of thirty cleanly and promoted nothing, because we were counting design quality as evidence about the workflow. With only integrity gates counting, the same chain promoted after its second run in both later jobs — the green rows are graphs admitted with no dry-run and no cap.`);
 }
 
 // ================================================================ 13. Four defects
@@ -1085,7 +1128,8 @@ Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 
     y += 1.22;
   });
 
-  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 6.38, w: 12.33, h: 0.62,
+  // Three lines at 12pt need more than 0.5" of box: the last line was clipped by the strip.
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 6.34, w: 12.33, h: 0.76,
     fill: { color: C.ink }, line: { color: C.ink } });
   text(s, [
     { text: "Two things to carry away.  ", options: { bold: true, color: "F0C898" } },
@@ -1093,15 +1137,13 @@ Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 
       "invisible to every contract check we had. And a plausible explanation is not a diagnosis: " +
       "the trajectory bug was a convincing cause for a LigandMPNN failure it had nothing to do with.",
       options: { color: "DCE5EC" } },
-  ], M + 0.2, 6.45, 11.95, 0.5, { fontSize: 12 });
+  ], M + 0.2, 6.42, 11.95, 0.62, { fontSize: 12 });
   s.addNotes(
 `[1:20] Four defects reached real hardware, each invisible to a dry run. The pattern across them is more useful than any one.
 
-What a tool writes. Our glob for the diffusion output picked a trajectory rather than the design — same extension, and "denoised" sorts before the design's own name. A five-megabyte multi-frame stack went downstream as the backbone instead of a nineteen-kilobyte design.
+The first two are in front of you. Read them as a pair: one picked the wrong file of the right extension, the other died in its module-level imports before parsing a single argument we passed it. No contract check we had could see either.
 
-Whether a tool can import. LigandMPNN died in its module-level imports, before parsing a single argument we passed it. No flag or path we sent could ever have been read.
-
-Where the bytes live — the storage story from the last slide.
+Where the bytes live — the storage story from the last slide, and the queued fix for it was to raise three walltimes six-fold, which would have hidden the real cost behind timeouts far too large.
 
 And the subtle one: an estimate that refuses work. Our cost models were literature guesses six to sixty-nine times over reality, and gate five and the interlock cap refuse graphs against those numbers. The inflated GPU side summed past the cap, the chain was refused, and the policy truncated the last stage off — which happened to be the only producer of two of the four campaign objectives. The run was unwinnable from the moment it was admitted, and nothing said so.
 
@@ -1129,10 +1171,13 @@ Two things to carry away. Checked against the binary is not executed. And a plau
     '  22692304/campaigns/_runs/_trust/cuda.jsonl    1 clean',
   ], M, 1.95, 6.3, 1.1, { anchor: "fixed in 52332c6 — CampaignSpec.trust_root", fs: 9.5 });
 
-  card(s, M + 6.6, 1.95, 6.23, 1.1, "promote_after = 3 counts within ONE file", [
-    "Two more jobs would have produced three files holding one run each, a pattern still " +
-      "untrusted, and two allocations spent for nothing.",
-  ], { fill: C.failTint, hc: C.fail, fs: 10.5 });
+  card(s, M + 6.6, 1.95, 6.23, 1.1, "…and then it remembered", [
+    "trust_root is absolute now, so evidence accumulates ACROSS jobs: 22702568's last event " +
+      "was clean, so 22726105 promoted a run early.",
+    `22728140 then ran ${TRUST["22728140"].trusted_cycles} consecutive trusted cycles — ` +
+      `${TRUST["22728140"].demotions} demotions, ` +
+      `${TRUST["22728140"].integrity_failures} integrity failures.`,
+  ], { fill: C.composeTint, hc: C.compose, fs: 9.5 });
 
   text(s, [
     { text: "How it hid: ", options: { bold: true, color: C.ink } },
@@ -1140,9 +1185,10 @@ Two things to carry away. Checked against the binary is not executed. And a plau
       "identical to one that had not earned promotion yet — and it was reported that way. " +
       "Campaign start now prints the absolute path with a pattern and trusted count. It had " +
       "been true since the first Delta job, so " },
-    { text: "the trusted code path has never executed", options: { bold: true, color: C.fail } },
-    { text: ": no pattern has ever skipped the forced dry-run, and the 10% cap has applied to " +
-      "every graph ever composed on real hardware." },
+    { text: "the trusted path did not execute until job 22726105",
+      options: { bold: true, color: C.compose } },
+    { text: ": every graph composed on real hardware before it ran under the forced dry-run " +
+      "and the 10% cap — and that cap is what truncated boltz_predict off the chain twice." },
   ], M, 3.2, 12.33, 0.75, { fontSize: 11.5 });
 
   // --- bottom half: the new finding
@@ -1186,17 +1232,17 @@ Two things to carry away. Checked against the binary is not executed. And a plau
   footer(s, "Signatures computed live by slides/run_model.py against this checkout — the mock run " +
     "on slide 6 shows the same shape, the shrink from 3 lineages to 2 producing a new pattern.");
   s.addNotes(
-`[1:35] Two findings about the trust ledger, and the second is new as of building this deck.
+`[1:50] Two findings about the trust ledger, and the second is still open.
 
-The first. The executor loaded the ledger from a path relative to the campaign root, and the Delta launcher changes directory into a per-job working directory before starting. So the ledger resolved inside each job and started empty every time. Two real runs left two files — one with zero clean runs, one with one — and promotion counts three consecutive clean runs within one file.
+The first. The ledger path was relative to the campaign root and the Delta launcher changes into a per-job directory, so it resolved inside each job and started empty every time — while promotion counts three consecutive clean runs within one file.
 
-What is worth your time is how it hid. Nothing ever logged where the ledger was, so a file that silently reset looks exactly like one that has not earned promotion yet — and I reported it that way. It had been true since the first Delta job, which means the trusted code path has never executed, and the ten percent cap has applied to every graph ever composed on real hardware. That cap is exactly what truncated the last stage off the chain twice.
+What is worth your time is how it hid. Nothing logged where the ledger was, so a file that silently reset looked exactly like one that had not earned promotion yet — and I reported it that way. It had been true since the first Delta job, which is why the trusted path did not execute until 22726105, and why the ten percent cap applied to every graph composed on real hardware before it. That cap is what truncated the last stage off the chain twice.
 
-The second I hit while generating the numbers for this deck, and I have not changed the code. The signature emits one string per node and hashes the sorted join, so N lineages give N duplicate parts and the hash changes with the replica count — even though it deliberately does not change when you tune a parameter. The table shows the same chain hashing three ways at one, two and four replicas.
+The fix did more than stop the reset: the ledger is a site-wide log now, so evidence accumulates across jobs. The previous job's last event was clean, so promotion came a run early — and the job after that ran three trusted cycles with no demotion and no integrity failure.
 
-The cost is concrete. The cheapest route to exercising four independent lineages was to promote the pattern with a one-replica campaign, then run four. It does not work: four replicas is a different, untrusted pattern, still capped, still refused, and the policy would quietly shrink it to three and run a weaker check than the one we asked for.
+The second I hit while generating these numbers, and I have not changed the code. The signature emits one string per node, so N lineages give N duplicate parts and the hash moves with the replica count — though it deliberately does not move when you tune a parameter.
 
-So, genuinely open: is trust earned at one lineage evidence about four, when the cap it would lift exists to bound blast radius?`);
+The cost is concrete. The cheapest route to four independent lineages was to promote at one replica, then run four. It does not work: four is a different, untrusted pattern, still capped, still refused — and the policy would quietly shrink it to three. The question on the card is ask five.`);
 }
 
 // ================================================================ 15. Running it
@@ -1262,17 +1308,22 @@ One convention I would steal for other projects: a magic number in a test is oft
 
   const real = [
     "A six-stage real-toolkit campaign ran end to end on Delta: 6/6 tasks, four objectives, a front.",
+    `The TRUSTED path: promoted after r0002, then ${TRUST["22728140"].trusted_cycles} ` +
+      "consecutive trusted cycles — no forced dry-run, no cost cap, no demotion, no integrity " +
+      "failure.",
     "The engine — compose, five gates, interlock, Pareto tree, provenance, durable run ledger.",
     "Four control models, plus conduct() reasoners, over one shared executor.",
-    "Control plane: in-process and HTTP+SSE, with synchronous admission, covered end to end.",
-    "A reasoner in another process, driving a campaign over the HTTP plane.",
+    "Control plane in two transports, in-process and HTTP+SSE, with synchronous admission — " +
+      "including a reasoner in another process driving a campaign over it.",
     "Dragon startup AND teardown bounded; both measured against real lost allocations.",
     "Per-tool cost measured for all six real tools, and the specs corrected from measurement.",
   ];
   const notreal = [
     "replicas > 1 has NEVER executed. The independence invariant is the one most likely to be " +
       "silently wrong, and it is unexercised.",
-    "Nothing has ever been promoted by the trust ledger, so the trusted path has never run.",
+    `No node has ever reached plain pass. All ${TRUSTED_NODES} trusted nodes missed an ` +
+      `acceptance threshold, at a ${TRUST.acceptance_rate.pct}% acceptance rate over ` +
+      `${TRUST.acceptance_rate.of} complete runs — that wants more draws, not code.`,
     "No measurement has superseded a prediction — the calibration machinery is untested.",
     "No structural QC gate exists for any real tool; every real gate is a threshold on a " +
       "self-reported number.",
@@ -1306,18 +1357,19 @@ One convention I would steal for other projects: a magic number in a test is oft
   });
 
   text(s, [
-    { text: "One campaign has completed. ", options: { bold: true, color: C.ink } },
-    { text: "One lineage, one cycle, one draw — and the node it produced is marked suspect, " +
-      "which is the interlock working rather than a defect." },
+    { text: `${TRUST.acceptance_rate.of} complete six-stage runs, and the trusted path held. `,
+      options: { bold: true, color: C.ink } },
+    { text: "Every one of them was a single lineage, so breadth is still unexercised — and no " +
+      "node has yet cleared every gate while trusted." },
   ], M, 6.62, 12.33, 0.5, { fontSize: 12.5 });
   s.addNotes(
-`[1:00] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else you said.
+`[1:25] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else you said.
 
-Left, what genuinely runs. A real six-stage campaign on Delta. The engine — composition, gates, interlock, Pareto tree, provenance, a durable ledger. Four control models over one shared executor. The control plane in two transports, including a reasoner driving a campaign from another process. Both ends of the Dragon lifecycle bounded, each against a real lost allocation.
+Left, what genuinely runs. A real six-stage campaign on Delta, and the shape it ran promoted and then held trust for three consecutive cycles with no safety net under it. The engine — composition, gates, interlock, Pareto tree, provenance, a durable ledger. Four control models over one shared executor. The control plane in two transports, including a reasoner driving a campaign from another process. Both ends of the Dragon lifecycle bounded, each against a real lost allocation.
 
-Right, what has never run. Replicas greater than one — the invariant most likely to be silently wrong, because N replicas are supposed to be N independent lineages with different seeds, and the only evidence the seed plumbing does anything is that the nodes carry different metrics. Nothing has ever been promoted by the trust ledger. No measurement has superseded a prediction. No structural QC gate exists for any real tool. There is no resume. The headless control model fails open and reports itself as the wrong model.
+Right, what has never run. Replicas greater than one — the invariant most likely to be silently wrong, because N replicas are supposed to be N independent lineages with different seeds, and the only evidence the seed plumbing does anything is that the nodes carry different metrics. No node has reached a plain pass: five trusted nodes, five acceptance misses, at a thirty-one percent acceptance rate, which is a matter of draws rather than code. No measurement has superseded a prediction. No structural QC gate exists for any real tool. There is no resume. The headless control model fails open and reports itself as the wrong model.
 
-One campaign has completed. One lineage, one cycle, one draw.`);
+Sixteen complete runs, and the trusted path held. Every one of them was one lineage.`);
 }
 
 // ================================================================ 17. Asks

@@ -13,9 +13,10 @@ Five sources, each labelled in the output so a slide can say where its number ca
             site in src/ that consults one - the census and the claim on slide 11
   shape     the real six-stage chain composed at 1, 2 and 4 replicas, and its pattern signature
             for each - the evidence for the A10 finding on slide 14
-  delta     the four Delta jobs, TRANSCRIBED from plans/first-real-run.md and plans/backlog.md.
-            The raw logs live under $WORK_DIR/impress_a_runs/<jobid>_<campaign> on Delta, not here; when a
-            copy exists locally, read it instead and drop the transcription.
+  delta     the Delta jobs, TRANSCRIBED from plans/first-real-run.md, plans/backlog.md,
+            plans/next-run-promotion.md and plans/next-run-sustained-trust.md. The raw logs live
+            under $WORK_DIR/impress_a_runs/<jobid>_<campaign> on Delta, not here; when a copy
+            exists locally, read it instead and drop the transcription.
 """
 
 from __future__ import annotations
@@ -156,7 +157,8 @@ def shape_signatures() -> dict:
 # Transcribed. Source for every figure: plans/first-real-run.md and plans/backlog.md (A1, A6,
 # A7, A11). None is None, never 0: a stage that did not run has no duration.
 DELTA = {
-    "source": "plans/first-real-run.md, plans/backlog.md - transcribed, raw logs on Delta",
+    "source": "plans/first-real-run.md, plans/backlog.md, plans/next-run-promotion.md, "
+              "plans/next-run-sustained-trust.md - transcribed, raw logs on Delta",
     "jobs": [
         {"job": "22536706", "date": "2026-09-29", "storage": "hdd",
          "outcome": "rfd3 ok; ligandmpnn failed, stderr lost (G6); hung at inflight=1",
@@ -172,6 +174,20 @@ DELTA = {
          "outcome": "6/6 ok in 2m53s, first attempt, one-node front",
          "stages": {"rfd3_design": 45.0, "ligandmpnn_design": 14.6, "packmin": 15.2,
                     "fastrelax": 22.4, "filter_shape": 10.0, "boltz_predict": 57.8}},
+        # The three trust runs. Per-stage durations were not transcribed for these - only per-run
+        # wall times - so they carry no "stages" and must not be drawn on slide 12's bar axis.
+        {"job": "22702568", "date": None, "storage": "nvme",
+         "outcome": "5 runs, 30/30 tasks ok, promoted NOTHING under the all-gates rule "
+                    "(decision 0013)",
+         "stages": {}},
+        {"job": "22726105", "date": "2026-10-07", "storage": "nvme",
+         "outcome": "5 runs, 30/30 ok in 13m41s; promoted after r0002, the trusted path "
+                    "executed, r0004 demoted",
+         "stages": {}},
+        {"job": "22728140", "date": "2026-10-07", "storage": "nvme",
+         "outcome": "5 runs, 30/30 ok in 13m37s; three consecutive trusted cycles, no demotion, "
+                    "no integrity failure",
+         "stages": {}},
     ],
     "hdd_baseline_22675512": {"rfd3_design": 137.2, "ligandmpnn_design": 292.6,
                               "packmin": "could not finish import pyrosetta in 300s"},
@@ -188,6 +204,57 @@ DELTA = {
     "cost_guess_over_measured": [6, 69],
     "boltz_cost": {"declared": 0.15, "measured": 0.0160, "now": 0.05},
     "untrusted_cap": {"replicas4_gpu_h": 0.68, "cap": 0.60},
+    # The trusted path, per run. Transcribed from the outcome tables in
+    # plans/next-run-promotion.md (22726105) and plans/next-run-sustained-trust.md (22728140);
+    # the per-task metrics behind them are in tests/test_validation.py, which replays both jobs.
+    "trust": {
+        "promote_after": 3,
+        "carried_in": "22702568's last ledger event was `clean`, so the site ledger folded to "
+                      "clean_runs=1 and promotion came after r0002 rather than r0003",
+        "22702568": {
+            "wall": None, "runs": 5, "tasks": "30/30",
+            "ledger": ["failure", "clean", "failure", "failure", "clean"],
+            "promoted": None,
+            "note": "every tool worked in every cycle; three designs merely scored short, and "
+                    "the all-gates rule counted that against the pattern",
+        },
+        "22726105": {
+            "wall": "13m41s", "commit": "5629a9a", "runs": 5, "promoted": "r0002",
+            "rows": [
+                ("r0001", "provisional", "6/6", "suspect", "none", "clean"),
+                ("r0002", "provisional", "6/6", "fail",
+                 "Boltz pLDDT 0.475, ipTM 0.389 (acceptance)", "clean, PROMOTED"),
+                ("r0003", "trusted", "6/6", "fail",
+                 "LigandMPNN confidence 0.377 (acceptance)", "-"),
+                ("r0004", "trusted", "6/6", "fail",
+                 "packmin total_score 1064.5 (INTEGRITY), pLDDT 0.498", "failure, DEMOTED"),
+                ("r0005", "provisional", "6/6", "fail",
+                 "pLDDT 0.417, ipTM 0.382 (acceptance)", "clean"),
+            ],
+        },
+        "22728140": {
+            "wall": "13m37s", "commit": "e9f44cd", "runs": 5, "promoted": "r0002",
+            "rows": [
+                ("r0001", "provisional", "6/6", "suspect", "none", "clean"),
+                ("r0002", "provisional", "6/6", "fail", "ipTM 0.395", "clean, PROMOTED"),
+                ("r0003", "trusted", "6/6", "fail",
+                 "LigandMPNN confidence 0.394/0.391, shape complementarity 0.471", "-"),
+                ("r0004", "trusted", "6/6", "fail", "pLDDT 0.364, ipTM 0.349", "-"),
+                ("r0005", "trusted", "6/6", "fail",
+                 "LigandMPNN confidence 0.397, pLDDT 0.494, ipTM 0.360", "-"),
+            ],
+            "trusted_cycles": 3, "demotions": 0, "integrity_failures": 0,
+        },
+        # The two defects the trusted path itself found.
+        "packmin_bound": {"was": "total_score <= 1000.0", "tripped_on": 1064.5,
+                          "relaxed_to": -336.0, "fa_rep": 119.1, "deleted_in": "d668838",
+                          "now": "metrics_reported, and fastrelax converging is the judgement"},
+        "cycle_off_by_one": {"asked": 6, "ran": 5, "fixed_in": "76594d4",
+                             "why": "the driver counted a Backtrack as a cycle"},
+        "acceptance_rate": {"passed": 5, "of": 16, "pct": 31},
+        "packmin_range": [-95.8, 1064.5], "fastrelax_range": [-503.1, -200.1],
+        "fa_rep_range": [71, 196],
+    },
 }
 
 

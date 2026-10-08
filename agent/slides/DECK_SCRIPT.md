@@ -16,23 +16,23 @@ realistic rate for technical material delivered with pauses.
 
 | Slide | Spoken | | Slide | Spoken |
 |---|---|---|---|---|
-| 1. Title | 0.9 min | | 10. Tools are data | 1.3 |
-| 2. What it does | 1.1 | | 11. Compute patterns | 1.3 |
-| 3. The constraint | 1.1 | | 12. Four jobs (F3) | 1.3 |
+| 1. Title | 1.0 min | | 10. Tools are data | 1.3 |
+| 2. What it does | 1.2 | | 11. Compute patterns | 1.3 |
+| 3. The constraint | 1.1 | | 12. Seven jobs (F3) | 1.6 |
 | 4. The loop (F1) | 1.3 | | 13. Four defects | 1.5 |
-| 5. Architecture (F2) | 1.1 | | 14. The trust ledger | 2.1 |
+| 5. Architecture (F2) | 1.1 | | 14. The trust ledger | 1.8 |
 | 6. One experiment, typed | 1.2 | | 15. Running it | 0.9 |
-| 7. Admission | 1.7 | | 16. Status | 1.1 |
+| 7. Admission | 1.7 | | 16. Status | 1.4 |
 | 8. The seam: dispatch | 1.4 | | 17. Asks | 1.5 |
 | 9. The seam: the engine | 1.6 | | | |
 
-**Main path: 3476 words = 22.4 minutes of speech.** Backups add 2.6 min if used.
+**Main path: 3551 words = 22.9 minutes of speech.** Backups add 2.6 min if used.
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **22.4** | a 25-minute slot, or 20 with questions strictly held to the end |
-| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | **18.6** | a 20-minute slot with a few questions taken inline |
-| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | **17.7** | a hard 20 that leaves real room for discussion |
+| **A · full** | every main slide | **22.9** | a 25-minute slot, or 20 with questions strictly held to the end |
+| **B · default** | drop 6 (typed dataflow) and 10-11 (the tools pair) | **19.1** | a 20-minute slot with a few questions taken inline |
+| **C · hard twenty** | B, and drop 15 (how to run it — it is in the README) | **18.2** | a hard 20 that leaves real room for discussion |
 
 **Protect 8, 9, 14 and 17.** Those are the two seam slides, the trust findings and the asks, and
 they are what this room came for. Slides 6, 10 and 11 are the designated cuts: the typed-dataflow
@@ -51,15 +51,15 @@ rather than read from a log on this machine.
 
 ---
 
-## 1. Title — *0.9 min*
+## 1. Title — *1.0 min*
 
-[0:45] A code walk, not a results talk. IMPRESS-A runs protein design campaigns on HPC: you give it a goal and a budget, and it decides what experiment to run next, composes a workflow out of a tool registry, runs it through asyncflow and rhapsody, and updates a population of candidates.
+[1:00] A code walk, not a results talk. IMPRESS-A runs protein design campaigns on HPC: you give it a goal and a budget, and it decides what experiment to run next, composes a workflow out of a tool registry, runs it through asyncflow and rhapsody, and updates a population of candidates.
 
 The word doing the work is composes. There is no fixed pipeline anywhere in this repository. Every experiment is a new graph no human has reviewed, and most of the code I will show you exists because of that one fact.
 
-When some of you last saw this, nothing real had ever run. Since then a six-stage campaign completed on Delta. I will walk the seam, show what four jobs cost us, and be precise about how little one completed campaign proves.
+When some of you last saw this, nothing real had ever run. Since then a six-stage campaign completed on Delta, and the shape it ran earned enough trust to be admitted without a safety net. I will walk the seam, show what seven jobs cost us, and be precise about what that trust does and does not cover.
 
-## 2. What it does — *1.1 min*
+## 2. What it does — *1.2 min*
 
 [1:05] The shape of a campaign, and then what one actually produced.
 
@@ -67,7 +67,7 @@ Across the top: a goal, a reasoner that decides, a composer that turns that into
 
 Left card, all measured. Six stages end to end in under three minutes: diffusion, sequence design, two Rosetta stages, a shape filter, a Boltz prediction. All four objectives came back with real values, admitted on the first attempt, cost measured per stage.
 
-Right card, because you would ask and I would rather say it first. One lineage, one cycle, one draw. Replicas greater than one has never run. The node is marked suspect rather than pass, because the pattern is still provisional — the interlock working, not a failure. And no measurement has ever superseded a prediction.
+Right card, because you would ask and I would rather say it first. Every run we have ever done is a single lineage. This node is suspect rather than pass because its pattern was provisional — the interlock working, not a failure — and no node has reached a plain pass since either, trusted ones included. And no measurement has ever superseded a prediction.
 
 Treat it as a floor. What it proves is that the plumbing survives contact with real tools.
 
@@ -181,9 +181,9 @@ Two honest things. The last column is the census: all eleven tools are P1 or P2.
 
 And the enum's own docstring says dispatch depends on these. It does not, yet — every consequence is enforced at load time or at a gate, which is composition time, not dispatch. That is the cheaper place for it, but the docstring is ahead of the code.
 
-## 12. Four jobs (F3) — *1.3 min*
+## 12. Seven jobs (F3) — *1.6 min*
 
-[1:15] Four jobs to a completed campaign, and the figure is really about one variable.
+[1:35] Seven jobs, and the figure at the top is really about one variable.
 
 Top row, the HDD baseline. Diffusion 137 seconds, sequence design 293, and then packmin could not finish importing PyRosetta inside its three-hundred-second budget, so nothing downstream ran at all.
 
@@ -191,37 +191,35 @@ Middle row, the same campaign with one thing changed: the virtual environment mo
 
 The reason is on the right. Importing PyRosetta off that filesystem costs 471 seconds — a 598-megabyte shared object, demand-paged. Torch is another 280. On NVMe both are seconds. That was the single largest cost this project was paying, and it was invisible because it looked like a tool timing out.
 
-It nearly caused a second bug, which is the more useful half. The queued fix was to raise three walltimes six-fold, which would have hidden the real cost behind timeouts far too large.
-
 Bottom right, the caveat for anyone reading our cost models. Diffusion took 146 seconds in one job and 45 in the next — same campaign, same parameters. These numbers feed gates that refuse graphs, so they sit deliberately above measurement and must not be tightened toward equality.
+
+The table underneath is three later jobs that changed nothing about the science and asked one question: does the shape earn trust. The first ran thirty tasks out of thirty cleanly and promoted nothing, because we were counting design quality as evidence about the workflow. With only integrity gates counting, the same chain promoted after its second run in both later jobs — the green rows are graphs admitted with no dry-run and no cap.
 
 ## 13. Four defects — *1.5 min*
 
 [1:20] Four defects reached real hardware, each invisible to a dry run. The pattern across them is more useful than any one.
 
-What a tool writes. Our glob for the diffusion output picked a trajectory rather than the design — same extension, and "denoised" sorts before the design's own name. A five-megabyte multi-frame stack went downstream as the backbone instead of a nineteen-kilobyte design.
+The first two are in front of you. Read them as a pair: one picked the wrong file of the right extension, the other died in its module-level imports before parsing a single argument we passed it. No contract check we had could see either.
 
-Whether a tool can import. LigandMPNN died in its module-level imports, before parsing a single argument we passed it. No flag or path we sent could ever have been read.
-
-Where the bytes live — the storage story from the last slide.
+Where the bytes live — the storage story from the last slide, and the queued fix for it was to raise three walltimes six-fold, which would have hidden the real cost behind timeouts far too large.
 
 And the subtle one: an estimate that refuses work. Our cost models were literature guesses six to sixty-nine times over reality, and gate five and the interlock cap refuse graphs against those numbers. The inflated GPU side summed past the cap, the chain was refused, and the policy truncated the last stage off — which happened to be the only producer of two of the four campaign objectives. The run was unwinnable from the moment it was admitted, and nothing said so.
 
 Two things to carry away. Checked against the binary is not executed. And a plausible explanation is not a diagnosis — the trajectory bug was a convincing cause for a failure it had nothing to do with, and only recovering the real stderr separated them.
 
-## 14. The trust ledger — *2.1 min*
+## 14. The trust ledger — *1.8 min*
 
-[1:35] Two findings about the trust ledger, and the second is new as of building this deck.
+[1:50] Two findings about the trust ledger, and the second is still open.
 
-The first. The executor loaded the ledger from a path relative to the campaign root, and the Delta launcher changes directory into a per-job working directory before starting. So the ledger resolved inside each job and started empty every time. Two real runs left two files — one with zero clean runs, one with one — and promotion counts three consecutive clean runs within one file.
+The first. The ledger path was relative to the campaign root and the Delta launcher changes into a per-job directory, so it resolved inside each job and started empty every time — while promotion counts three consecutive clean runs within one file.
 
-What is worth your time is how it hid. Nothing ever logged where the ledger was, so a file that silently reset looks exactly like one that has not earned promotion yet — and I reported it that way. It had been true since the first Delta job, which means the trusted code path has never executed, and the ten percent cap has applied to every graph ever composed on real hardware. That cap is exactly what truncated the last stage off the chain twice.
+What is worth your time is how it hid. Nothing logged where the ledger was, so a file that silently reset looked exactly like one that had not earned promotion yet — and I reported it that way. It had been true since the first Delta job, which is why the trusted path did not execute until 22726105, and why the ten percent cap applied to every graph composed on real hardware before it. That cap is what truncated the last stage off the chain twice.
 
-The second I hit while generating the numbers for this deck, and I have not changed the code. The signature emits one string per node and hashes the sorted join, so N lineages give N duplicate parts and the hash changes with the replica count — even though it deliberately does not change when you tune a parameter. The table shows the same chain hashing three ways at one, two and four replicas.
+The fix did more than stop the reset: the ledger is a site-wide log now, so evidence accumulates across jobs. The previous job's last event was clean, so promotion came a run early — and the job after that ran three trusted cycles with no demotion and no integrity failure.
 
-The cost is concrete. The cheapest route to exercising four independent lineages was to promote the pattern with a one-replica campaign, then run four. It does not work: four replicas is a different, untrusted pattern, still capped, still refused, and the policy would quietly shrink it to three and run a weaker check than the one we asked for.
+The second I hit while generating these numbers, and I have not changed the code. The signature emits one string per node, so N lineages give N duplicate parts and the hash moves with the replica count — though it deliberately does not move when you tune a parameter.
 
-So, genuinely open: is trust earned at one lineage evidence about four, when the cap it would lift exists to bound blast radius?
+The cost is concrete. The cheapest route to four independent lineages was to promote at one replica, then run four. It does not work: four is a different, untrusted pattern, still capped, still refused — and the policy would quietly shrink it to three. The question on the card is ask five.
 
 ## 15. Running it — *0.9 min*
 
@@ -231,15 +229,15 @@ The split that matters is that the entire local tier runs on a laptop in about f
 
 One convention I would steal for other projects: a magic number in a test is often a bug report. A stagnation limit of ten thousand appeared in three separate tests before anyone noticed the defect was in the engine, not the test setup.
 
-## 16. Status — *1.1 min*
+## 16. Status — *1.4 min*
 
-[1:00] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else you said.
+[1:25] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else you said.
 
-Left, what genuinely runs. A real six-stage campaign on Delta. The engine — composition, gates, interlock, Pareto tree, provenance, a durable ledger. Four control models over one shared executor. The control plane in two transports, including a reasoner driving a campaign from another process. Both ends of the Dragon lifecycle bounded, each against a real lost allocation.
+Left, what genuinely runs. A real six-stage campaign on Delta, and the shape it ran promoted and then held trust for three consecutive cycles with no safety net under it. The engine — composition, gates, interlock, Pareto tree, provenance, a durable ledger. Four control models over one shared executor. The control plane in two transports, including a reasoner driving a campaign from another process. Both ends of the Dragon lifecycle bounded, each against a real lost allocation.
 
-Right, what has never run. Replicas greater than one — the invariant most likely to be silently wrong, because N replicas are supposed to be N independent lineages with different seeds, and the only evidence the seed plumbing does anything is that the nodes carry different metrics. Nothing has ever been promoted by the trust ledger. No measurement has superseded a prediction. No structural QC gate exists for any real tool. There is no resume. The headless control model fails open and reports itself as the wrong model.
+Right, what has never run. Replicas greater than one — the invariant most likely to be silently wrong, because N replicas are supposed to be N independent lineages with different seeds, and the only evidence the seed plumbing does anything is that the nodes carry different metrics. No node has reached a plain pass: five trusted nodes, five acceptance misses, at a thirty-one percent acceptance rate, which is a matter of draws rather than code. No measurement has superseded a prediction. No structural QC gate exists for any real tool. There is no resume. The headless control model fails open and reports itself as the wrong model.
 
-One campaign has completed. One lineage, one cycle, one draw.
+Sixteen complete runs, and the trusted path held. Every one of them was one lineage.
 
 ## 17. Asks — *1.5 min*
 
