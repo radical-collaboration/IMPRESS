@@ -109,6 +109,24 @@ _ap.add_argument("--n-pipelines", type=int, default=None)
 _ap.add_argument("--work-dir", default=None)
 _args, _ = _ap.parse_known_args()
 
+# Run config is taken from the command line first, environment second.
+#
+# The CLI path exists because environment variables DO NOT reach this process on
+# a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
+# backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
+# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_N_PIPELINES
+# / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
+# below would be used instead.  Confirmed on job 22466127, which ran the built-in
+# defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
+# / FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
+# and the ssh login shell sources it -- do not rely on that for new settings.)
+# Dragon passes everything after PROG straight through to us, so argv is the one
+# channel that always works.  parse_known_args so any extra argv is ignored.
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--n-pipelines", type=int, default=None)
+_ap.add_argument("--work-dir", default=None)
+_args, _ = _ap.parse_known_args()
+
 cfg = PROD
 
 # Scale pipeline count with the allocation without editing PROD.  run() is a

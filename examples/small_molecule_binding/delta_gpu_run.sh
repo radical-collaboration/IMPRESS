@@ -131,7 +131,7 @@ dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 
 # ── Tool paths (read by SmallMoleculeBindingPipeline via env vars) ─────────────
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
-export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
+export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/LigandMPNN}"
 
 # Boltz-2 model weights cache.  Pre-warm once on a login node via
 # delta_env_setup.sh's Step 13 (boltz has no dedicated "download weights"
