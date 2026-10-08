@@ -5,7 +5,7 @@
 ### Delta (NCSA)
 
 ```shell
-export BASE_DIR=/scratch/bblj/matitov
+export BASE_DIR=/scratch/<project>/$USER
 export WORK_DIR=$BASE_DIR/impress
 
 # ensure that the working directory is created
@@ -15,8 +15,8 @@ mkdir -p $WORK_DIR
 module load anaconda3_gpu
 
 # AlphaFold2 container and databases
-export AF_CONTAINER=/scratch/rhaas/SUP-5301/alphafold.sif
-export AF_DB=/scratch/rhaas/SUP-5301/database
+export AF_CONTAINER=<path to the shared alphafold.sif>
+export AF_DB=<path to the shared AlphaFold database>
 ```
 
 **NOTE:** AlphaFold2 (AF) is not installed system-wise on Delta, but it is
@@ -25,7 +25,7 @@ into a shared space. GitHub repo for the Delta adapted Dockerfile:
 https://github.com/rhaas80/alphafold
 
 **NOTE:** For test purposes "local" AF container was used (located at: 
-`/scratch/bblj/matitov/alphafold/alphafold_delta.sif`)
+`$BASE_DIR/alphafold/alphafold_delta.sif`)
 
 ```shell
 # steps to build local (own) container
@@ -65,7 +65,7 @@ Platform specific acquiring resources using an interactive job:
 - **Delta**
   ```shell
   srun --time=00:10:00 --nodes=1 --tasks-per-node=1 --cpus-per-task=64 \
-       --exclusive --account=bblj-delta-gpu --partition=gpuA100x4 --gpus=4 \
+       --exclusive --account=<project>-delta-gpu --partition=gpuA100x4 --gpus=4 \
        --mem=0 --pty /bin/bash
   # load python module
   module load anaconda3_gpu

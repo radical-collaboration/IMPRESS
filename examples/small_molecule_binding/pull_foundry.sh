@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=bblj-delta-gpu
+##SBATCH --account=<project>-delta-gpu
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -14,14 +14,14 @@
 set -euo pipefail
 ulimit -c 0  # disable core dumps
 
-export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${SCRATCH:?SCRATCH must be set}/${USER}/.apptainer_cache}"
+export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${WORK_DIR:?WORK_DIR must be set}/.apptainer_cache}"
 export APPTAINER_TMPDIR=/tmp/apptainer_$$
 mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 
 # Build as sandbox (directory) to /tmp — no mksquashfs involved.
 # Then tar to a single archive on scratch for storage.
 SANDBOX=/tmp/foundry_sandbox_$$
-DEST_TAR="${FOUNDRY_SANDBOX_TAR:-${SCRATCH:?SCRATCH must be set}/${USER}/foundry_sandbox.tar.gz}"
+DEST_TAR="${FOUNDRY_SANDBOX_TAR:-${WORK_DIR:?WORK_DIR must be set}/foundry_sandbox.tar.gz}"
 
 echo "=== Building sandbox to /tmp ==="
 apptainer build --sandbox "$SANDBOX" docker://rosettacommons/foundry

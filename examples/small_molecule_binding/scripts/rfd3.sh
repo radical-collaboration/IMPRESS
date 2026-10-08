@@ -20,11 +20,23 @@ diffusion_batch_size="$4"
 unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE
 export PYTHONNOUSERSITE=1
 
+# dump_trajectories=False: the per-step *_noisy_* and *_denoised_* cif.gz files
+# are 11.85 MB of each 11.92 MB output dir -- 99.4% of rfd3's footprint and ~88%
+# of a whole campaign's.  Nothing in the repo reads them, and analysis_backbone
+# cannot pick one up by accident: it builds its candidate list from .json files
+# containing '_model_' and only then derives the structure via
+# .replace('.json', '.cif.gz'), while trajectory files ship no .json at all.
+# Only the 4 *_model_*.cif.gz designs and their .json metrics are kept (~71 KB).
+# To inspect a trajectory for one design, re-run that rfd3 task with this True.
+#
+# The WORK_DIR bind is what makes inputs, outputs and the RFD3 checkpoints
+# visible inside the container.  On a remote node of a `dragon -w ssh` run,
+# WORK_DIR comes only from ~/.bashrc -- without it the bind is silently dropped.
 apptainer exec --nv --writable-tmpfs ${WORK_DIR:+--bind "${WORK_DIR}:${WORK_DIR}"} "$foundry_sif_path" rfd3 design \
     out_dir="$output_dir" \
     inputs="$inputs" \
     skip_existing=False \
-    dump_trajectories=True \
+    dump_trajectories=False \
     prevalidate_inputs=True \
     diffusion_batch_size="$diffusion_batch_size"
 

@@ -4,10 +4,9 @@
 #
 # Set before calling sbatch:
 #   export SBATCH_ACCOUNT=<project>-delta-gpu
-#   export WORK_DIR=/work/nvme/bdyk/$USER
+#   export WORK_DIR=/work/nvme/<project>/$USER
 #
-# Optional overrides (all have defaults based on $SCRATCH, which on Delta is
-# already per-user, e.g. /scratch/<alloc>/<user> -- do not add $USER again):
+# Optional overrides (default under $WORK_DIR):
 #   export MPNN_DIR=/path/to/LigandMPNN
 #   export BOLTZ_CACHE=/path/to/boltz_cache
 #
@@ -22,14 +21,14 @@
 #   sbatch delta_gpu_run.sh run_nonadaptive.py   # non-adaptive runner
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
-#SBATCH --account=bdyk-delta-gpu
+##SBATCH --account=<project>-delta-gpu
 #SBATCH --partition=gpuA40x4
 #SBATCH --nodes=1
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=240G
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 # Sizing notes (measured, do not shrink casually):
 #   cpus-per-task=64 — the whole node.  Requesting 4 GPUs already reserves and
 #     bills the entire node, and billing is max(cpu*31.25, mem/8, gpu*500) under
@@ -40,13 +39,24 @@
 #   mem=240G — node RealMemory is 257637MB but MemSpecLimit=8450 is reserved,
 #     so 249187MB is the allocatable ceiling.  Those same runs used only ~65GB
 #     for 4 pipelines (~16GB each), so 240G covers 8+ pipelines with headroom.
-#   time=48:00:00 — the gpuA40x4 partition maximum.  There is no checkpoint or
-#     resume: on TIMEOUT all in-memory ensemble state is lost.  Billing is on
-#     elapsed, not requested, time, and `sbatch --test-only` showed identical
-#     queue start estimates for 4h and 48h, so a short request buys nothing.
+#   time=12:00:00 — NOT the 48h partition maximum, deliberately.  Sized as
+#     ~6.8h expected compute (measured on job 22491438; unchanged by allocation
+#     width, since each pipeline independently accumulates its own max_tasks
+#     entries) + ~1h teardown + slack down to ~62% of baseline throughput.
+#     The wall limit is the ONLY backstop against a hung Dragon teardown: on
+#     22491438 `flow.shutdown()` never returned after all 16 pipelines finished,
+#     the job sat 60 minutes and had to be scancelled, burning ~64 GPU-h (37% of
+#     its billed total) for zero output.  At 8 nodes that is 32 GPU-h per hung
+#     hour, so a 48h request would let an unattended hang bill ~1536 GPU-h
+#     versus 384 at 12h.  `sbatch --test-only` returns an identical queue start
+#     estimate for 8/12/16/24/48h, so shortening costs nothing in scheduling,
+#     and billing is on elapsed rather than requested time either way.
+#     Do not go below 12h: there is no checkpoint or resume, so a TIMEOUT loses
+#     all in-memory ensemble state (the failure the scale-up was done to fix),
+#     and 8h would leave only a 1.18x margin over expected compute.
 # Override nodes per run without editing this file:  sbatch --nodes=2 ...
 #SBATCH --job-name=impress_sm_binding
-#SBATCH --mail-user=mh1314@scarletmail.rutgers.edu
+##SBATCH --mail-user=you@example.edu
 #SBATCH --mail-type=ALL
 #SBATCH --output=impress_%j.out
 ##SBATCH --error=logs/impress_%j.err
@@ -66,7 +76,7 @@ echo "Account: ${SLURM_JOB_ACCOUNT:-unknown}"
 
 if [ -z "${WORK_DIR:-}" ]; then
     echo "ERROR: WORK_DIR is not set."
-    echo "       export WORK_DIR=/work/nvme/bdyk/\$USER && sbatch delta_gpu_run.sh"
+    echo "       export WORK_DIR=/work/nvme/<project>/\$USER && sbatch delta_gpu_run.sh"
     exit 1
 fi
 
@@ -101,12 +111,12 @@ echo "MPI_LIB:           ${MPI_LIB}"
 echo "FAB_LIB:           ${FAB_LIB}"
 
 # ── Environment ───────────────────────────────────────────────────────────────
-IMPRESS_VENV="${IMPRESS_VENV:-${HOME}/ve/impress}"
-# Keep this unset: Dragon launches its per-node backends with a plain
-# `srun --nodes=N --ntasks=N` and no --export flag, so srun's default
-# --export=ALL is what carries PATH (the venv), SCRATCH, MPNN_DIR, BOLTZ_CACHE
-# and FOUNDRY_SIF_PATH to the remote nodes.  If SLURM_EXPORT_ENV were left at
-# NONE, every remote task would lose the venv and boltz.sh would exit 127.
+IMPRESS_VENV="${IMPRESS_VENV:-${WORK_DIR}/ve/small_mol}"
+# Keep this unset so srun's default --export=ALL carries this environment to any
+# srun steps.  Note the multi-node path below (`dragon -w ssh`) does NOT use
+# srun: tasks on remote nodes see only Dragon's BASE_ENV_VARNAMES plus whatever
+# the ssh login shell's ~/.bashrc exports -- which is where WORK_DIR, MPNN_DIR,
+# BOLTZ_CACHE and FOUNDRY_SIF_PATH must come from for rfd3.sh/boltz.sh there.
 unset SLURM_EXPORT_ENV
 # Dragon's launcher issues its own srun steps inside this allocation; without
 # --overlap they can collide with the batch step and hang at "job step creation
@@ -123,11 +133,10 @@ dragon-config add --ofi-runtime-lib="${FAB_LIB}"
 # These are picked up by the pipeline's __init__ when not passed as kwargs.
 export MPNN_DIR="${MPNN_DIR:-${SCRATCH}/LigandMPNN}"
 
-# Boltz-2 model weights cache — kept on scratch to avoid home quota exhaustion.
-# Pre-warm once on a login node via delta_env_setup.sh's Step 13 (boltz has no
-# dedicated "download weights" subcommand; weights auto-download on first
-# `boltz predict` call).
-export BOLTZ_CACHE="${BOLTZ_CACHE:-${SCRATCH}/.cache/boltz}"
+# Boltz-2 model weights cache.  Pre-warm once on a login node via
+# delta_env_setup.sh's Step 13 (boltz has no dedicated "download weights"
+# subcommand; weights auto-download on first `boltz predict` call).
+export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
 # ── Foundry sandbox: extract to /tmp at job start, clean up on exit ───────────
@@ -147,11 +156,11 @@ if [ -z "${FOUNDRY_SIF_PATH:-}" ]; then
         echo "ERROR: multi-node job (--nodes=${SLURM_NNODES}) but no shared foundry image."
         echo "       The /tmp sandbox extraction is node-local and will not be"
         echo "       visible to rfd3 tasks scheduled on other nodes."
-        echo "       Put the .sif on Lustre: ${SCRATCH}/foundry.sif"
+        echo "       Put the .sif on shared storage: ${WORK_DIR}/foundry.sif"
         echo "       (or set FOUNDRY_SIF_PATH to a shared path)"
         exit 1
     fi
-    FOUNDRY_TAR="${FOUNDRY_TAR:-${SCRATCH}/foundry_sandbox.tar.gz}"
+    FOUNDRY_TAR="${FOUNDRY_TAR:-${WORK_DIR}/foundry_sandbox.tar.gz}"
     if [ ! -f "${FOUNDRY_TAR}" ]; then
         echo "ERROR: foundry sandbox tarball not found: ${FOUNDRY_TAR}"
         echo "       Build it first: sbatch pull_foundry.sh"
@@ -237,6 +246,23 @@ RUNNER="${1:-run_small_molecule_binding.py}"
 # Run config forwarded as argv (see the comment at the dragon invocations below).
 RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_DIR}" )
 
+# The runner records how it ended here; see the check after the run.
+RUNNER_STATUS_FILE="${IMPRESS_WORK_DIR}/runner_status"
+rm -f "${RUNNER_STATUS_FILE}"
+
+# Per-GPU utilisation and memory every 10 s.  Telemetry has gpu_percent but no
+# GPU memory, and memory is what limits packing more tools onto a GPU.  This
+# runs on the batch node only, so a multi-node job logs just that node.  It is
+# stopped after the run; on an early exit or TIMEOUT Slurm reaps it with the job.
+NVSMI_PID=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=timestamp,index,utilization.gpu,memory.used,memory.total \
+               --format=csv,noheader,nounits -l 10 \
+               > "${IMPRESS_WORK_DIR}/nvsmi.csv" 2>&1 &
+    NVSMI_PID=$!
+    echo "GPU log:           ${IMPRESS_WORK_DIR}/nvsmi.csv (pid ${NVSMI_PID})"
+fi
+
 if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
     rm -f ddict_orc*
     if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
@@ -294,4 +320,19 @@ else
     python3 "${RUNNER}"
 fi
 
-echo "=== Small Molecule Binding pipeline done: $(date) ==="
+# `dragon` exits 0 even when the runner dies with a traceback (job 22692267
+# was recorded COMPLETED), so set -e never fires on a failed run.  Take the
+# job's exit status from the runner's own record instead.  A missing record
+# means the runner died before reaching its __main__ block (e.g. an import
+# error), which only run_small_molecule_binding.py writes, so the other
+# runners are only warned about.
+[ -n "${NVSMI_PID}" ] && kill "${NVSMI_PID}" 2>/dev/null || true
+RUNNER_STATUS="$(cat "${RUNNER_STATUS_FILE}" 2>/dev/null || echo missing)"
+echo "=== Small Molecule Binding pipeline done: $(date) (runner status: ${RUNNER_STATUS}) ==="
+if [ "${RUNNER_STATUS}" != "ok" ]; then
+    if [ "${RUNNER_STATUS}" != "missing" ] || [ "$(basename "${RUNNER}")" = "run_small_molecule_binding.py" ]; then
+        echo "ERROR: runner did not finish cleanly; exiting 1 so Slurm records FAILED"
+        exit 1
+    fi
+    echo "WARNING: ${RUNNER} wrote no ${RUNNER_STATUS_FILE}; exit status unknown"
+fi

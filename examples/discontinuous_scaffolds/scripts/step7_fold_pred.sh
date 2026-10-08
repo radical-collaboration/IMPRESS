@@ -11,7 +11,7 @@ input_dir="$2"
 output_dir="$3"
 
 module load cuda/12.8.0
-source /anvil/projects/x-nairr240405/mason/chai-lab/.venv/bin/activate
+source /anvil/projects/${PROJECT:?set PROJECT to your allocation}/$USER/chai-lab/.venv/bin/activate
 
 python "$scripts_path/chai_batch.py" \
     --input_dir "$input_dir" \

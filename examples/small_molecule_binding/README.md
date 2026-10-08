@@ -119,6 +119,16 @@ Sequence analysis (`analysis_sequence`) always sets `pass=True`; routing is hand
 
 The `adaptive_decision` function in `run_small_molecule_binding.py` runs after every analysis step and sets `pipeline.next_step`. It uses an **ensemble-based selective average** to determine whether the current result is in a productive neighbourhood of the search space.
 
+> **Performance contract.** `adaptive_decision` is an `async` wrapper that runs its synchronous body
+> (`_adaptive_decision_sync`) via `asyncio.to_thread`, and the similarity readers it depends on
+> (`_read_fasta_seq`, `_parse_pdb_ca_coords`) are memoised. Both are load-bearing: the selective
+> average compares the current result against *every* prior entry of its type, so an uncached reader
+> costs O(ensemble) blocking filesystem reads per decision, and because the manager is one process
+> shared by all pipelines that stalls the entire job rather than one pipeline. Getting this wrong
+> capped an 8-node campaign at 37% of its 4-node baseline throughput with GPUs at 0.7% utilisation
+> (see the 2026-09-30 row in `CLAUDE.md` and `plans/2026-09-30-adaptive-callback-serialization.md`).
+> If you add a similarity metric, cache its reader and keep the body off the event loop.
+
 ### Ensemble store
 
 Every analysis task appends a tuple `(type, score, input_path, output_path)` to `pipeline.state['ensemble']`. All entries are kept regardless of pass/fail. The three entry types are:
@@ -259,10 +269,10 @@ Mock mode (`mock=True`, `mock.py`) mirrors this same layout with hardcoded fixtu
 
 ### Production run (Delta HPC)
 
-1. One-time environment setup: `bash delta_env_setup.sh` (creates the venv, installs all dependencies including Boltz-2 and PyRosetta, warms the Boltz weights cache). See that script's header comment for required env vars (`SCRATCH`, etc.).
+1. One-time environment setup: `bash delta_env_setup.sh` (creates the venv, installs all dependencies including Boltz-2 and PyRosetta, warms the Boltz weights cache). See that script's header comment for required env vars (`WORK_DIR`, etc.).
 2. Derive each ligand's SMILES once: `python scripts/derive_ligand_smiles.py <ligand>.params <reference>.pdb`, then copy the resulting `.smiles` file into every `<pipeline_name>_in/` directory that uses that ligand.
 3. Adjust `PROD`/`TEST` in `run_small_molecule_binding.py` if the default thresholds don't fit your target (class defaults above are permissive; `PROD` is tuned tighter — e.g. `fastrelax_max_fa_rep=100.0`, `interface_min_sc=0.55`, `fold_min_plddt=75.0`).
-4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `SCRATCH`-relative defaults, or export them yourself beforehand to override — see that script's header comment). Pass `IMPRESS_TEST_MODE=1` before `sbatch` to run the inert `TEST` config instead of `PROD`.
+4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `WORK_DIR`-relative defaults, or export them yourself beforehand to override — see that script's header comment). Pass `IMPRESS_TEST_MODE=1` before `sbatch` to run the inert `TEST` config instead of `PROD`.
 
 After a run, validate the output against expected invariants (ligand identity preserved through the guided-RFD3 path, Boltz output shape, no regression to rejected design states, etc.):
 

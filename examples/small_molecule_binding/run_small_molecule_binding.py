@@ -83,11 +83,31 @@ PROD = RunConfig(
 
 BACKEND = os.environ.get("IMPRESS_BACKEND", "dragon").lower()
 
+from concurrent.futures import ThreadPoolExecutor
+from rhapsody.backends import ConcurrentExecutionBackend
+
 if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
 else:
     from concurrent.futures import ProcessPoolExecutor
-    from rhapsody.backends import ConcurrentExecutionBackend
+
+# Run config is taken from the command line first, environment second.
+#
+# The CLI path exists because environment variables DO NOT reach this process on
+# a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
+# backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
+# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_N_PIPELINES
+# / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
+# below would be used instead.  Confirmed on job 22466127, which ran the built-in
+# defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
+# / FOUNDRY_SIF_PATH / WORK_DIR survive that hop only because ~/.bashrc exports them
+# and the ssh login shell sources it -- do not rely on that for new settings.)
+# Dragon passes everything after PROG straight through to us, so argv is the one
+# channel that always works.  parse_known_args so any extra argv is ignored.
+_ap = argparse.ArgumentParser(add_help=False)
+_ap.add_argument("--n-pipelines", type=int, default=None)
+_ap.add_argument("--work-dir", default=None)
+_args, _ = _ap.parse_known_args()
 
 # Run config is taken from the command line first, environment second.
 #
@@ -120,30 +140,74 @@ _n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
 if _n_pipelines:
     cfg = replace(cfg, n_pipelines=int(_n_pipelines))
 
-# Thread caps, set here rather than in the batch script for the same reason:
-# OMP_NUM_THREADS exported by delta_gpu_run.sh never survives the ssh hop.
-# 11 of the 13 tasks are local_task=True and run as concurrent subprocesses of
-# this process, inheriting os.environ -- so setting it here is what actually
-# takes effect.  Without a cap each of them defaults to every core on the node.
-# Divide by 2x the pipeline count to leave room for Dragon tasks co-resident on
-# this node; PyRosetta (fastrelax/packmin/filter_shape) is single-threaded
-# regardless, so this budget really targets the PyTorch tasks.
-# sched_getaffinity respects the cgroup/CPU mask SLURM applies to the job;
-# os.cpu_count() reports the physical core count and would over-subscribe on any
-# allocation smaller than a whole node.
-try:
-    _ncpu = len(os.sched_getaffinity(0))
-except AttributeError:          # not Linux
-    _ncpu = os.cpu_count() or 64
-_omp = max(1, _ncpu // (cfg.n_pipelines * 2))
-for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-    os.environ.setdefault(_var, str(_omp))
-# PASSIVE is what actually stops idle OpenMP teams from spinning on cores.
-os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+# Thread caps are NOT set here.  Every tool-running stage is an asyncflow task
+# whose backend launches it with its own per-task env
+# (SmallMoleculeBindingPipeline._tool_task_description), so nothing depends on
+# this process's os.environ reaching a subprocess.
+
+
+def _node_gpus() -> List[int]:
+    """GPU device IDs on a compute node, for spreading pipelines over them.
+
+    Dragon Batch does no GPU accounting: a process task with no gpu_affinity
+    is given every GPU on its node, and every GPU tool then runs on the first
+    one (GPU 0).  So each pipeline asks for one device, chosen here
+    round-robin (see gpu_index below and _tool_task_description).  Under
+    Dragon the IDs come from Dragon's own node descriptor, which is what
+    gpu_affinity is checked against; assumes all nodes are alike (Delta
+    gpuA40x4: 4 each).
+    """
+    if BACKEND == "dragon":
+        from dragon.native.machine import Node, System
+        return list(Node(System().nodes[0]).gpus or [])
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None:
+        return [int(d) for d in visible.split(",") if d.strip().isdigit()]
+    try:
+        import torch
+        return list(range(torch.cuda.device_count()))
+    except Exception:
+        return []
+
+
+def _n_nodes() -> int:
+    """Nodes in the allocation (1 off Dragon)."""
+    if BACKEND == "dragon":
+        from dragon.native.machine import System
+        return System().nnodes
+    return 1
+
+
+# Delay between start groups when several pipelines share a GPU.  Every
+# pipeline begins with rfd3, and a running rfd3 holds ~9.5 GB of host RAM for
+# its whole run, so N pipelines starting together put N rfd3 in memory at once:
+# 16 on one node took host RAM 13% -> 61% within 45 s (job 22714866), and 32
+# hit the 240 GB --mem limit in 2 minutes (22714785, OUT_OF_MEMORY).  After the
+# first wave the starts drift apart and memory stays far lower.  Staggering
+# groups of one-pipeline-per-GPU by this many seconds caps the overlap.
+START_STAGGER_S = 60
 
 
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
+    """Adaptive callback: picks pipeline.next_step from the last analysis.
+
+    The body is entirely synchronous, so calling this directly on the event
+    loop blocks every pipeline for its duration -- the defect that capped job
+    22534628 at 37% of baseline.  impress_smallmol_bind() therefore runs it as
+    a flow.function_task on the `local` thread-pool backend; run it the same
+    way anywhere more than a toy number of pipelines share the loop.
+
+    Safe to run off-loop because the body only reads pipeline.state and assigns
+    pipeline.state[...] / pipeline.next_step, and ImpressManager awaits each
+    pipeline's adaptive task before advancing that pipeline (see
+    src/impress/impress_manager.py:100-122), so there is no concurrent writer to
+    the same pipeline's state.  It must stay on a THREAD pool: a process pool
+    would mutate a pickled copy of the pipeline.
+    """
+    _adaptive_decision_sync(pipeline)
+
+
+def _adaptive_decision_sync(pipeline: SmallMoleculeBindingPipeline) -> None:
     step     = pipeline.state.get('last_analysis_step')
     metrics  = pipeline.state.get('last_analysis_metrics', {})
     passed   = metrics.get('pass', False)
@@ -379,18 +443,28 @@ async def impress_smallmol_bind() -> None:
     # correctly regardless of what base_path / work_dir is set to. Each
     # pipeline reads its own p{i}_in/ directory rather than sharing one.
 
+    # Two named backends on one engine; asyncflow routes each task by name.
+    #   compute -- the default.  Every tool-running stage (rfd3, mpnn, packmin,
+    #              fastrelax, filter_shape, boltz) goes here, so placement across
+    #              nodes, per-task env and process lifecycle are the backend's.
+    #   local   -- an in-process thread pool for Python callbacks that must see
+    #              the live pipeline objects (adaptive_decision).
+    # The constructors, not .create(), because .create() takes no name.
     if BACKEND == "dragon":
-        backend = await DragonExecutionBackend()
+        compute = await DragonExecutionBackend(name="compute")
     else:
-        backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+        compute = await ConcurrentExecutionBackend(
+            ProcessPoolExecutor(), name="compute")
+    local = await ConcurrentExecutionBackend(
+        ThreadPoolExecutor(max_workers=cfg.n_pipelines), name="local")
+    flow = await WorkflowEngine.create(backend=[compute, local])
     manager: ImpressManager = ImpressManager(
         flow,
         telemetry_config={
             # Absolute, derived from the already-resolved work_dir.  A relative
             # path (as the protein_binding reference uses) resolves against the
             # cwd of whichever process builds the TelemetryManager -- under
-            # delta_gpu_run.sh that is $SCRATCH, not the source tree.  Deriving
+            # delta_gpu_run.sh that is $WORK_DIR, not the source tree.  Deriving
             # it from work_dir also inherits per-job scoping for free, since
             # IMPRESS_WORK_DIR is logs/$SLURM_JOB_ID.
             "checkpoint_path": os.path.join(work_dir, "telemetry"),
@@ -406,11 +480,35 @@ async def impress_smallmol_bind() -> None:
         telemetry_subscribers=[_on_task_event],
     )
 
+    # Runs off the event loop, bounded by the local pool, and shows up in
+    # telemetry as a task with target_backend=local.
+    adaptive_fn = flow.function_task(backend="local")(adaptive_decision)
+
+    # One GPU per pipeline, round-robin: p1 -> gpus[0], p2 -> gpus[1], ...
+    # A pipeline runs its stages one at a time, so it never has more than one
+    # GPU task in flight.  The backend still picks the node.
+    gpus = _node_gpus()
+    def _gpu_for(i: int):
+        return gpus[(i - 1) % len(gpus)] if gpus else None
+    # Staggered start, only when pipelines outnumber the allocation's GPUs:
+    # each group of one-pipeline-per-GPU starts START_STAGGER_S after the last,
+    # so at one pipeline per GPU every delay is 0.
+    slots = max(1, len(gpus) * _n_nodes())
+    def _delay_for(i: int) -> int:
+        return ((i - 1) // slots) * START_STAGGER_S
+    print(f"[GPU] devices per node: {gpus or 'none'}; pipeline -> GPU: "
+          + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
+          flush=True)
+    if any(_delay_for(i) for i in range(1, cfg.n_pipelines + 1)):
+        print(f"[GPU] staggered start ({slots} GPU slots, {START_STAGGER_S}s per group): "
+              + ", ".join(f"p{i}:{_delay_for(i)}s" for i in range(1, cfg.n_pipelines + 1)),
+              flush=True)
+
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_decision,
+            adaptive_fn=adaptive_fn,
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),
@@ -428,6 +526,8 @@ async def impress_smallmol_bind() -> None:
                 "mpnn_ensemble_size":        cfg.mpnn_ensemble_size,
                 "rfd3_partial_t":            cfg.rfd3_partial_t,
                 "max_tasks":                 cfg.max_tasks,
+                "gpu_index":                 _gpu_for(i),
+                "start_delay":               _delay_for(i),
             }
         )
         for i in range(1, cfg.n_pipelines + 1)
@@ -448,5 +548,27 @@ async def impress_smallmol_bind() -> None:
         await flow.shutdown()
 
 
+def _write_runner_status(status: str) -> None:
+    """Record how this run ended, for delta_gpu_run.sh to check.
+
+    `dragon -w ssh` exits 0 even when this process dies with a traceback
+    (job 22692267: AttributeError 26 s in, Slurm state COMPLETED), so the
+    launcher cannot use dragon's exit code.  It reads this file instead.
+    """
+    work_dir = _args.work_dir or os.environ.get("IMPRESS_WORK_DIR")
+    if not work_dir:
+        return
+    try:
+        with open(os.path.join(work_dir, "runner_status"), "w") as fh:
+            fh.write(status + "\n")
+    except OSError as exc:
+        print(f"[RUNNER] could not write runner_status: {exc!r}")
+
+
 if __name__ == "__main__":
-    asyncio.run(impress_smallmol_bind())
+    try:
+        asyncio.run(impress_smallmol_bind())
+    except BaseException as exc:
+        _write_runner_status(f"failed: {exc!r}"[:500])
+        raise
+    _write_runner_status("ok")

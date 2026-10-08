@@ -3,13 +3,13 @@
 Live tracking doc for taking `small_molecule_binding` from its historical 1-node / 4-hour
 allocation to a 4-node / 48-hour run on Delta `gpuA40x4`.
 
-**Status:** Stage 3 complete; telemetry now wired so the next campaign is measured rather than
-inferred. Earlier status line retained below.
+**Status:** Stage 4 (8 nodes / 32 pipelines, job `22534628`) **submitted and pending** — no smoke
+test; the early-abort gate below substitutes for one. Earlier status line retained below.
 
 **Stage 3:** (4-node production, job `22491438`) **COMPLETE** — all 16 pipelines hit the
 `max_tasks` budget, 98% scaling efficiency, 552 passing folds. One new defect found: the Dragon
 teardown hangs (see below).
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-28 (Stage 4 submitted)
 
 ---
 
@@ -35,15 +35,16 @@ exist to retire that risk cheaply before committing ~768 GPU-hours.
 | 1b | ssh/TCP bring-up | 2 | 4 (PROD, see below) | 0:30 | 4 | `22466127` | **PASSED** | Ran on **both** nodes; full stack incl. boltz; no srun/ssh errors. Exposed the env-propagation blocker |
 | 2 | Remote-execution proof | — | — | — | — | — | **not needed** — 1b proved it via `TASK HOST` | gpub030 + gpub096 |
 | 3 | Production | 4 | 16 | 48:00 | ~172 actual | `22491438` | **COMPLETE** | 16/16 budgets hit at 6h41m; 552 folds; 98% efficiency. **Teardown hung 60 min**, manual cancel |
+| 4 | Expanded campaign | 8 | 32 | **12:00** | ~198 projected | `22534628` | **SUBMITTED** (2026-09-28, `PD`) | telemetry wired; trajectories dropped; walltime right-sized. Est. start 2026-10-04 |
 
-Cost context: `bdyk-delta-gpu` balance is 19,164 GPU-hours, so Stage 3 is ~4 %.
+Cost context: Stage 3 is a small fraction of the allocation balance.
 Billing accrues on **elapsed**, not requested, time.
 
 ### Commands
 
 ```bash
-export SCRATCH=/scratch/bdyk/hooten1
-cd /scratch/bdyk/hooten1/IMPRESS/examples/small_molecule_binding
+export SCRATCH=/scratch/<project>/$USER
+cd /scratch/<project>/$USER/IMPRESS/examples/small_molecule_binding
 
 # Stage 1b — submitted as 22466127 (same command; the launcher now picks the
 # ssh/TCP path internally whenever SLURM_NNODES > 1)
@@ -540,3 +541,82 @@ present with durations.
 `node_id` and 0 of `telemetry`, since it predates the wiring. It carries only the
 `dragon-network-config` JSON (which nodes Dragon discovered, and which is primary) and the
 `N managers` line.
+
+## Correction: the Dragon primary is not the batch node
+
+Stage 3's interim note said the primary node was at 29.5/64 and "no busier than the rest". That
+was wrong — it assumed the primary was the batch node `gpub015`. The `dragon-network-config`
+JSON in `impress_22491438.out` shows index `0`, `is_primary: true`, is **`gpub068`**, which was
+the busiest node in both readings:
+
+| node | early | steady | role |
+|---|---|---|---|
+| gpub015 | 28.8 | 29.5 | batch node (frontend only) |
+| gpub026 | 15.6 | 31.3 | |
+| gpub066 | 33.8 | 29.5 | |
+| **gpub068** | **38.4** | **39.7** | **Dragon primary — runs all 11 local stages** |
+
+So the primary sat at **62%** of 64 cores at 16 pipelines, ~10 cores above the others — the
+`local_task` load, exactly as the architecture predicts. A naive doubling to 32 pipelines
+projects to **~124%, i.e. oversubscribed**, and `OMP_NUM_THREADS` is already at its floor of 1
+so no headroom can be reclaimed by trimming threads.
+
+This does not invalidate the 98% efficiency figure, which is measured throughput. It does mean
+Stage 4 is likelier to land in the degraded regime than first stated. **Always check which node
+is `is_primary` before reading a load figure — it is not the batch node.**
+
+## Stage 4 preparation (not submitted)
+
+- `scripts/rfd3.sh`: `dump_trajectories=False`. The `*_noisy_*`/`*_denoised_*` files are
+  11.85 MB of each 11.92 MB rfd3 dir (99.4%). Safe: nothing reads them, and `analysis_backbone`
+  selects from `.json` files containing `_model_` then derives `.cif.gz` by extension swap —
+  trajectory files ship no `.json`, so they are unreachable by that selection. Campaign
+  footprint ~30 GB → ~3.8 GB.
+- `delta_gpu_run.sh`: `--time` 48:00:00 → **12:00:00**. The wall limit is the only backstop
+  against the teardown hang. 12 h = ~6.8 h expected compute + ~1 h teardown + slack to ~62%
+  throughput. Exposure if it hangs: 384 GPU-h vs 1536 at 48 h. Queue start estimate is identical
+  for 8/12/16/24/48 h, so shortening costs nothing. Not shorter than 12 h: at 8 h the margin is
+  1.18x, and a truncated run loses all in-memory ensemble state since there is no checkpoint.
+- `p17_in` … `p32_in` created (all 32 checksum-identical, gitignored). 8 nodes now yields 32
+  pipelines with **zero idle GPUs**; `OMP_NUM_THREADS` = 1.
+
+### Decision rule for the run
+
+Per-pipeline throughput against the 4-node baseline of **11.46 rfd3/pipeline/h**:
+
+- **>=10.5 (>=90%)** — scaling holds; 16 nodes becomes a reasonable next step.
+- **<=9 (<=80%)** — the primary-node ceiling is binding. The fix is architectural, not more
+  nodes: move `fastrelax`/`packmin`/`filter_shape` off the primary and onto Dragon tasks. The
+  `impress.LocalStage` durations say which stages dominate, making that targeted rather than a
+  rewrite.
+
+The telemetry pass conditions for the run are in "Telemetry wiring → What to collect" above;
+**8 distinct `node_id`s** is the one that proves the adapter did not silently no-op.
+
+### Early-abort gate (substitutes for a smoke test)
+
+Stage 4 went straight to production, so it is the first HPC execution of the telemetry wiring,
+the PR #64 argv/`cfg` changes and `dump_trajectories=False`. Because `checkpoint_interval=300.0`
+flushes the telemetry file every 5 minutes, the decisive `node_id` question is answerable ~10
+minutes into the run itself rather than needing a separate job.
+
+**t+5 min — cancel on failure.** `N_PIPELINES: 32`, `--n-pipelines 32` in the launcher line,
+**`9 managers`** (`num_nodes + 1`; fewer means Dragon clamped and the extra nodes bill for
+nothing), `Starting with 32 initial pipelines`, and zero hits for `Unable to create step` /
+`node configuration is not available` / `Permission denied` / `Traceback`. Any failure →
+`scancel` at once; at 8 nodes an idle hour is 32 GPU-h.
+
+**t+10 min — telemetry, but do not cancel on it.** Read
+`logs/22534628/telemetry/*.telemetry.jsonl` for 8 distinct `node_id`s, labels `p*:rfd3`/`p*:boltz`
+rather than `bash`, and `impress.LocalStage` rows. A no-op here costs only instrumentation while
+re-queuing costs ~6 days, so record it and let the science finish.
+
+**t+20 min — outputs are real.** 32 `logs/22534628/p*/` dirs; the first `*_rfd3/out/` holding
+~8 files at ~71 KB with zero `noisy`/`denoised`. An empty `out/` beside
+`adaptive/backbone] passed=False` is the silent `--writable-tmpfs` failure, not a QC rejection.
+
+**At completion — do not repeat the 60-minute hang.** If
+`=== Small Molecule Binding pipeline done ===` has not printed within ~10 min of
+`[MANAGER] All pipelines finished. Exiting.`, `scancel` rather than waiting: the
+`flow.shutdown()` bounding fix is declined, so the wall clock is the only automatic backstop, and
+at 8 nodes the hang bills 32 GPU-h per hour.

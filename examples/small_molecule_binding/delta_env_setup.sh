@@ -5,7 +5,7 @@
 # Creates a Python 3.11+ venv and installs all dependencies.
 #
 # Usage:
-#   export WORK_DIR=/work/nvme/bdyk/$USER
+#   export WORK_DIR=/work/nvme/<project>/$USER
 #   bash delta_env_setup.sh [--env-dir DIR] [--impress-dir DIR] [--python PATH]
 #
 # Defaults:
@@ -28,7 +28,7 @@ fi
 # ── Require WORK_DIR ──────────────────────────────────────────────────────────
 if [[ -z "${WORK_DIR:-}" ]]; then
     echo "ERROR: set WORK_DIR to your nvme work root, e.g.:"
-    echo "  export WORK_DIR=/work/nvme/bdyk/\$USER"
+    echo "  export WORK_DIR=/work/nvme/<project>/\$USER"
     echo "  bash delta_env_setup.sh"
     exit 1
 fi
@@ -292,7 +292,7 @@ echo "  source ${ENV_DIR}/bin/activate"
 echo ""
 echo "Run the pipeline:"
 echo "  export WORK_DIR=${WORK_DIR}"
-echo "  export SBATCH_ACCOUNT=bblj-delta-gpu"
+echo "  export SBATCH_ACCOUNT=<project>-delta-gpu"
 echo "  cd ${IMPRESS_DIR}/examples/small_molecule_binding"
 echo "  sbatch delta_gpu_run.sh"
 echo ""

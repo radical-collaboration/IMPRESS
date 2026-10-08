@@ -205,7 +205,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
             shutil.copy(f"{models_path}/confidence_{target_fasta}_model_0.json", best_ptm_json)
             _copy_pdb_rename_chains(f"{models_path}/{target_fasta}_model_0.pdb", mpnn_pdb)
 #            cmd = (
-#                f"pixi run --manifest-path /ocean/projects/dmr170002p/hooten/localcolabfold "
+#                f"pixi run --manifest-path /ocean/projects/<project>/<user>/localcolabfold "
 #                f"colabfold_batch "
 #                f"--model-type alphafold2_multimer_v3 "
 #                f"--max-template-date 2020-12-01 "
