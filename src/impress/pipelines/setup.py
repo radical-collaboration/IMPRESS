@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -17,9 +17,14 @@ class PipelineSetup(BaseModel):
         default_factory=dict,
         description="Pipeline configuration",
     )
-    adaptive_fn: Optional[Callable[[ImpressBasePipeline], Awaitable[None]]] = Field(
+    adaptive_fn: Optional[
+        Callable[[ImpressBasePipeline], Union[Awaitable[None], None]]
+    ] = Field(
         default=None,
-        description="Optional adaptive function for the pipeline",
+        description=(
+            "Optional adaptive function for the pipeline, sync or async. "
+            "ImpressManager runs it off the event loop by default."
+        ),
     )
     kwargs: dict[str, Any] = Field(
         default_factory=dict,

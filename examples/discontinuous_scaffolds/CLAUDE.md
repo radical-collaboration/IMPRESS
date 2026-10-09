@@ -195,7 +195,7 @@ Called by `adaptive_decision()` when fold models fail `rmsd_threshold`. For each
 
 ### Execution backends
 
-`run_discontinuous_scaffolds.py` has `DragonExecutionBackendV3()` active by default (HPC). Switch to the commented-out `LocalExecutionBackend(ThreadPoolExecutor())` for local testing.
+`run_discontinuous_scaffolds.py` has `DragonExecutionBackend()` active by default (HPC). It used to import `DragonExecutionBackendV3` from `rhapsody.backends`, which rhapsody 0.5.0 no longer exports there, so the runner failed at import. Switch to the commented-out `LocalExecutionBackend(ThreadPoolExecutor())` for local testing.
 
 ### Benchmark data
 
