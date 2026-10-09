@@ -1,6 +1,6 @@
 # F1 — PR 1 acceptance run on Delta
 
-**Status:** open · **Branch:** `framework-defaults-pr1` (`7327c84`) · **Blocks:** merging PR 1
+**Status:** submitted 2026-10-08 as job `22767771` (`bdyk-delta-gpu`, `gpuA40x4-interactive`, 1 node, 1 h, 32 pipelines, from `1372251`) · **Branch:** `framework-defaults-pr1` (`7327c84`) · **Blocks:** merging PR 1
 
 ## Why
 
@@ -23,7 +23,11 @@ Three parts of PR 1 depend on Dragon behaviour that the offline tests did not ex
 ## Run
 
 - Shape: 1 node, 1 hour, `gpuA40x4-interactive`, 32 pipelines (8 per GPU), launched from the branch checkout. This matches reference job `22718758`.
-- Inject one failure: a pipeline whose `p*_in` dir lacks `ALR.smiles`, so its `boltz` stage fails. That exercises the Dragon failure path.
+- Inject one failure by hiding `p32_in/ALR.params` (renamed to `ALR.params.f1-hold`), so p32's first `packmin` fails inside the Rosetta tool process on Dragon.
+  - Hiding `ALR.smiles`, as first planned, would not test the backend: the `boltz` coroutine reads it in-process and raises before anything is dispatched.
+  - Only the Rosetta tools read `ALR.params`, as `-extra_res_fa`. Its one in-process reader is the guided-rfd3 path, which runs only after a passing fold.
+  - Dependent job `22767773` (`afterany`) renames the file back when the run ends. Check `logs/f1_restore_22767773.out` says `restored` before the next run that uses p32.
+  - Expected side effect: per smb 15, p32 dies at that failure. Compare throughput per pipeline over the 31 healthy ones as well as per node.
 
 ## Pass criteria
 
