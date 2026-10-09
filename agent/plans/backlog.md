@@ -275,12 +275,16 @@ a band rather than a value for exactly this reason.
 
   **Now a distribution (2026-10-08, `performance_analysis` C1/C2):** 101 timed tasks over 5 jobs.
   Every declared figure is ≥2.25x the *worst* observed task, so no observed draw would have been
-  refused. The 3.2x swing is one outlier: rfd3 is 40-45s in 16 of its 17 tasks, and 145.7s only in
-  22684607. Each job's first run is slower on four stages (ligandmpnn +8.6s, packmin +10.5s, Boltz
-  +7.8s, rfd3 +4.3s), which looks like warm-up. Measured GPU per six-stage chain is 0.029 GPU-h
-  (median) against 0.17 declared. At p90 x 3 the chain would be 0.105, which admits **5**
-  untrusted lineages under the 0.60 cap instead of 3. Not applied: changing the specs changes what
-  admission refuses, so that is a decision, not a cleanup.
+  refused. The 3.2x swing is one outlier: rfd3 is 40-45s in **15** of its 17 tasks (the other two
+  are 48.0s and 145.7s, the latter only in 22684607). Each job's first run is slower on four
+  stages (ligandmpnn +8.6s, packmin +10.5s, Boltz +7.8s, rfd3 +4.3s), which looks like warm-up.
+  Measured GPU per six-stage chain is 0.029 GPU-h (median) against 0.17 declared. At p90 x 3 the
+  chain would be 0.105, which admits **5** untrusted lineages under the 0.60 cap instead of 3. Not
+  applied: changing the specs changes what admission refuses, so that is a decision, not a cleanup.
+
+  **Reproduced off-cluster (2026-10-09)** from `impress_a_runs_2026-10-08.tar.gz` alone, on this
+  laptop, at the same commit: every figure above holds to the digit except the 16-of-17, corrected
+  here. So these are archive-derived, not Delta-session-derived - the distinction G9 is about.
 
 **A12. The trust ledger reset every job, so promotion was unreachable on Delta — RESOLVED.**
 `executor.py` loaded it from `Path(spec.root) / "_trust"`, and `spec.root` defaults to the
@@ -562,7 +566,8 @@ The LigandMPNN stderr, the actual failure, was lost with it.
 
 **G7. A run's seed comes from its run label, so every job samples the same five designs.**
 `_replica_seed(run_label, lineage)`, and labels restart at r0001 in every job. Found by
-`performance_analysis` S5/S6 (2026-10-08), over 17 designs from 5 jobs:
+`performance_analysis` S5/S6 (2026-10-08), over 17 designs from 5 jobs, and reproduced off-cluster
+from the export on 2026-10-09 (5 distinct seeds, 21 same-seed pairs, every figure below unchanged):
 - **The seed fixes the design's length.** All 21 same-label pairs share a length, and no pair
   with different labels does.
 - **The seed biases the fold:** median TM-score 0.82 for same-label pairs against 0.28 for the rest.
@@ -583,10 +588,49 @@ record the salt. Making rfd3 deterministic is a separate question, probably GPU 
   trust run). Measured task time exists only as asyncflow state lines in `campaign.log`, which
   is what `performance_analysis/timeline.py` parses.
 - **GPU use:** nothing samples it. C3 bounds the GPU-busy share at **≤17%** of billed GPU time
-  in every job, because one GPU works at a time and three sit idle, and CPU efficiency is ~42%.
-  The reference IMPRESS pipeline already writes a per-job `<jobid>.gpusample.txt`
-  (`IMPRESS/examples/small_molecule_binding/logs/`), so check it before building a sampler
-  here.
+  in every job (15.4-16.7%), because one GPU works at a time and three sit idle, and CPU
+  efficiency is ~42% (37-42%). The reference IMPRESS pipeline already writes a per-job
+  `<jobid>.gpusample.txt` (`IMPRESS/examples/small_molecule_binding/logs/`), so check it before
+  building a sampler here.
+- **Both numbers are now archive-backed**, not session-backed: confirmed off-cluster on
+  2026-10-09 from the sacct snapshot shipped with the run archive (G9).
+- **The idle GPUs are the whole of it.** Tasks fill 95% of elapsed in the trust jobs, so
+  orchestration is not where the allocation goes - three of four GPUs never have work.
+
+**G9. The run export omitted `sacct.json`, so C3 could not be reproduced off-cluster — RESOLVED.**
+`performance_analysis` was written on Delta with sacct reachable, and
+`impress_a_runs_2026-10-08.tar.gz` was built without running `snapshot_sacct.py` first. Rerun
+off-cluster on 2026-10-09, eleven of the twelve sections reproduced to the digit; C3 was the
+exception, and everything it lost came from the allocation rather than the campaign: queue wait,
+elapsed, billed GPU time, the GPU-busy share behind G8's ≤17%, CPU efficiency and peak RSS.
+
+How it hid is the part worth keeping. `data.sacct` found no file, `Ctx.sacct` fell through to a
+live query, `snapshot_sacct.query` caught the `OSError` from a missing `sacct` binary and returned
+`{}` — and the report still labelled the source `live sacct` and printed *"at most nan% of the
+billed GPU time had a GPU task running"*. A section that cannot answer its question reported a
+`nan` as though it were a finding. Fixed: the label is `unavailable` when both the snapshot and
+the query come back empty, C3 names the missing file and drops the columns it cannot fill, and
+`test_c3_says_sacct_is_unavailable_rather_than_reporting_nan` pins it.
+
+**RESOLVED the same day.** The snapshot was taken on Delta for the five Tier A/B jobs and now sits
+beside the unpacked archive, so **all twelve sections reproduce off-cluster** and every G8 number
+is archive-backed rather than session-backed: GPU-busy share 15.4-16.7% per job, CPU efficiency
+37-42%, peak RSS 16.3 of 240 GB. Two facts C3 could not show before:
+
+- **Tasks fill 95% of the allocation's elapsed time** in the trust jobs (86-88% in the two short
+  smoke jobs, where a fixed ~20s prelaunch is a bigger share). Orchestration is not the overhead
+  worth attacking; the three idle GPUs are.
+- **Queue wait dwarfs the work.** 12269s, 26626s and 25278s for the first three jobs against
+  478s and 184s for the last two - up to 32x the campaign's own elapsed time, on
+  `gpuA100x4-interactive`. It is not billed, but it is the real latency of a test cycle.
+
+`impress_a_runs_2026-10-08.tar.gz` has been rebuilt to carry `sacct.json` in the run root, so a
+fresh unpack reproduces all twelve sections: verified by extracting the rebuilt archive to a
+scratch directory and diffing its report against the working one (identical). Any future export
+must run `snapshot_sacct.py` *before* packing. The same run exposed a second Delta-only
+assumption, already fixed:
+`datetime.UTC` is 3.11+, and the project declares `requires-python = ">=3.10"`, so `report.py`
+had never run anywhere but Delta's 3.12.
 
 ---
 

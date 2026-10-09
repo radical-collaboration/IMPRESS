@@ -169,7 +169,9 @@ acceptance threshold, and the one-in-three acceptance rate makes that a matter o
 **Wall time is not stable, and cost models must not be tuned as if it were.** `rfd3_design` took
 145.7s in job 22684607 and 45.0s in 22692304 — same campaign, same allocation, same parameters,
 3.2× apart. `cost_model` figures feed gate 5 and the untrusted-pattern cap, which *refuse*
-graphs, so they sit a few multiples above measurement on purpose.
+graphs, so they sit a few multiples above measurement on purpose. Over 17 rfd3 tasks that swing
+is one outlier — 15 are 40–45s — but the conclusion is unchanged: every declared figure is still
+≥2.25× the worst task observed, and that headroom is the point (backlog A11).
 
 Four defects reached real hardware before anything caught them, and each was invisible to a dry run:
 
