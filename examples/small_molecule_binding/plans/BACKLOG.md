@@ -9,6 +9,10 @@ Source of most entries below: the 8-node / 32-pipeline campaign **job `22534628`
 Run artifacts archived at
 `<hdd work dir>/impress-data-after-fixes/smb_8node/small_molecule_binding/`.
 
+Framework-level fixes (moving this example's workarounds into `src/impress/`) are tracked in
+[plans/BACKLOG.md](../../../plans/BACKLOG.md); items 2, 15, 16, 20 and 21 below have framework
+counterparts there (F5, F11, F11, F4, F6).
+
 | # | Item | Severity | Status | Doc |
 |---|---|---|---|---|
 | 2 | Dragon `flow.shutdown()` teardown hang — no watchdog, wall limit is the only backstop | high | open | [dragon-teardown-watchdog](2026-09-30-dragon-teardown-watchdog.md) |
