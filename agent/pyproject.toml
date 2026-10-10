@@ -27,8 +27,6 @@ agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.g
 oracle = ["litellm"]
 http = ["httpx"]          # the HTTP control-plane adapter
 dev = ["pytest", "pytest-asyncio", "ruff", "httpx"]
-# performance_analysis/ (not part of the package): figures, TM-align, structure parsing
-analysis = ["pandas", "scipy", "matplotlib", "tmtools", "gemmi", "biopython"]
 
 [project.scripts]
 impress-a = "impress_a.cli:main"

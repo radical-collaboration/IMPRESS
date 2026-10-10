@@ -82,5 +82,13 @@ LigandMPNN + Rosetta + Boltz-2), and
 [discontinuous scaffolds](examples/discontinuous_scaffolds/).
 
 
+## IMPRESS-A: autonomous campaigns
+
+[`agent/`](agent/) holds IMPRESS-A, an autonomous design agent that composes and runs
+workflows per cycle on the same AsyncFlow/rhapsody stack. It is a separate package
+(`impress_a`, Python >= 3.10) with its own install, tests and CI job; see
+[`agent/README.md`](agent/README.md).
+
+
 ## Resources
 To learn more, please visit the [IMPRESS documentation](https://radical-collaboration.github.io/IMPRESS/).

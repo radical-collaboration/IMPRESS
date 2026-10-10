@@ -2,6 +2,12 @@
 
 **Autonomous protein design on HPC.**
 
+> IMPRESS-A lives in the IMPRESS repository under `agent/`, as a self-contained subproject with its
+> own `pyproject.toml`: run every command below from `agent/`. It does not import the `impress`
+> package. The relationship is one of shared middleware and shared science —
+> `examples/small_molecule_binding` runs the same rfd3 → LigandMPNN → Rosetta → Boltz chain as a
+> fixed adaptive pipeline, where IMPRESS-A composes it per cycle.
+
 IMPRESS-A conducts scientific exploration of protein design space given a design prompt — *"stabilize the
 given protein"* — by repeatedly deciding what experiment to run next, composing a workflow to run it,
 executing that workflow on HPC, interpreting the result, and updating a population of design candidates.
@@ -232,7 +238,7 @@ whatever wall-clock limit kills the job. Measured, not theoretical: job 22318678
 on `CampaignSpec` (both Delta campaigns set 600s); see `docs/limitations.md`.
 
 **`ligand_smiles` was empty** in both Delta campaign specs. Resolved for the ALR benchmark target
-(`campaigns/data/alr/`, borrowed from the original IMPRESS project) — both campaigns now set it to
+(`campaigns/data/alr/`, borrowed from `examples/small_molecule_binding`) — both campaigns now set it to
 the real ligand's SMILES, and a fail-fast check catches any future target that leaves it blank
 instead of silently modeling no ligand.
 

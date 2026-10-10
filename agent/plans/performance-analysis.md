@@ -1,5 +1,10 @@
 # Performance analysis of the Delta runs
 
+> **Not carried into IMPRESS.** `performance_analysis/` stayed in the standalone
+> [drawadiagram/impress_a](https://github.com/drawadiagram/impress_a) repository when this project
+> moved to `agent/`; run it from a checkout of that repo. The findings it produced (A11, G7, G8)
+> are recorded in `plans/backlog.md` and do not depend on it.
+
 ## The problem
 
 `performance_analysis/` was written on Delta, against the live run archive at

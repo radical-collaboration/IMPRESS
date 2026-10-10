@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+This project lives in the IMPRESS repository under `agent/`; paths below are relative to `agent/`,
+and nothing here may change IMPRESS's own `src/`, `tests/`, `examples/`, `docs/` or root packaging.
+
 **Read `README.md` first** for what IMPRESS-A is and how it fits together. This file covers what you need
 to *work on* it: commands, invariants that must not be broken, and behaviours that are easy to get wrong.
 
