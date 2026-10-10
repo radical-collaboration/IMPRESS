@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
-from rhapsody.backends import DragonExecutionBackendV3
+from rhapsody.backends import DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
 from discontinuous_scaffolds import (
@@ -439,7 +439,7 @@ async def run_discontinuous_scaffolds() -> None:
     """Set up the IMPRESS manager and launch the discontinuous scaffolds pipeline."""
     #backend = await LocalExecutionBackend(ProcessPoolExecutor())
     # For HPC execution use:
-    backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackend()
 
     flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)

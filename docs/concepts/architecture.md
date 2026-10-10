@@ -75,12 +75,33 @@ required methods, plus one optional one:
   spawns a child pipeline (for example, to remove migrated work items from
   the parent's tracking state).
 
-`auto_register_task(local_task=False, **task_kwargs)` decides how a task
-runs: by default it wraps the function via
+`auto_register_task(local_task=False, capture_stdio=True, **task_kwargs)`
+decides how a task runs: by default it wraps the function via
 `self.flow.executable_task(**task_kwargs)`, submitting it as an
 HPC-executable task through the workflow engine; with `local_task=True` the
 function runs as a plain in-process coroutine (used for lightweight local
 work like parsing a CSV or ranking sequences).
+
+Defaults that every pipeline gets without asking:
+
+- **stdio is captured.** An executable task's stdout and stderr go to
+  `{task uid}.stdout` / `.stderr` in the backend's work dir, which is
+  `{work_dir}/{engine uid}` for the `work_dir` passed to
+  `WorkflowEngine.create()`. The task's future then resolves to the stdout
+  file path, not the text; pass `capture_stdio=False` to get the text.
+- **failures explain themselves.** When an executable task fails, the last
+  lines of its captured stderr are logged and attached to the exception as
+  a note (Python 3.11+). Without this, the error is only a file path or an
+  exit code.
+- **tasks are labelled.** Each call is tagged `{pipeline}:{stage}` in
+  telemetry unless the caller passes `workflow_id=`. Otherwise asyncflow
+  names a task after its executable, which is usually just `bash`.
+- **local tasks are traced.** Each call of a `local_task=True` stage emits
+  one `impress.LocalStage` telemetry event (stage, pipeline, duration,
+  status), since local tasks never reach the engine.
+
+For a per-task log file next to a task's outputs, return
+`self.logged_command(log_file, cmd)` instead of `cmd`.
 
 A pipeline's `self.state` dict is the conventional place to pass data
 between stages — task methods write intermediate results into it (file
@@ -98,8 +119,8 @@ expressed as a static graph.
    (or `wait=False` to continue concurrently). This sets
    `invoke_adaptive_step = True`.
 2. On its next poll, `ImpressManager` notices the flag and runs the
-   pipeline's registered `adaptive_fn(pipeline)` coroutine as a background
-   task.
+   pipeline's registered `adaptive_fn(pipeline)` as a background task,
+   **off the event loop** (see below).
 3. `adaptive_fn` inspects/mutates the pipeline's `state` and attributes
    (for example, comparing a current score against a previous one), and may
    call `pipeline.submit_child_pipeline_request(new_config)` to request
@@ -113,6 +134,26 @@ expressed as a static graph.
    new pipeline.
 6. A pipeline can set `self.kill_parent = True` at any point to have the
    manager cancel its own task on the next tick (self-termination).
+
+**Adaptive functions run off the event loop.** One event loop drives every
+pipeline's task dispatch, so an adaptive function that blocks it, even an
+`async def` that never awaits, stalls all pipelines while it runs. On an
+8-node, 32-pipeline run this held the loop for 67% of wall clock and cut
+throughput to 37% of baseline. The manager therefore runs each adaptive
+function in a worker thread, against the live pipeline object:
+
+- If the engine has a backend named `local`, the function runs there as a
+  `flow.function_task`, which bounds concurrency and shows it in telemetry
+  as `{pipeline}:adaptive`. Use a thread-pool backend for it, such as
+  `ConcurrentExecutionBackend(ThreadPoolExecutor(), name="local")`: a
+  process pool would mutate a pickled copy of the pipeline.
+- Otherwise it runs in `asyncio.to_thread`.
+- A function that is already a flow task runs as it is.
+
+Pass `ImpressManager(..., adaptive_offload=False)` for an adaptive function
+that must await objects bound to the main loop, such as engine tasks.
+Module-level caches an adaptive function shares across pipelines may now be
+touched from several threads at once.
 
 Because child pipelines can themselves have an `adaptive_fn` that spawns
 further children, this protocol supports arbitrarily deep or wide trees of
@@ -130,7 +171,8 @@ differently — see each page's Adaptive Flow section for specifics.
   actually be one).
 - `config` — configuration dict merged into the pipeline's constructor
   kwargs.
-- `adaptive_fn` — optional `async def adaptive_fn(pipeline) -> None`.
+- `adaptive_fn` — optional `adaptive_fn(pipeline) -> None`, a plain
+  function or a coroutine function.
 - `kwargs` — additional constructor kwargs.
 
 `PipelineSetup.from_dict()`/`.to_dict()` let a plain dict (such as the

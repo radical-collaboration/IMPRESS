@@ -1,8 +1,11 @@
 import asyncio
+import functools
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..utils.logger import ImpressLogger
+from ..utils.logger import ImpressLogger, LogLevel
+from ..utils.stdio import logged_command, stderr_tail
+from ..utils.telemetry import wrap_local_task
 
 
 class ImpressBasePipeline(ABC):
@@ -51,6 +54,8 @@ class ImpressBasePipeline(ABC):
         self.invoke_adaptive_step = False
         self.incoming_child_pipeline_request = {}
         self._adaptive_barrier = asyncio.Event()
+        # Set by ImpressManager once telemetry has started; see `telemetry`.
+        self._telemetry = None
 
         # Call the registration method - subclasses must implement this
         self.register_pipeline_tasks()
@@ -84,7 +89,18 @@ class ImpressBasePipeline(ABC):
 
         return None
 
-    def auto_register_task(self, local_task=False, **task_kwargs):
+    @property
+    def telemetry(self):
+        """The running telemetry manager, or None when telemetry is off.
+
+        `ImpressManager` sets it before `run()`. A pipeline driven without the
+        manager falls back to the engine's own reference.
+        """
+        if self._telemetry is not None:
+            return self._telemetry
+        return getattr(self.flow, "_telemetry", None)
+
+    def auto_register_task(self, local_task=False, capture_stdio=True, **task_kwargs):
         """
         Decorator factory that binds a task function as a callable pipeline method.
 
@@ -95,11 +111,23 @@ class ImpressBasePipeline(ABC):
             local_task: If False (default), wraps the function via
                 `self.flow.executable_task(**task_kwargs)`, turning it into
                 an HPC-executable task submitted through the workflow
-                engine. If True, the function is registered as-is and runs
-                as a plain local coroutine (e.g. for CPU-only analysis
-                steps).
+                engine. If True, the function runs as a plain local
+                coroutine (e.g. for CPU-only analysis steps); each call is
+                timed and emitted as an `impress.LocalStage` telemetry event.
+            capture_stdio: For executable tasks, write the task's stdout and
+                stderr to files in the backend's work dir (default True).
+                The task's future then resolves to the stdout file path,
+                not the stdout text. Pass False to get the text back.
             **task_kwargs: Forwarded to `self.flow.executable_task()` when
                 `local_task` is False.
+
+        Executable tasks get two more behaviours:
+
+        - Each call is labelled `{pipeline}:{stage}` in telemetry unless the
+          caller passes its own `workflow_id=`. Without a label, asyncflow
+          names a task after its executable, which is usually `bash`.
+        - When a task fails, the last lines of its captured stderr are
+          logged, and attached to the exception as a note (Python 3.11+).
 
         Returns:
             A decorator that binds the wrapped function to `self` under its
@@ -107,14 +135,56 @@ class ImpressBasePipeline(ABC):
         """
 
         def decorator(func):
-            if not local_task:
-                task = self.flow.executable_task(**task_kwargs)(func)
+            if local_task:
+                task = wrap_local_task(self, func)
             else:
-                task = func
+                flow_task = self.flow.executable_task(
+                    capture_stdio=capture_stdio, **task_kwargs
+                )(func)
+                task = self._wrap_executable_task(func, flow_task)
             setattr(self, func.__name__, task)
             return task
 
         return decorator
+
+    def _wrap_executable_task(self, func, flow_task):
+        """Label each call and report a failed task's stderr.
+
+        Returns the engine's own future unchanged, so a stage future can
+        still be passed to another task as a dependency.
+        """
+        stage = func.__name__
+
+        @functools.wraps(flow_task)
+        def call(*args, **kwargs):
+            kwargs.setdefault("workflow_id", f"{self.name}:{stage}")
+            fut = flow_task(*args, **kwargs)
+            fut.add_done_callback(functools.partial(self._report_task_failure, stage))
+            return fut
+
+        return call
+
+    def _report_task_failure(self, stage, fut):
+        if fut.cancelled():
+            return
+        exc = fut.exception()
+        if exc is None:
+            return
+        tail = stderr_tail(self.flow, fut, exc)
+        message = f"{stage} failed: {exc!r}"
+        if tail:
+            message = f"{message}\n{tail}"
+            if hasattr(exc, "add_note"):
+                exc.add_note(tail)
+        self.logger.pipeline_log(message, level=LogLevel.ERROR)
+
+    def logged_command(self, log_file, cmd):
+        """Wrap `cmd` so its combined output lands in `log_file`.
+
+        For a per-task log next to the task's outputs. On failure the log's
+        last lines also go to stderr, and so into the task's error.
+        """
+        return logged_command(log_file, cmd)
 
     async def run_adaptive_step(self, wait: bool = True):
         """Trigger adaptive step and optionally wait for completion.
