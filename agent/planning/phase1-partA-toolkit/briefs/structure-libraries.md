@@ -1,0 +1,69 @@
+# Structure Libraries: BioPython, Biotite, ProDy
+
+**One-line identity.** The three general-purpose Python libraries for parsing, manipulating, and querying protein structure files — the substrate every QC, scoring, and I/O-adjacent piece of agent code in this toolkit is built on top of.
+
+## Identity
+- **Version / release examined:** BioPython — pinned at `biopython==1.84` in `impress-a-refcodes/tools/boltz/pyproject.toml:29` and `biopython==1.86` in `impress-a-refcodes/tools/IMPRESS/examples/small_molecule_binding/scripts/requirements_IMPRESS.txt:4`. Biotite — pinned at `biotite>=1.6.0` in `impress-a-refcodes/tools/agent-rosetta/pyproject.toml:16`, and imported directly (`from biotite.structure import AtomArray`) in `impress-a-refcodes/tools/foundry/src/foundry/utils/components.py:7` and used extensively in `impress-a-refcodes/tools/foundry/models/rfd3/src/rfd3/metrics/{metrics_utils.py,sidechain_metrics.py,hbonds_metrics.py}` and `impress-a-refcodes/tools/agent-rosetta/environments/rosetta/utils/rmsd.py:5-12`. ProDy — current PyPI release 2.6.1 (Aug 2025); **not found anywhere in the refcodes** (no import, no dependency pin).
+- **Provenance:** BioPython — dual-licensed under the Biopython License Agreement / BSD-3-Clause (migration to plain BSD-3-Clause in progress since v1.69), maintained by the Biopython community since 1999. Biotite — BSD-3-Clause, Kunzmann & Hamacher (TU Darmstadt), first published 2018 (BMC Bioinformatics), actively developed. ProDy — MIT license, Bahar lab (U. Pittsburgh), first published ~2011, "ProDy 2.0" update in 2021 (Bioinformatics).
+- **Maturity:** all three production-grade and actively maintained. BioPython is the most ubiquitous (default choice in most bioinformatics tutorials, tool interop, and third-party integrations, e.g. `Bio.PDB.DSSP` wraps `mkdssp`); Biotite is the newest and most actively adopted by the AI-protein-design tooling generation specifically (see refcode evidence below); ProDy is the most specialized (its distinguishing strength — elastic network models / normal-mode analysis — is a niche this toolkit's other tools don't otherwise cover).
+
+## Scientific role
+Substrate library used by every problem class indirectly: **parse** structure files into an in-memory representation, **manipulate** (select chains/residues/atoms, superimpose, compute RMSD, mutate residues), and feed the result to a scoring tool (DSSP, FreeSASA, ΔΔG predictors) or a generative model's I/O layer. Not itself a generator, predictor, or simulator — it's the plumbing all of those depend on. Pipeline stage: **analyze** (parsing/manipulation utility, cross-cutting).
+
+## Invocation & I/O contract
+- **BioPython** — Python API only. `from Bio.PDB import PDBParser; s = PDBParser().get_structure("id", "file.pdb")` yields a `Structure`→`Model`→`Chain`→`Residue`→`Atom` object hierarchy (pure-Python objects, not array-backed). `Bio.PDB.DSSP`, `Bio.PDB.Superimposer`, `Bio.PDB.NeighborSearch` are the common downstream utilities.
+- **Biotite** — Python API only. `import biotite.structure.io.pdb as pdb; f = pdb.PDBFile.read("file.pdb"); atoms = f.get_structure(model=1)` yields an `AtomArray` — a NumPy-array-backed structure-of-arrays representation (parallel arrays for coord/chain_id/res_id/atom_name/element, etc.), not a Python object tree. This is the source of its speed advantage (vectorized NumPy/C operations instead of per-atom Python object traversal).
+- **ProDy** — Python API only. `from prody import parsePDB; atoms = parsePDB("file.pdb")` yields an `AtomGroup`, also array-backed (similar philosophy to Biotite, predates it), plus dedicated `ANM`/`GNM`/`PCA` classes for elastic-network and ensemble analysis not native to the other two.
+- **Inputs:** PDB, mmCIF/PDBx (all three); Biotite additionally reads/writes MMTF (its own vectorized decoder, notably faster than RCSB's reference implementation) and has first-class small-molecule/ligand support via its own `AtomArray` chemistry extensions; ProDy has first-class support for ensemble/trajectory-style multi-model analysis (NMR ensembles, DCD trajectories) tied to its ENM machinery.
+- **Outputs:** in-memory structure objects; all three can write back to PDB/mmCIF.
+- **A concrete example (verified in refcode):** `impress-a-refcodes/tools/agent-rosetta/environments/rosetta/utils/rmsd.py:5-7` — `import biotite.structure as struc; from biotite.structure import superimpose; from biotite.structure.io.pdb import PDBFile` — Biotite's `superimpose`+RMSD path used directly inside the agent-rosetta refcode's own RMSD utility.
+
+## Compute pattern
+- **Pattern:** **P6** (in-process library call) for all three — parsing a structure, computing an RMSD, or selecting a substructure is milliseconds and must never be treated as a scheduled task.
+- **GPU vendor portability:** CPU-only / n/a for all three (pure NumPy/C, no GPU kernels).
+- **State model:** stateless (structure objects are in-memory representations of a file; no persistent state across calls).
+- **Data locality:** self-contained (operates on whatever structure file/bytes are handed to it; no shared-FS requirement).
+- **Staging burden:** none — pip/conda-installable packages, no model weights, no reference database beyond ProDy's optional PDB-fetching convenience functions (which are P5 network calls, not part of the library's core cost).
+- **Container availability:** official/community — all three are on conda-forge and PyPI; trivially included in any Python-based agent container.
+
+## Deployment on DOE & ACCESS
+No platform blocker anywhere — pure-Python-plus-C-extension packages install identically via pip/conda on Frontier, Aurora, Polaris, and every ACCESS system, with no GPU dependency and no license gate. The only deployment decision is which library(ies) to standardize the agent's own codebase on, since carrying all three as active dependencies (rather than one primary + situational others) adds needless surface area to every container image and every structure-object-passing interface between tools.
+
+## Agentic surface
+- **Native MCP:** no. No MCP server was found exposing BioPython, Biotite, or ProDy as typed tools — these are invoked as ordinary library calls from within the agent's own Python code, not as externally-callable tools in their own right.
+- **Parameters worth exposing for autonomous variation:** n/a in the usual sense — these are not tunable "runs," they are deterministic parsing/manipulation calls. The one variation surface worth naming is **which library backs a given internal utility** (e.g., "use Biotite's vectorized superimpose for RMSD on large ensembles, fall back to BioPython's `Superimposer` where an existing helper already depends on it") — a code-architecture decision, not a per-call agent parameter.
+- **Parameters that must NOT be agent-varied:** n/a.
+
+## Failure modes & what the agent must check
+- **Loud failure:** malformed PDB/mmCIF (missing required records), unrecognized residue/atom names causing a parse exception. All three raise Python exceptions on genuinely malformed input rather than silently producing empty structures.
+- **Silent bad output:** the main risk is not in the libraries themselves but in **using two different libraries' structure objects interchangeably without an explicit conversion**, e.g., comparing a BioPython `Residue`'s numbering against a Biotite `AtomArray`'s `res_id` array when the two disagree on insertion-code or hetero-residue handling — this can silently misalign a downstream computation (wrong-residue RMSD, wrong-residue mutation) without any error. The agent-facing mitigation is architectural: pick one primary library (see Verdict) for anything that crosses a tool boundary, and treat the others as internal-only where an existing refcode dependency already requires them.
+- BioPython's `PDBParser` is permissive by default (`QUIET=True` suppresses warnings about, e.g., discontinuous chains or duplicate atoms) — an agent relying on BioPython for parsing should not disable warnings blindly, since a suppressed warning can mask a structurally invalid input that the QC cluster's other tools (DSSP, MolProbity) should have been given the chance to catch instead.
+
+## Cost per unit of work
+- **Parse a single-domain protein (~1–500 residues) from PDB/mmCIF:** BioPython — low-tens of milliseconds (pure-Python object construction dominates). Biotite — sub-to-low-single-digit milliseconds (vectorized parse into NumPy arrays); reported as "multitudes" faster than BioPython for structure loading and an order of magnitude faster for sequence alignment (traceback is C-accelerated in Biotite vs. a per-cell Python-API call in BioPython). ProDy — comparable order of magnitude to Biotite for parsing (also array-backed), not independently benchmarked against Biotite in the sources found here.
+- **Checkpointable:** n/a — sub-second, atomic, no restart concept applies.
+- At campaign scale (parsing thousands of generated structures for downstream QC/scoring), library choice becomes a real wall-clock line item only when structure counts run into the tens of thousands to millions; for typical per-iteration batch sizes in an autonomous design loop (tens to low-hundreds of candidates), any of the three is negligible next to the GPU/CPU cost of the generation or scoring step that produced or will consume the structure.
+
+## Verdict
+**Core — Biotite as primary, BioPython retained for specific interop needs, ProDy deferred.**
+
+This cluster asked for a real recommendation, so: **standardize the agent's own structure-manipulation code on Biotite.** Three independent lines of evidence converge on this, not just the abstract speed argument:
+1. **The newest, most directly-relevant refcodes already made this choice.** `agent-rosetta` (the agentic orchestration layer most architecturally similar to what this project is building) depends on `biotite>=1.6.0` and uses it directly for RMSD/superimposition (`agent-rosetta/environments/rosetta/utils/rmsd.py`). `foundry`'s RFdiffusion3 codebase — the most modern generative model in this toolkit — uses Biotite's `AtomArray` and `annotate_sse` throughout its own metrics code. That is a strong revealed-preference signal from the teams building the tools this project will orchestrate, not just a benchmark claim.
+2. **The performance case is real and specific, not generic marketing.** Biotite's NumPy-array-backed `AtomArray` avoids the per-atom Python object overhead that BioPython's `Structure`/`Model`/`Chain`/`Residue`/`Atom` tree incurs, and its C-accelerated alignment traceback gives an order-of-magnitude speedup over BioPython for sequence alignment specifically. At the scale an autonomous campaign will operate (thousands of structures QC'd and re-parsed per iteration across a long-running loop), this compounds.
+3. **BioPython is not being rejected — it stays as a secondary dependency** for the one thing it remains genuinely better positioned for: interop with tools whose own Python wrappers are built on it (e.g., `Bio.PDB.DSSP` is the standard Biopython-native way to shell out to `mkdssp` and get results back as Python objects — see `structure-qc.md`), and for any refcode-adjacent tool (`boltz`, `IMPRESS`) that already pins BioPython as a hard dependency, where reimplementing that interop on Biotite would be pure churn with no benefit.
+4. **ProDy is deferred, not rejected.** Its distinguishing capability — elastic network models (ANM/GNM) and ensemble/normal-mode analysis — is genuinely unique among these three, but it is not something any in-scope problem class (stability, binder design, enzyme design, small-molecule binding) currently calls for in this toolkit's other briefs, and it appears nowhere in the refcodes. Revisit if a later phase adds a flexibility/dynamics-aware design or scoring step (e.g., ENM-based B-factor prediction as a stability proxy) that would make ProDy's ANM/GNM machinery load-bearing rather than a duplicate of what MD tools (GROMACS/OpenMM, covered elsewhere in this toolkit) already provide at higher fidelity and higher cost.
+
+## Sources
+- `impress-a-refcodes/tools/boltz/pyproject.toml:29` (`biopython==1.84`)
+- `impress-a-refcodes/tools/IMPRESS/examples/small_molecule_binding/scripts/requirements_IMPRESS.txt:4` (`biopython==1.86`)
+- `impress-a-refcodes/tools/agent-rosetta/pyproject.toml:16` (`biotite>=1.6.0`)
+- `impress-a-refcodes/tools/agent-rosetta/environments/rosetta/utils/rmsd.py:5-12` (Biotite `superimpose`/`AtomArray` usage)
+- `impress-a-refcodes/tools/foundry/src/foundry/utils/components.py:7` (`from biotite.structure import AtomArray`)
+- `impress-a-refcodes/tools/foundry/models/rfd3/src/rfd3/metrics/metrics_utils.py:8,22-28` (Biotite `annotate_sse`/P-SEA)
+- `impress-a-refcodes/tools/foundry/models/rfd3/src/rfd3/metrics/sidechain_metrics.py:3` (`from biotite.structure.info import residue`)
+- [Biotite: a unifying open source computational biology framework in Python (BMC Bioinformatics 2018)](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-018-2367-z)
+- [Biotite: new tools for a versatile Python bioinformatics library (BMC Bioinformatics 2023)](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-023-05345-6)
+- [Biopython License — Open Hub](https://openhub.net/licenses/Biopython-License), [biopython/LICENSE.rst](https://github.com/biopython/biopython/blob/master/LICENSE.rst)
+- [ProDy License](http://www.bahargroup.org/prody/manual/about/license.html), [ProDy PyPI](https://pypi.org/project/ProDy/), [ProDy 2.0 (Bioinformatics 2021)](https://academic.oup.com/bioinformatics/article/37/20/3657/6211036)
+- [Elastic Network Models — ProDy tutorial](http://prody.csb.pitt.edu/tutorials/enm_analysis/)
+- [GitHub - jgreener64/pdb-benchmarks](https://github.com/jgreener64/pdb-benchmarks) (cross-library benchmark repo referenced in Biotite's own performance comparisons)

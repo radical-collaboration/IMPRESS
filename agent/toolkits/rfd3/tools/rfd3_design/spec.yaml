@@ -1,0 +1,32 @@
+id: rfd3_design
+toolkit: rfd3
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.rfd3_agents.RFD3DesignAgent
+resources: {gpus: 1, cores: 8, walltime_s: 900}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+outputs:
+  backbone: {type: Backbone}
+parameters:
+  # Default 1: breadth comes from `replicas` (N independent lineages, N DesignNodes),
+  # not from internal sampling the adapter would discard all but the first of.
+  num_designs: {type: int, default: 1, min: 1, max: 64, trades: "coverage vs GPU-hours"}
+  diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs wall-clock"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  # Path to a real RFD3 `inputs=` JSON (a `DesignInputSpecification`: input PDB, contig,
+  # ligand, select_exposed/select_buried, ...). RFD3 has no scaffold/guidance CLI override
+  # - guided vs. unguided diffusion is selected entirely by WHICH file this points at,
+  # never by a flag - so this is target identity, campaign-supplied, not composer-tuned.
+  # See toolkits/rfd3/SKILL.md.
+  input_spec_path: {type: str, default: ""}
+metrics: [ss_fraction, num_models]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}
+# Measured on job 22684607 (NVMe, 1 node): 145.7s = 0.0405 h. Declared 0.25 was
+# 6x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.1 keeps ~2x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.1}}

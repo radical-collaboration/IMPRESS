@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "impress-a"
+version = "0.1.0"
+description = "Autonomous protein design agent for HPC"
+requires-python = ">=3.10"
+dependencies = [
+  "radical.asyncflow>=0.5.1",
+  "rhapsody-py>=0.5.0",
+  "langgraph>=1.0",
+  "langchain-core>=1.0",
+  "pydantic>=2",
+  "pyyaml",
+  "paretoset>=1.2.5",
+  "numpy",
+  # PDB parsing in the real toolkit adapters (tools/_pdbtools.py, boltz_agents.py). Imported
+  # lazily, but in the agent process itself - not inside a tool's subprocess or container.
+  "biopython",
+]
+
+[project.optional-dependencies]
+# flowgentic is 0.1.0 with no PyPI release; pin to a commit, never a branch.
+agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.git@dd27bd8b7e6edb2995038c9c1cc9b2fec3b7c7e9"]
+oracle = ["litellm"]
+http = ["httpx"]          # the HTTP control-plane adapter
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx"]
+# performance_analysis/ (not part of the package): figures, TM-align, structure parsing
+analysis = ["pandas", "scipy", "matplotlib", "tmtools", "gemmi", "biopython"]
+
+[project.scripts]
+impress-a = "impress_a.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,10 @@
+{
+  "why": "THE CHEAPEST EXECUTABLE RECORD OF BACKLOG G4. This output passes our gates (total_score max 0.0, fa_rep max 500.0) and would fail every one of upstream's calibrated PROD values (total_score < -250.0, fa_rep < 100.0, interaction_energy < -8.0). The third of those we do not compute at all (rosetta_agents.py:88-91), and it is the one that actually measures binding. It is filed as a .good fixture because that is what our gates currently say about it - the file is honest about the engine as it stands. WHEN G4 IS CLOSED THIS FILE MUST MOVE TO .bad.json, and the fact that it has to move is the point.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": -12.0, "fa_rep": 480.0}
+  }
+}

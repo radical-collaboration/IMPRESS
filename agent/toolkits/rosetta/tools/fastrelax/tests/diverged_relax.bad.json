@@ -1,0 +1,10 @@
+{
+  "why": "FastRelax diverged instead of converging: total_score is large and positive and fa_rep is far beyond its ceiling, the signature of a structure that was clashing before relax and stayed clashing through it. Both metric gates fire.",
+  "failing_gates": ["metric_in_range[total_score]", "metric_in_range[fa_rep]"],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": 1523.4, "fa_rep": 2780.0}
+  }
+}

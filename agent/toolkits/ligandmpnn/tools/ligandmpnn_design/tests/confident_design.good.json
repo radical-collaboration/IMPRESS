@@ -1,0 +1,10 @@
+{
+  "why": "A parsed header and a design that clears both confidence gates. The numbers are the ones in the documented example header at ligandmpnn_agents.py:18, so this fixture and tests/raw/parsed_header.fa agree by construction - if _CONF_RE is ever changed, the raw file and this fixture must still round-trip to each other.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"overall_confidence": 0.642, "ligand_confidence": 0.582}
+  }
+}

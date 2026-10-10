@@ -1,0 +1,10 @@
+{
+  "why": "mock_noodle's failure mode on the real tool: rfd3 produced a model, reported a model count, and the backbone is disordered. The point of this fixture is the gate list - `output_present` PASSES, because there genuinely is output. A pipeline that checked only for the presence of a file would pass this design straight into LigandMPNN and spend a GPU-hour designing sequence for a noodle. The ss_fraction here comes from our own phi/psi approximation (_pdbtools.secondary_structure_fraction), explicitly not DSSP; backlog G2 would replace it with rfd3's own reported helix_fraction/sheet_fraction.",
+  "failing_gates": ["has_secondary_structure"],
+  "output": {
+    "result": "backbone",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"ss_fraction": 0.04, "num_models": 1}
+  }
+}

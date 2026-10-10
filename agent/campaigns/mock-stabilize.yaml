@@ -1,0 +1,15 @@
+campaign_id: mock-stabilize
+goal: "Stabilize the given protein while preserving the designed fold"
+backend: concurrent
+backend_config: {workers: 4}
+max_cycles: 8
+stagnation_limit: 3
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 2.0
+  cpu_hours: 12.0
+objectives:
+  - {name: sc_rmsd,    direction: minimize, max: 3.0}
+  - {name: iptm,       direction: maximize, min: 0.55}
+  - {name: ddg,        direction: minimize}
+  - {name: clashscore, direction: minimize, max: 25.0}

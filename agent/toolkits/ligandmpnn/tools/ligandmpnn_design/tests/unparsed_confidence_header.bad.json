@@ -1,0 +1,10 @@
+{
+  "why": "LigandMPNN produced sequences and a packed structure, but its FASTA header did not match `_CONF_RE` (src/impress_a/tools/ligandmpnn_agents.py). The extraction used to initialise `overall = ligand = 0.0` and break only on a match, so a PARSER failure was reported as a design with 0.0 confidence - indistinguishable downstream from a genuinely terrible design, and caught only by thresholds that no longer reset trust. `_parse_confidence` now returns nothing when no header parses, so both metrics are absent and the INTEGRITY gate `metrics_reported` fails: the reason is kept, not just the verdict (docs/decisions/0013). See tests/raw/unparsed_header.fa for a header that triggers it.",
+  "failing_gates": ["metrics_reported", "metric_in_range[overall_confidence]", "metric_in_range[ligand_confidence]"],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {}
+  }
+}
