@@ -1,0 +1,10 @@
+{
+  "why": "Four models, a well-formed helical backbone, both gates clear. The count matters: `diffusion_batch_size` is set from num_designs, and a run that silently produced one model where four were requested is what `count_matches_request` would catch - a gate this spec does not reference (backlog B3).",
+  "failing_gates": [],
+  "output": {
+    "result": "backbone",
+    "count": 4,
+    "outputs": {},
+    "metrics": {"ss_fraction": 0.71, "num_models": 4}
+  }
+}

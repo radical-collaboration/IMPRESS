@@ -1,0 +1,39 @@
+{
+ "title": "IMPRESS-A code walk",
+ "acts": [
+  {
+   "n": 1,
+   "name": "Functionality",
+   "from": 6,
+   "slides": "6-10",
+   "question": "what can you ask for that an adaptive pipeline cannot be asked?",
+   "gap": "every graph composed so far is the six-stage shape the reference pipeline already had"
+  },
+  {
+   "n": 2,
+   "name": "Performance",
+   "from": 11,
+   "slides": "11-18",
+   "question": "what does composing, validating and scoring a graph cost?",
+   "gap": "no serial baseline, no head-to-head, one lineage per GPU and three GPUs idle"
+  },
+  {
+   "n": 3,
+   "name": "Usability",
+   "from": 19,
+   "slides": "19-21",
+   "question": "what is it usable as - application, platform, component?",
+   "gap": "nothing else has ever driven it: no resume, and no serve/reason command"
+  }
+ ],
+ "orders": [
+  {"name": "A · full", "drop": [],
+   "fits": "a 35-minute slot, or a working session where questions land inline"},
+  {"name": "B · default", "drop": ["17", "18", "20"],
+   "fits": "a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence"},
+  {"name": "C · hard twenty", "drop": ["8", "9", "13", "15", "17", "18", "20"],
+   "fits": "a hard 20 that leaves real room for discussion - the baseline, the three dividers, the dispatch seam, both measured performance slides, status and asks"}
+ ],
+ "protect": "**Protect 3, 4, 14, 16, 22 and 23.** Three and four are what make this a comparison rather than a tour; 14 and 16 are the only measured performance claims in the deck; 22 is status and 23 is the asks. Never cut a divider: a cut deck without them is a list of slides. Backups B1 (typed hops) and B2 (compute patterns) are already out of every order - do not put them back to fill time.",
+ "say_out_loud": "that every run so far is a single lineage and `replicas > 1` has never executed; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer."
+}

@@ -1,0 +1,302 @@
+[
+ [
+  "impress_a/src/impress_a/core/decision.py",
+  21,
+  "class ExperimentIntent",
+  "S5 - a policy emits intent, never a DAG"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  30,
+  "def validate",
+  "S5, S9 - composition-time validation"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  143,
+  "async def dry_run",
+  "S5, S9 - the dry-run"
+ ],
+ [
+  "impress_a/src/impress_a/compose/interlock.py",
+  146,
+  "def for_pattern",
+  "S5, S9 - trust is scored on shape"
+ ],
+ [
+  "impress_a/src/impress_a/tools/agent.py",
+  110,
+  "async def post_process",
+  "S5, S10 - exit code is never evidence"
+ ],
+ [
+  "impress_a/src/impress_a/core/pareto.py",
+  56,
+  "def feasible",
+  "S5 - a FAIL node is never feasible"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  242,
+  "def _absorb",
+  "S5, S7 - one writer, await-free"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  215,
+  "def observe",
+  "S7 - the executor's observe"
+ ],
+ [
+  "impress_a/src/impress_a/policy/driver.py",
+  98,
+  "async def _submit_with_retry",
+  "S7 - bounded retry in the driver"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  304,
+  "async def _admit_once",
+  "S7, S9 - the executor's independent admission cap"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  165,
+  "def submit",
+  "S7 - submit"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  744,
+  "async def pump",
+  "S7 - pump"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  629,
+  "async def _reap",
+  "S7 - _reap"
+ ],
+ [
+  "impress_a/src/impress_a/compose/composer.py",
+  36,
+  "def compose",
+  "B1 - compose"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  91,
+  "def to_outcome",
+  "B1 - to_outcome"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  38,
+  "def _g1_types",
+  "S9 - gate 1, types"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  70,
+  "def _g2_structure",
+  "S9 - gate 2, structure"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  86,
+  "def _g3_params",
+  "S9 - gate 3, params"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  103,
+  "def _g4_resources",
+  "S9 - gate 4, resources and the P6 refusal"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  134,
+  "def _g5_budget",
+  "S9 - gate 5, budget"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  331,
+  "if failure is None and not scrutiny.trusted",
+  "S9 - forced dry-run for an untrusted shape"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  337,
+  "if failure is None and scrutiny.cost_cap_fraction",
+  "S9 - the untrusted cost cap"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  355,
+  "if blown := self.budget.reserve",
+  "S9 - RESERVE is last"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  144,
+  "def _make_task",
+  "S12-A - one generic factory"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  153,
+  "async def _run",
+  "S12-A - the node coroutine"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  162,
+  "_run.__name__ = node_id",
+  "S12-A - names come from fn.__name__"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  182,
+  "for tid in g.topo_order()",
+  "S12-B - futures as arguments are DAG edges"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  188,
+  "gather = asyncio.gather",
+  "S12-B - the unawaited gather"
+ ],
+ [
+  "impress_a/src/impress_a/exec/dispatch.py",
+  207,
+  "def cancel",
+  "S12 - cancellation is advisory"
+ ],
+ [
+  "impress_a/src/impress_a/exec/backend.py",
+  128,
+  "async def make_engine_bounded",
+  "S13-A - make_engine_bounded"
+ ],
+ [
+  "impress_a/src/impress_a/exec/backend.py",
+  140,
+  "if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS",
+  "S13-A - 0 disables the bound"
+ ],
+ [
+  "impress_a/src/impress_a/exec/backend.py",
+  144,
+  "threading.Thread(target=_construct_backend_in_thread",
+  "S13-A - synchronous construction on a daemon thread"
+ ],
+ [
+  "impress_a/src/impress_a/exec/backend.py",
+  160,
+  "be = await asyncio.wait_for",
+  "S13-A - the bound itself"
+ ],
+ [
+  "impress_a/src/impress_a/exec/backend.py",
+  172,
+  "async def _finish",
+  "S13-A - async init and the engine on the caller's loop"
+ ],
+ [
+  "impress_a/src/impress_a/tools/agent.py",
+  55,
+  "async def pre_process",
+  "S10 - pre_process"
+ ],
+ [
+  "impress_a/src/impress_a/tools/agent.py",
+  58,
+  "def parameterize",
+  "S10 - parameterize"
+ ],
+ [
+  "impress_a/src/impress_a/tools/agent.py",
+  79,
+  "async def run",
+  "S10 - run"
+ ],
+ [
+  "impress_a/src/impress_a/core/types.py",
+  12,
+  "class Pattern(str, Enum)",
+  "B2 - the pattern enum"
+ ],
+ [
+  "impress_a/src/impress_a/compose/composer.py",
+  45,
+  "stages = [t for t in intent.stages",
+  "B2 - P6 stages dropped before they become nodes"
+ ],
+ [
+  "impress_a/src/impress_a/compose/validate.py",
+  106,
+  "if spec.pattern is Pattern.P6",
+  "B2 - gate 4 refuses a scheduled P6"
+ ],
+ [
+  "impress_a/src/impress_a/tools/spec.py",
+  107,
+  "if self.pattern is Pattern.P1",
+  "B2 - a P1 tool must declare a GPU"
+ ],
+ [
+  "impress_a/src/impress_a/compose/graph.py",
+  51,
+  "def pattern_signature",
+  "S18 - the pattern signature"
+ ],
+ [
+  "impress_a/src/impress_a/runtime/executor.py",
+  155,
+  "trust_dir = Path(spec.trust_root)",
+  "S18 - trust_root, now absolute"
+ ],
+ [
+  "IMPRESS/examples/small_molecule_binding/small_molecule_binding.py",
+  36,
+  "STEP_DONE",
+  "S3 - the fixed step set a pipeline's shape is drawn from"
+ ],
+ [
+  "IMPRESS/examples/small_molecule_binding/run_small_molecule_binding.py",
+  210,
+  "def _adaptive_decision_sync",
+  "S3 - the hand-written state machine the shape lives in"
+ ],
+ [
+  "IMPRESS/examples/small_molecule_binding/run_small_molecule_binding.py",
+  63,
+  "PROD = RunConfig(",
+  "S3, S10 - thresholds live in the runner, parsed by run_model.py"
+ ],
+ [
+  "IMPRESS/examples/small_molecule_binding/small_molecule_binding.py",
+  1154,
+  "interact      is not None and interact",
+  "S10 - the three-term fastrelax gate, inside the function that parses the output"
+ ],
+ [
+  "IMPRESS/examples/small_molecule_binding/run_nonadaptive.py",
+  32,
+  "routes = {",
+  "S3 - the declarative variant of the same science, 102 lines"
+ ],
+ [
+  "impress_a/toolkits/rosetta/tools/fastrelax/spec.yaml",
+  27,
+  "- {id: metric_in_range, params: {metric: total_score, max: 0.0}}",
+  "S10 - our threshold on a stage we share, and it is the weaker one"
+ ],
+ [
+  "impress_a/planning/phase1-partA-toolkit/briefs/impress.md",
+  112,
+  "3. `_run_adaptive_fn` calls",
+  "S3 - the adaptive hook is a plain closure with full object access"
+ ]
+]

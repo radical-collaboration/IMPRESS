@@ -1,0 +1,883 @@
+{
+ "code": {
+  "head": "ffac4b0",
+  "packages": {
+   "tools": 1506,
+   "runtime": 1027,
+   "control": 928,
+   "core": 848,
+   "policy": 769,
+   "exec": 512,
+   "compose": 433,
+   "cli": 423,
+   "manager.py": 115,
+   "__main__.py": 3,
+   "__init__.py": 0
+  },
+  "src_total": 6564,
+  "test_lines": 3791,
+  "tests_collected": 165,
+  "tools": [
+   "boltz_predict",
+   "fastrelax",
+   "filter_shape",
+   "ligandmpnn_design",
+   "mock_design",
+   "mock_fold",
+   "mock_generate",
+   "mock_noodle",
+   "mock_score",
+   "packmin",
+   "rfd3_design"
+  ],
+  "n_tools": 11,
+  "toolkits": [
+   "boltz",
+   "ligandmpnn",
+   "mock",
+   "rfd3",
+   "rosetta"
+  ],
+  "n_toolkits": 5,
+  "n_real_toolkits": 4
+ },
+ "mock": {
+  "campaign": "mock-stabilize-D",
+  "stdout_tail": [
+   "campaign : mock-stabilize-D",
+   "  policy   : rulecorrectionspolicy(threshold)",
+   "  cycles   : 2",
+   "  stop     : target front size 3 reached",
+   "  nodes    : 4  front: 3",
+   "    n000001-b6b2 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
+   "    n000003-b6b2 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
+   "    n000004-b6b2 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
+  ],
+  "admissions": [
+   {
+    "run": "r0001",
+    "signature": "9fdcfd202951f82f",
+    "nodes": 12,
+    "estimate": {
+     "gpu_hours": 0.165,
+     "cpu_hours": 1.5
+    },
+    "trusted": false,
+    "rejected": {
+     "gate": "interlock",
+     "node": null,
+     "reason": "provisional pattern capped at 10% of available cpu_hours (1.500 > 1.200)",
+     "detail": {},
+     "transient": true
+    }
+   },
+   {
+    "run": "r0002",
+    "signature": "66bb492308e3d238",
+    "nodes": 8,
+    "estimate": {
+     "gpu_hours": 0.11,
+     "cpu_hours": 1.0
+    },
+    "trusted": false,
+    "rejected": null
+   },
+   {
+    "run": "r0003",
+    "signature": "66bb492308e3d238",
+    "nodes": 8,
+    "estimate": {
+     "gpu_hours": 0.11,
+     "cpu_hours": 1.0
+    },
+    "trusted": false,
+    "rejected": null
+   }
+  ],
+  "nodes": [
+   {
+    "node": "n000001-b6b2",
+    "run": "r0002",
+    "lineage": 0,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.64,
+     "designability": 0.95,
+     "seq_recovery": 0.54,
+     "diversity": 0.35,
+     "iptm": 0.681,
+     "sc_rmsd": 2.382,
+     "ddg": -2.027,
+     "clashscore": 3.38
+    }
+   },
+   {
+    "node": "n000002-b6b2",
+    "run": "r0002",
+    "lineage": 1,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.545,
+     "designability": 0.943,
+     "seq_recovery": 0.56,
+     "diversity": 0.35,
+     "iptm": 0.489,
+     "sc_rmsd": 3.203,
+     "ddg": 1.828,
+     "clashscore": 2.57
+    }
+   },
+   {
+    "node": "n000003-b6b2",
+    "run": "r0003",
+    "lineage": 0,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.65,
+     "designability": 0.649,
+     "seq_recovery": 0.699,
+     "diversity": 0.07,
+     "iptm": 0.7,
+     "sc_rmsd": 2.3,
+     "ddg": -1.079,
+     "clashscore": 5.61
+    }
+   },
+   {
+    "node": "n000004-b6b2",
+    "run": "r0003",
+    "lineage": 1,
+    "qc": "suspect",
+    "metrics": {
+     "ss_fraction": 0.623,
+     "designability": 0.67,
+     "seq_recovery": 0.685,
+     "diversity": 0.07,
+     "iptm": 0.645,
+     "sc_rmsd": 2.439,
+     "ddg": -2.462,
+     "clashscore": 4.2
+    }
+   }
+  ],
+  "front": [
+   "n000001-b6b2",
+   "n000003-b6b2",
+   "n000004-b6b2"
+  ],
+  "stop": "target front size 3 reached",
+  "cycles": 2,
+  "promoted": [],
+  "trust_events": [
+   {
+    "event": "seen",
+    "signature": "9fdcfd202951f82f"
+   },
+   {
+    "event": "seen",
+    "signature": "66bb492308e3d238"
+   },
+   {
+    "event": "clean",
+    "signature": "66bb492308e3d238"
+   },
+   {
+    "event": "clean",
+    "signature": "66bb492308e3d238"
+   }
+  ],
+  "ledger_records": 7
+ },
+ "patterns": {
+  "declared": [
+   "P1",
+   "P2",
+   "P3",
+   "P4",
+   "P5",
+   "P6",
+   "P7",
+   "P8"
+  ],
+  "members": {
+   "P1": [
+    "boltz_predict",
+    "ligandmpnn_design",
+    "mock_design",
+    "mock_fold",
+    "mock_generate",
+    "mock_noodle",
+    "rfd3_design"
+   ],
+   "P2": [
+    "fastrelax",
+    "filter_shape",
+    "mock_score",
+    "packmin"
+   ],
+   "P3": [],
+   "P4": [],
+   "P5": [],
+   "P6": [],
+   "P7": [],
+   "P8": []
+  },
+  "counts": {
+   "P1": 7,
+   "P2": 4,
+   "P3": 0,
+   "P4": 0,
+   "P5": 0,
+   "P6": 0,
+   "P7": 0,
+   "P8": 0
+  },
+  "in_use": [
+   "P1",
+   "P2"
+  ],
+  "unused": [
+   "P3",
+   "P4",
+   "P5",
+   "P6",
+   "P7",
+   "P8"
+  ],
+  "inline": [
+   "P6"
+  ],
+  "external": [
+   "P4",
+   "P8"
+  ],
+  "consulted_in": [
+   {
+    "file": "compose/composer.py",
+    "lines": [
+     46
+    ]
+   },
+   {
+    "file": "compose/validate.py",
+    "lines": [
+     79,
+     106,
+     110
+    ]
+   },
+   {
+    "file": "tools/spec.py",
+    "lines": [
+     107
+    ]
+   }
+  ]
+ },
+ "shape": {
+  "1": {
+   "signature": "f5b21d82924fbcd0",
+   "nodes": 6
+  },
+  "2": {
+   "signature": "f8bcefed63c493ae",
+   "nodes": 12
+  },
+  "4": {
+   "signature": "78e730c67750a361",
+   "nodes": 24
+  },
+  "1_tuned_params": {
+   "signature": "f5b21d82924fbcd0",
+   "nodes": 6
+  }
+ },
+ "delta": {
+  "source": "plans/first-real-run.md, plans/backlog.md, plans/next-run-promotion.md, plans/next-run-sustained-trust.md - transcribed, raw logs on Delta",
+  "jobs": [
+   {
+    "job": "22536706",
+    "date": "2026-09-29",
+    "storage": "hdd",
+    "outcome": "rfd3 ok; ligandmpnn failed, stderr lost (G6); hung at inflight=1",
+    "stages": {
+     "rfd3_design": 180.0
+    }
+   },
+   {
+    "job": "22669509",
+    "date": "2026-10-04",
+    "storage": "hdd",
+    "outcome": "rfd3 ok; ligandmpnn FAILED loudly at import (A6) after 276s",
+    "stages": {
+     "rfd3_design": null,
+     "ligandmpnn_design": 276.0
+    }
+   },
+   {
+    "job": "22684607",
+    "date": "2026-10-05",
+    "storage": "nvme",
+    "outcome": "5/5 ok in 3m44s; boltz truncated off by the cost cap (A7)",
+    "stages": {
+     "rfd3_design": 145.7,
+     "ligandmpnn_design": 18.1,
+     "packmin": 15.9,
+     "fastrelax": 25.9,
+     "filter_shape": 10.2
+    }
+   },
+   {
+    "job": "22692304",
+    "date": "2026-10-06",
+    "storage": "nvme",
+    "outcome": "6/6 ok in 2m53s, first attempt, one-node front",
+    "stages": {
+     "rfd3_design": 45.0,
+     "ligandmpnn_design": 14.6,
+     "packmin": 15.2,
+     "fastrelax": 22.4,
+     "filter_shape": 10.0,
+     "boltz_predict": 57.8
+    }
+   },
+   {
+    "job": "22702568",
+    "date": null,
+    "storage": "nvme",
+    "outcome": "5 runs, 30/30 tasks ok, promoted NOTHING under the all-gates rule (decision 0013)",
+    "stages": {}
+   },
+   {
+    "job": "22726105",
+    "date": "2026-10-07",
+    "storage": "nvme",
+    "outcome": "5 runs, 30/30 ok in 13m41s; promoted after r0002, the trusted path executed, r0004 demoted",
+    "stages": {}
+   },
+   {
+    "job": "22728140",
+    "date": "2026-10-07",
+    "storage": "nvme",
+    "outcome": "5 runs, 30/30 ok in 13m37s; three consecutive trusted cycles, no demotion, no integrity failure",
+    "stages": {}
+   }
+  ],
+  "hdd_baseline_22675512": {
+   "rfd3_design": 137.2,
+   "ligandmpnn_design": 292.6,
+   "packmin": "could not finish import pyrosetta in 300s"
+  },
+  "import_cost_s": {
+   "pyrosetta_hdd": 471,
+   "torch_hdd": 280
+  },
+  "completed": {
+   "job": "22692304",
+   "wall": "2m53s",
+   "cost": {
+    "gpu_hours": 0.27,
+    "cpu_hours": 0.06
+   },
+   "qc": "suspect",
+   "front": [
+    "n000001-4101"
+   ],
+   "metrics": {
+    "ss_fraction": 0.827,
+    "overall_confidence": 0.448,
+    "ligand_confidence": 0.424,
+    "total_score": -272.0,
+    "fa_rep": 109.4,
+    "shape_complementarity": 0.591,
+    "complex_plddt": 0.507,
+    "ligand_iptm": 0.752
+   }
+  },
+  "filter_shape_sc": {
+   "22684607": 0.524,
+   "22692304": 0.591,
+   "bound": 0.55
+  },
+  "cost_guess_over_measured": [
+   6,
+   69
+  ],
+  "boltz_cost": {
+   "declared": 0.15,
+   "measured": 0.016,
+   "now": 0.05
+  },
+  "untrusted_cap": {
+   "replicas4_gpu_h": 0.68,
+   "cap": 0.6
+  },
+  "trust": {
+   "promote_after": 3,
+   "carried_in": "22702568's last ledger event was `clean`, so the site ledger folded to clean_runs=1 and promotion came after r0002 rather than r0003",
+   "22702568": {
+    "wall": null,
+    "runs": 5,
+    "tasks": "30/30",
+    "ledger": [
+     "failure",
+     "clean",
+     "failure",
+     "failure",
+     "clean"
+    ],
+    "promoted": null,
+    "note": "every tool worked in every cycle; three designs merely scored short, and the all-gates rule counted that against the pattern"
+   },
+   "22726105": {
+    "wall": "13m41s",
+    "commit": "5629a9a",
+    "runs": 5,
+    "promoted": "r0002",
+    "rows": [
+     [
+      "r0001",
+      "provisional",
+      "6/6",
+      "suspect",
+      "none",
+      "clean"
+     ],
+     [
+      "r0002",
+      "provisional",
+      "6/6",
+      "fail",
+      "Boltz pLDDT 0.475, ipTM 0.389 (acceptance)",
+      "clean, PROMOTED"
+     ],
+     [
+      "r0003",
+      "trusted",
+      "6/6",
+      "fail",
+      "LigandMPNN confidence 0.377 (acceptance)",
+      "-"
+     ],
+     [
+      "r0004",
+      "trusted",
+      "6/6",
+      "fail",
+      "packmin total_score 1064.5 (INTEGRITY), pLDDT 0.498",
+      "failure, DEMOTED"
+     ],
+     [
+      "r0005",
+      "provisional",
+      "6/6",
+      "fail",
+      "pLDDT 0.417, ipTM 0.382 (acceptance)",
+      "clean"
+     ]
+    ]
+   },
+   "22728140": {
+    "wall": "13m37s",
+    "commit": "e9f44cd",
+    "runs": 5,
+    "promoted": "r0002",
+    "rows": [
+     [
+      "r0001",
+      "provisional",
+      "6/6",
+      "suspect",
+      "none",
+      "clean"
+     ],
+     [
+      "r0002",
+      "provisional",
+      "6/6",
+      "fail",
+      "ipTM 0.395",
+      "clean, PROMOTED"
+     ],
+     [
+      "r0003",
+      "trusted",
+      "6/6",
+      "fail",
+      "LigandMPNN confidence 0.394/0.391, shape complementarity 0.471",
+      "-"
+     ],
+     [
+      "r0004",
+      "trusted",
+      "6/6",
+      "fail",
+      "pLDDT 0.364, ipTM 0.349",
+      "-"
+     ],
+     [
+      "r0005",
+      "trusted",
+      "6/6",
+      "fail",
+      "LigandMPNN confidence 0.397, pLDDT 0.494, ipTM 0.360",
+      "-"
+     ]
+    ],
+    "trusted_cycles": 3,
+    "demotions": 0,
+    "integrity_failures": 0
+   },
+   "packmin_bound": {
+    "was": "total_score <= 1000.0",
+    "tripped_on": 1064.5,
+    "relaxed_to": -336.0,
+    "fa_rep": 119.1,
+    "deleted_in": "d668838",
+    "now": "metrics_reported, and fastrelax converging is the judgement"
+   },
+   "cycle_off_by_one": {
+    "asked": 6,
+    "ran": 5,
+    "fixed_in": "76594d4",
+    "why": "the driver counted a Backtrack as a cycle"
+   },
+   "acceptance_rate": {
+    "passed": 5,
+    "of": 16,
+    "pct": 31
+   },
+   "packmin_range": [
+    -95.8,
+    1064.5
+   ],
+   "fastrelax_range": [
+    -503.1,
+    -200.1
+   ],
+   "fa_rep_range": [
+    71,
+    196
+   ]
+  }
+ },
+ "analysis": {
+  "source": "performance_analysis report 2026-10-09 over impress_a_runs_2026-10-08.tar.gz (22702568, 22726105, 22728140 trust; 22684607, 22692304 smoke), code at d3c20ca",
+  "n_timed_tasks": 101,
+  "stage_s": {
+   "rfd3_design": [
+    17,
+    41.0,
+    40.7,
+    45.1,
+    40.1,
+    145.7
+   ],
+   "ligandmpnn_design": [
+    17,
+    7.1,
+    6.6,
+    14.6,
+    6.0,
+    18.1
+   ],
+   "packmin": [
+    17,
+    6.0,
+    5.2,
+    15.2,
+    5.1,
+    16.4
+   ],
+   "fastrelax": [
+    17,
+    25.9,
+    22.4,
+    35.2,
+    13.1,
+    48.0
+   ],
+   "filter_shape": [
+    17,
+    10.2,
+    10.0,
+    10.5,
+    9.5,
+    13.1
+   ],
+   "boltz_predict": [
+    16,
+    52.1,
+    51.7,
+    60.1,
+    49.6,
+    64.8
+   ]
+  },
+  "rfd3_tight": {
+   "n": 15,
+   "of": 17,
+   "band": [
+    40,
+    45
+   ],
+   "others": [
+    48.0,
+    145.7
+   ]
+  },
+  "warmup_s": {
+   "packmin": 10.5,
+   "ligandmpnn_design": 8.6,
+   "boltz_predict": 7.8,
+   "rfd3_design": 4.3
+  },
+  "cost": {
+   "declared_per_chain": 0.17,
+   "measured_median": 0.0285,
+   "measured_max": 0.0337,
+   "recommended_per_chain": 0.105,
+   "min_declared_over_max": 2.25,
+   "untrusted_cap": 0.6,
+   "lineages_admissible": 3
+  },
+  "allocation": {
+   "partition": "gpuA100x4-interactive",
+   "gpus": 4,
+   "cpus": 64,
+   "gpu_share_max": [
+    0.154,
+    0.167
+   ],
+   "task_share_trust": [
+    0.948,
+    0.954
+   ],
+   "cpu_eff": [
+    0.369,
+    0.424
+   ],
+   "maxrss_gb": 16.3,
+   "mem_gb": 240,
+   "queue_s": [
+    12269,
+    26626,
+    25278,
+    478,
+    184
+   ],
+   "elapsed_s": [
+    245,
+    191,
+    805,
+    821,
+    817
+   ]
+  },
+  "scrutiny": {
+   "n_untrusted": 11,
+   "n_trusted": 5,
+   "run_s": [
+    167.0,
+    159.1,
+    7.9,
+    [
+     -17.9,
+     30.2
+    ]
+   ],
+   "overhead_s": [
+    2.9,
+    2.8,
+    0.0,
+    [
+     -0.9,
+     1.2
+    ]
+   ]
+  },
+  "diversity": {
+   "designs": 17,
+   "seeds": 5,
+   "tm_same_seed": 0.82,
+   "tm_other": 0.28,
+   "identical_backbones": 0,
+   "ca_rmsd": 2.39
+  }
+ },
+ "baseline": {
+  "code": {
+   "lines": {
+    "pipeline": 1450,
+    "runner": 574,
+    "nonadaptive": 102
+   },
+   "decision_fn_lines": 220,
+   "next_step_sites": 19,
+   "steps": [
+    "DONE",
+    "RFD3",
+    "MPNN",
+    "FASTRELAX",
+    "INTERFACE",
+    "AF2",
+    "RETRY_SEQ"
+   ],
+   "tool_stages": [
+    "rfd3",
+    "mpnn",
+    "packmin",
+    "fastrelax",
+    "filter_shape",
+    "boltz",
+    "filter_energy"
+   ],
+   "analysis_stages": [
+    "analysis_backbone",
+    "analysis_sequence",
+    "analysis_packmin",
+    "analysis_fastrelax",
+    "analysis_interface",
+    "analysis_fold"
+   ],
+   "prod": {
+    "n_pipelines": 4.0,
+    "max_tasks": 300.0,
+    "backbone_max_ca_deviation": 1.0,
+    "backbone_min_ss_fraction": 0.5,
+    "fastrelax_max_fa_rep": 100.0,
+    "fastrelax_max_score": -250.0,
+    "fastrelax_max_interact": -8.0,
+    "interface_min_sc": 0.55,
+    "fold_min_plddt": 75.0,
+    "fold_min_ligand_iptm": null,
+    "diffusion_batch_size": 4.0,
+    "num_refine_cycles": 2.0,
+    "mpnn_ensemble_size": 10.0,
+    "rfd3_partial_t": 10.0
+   },
+   "head": "5f12c1a"
+  },
+  "measured": {
+   "source": "IMPRESS small-molecule performance report (impress-smallmol-performance/report.md), over impress_runs_export_nvme_2026-10-08.tar.gz",
+   "hardware": "A40, 1-8 nodes, 8-256 pipelines",
+   "scale": {
+    "task_dirs": 24026,
+    "metric_values": 1208591,
+    "gpu_h_billed": 267.9,
+    "passing_folds_clean": 913,
+    "jobs": 4,
+    "task_failures_clean": 0
+   },
+   "packing": {
+    "k1": {
+     "gpu": [
+      0.114,
+      0.122
+     ],
+     "gpu_h_per_fold": 0.159,
+     "rfd3_node_h": 63.0
+    },
+    "k8": {
+     "gpu": 0.705,
+     "gpu_h_per_fold": 0.053,
+     "rfd3_node_h": 316.5
+    }
+   },
+   "busy_share": [
+    0.955,
+    0.979
+   ],
+   "manager": {
+    "occupancy": [
+     0.0049,
+     0.0177
+    ],
+    "p99_s": [
+     0.065,
+     0.287
+    ],
+    "dispatch_median_s": 0.001,
+    "regression": {
+     "job": "22534628",
+     "occupancy": 0.67,
+     "p99_s": 56
+    }
+   },
+   "depth": {
+    "plddt_terciles": [
+     90.7,
+     95.2,
+     95.0
+    ],
+    "iptm_terciles": [
+     0.845,
+     0.889,
+     0.896
+    ],
+    "reached_4h": 280,
+    "reached_1h": 42.5
+   },
+   "guided": {
+    "pairs": 602,
+    "d_plddt": 0.011,
+    "better_share": 0.505,
+    "p": 0.85,
+    "by_parent": {
+     "weak": 1.44,
+     "mid": 0.02,
+     "strong": -0.17
+    },
+    "tasks_per_fold": {
+     "guided": 8.1,
+     "scratch": 34.8
+    }
+   },
+   "novelty": {
+    "folds": 804,
+    "distinct_seqs": 794,
+    "clusters_90pct": 596,
+    "folds_per_cluster": 1.3,
+    "cross_pipeline_identity": [
+     0.11,
+     0.125
+    ]
+   },
+   "routing": {
+    "decisions": 13074,
+    "retry_seq": 0.32,
+    "backbone_reject": 0.055,
+    "fastrelax_escalate": 0.131,
+    "interface": 0.031
+   },
+   "quota_failure": {
+    "job": "22726386",
+    "pipelines": 256,
+    "killed": 245,
+    "quota": 174,
+    "oom": 59,
+    "gpu_h_billed": 128.0,
+    "gpu_h_wasted": 108
+   },
+   "teardown": {
+    "job": "22491438",
+    "pipelines": 16,
+    "minutes": 60,
+    "gpu_h": 64,
+    "share_of_billed": 0.37,
+    "source": "docs/limitations.md"
+   }
+  },
+  "our_rosetta_gates": {
+   "packmin": {},
+   "fastrelax": {
+    "total_score": {
+     "max": 0.0
+    },
+    "fa_rep": {
+     "max": 500.0
+    }
+   }
+  }
+ }
+}

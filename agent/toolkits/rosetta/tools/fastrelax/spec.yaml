@@ -1,0 +1,34 @@
+id: fastrelax
+toolkit: rosetta
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.rosetta_agents.FastRelaxAgent
+resources: {cores: 8, walltime_s: 900}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  nstruct: {type: int, default: 1, min: 1, max: 8, trades: "sampling vs cpu-hours"}
+  relax_cycles: {type: int, default: 3, min: 1, max: 8, trades: "convergence vs cpu-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  # Path to a Rosetta ligand .params file, passed to pyrosetta.init() as -extra_res_fa.
+  # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
+  # will raise (confirmed: old IMPRESS's fastrelax.py always passes this).
+  ligand_params_path: {type: str, default: ""}
+metrics: [total_score, fa_rep]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  # Convergence, and integrity on purpose: a relax that cannot reach a negative score, or
+  # leaves heavy repulsion, has not relaxed. These two gates are also the ONLY judgement of
+  # whether packmin's pose blew up - packmin no longer bounds its own pre-relax score
+  # (see packmin/spec.yaml, job 22726105 r0004).
+  - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
+  - {id: metric_in_range, params: {metric: fa_rep, max: 500.0}}
+# Measured on job 22684607 (NVMe, 1 node): 25.9s = 0.0072 h. Declared 0.5 was
+# 69x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.03 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.03}}
