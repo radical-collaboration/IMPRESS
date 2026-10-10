@@ -285,6 +285,41 @@ async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatc
     assert any(o.startswith("out_dir=") for o in overrides)
 
 
+async def test_rfd3_resolves_a_relative_design_input_against_its_spec(reg, monkeypatch, tmp_path):
+    """The checked-in ALR spec names its scaffold relative to itself. rfd3 runs from the job
+    directory, so the agent hands it a resolved copy in the task workdir; the original file
+    is not touched."""
+    import json
+
+    from impress_a.tools import rfd3_agents
+    from impress_a.tools.agent import TaskRequest
+
+    data = tmp_path / "campaigns" / "data"
+    data.mkdir(parents=True)
+    spec_file = data / "inputs.json"
+    spec_file.write_text(json.dumps({"partial": {"input": "pdbs/x.pdb", "length": "70-170"}}))
+    monkeypatch.setenv("FOUNDRY_SIF_PATH", "/fake/foundry.sif")
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    captured: dict[str, Any] = {}
+
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["cmd"] = cmd
+        return "", ""
+
+    monkeypatch.setattr(rfd3_agents, "run_cmd", fake_run_cmd)
+    agent = reg.agent_for("rfd3_design")(reg.get("rfd3_design"))
+    req = TaskRequest(tool="rfd3_design", node_id="r0001:r0_s0_rfd3_design",
+                      params={"input_spec_path": str(spec_file)})
+    await agent.run(req, agent.parameterize(req))
+
+    inputs = next(a for a in captured["cmd"] if a.startswith("inputs="))[len("inputs="):]
+    assert inputs != str(spec_file), "a relative input must not reach rfd3 as-is"
+    assert json.loads(pathlib.Path(inputs).read_text())["partial"]["input"] == \
+        str(data / "pdbs/x.pdb")
+    assert json.loads(spec_file.read_text())["partial"]["input"] == "pdbs/x.pdb"
+
+
 async def test_rfd3_binds_both_trees_into_the_container(reg, monkeypatch, tmp_path):
     """apptainer binds $HOME, /tmp and the CWD - and nothing else.
 

@@ -32,6 +32,22 @@ POLICIES = {"D": ThresholdPolicy, "B": OraclePolicy, "A": FourNodePolicy,
             "C": ExternalPolicy, "null": NullPolicy, "replay": ReplayPolicy}
 
 
+def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
+    """A relative `*_path` tool parameter is relative to the campaign YAML, not the CWD.
+
+    The launcher cds into a per-job directory before loading the spec, so a CWD-relative
+    path breaks there; an absolute one ties the spec to one checkout on one machine.
+    """
+    out: dict[str, Any] = {}
+    for tool, p in params.items():
+        if isinstance(p, dict):
+            p = {k: (str(base / v) if k.endswith("_path") and isinstance(v, str)
+                     and v and not Path(v).is_absolute() else v)
+                 for k, v in p.items()}
+        out[tool] = p
+    return out
+
+
 def load_spec(path: str | Path) -> CampaignSpec:
     d: dict[str, Any] = yaml.safe_load(Path(path).read_text())
     return CampaignSpec(
@@ -54,7 +70,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # env expansion. Set beside MPNN_DIR/BOLTZ_CACHE in scripts/delta_gpu_run.sh.
         trust_root=d.get("trust_root") or os.environ.get("IMPRESS_A_TRUST_DIR", ""),
         stages=d.get("stages", []) or [],
-        params=d.get("params", {}) or {},
+        params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
         # narrow every campaign that never mentioned it.
         replicas=int(d.get("replicas", 0)),

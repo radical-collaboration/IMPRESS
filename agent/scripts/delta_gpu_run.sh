@@ -6,7 +6,7 @@
 # examples/small_molecule_binding/delta_gpu_run.sh.
 #
 # Set before calling sbatch (only SBATCH_ACCOUNT and WORK_DIR are required):
-#   export SBATCH_ACCOUNT=<project>-delta-gpu     # <project>-delta-gpu or <project>-delta-gpu
+#   export SBATCH_ACCOUNT=<project>-delta-gpu
 #   export WORK_DIR=/work/nvme/<project>/$USER        # NVMe-backed; see "Why NVMe" below
 #
 # Why NVMe, and why this replaced SCRATCH: every default path here used to hang off

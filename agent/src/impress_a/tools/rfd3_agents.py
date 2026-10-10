@@ -42,6 +42,35 @@ def _container_env() -> dict[str, str]:
     return env
 
 
+def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
+    """The design spec's `input` structures may be relative to the spec file itself.
+
+    rfd3 runs with the job directory as its CWD, so a relative `input` would not resolve
+    there. Rather than make the checked-in spec carry one machine's absolute path, write a
+    resolved copy into the task's workdir (already bound) and hand rfd3 that. A spec with
+    no relative `input` is passed through untouched.
+    """
+    import json
+
+    src = Path(spec_path)
+    try:
+        spec = json.loads(src.read_text())
+    except (OSError, ValueError):
+        return spec_path        # let rfd3's own prevalidation report it
+    base = src.resolve().parent
+    changed = False
+    for entry in spec.values() if isinstance(spec, dict) else ():
+        inp = entry.get("input") if isinstance(entry, dict) else None
+        if isinstance(inp, str) and inp and not Path(inp).is_absolute():
+            entry["input"] = str(base / inp)
+            changed = True
+    if not changed:
+        return spec_path
+    out = work / src.name
+    out.write_text(json.dumps(spec, indent=4))
+    return str(out)
+
+
 class RFD3DesignAgent(TaskAgent):
     """De novo backbone generation. More `diffusion_steps` trades wall-clock for quality."""
 
@@ -59,7 +88,7 @@ class RFD3DesignAgent(TaskAgent):
         work = workdir_for(req, "rfd3")
         overrides = [
             f"out_dir={work}",
-            f"inputs={params['input_spec_path']}",
+            f"inputs={_inputs_with_absolute_paths(params['input_spec_path'], work)}",
             "skip_existing=False",
             # False, not the CLI's default True: upstream measured trajectories at
             # 11.85 MB of each 11.92 MB output dir - 99.4% - and flipped it (IMPRESS

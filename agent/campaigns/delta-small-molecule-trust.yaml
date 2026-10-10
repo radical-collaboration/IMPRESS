@@ -58,17 +58,17 @@ params:
   rfd3_design:
     # A real DesignInputSpecification (RFD3 has no scaffold/guidance CLI override - the
     # target is selected entirely by which JSON file this points at).
-    input_spec_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR_binder_design.json"
+    input_spec_path: "data/alr/ALR_binder_design.json"
     num_designs: 1
     diffusion_steps: 50
   ligandmpnn_design:
     fixed_residues: "A16"      # hold this residue fixed during sequence design
   packmin:
-    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+    ligand_params_path: "data/alr/ALR.params"
   fastrelax:
-    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+    ligand_params_path: "data/alr/ALR.params"
   filter_shape:
-    ligand_params_path: "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/ALR.params"
+    ligand_params_path: "data/alr/ALR.params"
   boltz_predict:
     ligand_smiles: "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12"
 replicas: 1

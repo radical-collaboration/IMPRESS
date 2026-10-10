@@ -1,6 +1,6 @@
 {
     "partial": {
-        "input": "/work/hdd/<project>/$USER/impress_a/campaigns/data/alr/input_pdbs/scaffold-with-ALR.pdb",
+        "input": "input_pdbs/scaffold-with-ALR.pdb",
         "ligand": "A:R",
         "length": "70-170",
         "select_exposed": {

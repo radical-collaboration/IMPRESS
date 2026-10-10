@@ -434,3 +434,28 @@ def test_replaying_job_22726105_stays_trusted_once_promoted(reg, tmp_path):
     assert trusted_after == {"r0001": False, "r0002": True, "r0003": True,
                              "r0004": True, "r0005": True}, \
         "promoted after r0002 as observed - and no longer demoted by r0004's pre-relax score"
+
+
+def test_relative_path_params_resolve_against_the_campaign_yaml(tmp_path, monkeypatch):
+    """The Delta launcher cds into a per-job directory before loading the spec, so a
+    `*_path` param relative to the CWD would break there - and an absolute one ties the
+    spec to one checkout. Relative means relative to the YAML; absolute is left alone."""
+    from impress_a.cli import load_spec
+
+    src = pathlib.Path("campaigns/mock-stabilize.yaml").read_text()
+    spec_file = tmp_path / "c.yaml"
+    spec_file.write_text(src + "\nparams:\n  rfd3_design: {input_spec_path: data/in.json, n: 3}\n"
+                         "  packmin: {ligand_params_path: /abs/L.params}\n")
+    monkeypatch.chdir("/")
+    params = load_spec(spec_file).params
+    assert params["rfd3_design"]["input_spec_path"] == str(tmp_path / "data/in.json")
+    assert params["rfd3_design"]["n"] == 3
+    assert params["packmin"]["ligand_params_path"] == "/abs/L.params"
+
+
+def test_shipped_campaigns_carry_no_absolute_checkout_paths():
+    """Campaign data lives beside the YAML; an absolute path into one user's checkout
+    breaks every other checkout and leaks an allocation's directory layout."""
+    for f in pathlib.Path("campaigns").glob("*.yaml"):
+        assert "/work/" not in f.read_text(), f
+    assert "/work/" not in pathlib.Path("campaigns/data/alr/ALR_binder_design.json").read_text()
