@@ -42,8 +42,9 @@
 // saying so.
 const path = require("path");
 const fs = require("fs");
-const { createDeck } = require(
-  "<workspace>/skills_mason/skills/code-walk-deck/scripts/deck_lib.js");
+const os = require("os");
+const { createDeck } = require(process.env.DECK_LIB || path.join(
+  os.homedir(), ".claude/skills/code-walk-deck/scripts/deck_lib.js"));
 
 const R = JSON.parse(fs.readFileSync(path.join(__dirname, "run.json"), "utf8"));
 const CODE = R.code, MOCK = R.mock, SHAPE = R.shape, D = R.delta, DONE = R.delta.completed;

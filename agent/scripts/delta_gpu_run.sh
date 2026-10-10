@@ -57,7 +57,7 @@
 #     the upstream pipeline does not; the wall clock is our second line, not our first.
 # Override nodes per run without editing this file:  sbatch --nodes=2 ...
 #SBATCH --job-name=impress_a_sm_binding
-#SBATCH --mail-user=<your email>
+##SBATCH --mail-user=<your email>   # enable to mail someone other than the submitter
 #SBATCH --mail-type=ALL
 #SBATCH --output=impress_a_%j.out
 # NOTE: IMPRESS-A log output (including errors) goes to .out, not .err, mirroring the

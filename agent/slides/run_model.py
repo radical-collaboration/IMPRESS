@@ -275,8 +275,10 @@ DELTA = {
 #   baseline["measured"]  TRANSCRIBED from that pipeline's own performance report, which reads
 #                         run archives no checkout can reproduce. Every slide showing one of
 #                         these repeats the source in its footer.
-REF = Path("<workspace>/IMPRESS/examples/small_molecule_binding")
-REF_REPORT = Path("<workspace>/impress-smallmol-performance/report.md")
+# The reference pipeline is this repository's own example once impress_a lives in IMPRESS
+# under agent/; IMPRESS_ROOT points elsewhere if the deck is built from another checkout.
+REF = Path(os.environ.get("IMPRESS_ROOT") or Path(__file__).resolve().parents[2]) \
+    / "examples" / "small_molecule_binding"
 
 
 def baseline_code() -> dict | None:
