@@ -124,8 +124,8 @@ class ImpressManager:
         """
         try:
             self.logger.adaptive_started(pipeline.name)
-            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Any]] = (
-                getattr(pipeline, "_adaptive_fn", None)
+            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Any]] = getattr(
+                pipeline, "_adaptive_fn", None
             )
             if adaptive_fn:
                 await self._invoke_adaptive_fn(adaptive_fn, pipeline)

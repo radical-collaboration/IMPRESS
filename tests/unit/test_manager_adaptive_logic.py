@@ -131,9 +131,7 @@ class TestAdaptiveOffload:
         await impress_manager._run_adaptive_fn(_adaptive_pipeline(fn=no_awaits))
         assert seen["thread"] != threading.get_ident()
 
-    async def test_sync_callback_result_applied_to_live_pipeline(
-        self, impress_manager
-    ):
+    async def test_sync_callback_result_applied_to_live_pipeline(self, impress_manager):
         def decide(pipeline):
             pipeline.next_step = 3
 
