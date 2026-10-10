@@ -4,12 +4,18 @@ Every code block that appears on a slide, keyed by snippet ID, anchored, and mar
 Companion to [`DECK_OUTLINE.md`](DECK_OUTLINE.md) and `build_deck.js`; slide numbers and snippet IDs
 match across all three.
 
-**Derived against `main` @ `2debd76`.** Every anchor below is checked mechanically, and the
+**Derived against `main` @ `ffac4b0`.** Every anchor below is checked mechanically, and the
 script reports the count rather than this file restating it:
 
 ```sh
-python3 slides/check_anchors.py
+python3 ~/.claude/skills/code-walk-deck/scripts/check_anchors.py \
+    --anchors slides/anchors.json --root <workspace>
 ```
+
+The root is the *parent* of this checkout, because the table also anchors the reference IMPRESS
+pipeline's own code: the deck's argument is a comparison with it, its authors are in the room, and
+a structural claim about their file should be as checkable as one about ours. Those entries report
+`MISSING` rather than drifting if that checkout is not beside this one.
 
 **Fidelity marking, on every block:**
 
@@ -25,19 +31,21 @@ is the legible maximum. That is why most of the blocks here are EDITED rather th
 real signatures carry full type annotations and do not fit. **What is never edited is behaviour** —
 no block says the code does something it does not do.
 
+`B1`/`B2` are backup slides: still in the deck, excluded from every running order.
+
 | ID | Slide | Source | Fidelity | What changed |
 |---|---|---|---|---|
-| S6-A | 6 | a real `--model D` run | **MINED** | stdout of the run `run_model.py` performs; nothing retyped |
-| S8-A | 8 | `exec/dispatch.py:144–163` | **EDITED** | type annotations dropped from the signature; the body of `_run` elided to its shape. `_run.__name__` and the decorator call are verbatim |
-| S8-B | 8 | `exec/dispatch.py:182–190` | **EDITED** | the `workflow_id` conditional collapsed to its taken branch; comments shortened. The `topo_order` loop and the unawaited `gather` are verbatim |
-| S9-A | 9 | `exec/backend.py:128–176` | **EDITED** | condensed: the `Future`/`wrap_future` setup, the heartbeat task and both `BackendConstructionTimeout` messages are elided. Control flow and ordering are exact |
+| B1-A | B1 | a real `--model D` run | **MINED** | stdout of the run `run_model.py` performs; nothing retyped |
+| S12-A | 12 | `exec/dispatch.py:144–163` | **EDITED** | type annotations dropped from the signature; the body of `_run` elided to its shape. `_run.__name__` and the decorator call are verbatim |
+| S12-B | 12 | `exec/dispatch.py:182–190` | **EDITED** | the `workflow_id` conditional collapsed to its taken branch; comments shortened. The `topo_order` loop and the unawaited `gather` are verbatim |
+| S13-A | 13 | `exec/backend.py:128–176` | **EDITED** | condensed: the `Future`/`wrap_future` setup, the heartbeat task and both `BackendConstructionTimeout` messages are elided. Control flow and ordering are exact |
 | S10-A | 10 | `toolkits/rosetta/tools/filter_shape/spec.yaml` | **EDITED** | comments and `toolkit:`/`version:` dropped; `inputs`/`outputs` folded to one line each |
 | S10-B | 10 | `tools/mock_agents.py:73–84` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
 | S10-C | 10 | `tests/test_campaign.py:81–83` | **EDITED** | one assertion message wrapped across two lines to fit |
-| S11-A | 11 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:107` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
-| S14-A | 14 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
-| S14-B | 14 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
-| S15-A | 15 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
+| B2-A | B2 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:107` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
+| S18-A | 18 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
+| S18-B | 18 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
+| S20-A | 20 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
 
 ---
 
@@ -45,7 +53,7 @@ no block says the code does something it does not do.
 
 Quoted in full here because the slide text must not be the only record of them.
 
-### S14-B — the pattern signature · **VERBATIM**
+### S18-B — the pattern signature · **VERBATIM**
 
 `src/impress_a/compose/graph.py:51–61`. The only thing added on the slide is the trailing comment
 on the first line.
@@ -70,7 +78,7 @@ Parameters are excluded on purpose; breadth is not, and nothing says whether tha
 Verified against this checkout by `run_model.py`, which composes the real six-stage chain at 1, 2 and
 4 replicas and records the three signatures in `run.json` under `shape`.
 
-### S11-A — the compute-pattern taxonomy, and every site that consults it · **EDITED**
+### B2-A — the compute-pattern taxonomy, and every site that consults it · **EDITED**
 
 Four excerpts from three files. The slide stacks them because the point is how *few* there are: the
 taxonomy has eight members, and the entire set of places that branch on one fits on a slide.
@@ -126,7 +134,7 @@ translates `ResourceShape`, not `Pattern`. `run_model.py`'s pattern census greps
 such site and records them in `run.json` under `patterns.consulted_in`, so the slide's "four sites,
 none in `exec/`" is mined, and a fifth site appearing anywhere falsifies it loudly.
 
-### S8-A / S8-B — the generic factory and the non-blocking submit
+### S12-A / S12-B — the generic factory and the non-blocking submit
 
 `src/impress_a/exec/dispatch.py:144–190`. The two lines that must never be cut from either block are
 `_run.__name__ = node_id` and the unawaited `gather`.
@@ -171,7 +179,7 @@ none in `exec/`" is mined, and a fifth site appearing anywhere falsifies it loud
 run outside a campaign has no run id, and asyncflow rejects `workflow_id=""`. It changes nothing
 about the argument.
 
-### S9-A — construction, and which loop it happens on
+### S13-A — construction, and which loop it happens on
 
 `src/impress_a/exec/backend.py:128–176`, condensed on the slide. The ordering is the content: the
 daemon thread does *only* `_construct_backend_sync`, and both `_init_backend` (which is what
@@ -202,12 +210,14 @@ daemon thread is abandoned for free.
 ## Re-deriving before you present
 
 ```sh
-python3 slides/run_model.py          # regenerate run.json from this checkout
-python3 slides/check_anchors.py      # 40/40 — do not present a drifted anchor
-python3 slides/make_script.py        # regenerate DECK_SCRIPT.md from the deck's notes
+S=~/.claude/skills/code-walk-deck/scripts
+PYTHONPATH=src python3 slides/run_model.py                     # run.json, from this checkout
+python3 $S/check_anchors.py --anchors slides/anchors.json \
+    --root <workspace>                             # do not present a drifted anchor
+python3 $S/make_script.py --deck slides/build_deck.js          # DECK_SCRIPT.md, from the notes
 NODE_PATH=<dir with pptxgenjs> node slides/build_deck.js
 ```
 
-Add an entry to `ANCHORS` in `check_anchors.py` whenever a snippet is added here. A slide citing
+Add an entry to `slides/anchors.json` whenever a snippet is added here. A slide citing
 `executor.py:304` while showing code from somewhere else is worse than a slide with no citation at
 all — this audience can grep.

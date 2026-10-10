@@ -1,6 +1,6 @@
 {
  "code": {
-  "head": "2debd76",
+  "head": "ffac4b0",
   "packages": {
    "tools": 1506,
    "runtime": 1027,
@@ -30,7 +30,16 @@
    "packmin",
    "rfd3_design"
   ],
-  "n_tools": 11
+  "n_tools": 11,
+  "toolkits": [
+   "boltz",
+   "ligandmpnn",
+   "mock",
+   "rfd3",
+   "rosetta"
+  ],
+  "n_toolkits": 5,
+  "n_real_toolkits": 4
  },
  "mock": {
   "campaign": "mock-stabilize-D",
@@ -40,9 +49,9 @@
    "  cycles   : 2",
    "  stop     : target front size 3 reached",
    "  nodes    : 4  front: 3",
-   "    n000001-0d1a qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
-   "    n000003-0d1a qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
-   "    n000004-0d1a qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
+   "    n000001-b6b2 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
+   "    n000003-b6b2 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
+   "    n000004-b6b2 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
   ],
   "admissions": [
    {
@@ -87,7 +96,7 @@
   ],
   "nodes": [
    {
-    "node": "n000001-0d1a",
+    "node": "n000001-b6b2",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
@@ -103,7 +112,7 @@
     }
    },
    {
-    "node": "n000002-0d1a",
+    "node": "n000002-b6b2",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
@@ -119,7 +128,7 @@
     }
    },
    {
-    "node": "n000003-0d1a",
+    "node": "n000003-b6b2",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
@@ -135,7 +144,7 @@
     }
    },
    {
-    "node": "n000004-0d1a",
+    "node": "n000004-b6b2",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
@@ -152,9 +161,9 @@
    }
   ],
   "front": [
-   "n000001-0d1a",
-   "n000003-0d1a",
-   "n000004-0d1a"
+   "n000001-b6b2",
+   "n000003-b6b2",
+   "n000004-b6b2"
   ],
   "stop": "target front size 3 reached",
   "cycles": 2,
@@ -550,6 +559,325 @@
     71,
     196
    ]
+  }
+ },
+ "analysis": {
+  "source": "performance_analysis report 2026-10-09 over impress_a_runs_2026-10-08.tar.gz (22702568, 22726105, 22728140 trust; 22684607, 22692304 smoke), code at d3c20ca",
+  "n_timed_tasks": 101,
+  "stage_s": {
+   "rfd3_design": [
+    17,
+    41.0,
+    40.7,
+    45.1,
+    40.1,
+    145.7
+   ],
+   "ligandmpnn_design": [
+    17,
+    7.1,
+    6.6,
+    14.6,
+    6.0,
+    18.1
+   ],
+   "packmin": [
+    17,
+    6.0,
+    5.2,
+    15.2,
+    5.1,
+    16.4
+   ],
+   "fastrelax": [
+    17,
+    25.9,
+    22.4,
+    35.2,
+    13.1,
+    48.0
+   ],
+   "filter_shape": [
+    17,
+    10.2,
+    10.0,
+    10.5,
+    9.5,
+    13.1
+   ],
+   "boltz_predict": [
+    16,
+    52.1,
+    51.7,
+    60.1,
+    49.6,
+    64.8
+   ]
+  },
+  "rfd3_tight": {
+   "n": 15,
+   "of": 17,
+   "band": [
+    40,
+    45
+   ],
+   "others": [
+    48.0,
+    145.7
+   ]
+  },
+  "warmup_s": {
+   "packmin": 10.5,
+   "ligandmpnn_design": 8.6,
+   "boltz_predict": 7.8,
+   "rfd3_design": 4.3
+  },
+  "cost": {
+   "declared_per_chain": 0.17,
+   "measured_median": 0.0285,
+   "measured_max": 0.0337,
+   "recommended_per_chain": 0.105,
+   "min_declared_over_max": 2.25,
+   "untrusted_cap": 0.6,
+   "lineages_admissible": 3
+  },
+  "allocation": {
+   "partition": "gpuA100x4-interactive",
+   "gpus": 4,
+   "cpus": 64,
+   "gpu_share_max": [
+    0.154,
+    0.167
+   ],
+   "task_share_trust": [
+    0.948,
+    0.954
+   ],
+   "cpu_eff": [
+    0.369,
+    0.424
+   ],
+   "maxrss_gb": 16.3,
+   "mem_gb": 240,
+   "queue_s": [
+    12269,
+    26626,
+    25278,
+    478,
+    184
+   ],
+   "elapsed_s": [
+    245,
+    191,
+    805,
+    821,
+    817
+   ]
+  },
+  "scrutiny": {
+   "n_untrusted": 11,
+   "n_trusted": 5,
+   "run_s": [
+    167.0,
+    159.1,
+    7.9,
+    [
+     -17.9,
+     30.2
+    ]
+   ],
+   "overhead_s": [
+    2.9,
+    2.8,
+    0.0,
+    [
+     -0.9,
+     1.2
+    ]
+   ]
+  },
+  "diversity": {
+   "designs": 17,
+   "seeds": 5,
+   "tm_same_seed": 0.82,
+   "tm_other": 0.28,
+   "identical_backbones": 0,
+   "ca_rmsd": 2.39
+  }
+ },
+ "baseline": {
+  "code": {
+   "lines": {
+    "pipeline": 1450,
+    "runner": 574,
+    "nonadaptive": 102
+   },
+   "decision_fn_lines": 220,
+   "next_step_sites": 19,
+   "steps": [
+    "DONE",
+    "RFD3",
+    "MPNN",
+    "FASTRELAX",
+    "INTERFACE",
+    "AF2",
+    "RETRY_SEQ"
+   ],
+   "tool_stages": [
+    "rfd3",
+    "mpnn",
+    "packmin",
+    "fastrelax",
+    "filter_shape",
+    "boltz",
+    "filter_energy"
+   ],
+   "analysis_stages": [
+    "analysis_backbone",
+    "analysis_sequence",
+    "analysis_packmin",
+    "analysis_fastrelax",
+    "analysis_interface",
+    "analysis_fold"
+   ],
+   "prod": {
+    "n_pipelines": 4.0,
+    "max_tasks": 300.0,
+    "backbone_max_ca_deviation": 1.0,
+    "backbone_min_ss_fraction": 0.5,
+    "fastrelax_max_fa_rep": 100.0,
+    "fastrelax_max_score": -250.0,
+    "fastrelax_max_interact": -8.0,
+    "interface_min_sc": 0.55,
+    "fold_min_plddt": 75.0,
+    "fold_min_ligand_iptm": null,
+    "diffusion_batch_size": 4.0,
+    "num_refine_cycles": 2.0,
+    "mpnn_ensemble_size": 10.0,
+    "rfd3_partial_t": 10.0
+   },
+   "head": "5f12c1a"
+  },
+  "measured": {
+   "source": "IMPRESS small-molecule performance report (impress-smallmol-performance/report.md), over impress_runs_export_nvme_2026-10-08.tar.gz",
+   "hardware": "A40, 1-8 nodes, 8-256 pipelines",
+   "scale": {
+    "task_dirs": 24026,
+    "metric_values": 1208591,
+    "gpu_h_billed": 267.9,
+    "passing_folds_clean": 913,
+    "jobs": 4,
+    "task_failures_clean": 0
+   },
+   "packing": {
+    "k1": {
+     "gpu": [
+      0.114,
+      0.122
+     ],
+     "gpu_h_per_fold": 0.159,
+     "rfd3_node_h": 63.0
+    },
+    "k8": {
+     "gpu": 0.705,
+     "gpu_h_per_fold": 0.053,
+     "rfd3_node_h": 316.5
+    }
+   },
+   "busy_share": [
+    0.955,
+    0.979
+   ],
+   "manager": {
+    "occupancy": [
+     0.0049,
+     0.0177
+    ],
+    "p99_s": [
+     0.065,
+     0.287
+    ],
+    "dispatch_median_s": 0.001,
+    "regression": {
+     "job": "22534628",
+     "occupancy": 0.67,
+     "p99_s": 56
+    }
+   },
+   "depth": {
+    "plddt_terciles": [
+     90.7,
+     95.2,
+     95.0
+    ],
+    "iptm_terciles": [
+     0.845,
+     0.889,
+     0.896
+    ],
+    "reached_4h": 280,
+    "reached_1h": 42.5
+   },
+   "guided": {
+    "pairs": 602,
+    "d_plddt": 0.011,
+    "better_share": 0.505,
+    "p": 0.85,
+    "by_parent": {
+     "weak": 1.44,
+     "mid": 0.02,
+     "strong": -0.17
+    },
+    "tasks_per_fold": {
+     "guided": 8.1,
+     "scratch": 34.8
+    }
+   },
+   "novelty": {
+    "folds": 804,
+    "distinct_seqs": 794,
+    "clusters_90pct": 596,
+    "folds_per_cluster": 1.3,
+    "cross_pipeline_identity": [
+     0.11,
+     0.125
+    ]
+   },
+   "routing": {
+    "decisions": 13074,
+    "retry_seq": 0.32,
+    "backbone_reject": 0.055,
+    "fastrelax_escalate": 0.131,
+    "interface": 0.031
+   },
+   "quota_failure": {
+    "job": "22726386",
+    "pipelines": 256,
+    "killed": 245,
+    "quota": 174,
+    "oom": 59,
+    "gpu_h_billed": 128.0,
+    "gpu_h_wasted": 108
+   },
+   "teardown": {
+    "job": "22491438",
+    "pipelines": 16,
+    "minutes": 60,
+    "gpu_h": 64,
+    "share_of_billed": 0.37,
+    "source": "docs/limitations.md"
+   }
+  },
+  "our_rosetta_gates": {
+   "packmin": {},
+   "fastrelax": {
+    "total_score": {
+     "max": 0.0
+    },
+    "fa_rep": {
+     "max": 500.0
+    }
+   }
   }
  }
 }
