@@ -54,8 +54,21 @@ MPNN_SHIM = '''\
 Usage: python mpnn_run.py <mpnn_dir> [run.py args...]
 """
 import os
-import runpy
 import sys
+
+# CPython prepends this script's own directory to sys.path, and this script is written
+# into a LigandMPNN *output* directory - so that directory would otherwise sit ahead of
+# the stdlib for the whole run, invisible until something writes a .py-named file in
+# there. `-P` is the interpreter flag for exactly this, but it is 3.11+ and the package
+# floor is 3.10 (README), where it is a hard `Unknown option: -P` before this script ever
+# starts. So the job is done here, where it holds on every version.
+#
+# Above `runpy`/`warnings`/`numpy` and not below: those are shadowable, while `os` and
+# `sys` are in sys.modules before this script runs, so reaching them up here is safe.
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _here]
+
+import runpy
 import warnings
 
 import numpy as np
@@ -120,14 +133,13 @@ class LigandMPNNDesignAgent(TaskAgent):
         # proves it found our numpy and torch), so this is not a bug fix - it removes the
         # dependency on that staying true.
         #
-        # `-P` keeps the shim's own directory off sys.path. CPython otherwise prepends the
-        # script's directory, which would put a LigandMPNN *output* directory ahead of the
-        # stdlib for the whole run - harmless today, and a shadowing bug with a traceback
-        # pointing at torch on the day anything writes a .py-named file in there.
+        # No `-P` here: keeping the shim's own directory off sys.path is the shim's own
+        # first act, because the flag is 3.11+ and this package supports 3.10. See the
+        # comment at that line in MPNN_SHIM for why the guarantee is needed at all.
         shim = out / "mpnn_run.py"
         shim.write_text(MPNN_SHIM)
         cmd = [
-            sys.executable, "-P", str(shim), str(root),
+            sys.executable, str(shim), str(root),
             "--model_type", "ligand_mpnn",
             # Both checkpoints, ABSOLUTE and explicit. `run.py` defaults them to
             # "./model_params/..." - relative to the CURRENT WORKING DIRECTORY, which for

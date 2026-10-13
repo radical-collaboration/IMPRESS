@@ -376,7 +376,7 @@ def preflight(spec: CampaignSpec | None = None) -> int:
             with tempfile.TemporaryDirectory() as td:
                 shim = Path(td) / "mpnn_run.py"
                 shim.write_text(MPNN_SHIM)
-                out = subprocess.run([sys.executable, "-P", str(shim), mpnn, "--help"],
+                out = subprocess.run([sys.executable, str(shim), mpnn, "--help"],
                                      capture_output=True, timeout=900, check=False)
             took = time.monotonic() - t0
             ok = out.returncode == 0

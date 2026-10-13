@@ -781,17 +781,20 @@ async def test_ligandmpnn_runs_run_py_through_the_numpy_alias_shim(reg, monkeypa
     assert cmd[0] == sys.executable, \
         "PATH happened to be right on job 22669509 because the launcher activates the " \
         "venv; this removes the dependency on that staying true"
-    assert cmd[1] == "-P", \
-        "without -P, CPython prepends the shim's directory - a LigandMPNN output dir - " \
-        "to sys.path ahead of the stdlib"
-    shim = pathlib.Path(cmd[2])
+    shim = pathlib.Path(cmd[1])
     assert shim.name == "mpnn_run.py" and shim.exists(), \
         "the shim must be written to disk before it can be run"
-    assert "setattr(np, _alias, _builtin)" in shim.read_text()
-    assert cmd[3] == str(mpnn), "the shim takes mpnn_dir as its first argument"
+    text = shim.read_text()
+    assert "setattr(np, _alias, _builtin)" in text
+    assert "-P" not in cmd, \
+        "-P is 3.11+ and this package supports 3.10, where it is a hard Unknown option"
+    assert "sys.path[:] = [p for p in sys.path" in text, \
+        "so the shim scrubs its own directory itself - CPython otherwise prepends it, " \
+        "a LigandMPNN output dir, to sys.path ahead of the stdlib"
+    assert cmd[2] == str(mpnn), "the shim takes mpnn_dir as its first argument"
     assert str(mpnn / "run.py") not in cmd, \
         "run.py must never be invoked directly - it cannot import under numpy 2.x"
-    assert cmd[4:6] == ["--model_type", "ligand_mpnn"], \
+    assert cmd[3:5] == ["--model_type", "ligand_mpnn"], \
         "everything after the shim's own argument is run.py's argv, unchanged"
 
 
@@ -824,7 +827,7 @@ def test_the_mpnn_shim_restores_the_aliases_openfold_needs(tmp_path):
     shim = tmp_path / "mpnn_run.py"
     shim.write_text(MPNN_SHIM)
 
-    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn), "--seed", "11"],
+    out = subprocess.run([sys.executable, str(shim), str(mpnn), "--seed", "11"],
                          capture_output=True, timeout=120, check=False, cwd=tmp_path)
 
     assert out.returncode == 7, \
@@ -837,9 +840,10 @@ def test_the_mpnn_shim_restores_the_aliases_openfold_needs(tmp_path):
     assert pathlib.Path(payload["cwd"]).resolve() == mpnn.resolve(), \
         "run.py resolves its bundled resources relative to the checkout"
     assert str(tmp_path) not in payload["path"], \
-        ("-P must keep the shim's own directory off sys.path. Without it CPython prepends "
-         "it, which puts a LigandMPNN *output* directory ahead of the stdlib for the whole "
-         "run - invisible until something writes a .py-named file in there")
+        ("the shim must scrub its own directory off sys.path. CPython prepends it, which "
+         "puts a LigandMPNN *output* directory ahead of the stdlib for the whole run - "
+         "invisible until something writes a .py-named file in there. `-P` is the "
+         "interpreter's own answer to this, but it is 3.11+ and the floor here is 3.10")
 
 
 def test_the_mpnn_shim_does_not_launder_a_failure(tmp_path):
@@ -860,7 +864,7 @@ def test_the_mpnn_shim_does_not_launder_a_failure(tmp_path):
     mpnn = tmp_path / "LigandMPNN"
     mpnn.mkdir()
     (mpnn / "run.py").write_text("raise RuntimeError('boom')\n")
-    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn)],
+    out = subprocess.run([sys.executable, str(shim), str(mpnn)],
                          capture_output=True, timeout=120, check=False)
     err = out.stderr.decode()
     assert out.returncode != 0, "a raising run.py must not report success"
@@ -870,7 +874,7 @@ def test_the_mpnn_shim_does_not_launder_a_failure(tmp_path):
     # argparse exits 2 on a usage error; laundering that into 0 or 1 would mean a
     # malformed invocation reads as something else entirely.
     (mpnn / "run.py").write_text("import sys\nsys.exit(2)\n")
-    out = subprocess.run([sys.executable, "-P", str(shim), str(mpnn)],
+    out = subprocess.run([sys.executable, str(shim), str(mpnn)],
                          capture_output=True, timeout=120, check=False)
     assert out.returncode == 2, f"exit code must pass through runpy, got {out.returncode}"
 
@@ -888,7 +892,7 @@ def test_the_mpnn_shim_says_so_when_mpnn_dir_is_not_a_checkout(tmp_path):
     empty = tmp_path / "not-a-checkout"
     empty.mkdir()
 
-    out = subprocess.run([sys.executable, "-P", str(shim), str(empty)],
+    out = subprocess.run([sys.executable, str(shim), str(empty)],
                          capture_output=True, timeout=120, check=False)
     assert out.returncode != 0
     assert "no run.py under" in out.stderr.decode()
