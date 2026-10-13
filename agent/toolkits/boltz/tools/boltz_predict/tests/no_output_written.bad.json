@@ -1,0 +1,10 @@
+{
+  "why": "The `if not confidence_files or not pdb_files` branch of BoltzPredictAgent.run (src/impress_a/tools/boltz_agents.py:85-87), verbatim. `boltz predict` exited 0 but wrote no confidence JSON and no PDB under its out_dir - the shape a walltime kill, an OOM inside the sampler, or an out_dir the process could not write to all produce. Recorded because exit code is never sufficient evidence: without `output_present` this node would enter the tree carrying no metrics and simply look uninformative rather than failed.",
+  "failing_gates": ["output_present", "metrics_reported", "metric_in_range[complex_plddt]", "metric_in_range[ligand_iptm]"],
+  "output": {
+    "result": null,
+    "count": 0,
+    "outputs": {},
+    "metrics": {}
+  }
+}

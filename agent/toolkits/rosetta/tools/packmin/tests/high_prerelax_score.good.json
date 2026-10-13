@@ -1,0 +1,10 @@
+{
+  "why": "Observed, not transcribed: job 22726105 r0004, packmin total_score +1064.49. It tripped the old `max: 1000.0` integrity bound and demoted a trusted pattern, yet the same pose relaxed normally one stage later (fastrelax -336.0, fa_rep 119.1) and filter_shape and Boltz looked ordinary. Ten real packmin scores across jobs 22702568 and 22726105 span -7.6 to +1064.5, and every one relaxed. A high pre-relax score means 'much relaxing left to do', not 'broken', so packmin no longer bounds its own score; whether a pose exploded is judged by fastrelax converging (fastrelax/tests/diverged_relax.bad.json is that case). This replaces positive_total_score.bad.json, whose 8125.0 was a synthetic exploded pose that packmin itself is no longer the judge of.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": 1064.49}
+  }
+}

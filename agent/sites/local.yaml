@@ -1,0 +1,7 @@
+name: local
+scheduler: none
+backend: {kind: concurrent, config: {workers: 4, executor: process}}
+gpu: {vendor: none, api: cuda, per_node: 1}
+filesystems: {shared: ./campaigns/_runs, scratch: /tmp}
+tool_delivery: {default: mock}
+p5_governor: {max_concurrency: {colabfold_msa: 1, rcsb: 4}}

@@ -1,0 +1,223 @@
+# Code for the deck — staging file
+
+Every code block that appears on a slide, keyed by snippet ID, anchored, and marked for fidelity.
+Companion to [`DECK_OUTLINE.md`](DECK_OUTLINE.md) and `build_deck.js`; slide numbers and snippet IDs
+match across all three.
+
+**Derived against `main` @ `ffac4b0`.** Every anchor below is checked mechanically, and the
+script reports the count rather than this file restating it:
+
+```sh
+python3 ~/.claude/skills/code-walk-deck/scripts/check_anchors.py \
+    --anchors slides/anchors.json --root <workspace>
+```
+
+The root is the *parent* of this checkout, because the table also anchors the reference IMPRESS
+pipeline's own code: the deck's argument is a comparison with it, its authors are in the room, and
+a structural claim about their file should be as checkable as one about ours. Those entries report
+`MISSING` rather than drifting if that checkout is not beside this one.
+
+**Fidelity marking, on every block:**
+
+| Mark | Meaning |
+|---|---|
+| **VERBATIM** | byte-identical to the source at the cited lines — safe to present as "this is the code" |
+| **TRIMMED** | verbatim lines with whole lines removed; nothing rewritten |
+| **EDITED** | restructured for legibility — **the slide says so**, and the real file is one grep away |
+| **MINED** | real output from a real run, not source — `run.json` says which run |
+
+A slide is 13.3 inches wide and the back of the room is far away, so roughly 12 lines at 70 columns
+is the legible maximum. That is why most of the blocks here are EDITED rather than VERBATIM: the
+real signatures carry full type annotations and do not fit. **What is never edited is behaviour** —
+no block says the code does something it does not do.
+
+`B1`/`B2` are backup slides: still in the deck, excluded from every running order.
+
+| ID | Slide | Source | Fidelity | What changed |
+|---|---|---|---|---|
+| B1-A | B1 | a real `--model D` run | **MINED** | stdout of the run `run_model.py` performs; nothing retyped |
+| S12-A | 12 | `exec/dispatch.py:144–163` | **EDITED** | type annotations dropped from the signature; the body of `_run` elided to its shape. `_run.__name__` and the decorator call are verbatim |
+| S12-B | 12 | `exec/dispatch.py:182–190` | **EDITED** | the `workflow_id` conditional collapsed to its taken branch; comments shortened. The `topo_order` loop and the unawaited `gather` are verbatim |
+| S13-A | 13 | `exec/backend.py:128–176` | **EDITED** | condensed: the `Future`/`wrap_future` setup, the heartbeat task and both `BackendConstructionTimeout` messages are elided. Control flow and ordering are exact |
+| S10-A | 10 | `toolkits/rosetta/tools/filter_shape/spec.yaml` | **EDITED** | comments and `toolkit:`/`version:` dropped; `inputs`/`outputs` folded to one line each |
+| S10-B | 10 | `tools/mock_agents.py:73–84` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
+| S10-C | 10 | `tests/test_campaign.py:81–83` | **EDITED** | one assertion message wrapped across two lines to fit |
+| B2-A | B2 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:107` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
+| S18-A | 18 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
+| S18-B | 18 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
+| S20-A | 20 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
+
+---
+
+## The four blocks that carry the argument
+
+Quoted in full here because the slide text must not be the only record of them.
+
+### S18-B — the pattern signature · **VERBATIM**
+
+`src/impress_a/compose/graph.py:51–61`. The only thing added on the slide is the trailing comment
+on the first line.
+
+```python
+    def pattern_signature(self) -> str:
+        """Identity for the interlock: SHAPE ONLY - tool ids plus typed edges.
+
+        Parameter values are excluded deliberately, otherwise every parameter change
+        would reset a pattern's accumulated trust.
+        """
+        parts = sorted(
+            f"{n.tool}<-{','.join(sorted(self.nodes[d].tool for d in n.deps))}"
+            for n in self.nodes.values()
+        )
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+```
+
+**Why it is on a slide.** One string per *node*, so N lineages contribute N duplicate parts and the
+hash moves with the replica count — while the docstring's stated intent is that only *shape* counts.
+Parameters are excluded on purpose; breadth is not, and nothing says whether that was a decision.
+Verified against this checkout by `run_model.py`, which composes the real six-stage chain at 1, 2 and
+4 replicas and records the three signatures in `run.json` under `shape`.
+
+### B2-A — the compute-pattern taxonomy, and every site that consults it · **EDITED**
+
+Four excerpts from three files. The slide stacks them because the point is how *few* there are: the
+taxonomy has eight members, and the entire set of places that branch on one fits on a slide.
+
+```python
+# src/impress_a/core/types.py:12-32 - the enum and its two derived rules
+class Pattern(str, Enum):
+    """Compute patterns. Dispatch depends on these, not on what a tool computes."""
+
+    P1 = "P1"  # GPU-node-local, in-job
+    P2 = "P2"  # CPU-parallel fan-out, in-job
+    P3 = "P3"  # MPI multi-node, in-job
+    P4 = "P4"  # external HPC job - durable ledger, outlives the agent
+    P5 = "P5"  # network service over HTTPS
+    P6 = "P6"  # in-process - MUST NEVER be scheduled
+    P7 = "P7"  # composite pipeline
+    P8 = "P8"  # external experiment (robotic lab) - forward-declared, unused
+
+    @property
+    def is_inline(self) -> bool:
+        return self is Pattern.P6
+
+    @property
+    def is_external(self) -> bool:
+        return self in (Pattern.P4, Pattern.P8)
+
+# src/impress_a/compose/composer.py:45 - a P6 stage never becomes a node
+stages = [t for t in intent.stages
+          if self.reg.get(t).pattern is not Pattern.P6]
+
+# src/impress_a/compose/validate.py:106 - gate 4 refuses one that did
+if spec.pattern is Pattern.P6:
+    return ValidationFailure(
+        gate="resource", node=tid,
+        reason=f"{node.tool} is P6 and must be inlined, never scheduled")
+
+# src/impress_a/tools/spec.py:107 - load time, not run time
+if self.pattern is Pattern.P1 and self.resources.gpus == 0:
+    raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
+```
+
+**What was edited.** The slide shows the class line and the two properties only: all eight members
+are dropped, because the slide's table carries each one with its scheduling consequence, and
+repeating them in the code block would say the same thing twice at half the legible size.
+`@property`, the docstrings and the `-> bool` annotations go for width; gate 4's keyword arguments
+collapse to `reason=...`. No condition is altered.
+
+**Why it is on a slide.** It is the honest version of the docstring's claim. `is_external` exists for
+the P4 durable-ledger path and is consulted only by gate 4's `allow_external` check — no registered
+tool is P4, so it has never fired in anger. And nothing under `exec/` or `runtime/` consults a
+pattern at all: `exec/dispatch.py` builds the same closure for every node and `exec/resources.py`
+translates `ResourceShape`, not `Pattern`. `run_model.py`'s pattern census greps `src/` for every
+such site and records them in `run.json` under `patterns.consulted_in`, so the slide's "four sites,
+none in `exec/`" is mined, and a fifth site appearing anywhere falsifies it loudly.
+
+### S12-A / S12-B — the generic factory and the non-blocking submit
+
+`src/impress_a/exec/dispatch.py:144–190`. The two lines that must never be cut from either block are
+`_run.__name__ = node_id` and the unawaited `gather`.
+
+```python
+    def _make_task(self, node_id: str, tool_id: str, params: dict[str, Any],
+                   invocation: str = "", seed: int | None = None):
+        """ONE generic factory for every node in every graph."""
+        reg, spec = self.reg, self.reg.get(tool_id)
+        agent_cls = reg.agent_for(tool_id)
+        # Bind to a local: the closure is pickled to the process pool, and reaching
+        # `self` would drag the Dispatcher - and the engine's asyncio futures - with it.
+        workdir = self.workdir
+
+        async def _run(*deps: Any) -> dict[str, Any]:
+            agent = agent_cls(spec)
+            req = TaskRequest(tool=tool_id, params=params,
+                              node_id=invocation, seed=seed, workdir=workdir,
+                              inputs={f"dep{i}": d for i, d in enumerate(deps)})
+            res = await agent(req)
+            return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
+                    "qc": res.qc.model_dump(), "cost": res.cost}
+
+        _run.__name__ = node_id   # asyncflow reads the name from __name__
+        return self.flow.function_task(_run)
+```
+
+```python
+        futures: dict[str, Any] = {}
+        for tid in g.topo_order():                       # edges via unawaited futures
+            deps = [futures[d] for d in g.nodes[tid].deps]
+            futures[tid] = (tasks[tid](*deps, workflow_id=run_id) if run_id
+                            else tasks[tid](*deps))
+        # return_exceptions=True: one bad task must not cancel its siblings, and the
+        # gather is not awaited yet, so a raising task would otherwise go unretrieved.
+        gather = asyncio.gather(*futures.values(), return_exceptions=True)
+        return DispatchHandle(run_id=run_id, graph_id=g.id, futures=futures,
+                              gather=gather)
+```
+
+**If challenged on the `workflow_id` conditional** the slide collapses: it is there because a graph
+run outside a campaign has no run id, and asyncflow rejects `workflow_id=""`. It changes nothing
+about the argument.
+
+### S13-A — construction, and which loop it happens on
+
+`src/impress_a/exec/backend.py:128–176`, condensed on the slide. The ordering is the content: the
+daemon thread does *only* `_construct_backend_sync`, and both `_init_backend` (which is what
+triggers `__await__` and registers task states) and `WorkflowEngine.create` happen on the caller's
+loop.
+
+```python
+    fut: Future = Future()
+    threading.Thread(target=_construct_backend_in_thread, args=(kind, config, fut),
+                     daemon=True, name="backend-construct").start()
+    async_fut = asyncio.wrap_future(fut)
+    ...
+        be = await asyncio.wait_for(asyncio.shield(async_fut), timeout=timeout_s)
+    ...
+        async def _finish():
+            from radical.asyncflow import WorkflowEngine
+            backend = await _init_backend(be)
+            return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
+```
+
+The docstring on `_construct_backend_in_thread` is worth reading aloud if anyone asks why not
+`loop.run_in_executor`: a pooled worker thread is joined at interpreter shutdown, so a genuinely
+stuck `Batch()` would hang process exit even after the awaiting coroutine gave up. A dedicated
+daemon thread is abandoned for free.
+
+---
+
+## Re-deriving before you present
+
+```sh
+S=~/.claude/skills/code-walk-deck/scripts
+PYTHONPATH=src python3 slides/run_model.py                     # run.json, from this checkout
+python3 $S/check_anchors.py --anchors slides/anchors.json \
+    --root <workspace>                             # do not present a drifted anchor
+python3 $S/make_script.py --deck slides/build_deck.js          # DECK_SCRIPT.md, from the notes
+NODE_PATH=<dir with pptxgenjs> node slides/build_deck.js
+```
+
+Add an entry to `slides/anchors.json` whenever a snippet is added here. A slide citing
+`executor.py:304` while showing code from somewhere else is worse than a slide with no citation at
+all — this audience can grep.

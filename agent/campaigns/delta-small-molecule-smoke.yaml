@@ -1,0 +1,62 @@
+# Smallest possible real run of the rfd3/ligandmpnn/rosetta/boltz chain - stands in for
+# the old IMPRESS project's IMPRESS_TEST_MODE=1 (impress_a has no equivalent env var; use
+# a smaller campaign spec instead). Intended for the FIRST live compute-node test, before
+# trusting campaigns/delta-small-molecule.yaml's full budget.
+#
+# Target: ALR (a sulfonated azo-dye ligand), borrowed from the original IMPRESS project's
+# small_molecule_binding example - see campaigns/data/alr/ and CLAUDE.md's ALR footgun
+# note (the ligand resname is the literal "A:R", not "ALR" - RFD3 misresolves the bare
+# code, and the colon is a deliberate, verified workaround).
+campaign_id: delta-small-molecule-smoke
+goal: "Design a small-molecule-binding protein around the configured ligand"
+backend: dragon
+backend_config: {}
+# rhapsody's Dragon backend builds Batch() synchronously with no await points - a stall
+# there blocks the event loop entirely (no heartbeat, no timeout) until the walltime is
+# spent (see docs/limitations.md). 600s is generous for legitimate startup, nowhere near
+# the allocation's walltime.
+backend_startup_timeout_s: 600
+backend_startup_heartbeat_s: 30
+# And the mirror image. Measured on the reference IMPRESS pipeline (job 22491438):
+# `flow.shutdown()` never returned once every pipeline had finished, and the job sat 60
+# minutes before being cancelled by hand - ~64 GPU-hours spent after the science was done.
+# Abandoning a stuck teardown is safe here: results are already durable in provenance and
+# the ledger by that point.
+backend_shutdown_timeout_s: 300
+max_cycles: 1
+stagnation_limit: 2
+site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+# Sized against the INTERLOCK, not just the chain. A novel composition pattern is
+# capped at 10% of available budget until it earns trust, and one pass of this chain
+# costs 0.5 gpu-h / 0.75 cpu-h - so anything under 5.0/7.5 rejects its own first run.
+budget:
+  gpu_hours: 6.0
+  cpu_hours: 10.0
+stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]
+# Boltz is LAST on purpose: an independent prediction run AFTER the Rosetta physics
+# gates, so agreement between the two is the campaign's strongest signal
+# (toolkits/boltz/SKILL.md). Running Rosetta on a Boltz output inverts that logic.
+params:
+  rfd3_design:
+    # A real DesignInputSpecification (RFD3 has no scaffold/guidance CLI override - the
+    # target is selected entirely by which JSON file this points at).
+    input_spec_path: "data/alr/ALR_binder_design.json"
+    num_designs: 1
+    diffusion_steps: 50
+  ligandmpnn_design:
+    fixed_residues: "A16"      # hold this residue fixed during sequence design
+  packmin:
+    ligand_params_path: "data/alr/ALR.params"
+  fastrelax:
+    ligand_params_path: "data/alr/ALR.params"
+  filter_shape:
+    ligand_params_path: "data/alr/ALR.params"
+  boltz_predict:
+    ligand_smiles: "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12"
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.5}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

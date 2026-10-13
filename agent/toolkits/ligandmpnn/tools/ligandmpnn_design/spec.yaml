@@ -1,0 +1,44 @@
+id: ligandmpnn_design
+toolkit: ligandmpnn
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.ligandmpnn_agents.LigandMPNNDesignAgent
+# walltime_s is 6x the MEASURED import cost, not a guess. Job 22669509: task.000002
+# went RUNNING at 23:09:51 and FAILED at 23:14:27 - 276s to reach a ModuleNotFoundError
+# in run.py's module-level imports, before one tensor was allocated. ~280s of that is
+# `import torch` paging 1.6 GB of shared objects off Lustre; measured again on a login
+# node at ~360s wall for 9s of CPU. At the old 300s this tool could not have finished
+# importing, and would have failed as `timed out after 300s` - indistinguishable from a
+# hang, and blamed on LigandMPNN rather than on this number.
+resources: {gpus: 1, cores: 4, walltime_s: 1800}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  backbone: {type: Backbone}
+outputs:
+  structure: {type: Complex}
+parameters:
+  temperature: {type: float, default: 0.2, min: 0.0, max: 1.0, trades: "diversity vs recovery"}
+  # Default 1: see rfd3_design.num_designs - breadth is `replicas`, not internal N.
+  num_seqs: {type: int, default: 1, min: 1, max: 64}
+  pack_side_chains: {type: bool, default: true}
+  # Space-separated residue indices to hold fixed, e.g. "A16" - passed straight through to
+  # LigandMPNN's own `--fixed_residues` flag (confirmed real: `run.py --help`).
+  fixed_residues: {type: str, default: ""}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+metrics: [overall_confidence, ligand_confidence]
+# Integrity gates say the tool worked; acceptance gates say the design is good enough.
+# Only integrity failures reset trust (docs/decisions/0013). Each acceptance threshold is
+# backed by `metrics_reported`, so a value the adapter could not read is an integrity
+# failure, never a low score.
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [overall_confidence, ligand_confidence]}}
+  - {id: metric_in_range, role: acceptance, params: {metric: overall_confidence, min: 0.4}}
+  - {id: metric_in_range, role: acceptance, params: {metric: ligand_confidence, min: 0.4}}
+# Measured on job 22684607 (NVMe, 1 node): 18.1s = 0.0050 h. Declared 0.25 was
+# 50x that - a literature guess, and on the gpu dimension those guesses summed
+# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
+# 0.02 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
+# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.02}}

@@ -1,0 +1,10 @@
+{
+  "why": "The same tool's output shape with a backbone that actually folded. Present so the bad fixture proves the gate DISCRIMINATES rather than merely rejecting everything: a gate that fails every input is not catching a silent failure, it is broken. Note the designability here is LOWER than the noodle's 0.91 - the lying tool is more confident than the honest one, which is why a confidence threshold could never have caught it.",
+  "failing_gates": [],
+  "output": {
+    "result": "backbone",
+    "count": 2,
+    "outputs": {},
+    "metrics": {"ss_fraction": 0.62, "designability": 0.62}
+  }
+}
