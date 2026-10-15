@@ -22,7 +22,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 
 | # | Item | Tier | Status | Doc |
 |---|---|---|---|---|
-| F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | submitted: job `22767771` (restore job `22767773` puts `p32_in/ALR.params` back); blocks merging PR 1 | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md) |
+| F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | **passed** on `22767771` (2026-10-15): labels, local stages, adaptive offload, stderr tails and storage all pass. Full-window rfd3 264.3/node-h (−16 %) is attributed to a 76 s Dragon completion stall beside an smb 16 failure; before the stall the rate was +6 %. Next: merge PR 1, then delete this row | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md#result) |
 | F2 | Per-task resources translated per backend: thread caps and GPU pinning (`_tool_task_description` in smb). `gpus_per_rank` is silently ignored by Dragon in discontinuous_scaffolds | 2 | open | [pr2](2026-10-08-framework-pr2.md#f2) |
 | F3 | `register_pipeline_tasks()` runs in `__init__` before subclass attributes and `self.logger` exist; crashed `22692267` | 2 (bug) | open | [pr2](2026-10-08-framework-pr2.md#f3) |
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
