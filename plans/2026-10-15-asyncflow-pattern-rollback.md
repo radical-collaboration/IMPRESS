@@ -1,6 +1,6 @@
 # Roll back the asyncflow escapes where asyncflow now has the pattern (F14–F17)
 
-**Status:** re-scoped 2026-10-15. F14, F17, F15 part 2 and the `stdio.py` docstring are **fixed on `framework-defaults-pr1` (`a74b71d`)**. They are not yet merged and need no Delta run (see [Order](#order-revised-2026-10-15)). F15 part 1 goes to PR 2 and is blocked on an asyncflow quoting defect. F16 is open and needs a decision · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), F1 job `22767771`, a test run without rhapsody (115 passed / 5 skipped) · **Depends on:** F1 passed; F16 also on F13
+**Status:** re-scoped 2026-10-15. F14, F17, F15 part 2 and the `stdio.py` docstring are **fixed on `framework-defaults-pr1` (`a74b71d`)**. They are not yet merged and need no Delta run (see [Order](#order-revised-2026-10-15)). F15 part 1 is **blocked upstream**: asyncflow's `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5). F16 is open and needs a decision · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), F1 job `22767771`, a test run without rhapsody (115 passed / 5 skipped) · **Depends on:** F1 passed; F16 also on F13
 
 ## Why
 
@@ -94,7 +94,7 @@ all** — they are exercised only where rhapsody is installed.
 
 **Change.** Two parts, split across PRs since 2026-10-15:
 
-1. **PR 2.** Runners: `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")` on the non-Dragon
+1. **Blocked upstream (was PR 2).** Runners: `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")` on the non-Dragon
    branch, dropping the rhapsody import from the dev path. Keep `DragonExecutionBackend` for
    production. Also replace the `isinstance(self.flow.backend, ConcurrentExecutionBackend)`
    env branch (`examples/small_molecule_binding/small_molecule_binding.py:739`), which forces
@@ -109,6 +109,14 @@ all** — they are exercised only where rhapsody is installed.
    stage that wraps its command in `logged_command()` returns exactly that shape, so the swap
    would break five of smb's seven tool stages. Upstream fix: `shlex.join(parts)`, or default
    to exec mode. Added to F13's asks.
+   **Second blocker, found 2026-10-15: per-task `env` is ignored.** `_execute_command` calls
+   `create_subprocess_shell(cmd, stdout=…, stderr=…)` / `create_subprocess_exec(…)` with no
+   `env` (`backends.py:311-343`). So `_tool_task_description`'s thread caps and
+   `CUDA_VISIBLE_DEVICES` would never reach the tool. boltz and rfd3 would run uncapped, which is
+   the ~3,030 % CPU oversubscription seen on `22670942`. F13's fifth ask.
+   Either blocker alone makes the swap a regression. The line-739 check exists only to choose
+   between the Concurrent and Dragon env shapes, so rewriting it alone gains nothing. Part 1
+   waits for asyncflow to fix both; it is no longer scheduled for PR 2.
 2. **PR 1.** Tests only, no runtime change: add a `LocalExecutionBackend` variant of `test_task_defaults.py`. It cannot assert
    the current file-path behaviour, because that backend **ignores `capture_stdio`** — it
    pipes and decodes (`backends.py:311-343`; `capture_stdio` appears nowhere in that module
@@ -215,8 +223,9 @@ Also not an escape: `_run_to_completion`'s `asyncio.run` in a worker thread and 
 1. **With PR 1, before it merges:** F17, F14, F15 part 2 and the `stdio.py` docstring.
    - F14 changes PR 1's own new API. Changing it after merge would break callers.
    - The rest is a one-line deletion, tests or docs.
-2. **PR 2:** F15 part 1, beside F7. Both touch the runners' backend layout, and F15 part 1
-   touches the env branch every Dragon task takes.
+2. **Blocked upstream:** F15 part 1, until asyncflow's `LocalExecutionBackend` keeps quoting
+   and honours per-task `env` (F13 asks 4 and 5). Then it goes beside F7, since both touch the
+   runners' backend layout.
 3. **Last:** F16, after F13 has an upstream answer and the trace-schema decision is made.
 
 **Risk to F1.** F1 passed on `e3926d8`, which has none of these changes. They leave the Delta

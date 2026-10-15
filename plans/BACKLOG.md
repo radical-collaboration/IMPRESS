@@ -34,24 +34,25 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F10 | Staggered pipeline start as a manager option (smb `start_delay`; OOM on `22714785` without it) | 3 | open | [pr3](2026-10-08-framework-pr3.md#f10) |
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
-| F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
+| F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
 | F14 | Adaptive backend declared (`adaptive_backend=`), not probed out of `flow._backends` (`impress_manager.py:162-164`); today an engine whose pool is not named `local` silently falls back to a thread. A misnamed backend would shut the whole engine down at submit, so `start()` validates the name | 2 | fixed on the PR 1 branch (`a74b71d`); mock run unchanged; not yet merged | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14) |
-| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: fixed on the PR 1 branch (`a74b71d`). Part 1, the runner swap: PR 2, and blocked because `LocalExecutionBackend` drops a command's quoting (F13) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
+| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: fixed on the PR 1 branch (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
 | F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
 | F17 | Drop `pipeline.telemetry`'s `flow._telemetry` fallback (`impress_pipeline.py:101`); the manager already injects the public handle | 3 | fixed on the PR 1 branch (`a74b71d`); not yet merged | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17) |
+| F18 | Confirm the PR 1 branch head on Delta: F14's `start()` check and declared `local` routing, F17's telemetry injection, and F1's throughput caveat without an injected failure. Same shape as `22767771` | 1 | open, not yet submitted; blocks pushing PR 1 | [pr1-head-confirmation](2026-10-15-pr1-head-confirmation.md) |
 
 ## Order
 
-1. F1 (passed), then F14, F17, F15 part 2 and the `stdio.py` docstring on the PR 1 branch,
-   then merge PR 1.
+1. F1 (passed), then F14, F17, F15 part 2 and the `stdio.py` docstring on the PR 1 branch
+   (done, `a74b71d`), then F18 on Delta, then push and merge PR 1.
    - F14 changes PR 1's own new API, so it should not reach `main` in its first form.
    - The rest is a one-line deletion, tests or docs. None of it changes the Delta path F1
      measured ([pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#order-revised-2026-10-15)).
-2. PR 2: F2–F7, plus F15 part 1 beside F7. F3 and F4 first (bug fix, then a test that may move
+2. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move
    smb 20 to teardown).
 3. PR 3: F8–F10.
 4. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
-   F16 waits for its answer.
+   F16 and F15 part 1 wait for its answer.
 
 Each PR also migrates the examples off the code it replaces, updates `docs/`, and adds a revision
 row to each touched example's CLAUDE.md.
