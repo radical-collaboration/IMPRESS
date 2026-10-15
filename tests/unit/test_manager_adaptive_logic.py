@@ -151,9 +151,9 @@ class TestAdaptiveOffload:
         await manager._run_adaptive_fn(_adaptive_pipeline(fn=on_loop))
         assert seen["thread"] == threading.get_ident()
 
-    async def test_uses_local_backend_when_present(self):
+    async def test_routes_to_declared_backend(self):
         flow = LocalBackendFlow()
-        manager = ImpressManager(flow, use_colors=False)
+        manager = ImpressManager(flow, use_colors=False, adaptive_backend="local")
         manager.logger = Mock()
         calls = []
 
@@ -167,6 +167,33 @@ class TestAdaptiveOffload:
         # Registered once, labelled after the callback, routed to "local".
         assert flow.registered == [("adaptive_decision", "local")]
         assert [c["workflow_id"] for c in flow.calls] == ["p1:adaptive", "p2:adaptive"]
+
+    async def test_backend_present_but_not_declared_uses_a_thread(self):
+        flow = LocalBackendFlow()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
+        seen = {}
+
+        def adaptive_decision(pipeline):
+            seen["thread"] = threading.get_ident()
+
+        await manager._run_adaptive_fn(_adaptive_pipeline(fn=adaptive_decision))
+        assert seen["thread"] != threading.get_ident()
+        assert flow.registered == []  # no silent switch to "local"
+
+    async def test_start_rejects_unknown_backend_before_any_work(self):
+        flow = LocalBackendFlow()
+        manager = ImpressManager(flow, use_colors=False, adaptive_backend="callbacks")
+        manager.logger = Mock()
+        manager.submit_new_pipelines = Mock()
+
+        with pytest.raises(ValueError, match="'callbacks'.*\\['local'\\]"):
+            await manager.start(pipeline_setups=[])
+        manager.submit_new_pipelines.assert_not_called()
+
+    async def test_start_skips_check_when_backend_table_unreadable(self, mock_flow):
+        manager = ImpressManager(mock_flow, use_colors=False, adaptive_backend="local")
+        manager._check_adaptive_backend()  # no _backends on the mock: no error
 
     async def test_flow_task_passed_through(self):
         flow = LocalBackendFlow()

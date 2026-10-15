@@ -51,7 +51,7 @@ async def test_stdio_captured_labelled_and_failure_explained(tmp_path):
         seen["thread"] = threading.get_ident()
         seen["state"] = dict(pipeline.state)
 
-    manager = ImpressManager(flow, use_colors=False)
+    manager = ImpressManager(flow, use_colors=False, adaptive_backend="local")
     try:
         await manager.start(
             [PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide)]

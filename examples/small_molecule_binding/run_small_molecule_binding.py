@@ -474,6 +474,7 @@ async def impress_smallmol_bind() -> None:
             "checkpoint_interval": 300.0,
         },
         telemetry_subscribers=[_on_task_event],
+        adaptive_backend="local",
     )
 
     # One GPU per pipeline, round-robin: p1 -> gpus[0], p2 -> gpus[1], ...

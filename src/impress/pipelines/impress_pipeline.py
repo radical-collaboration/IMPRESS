@@ -94,11 +94,9 @@ class ImpressBasePipeline(ABC):
         """The running telemetry manager, or None when telemetry is off.
 
         `ImpressManager` sets it before `run()`. A pipeline driven without the
-        manager falls back to the engine's own reference.
+        manager has none unless the caller sets `_telemetry` itself.
         """
-        if self._telemetry is not None:
-            return self._telemetry
-        return getattr(self.flow, "_telemetry", None)
+        return self._telemetry
 
     def auto_register_task(self, local_task=False, capture_stdio=True, **task_kwargs):
         """

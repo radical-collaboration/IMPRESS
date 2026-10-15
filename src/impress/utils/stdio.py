@@ -1,11 +1,15 @@
 """Helpers for the stdout/stderr of executable tasks.
 
-With `capture_stdio=True` (the IMPRESS default), the Concurrent and Dragon
-backends write each task's output to `{backend work dir}/{task uid}.stdout`
+With `capture_stdio=True` (the IMPRESS default), rhapsody's Concurrent and
+Dragon backends write each task's output to `{backend work dir}/{task uid}.stdout`
 and `.stderr`. A failed task then raises an exception that does not say what
-went wrong: Concurrent raises `RuntimeError(<stderr path>)`, and Dragon raises
-`SystemExit(<exit code>)`. `stderr_tail` finds that file so the error can
-carry its last lines.
+went wrong: Concurrent raises `RuntimeError(<stderr path>)`, and Dragon
+`RuntimeError(<exit code>)` (rhapsody reports `SystemExit(code)`, which
+asyncflow wraps because it is not an `Exception`). `stderr_tail` finds that
+file so the error can carry its last lines. The path is rebuilt from private
+engine attributes only for Dragon. asyncflow's `LocalExecutionBackend`
+ignores `capture_stdio` and puts the stderr text in the exception itself, so
+there is no file and `stderr_tail` returns None.
 """
 
 import os

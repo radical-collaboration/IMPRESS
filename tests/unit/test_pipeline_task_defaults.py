@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 import sys
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -142,6 +143,20 @@ class TestExecutableTaskDefaults:
         fut.set_result("/path/to/stdout")
         await asyncio.sleep(0)
         p.logger.pipeline_log.assert_not_called()
+
+
+class TestTelemetryHandle:
+    def test_manager_less_pipeline_has_no_telemetry(self):
+        # The engine's private handle is not used as a fallback.
+        flow = SimpleNamespace(_telemetry=FakeTelemetry())
+        p = OneTaskPipeline("p1", flow=flow, local=True)
+        assert p.telemetry is None
+
+    def test_injected_telemetry_is_returned(self):
+        p = OneTaskPipeline("p1", local=True)
+        tel = FakeTelemetry()
+        p._telemetry = tel
+        assert p.telemetry is tel
 
 
 @pytest.mark.skipif(

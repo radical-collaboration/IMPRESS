@@ -142,12 +142,16 @@ pipeline's task dispatch, so an adaptive function that blocks it, even an
 throughput to 37% of baseline. The manager therefore runs each adaptive
 function in a worker thread, against the live pipeline object:
 
-- If the engine has a backend named `local`, the function runs there as a
-  `flow.function_task`, which bounds concurrency and shows it in telemetry
-  as `{pipeline}:adaptive`. Use a thread-pool backend for it, such as
+- With `ImpressManager(..., adaptive_backend="<name>")`, the function runs on
+  that engine backend as a `flow.function_task`, which bounds concurrency and
+  shows it in telemetry as `{pipeline}:adaptive`. Use a thread-pool backend
+  for it, such as
   `ConcurrentExecutionBackend(ThreadPoolExecutor(), name="local")`: a
-  process pool would mutate a pickled copy of the pipeline.
-- Otherwise it runs in `asyncio.to_thread`.
+  process pool would mutate a pickled copy of the pipeline. `start()` raises
+  `ValueError` if the engine has no backend of that name, because asyncflow
+  would otherwise fail inside its submit loop and shut the engine down.
+- With no `adaptive_backend` (the default), it runs in `asyncio.to_thread`,
+  whatever backends the engine has.
 - A function that is already a flow task runs as it is.
 
 Pass `ImpressManager(..., adaptive_offload=False)` for an adaptive function

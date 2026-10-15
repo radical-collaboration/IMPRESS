@@ -25,6 +25,7 @@ class ImpressManager:
         telemetry_config: Optional[dict[str, Any]] = None,
         telemetry_subscribers: Optional[list[Callable]] = None,
         adaptive_offload: bool = True,
+        adaptive_backend: Optional[str] = None,
     ) -> None:
         """
         Initialize the ImpressManager.
@@ -42,13 +43,18 @@ class ImpressManager:
             adaptive_offload: Run each adaptive function off the event loop
                 (default True). The loop is shared by every pipeline, so a
                 callback that blocks it, even an `async def` that never
-                awaits, stalls task dispatch for all of them. With a backend
-                named "local" on the engine, the callback runs there as a
-                `flow.function_task`, which bounds it and makes it visible in
-                telemetry; otherwise it runs in `asyncio.to_thread`. Either
-                way it runs in a thread, against the live pipeline object.
-                Set False for a callback that must await objects bound to the
-                main event loop, such as engine tasks.
+                awaits, stalls task dispatch for all of them. The callback
+                runs in a thread, against the live pipeline object: on
+                `adaptive_backend` if one is named, otherwise in
+                `asyncio.to_thread`. Set False for a callback that must await
+                objects bound to the main event loop, such as engine tasks.
+            adaptive_backend: Name of an engine backend to run offloaded
+                adaptive functions on, as a `flow.function_task`. That bounds
+                them by the backend's pool and labels them
+                `{pipeline}:adaptive` in telemetry. It must be a thread pool:
+                a process pool would mutate a pickled copy of the pipeline.
+                `start()` raises ValueError if the engine has no backend of
+                that name. None (the default) uses `asyncio.to_thread`.
         """
         self.flow: WorkflowEngine = flow
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
@@ -59,6 +65,7 @@ class ImpressManager:
         self._telemetry_subscribers: list[Callable] = telemetry_subscribers or []
         self.telemetry: Any = None
         self.adaptive_offload: bool = adaptive_offload
+        self.adaptive_backend: Optional[str] = adaptive_backend
         self._offloaded_fns: dict[Callable, Callable] = {}
 
     def _normalize_pipeline_setup(
@@ -147,21 +154,15 @@ class ImpressManager:
             await _maybe_await(adaptive_fn(pipeline))
             return
 
-        local_task = self._local_backend_task(adaptive_fn)
-        if local_task is not None:
-            await local_task(pipeline, workflow_id=f"{pipeline.name}:adaptive")
-        else:
+        if self.adaptive_backend is None:
             await asyncio.to_thread(_run_to_completion, adaptive_fn, pipeline)
+            return
 
-    def _local_backend_task(self, adaptive_fn: Callable) -> Optional[Callable]:
-        """`adaptive_fn` as a function task on the engine's "local" backend.
+        backend_task = self._backend_task(adaptive_fn)
+        await backend_task(pipeline, workflow_id=f"{pipeline.name}:adaptive")
 
-        Returns None when the engine has no backend of that name. The
-        engine's backend table is private, hence the guarded lookup.
-        """
-        backends = getattr(self.flow, "_backends", None)
-        if not isinstance(backends, dict) or "local" not in backends:
-            return None
+    def _backend_task(self, adaptive_fn: Callable) -> Callable:
+        """`adaptive_fn` as a function task on `self.adaptive_backend`."""
         task = self._offloaded_fns.get(adaptive_fn)
         if task is None:
 
@@ -171,9 +172,26 @@ class ImpressManager:
             # Telemetry labels a function task by its __name__.
             name = getattr(adaptive_fn, "__name__", "adaptive_fn")
             run_adaptive.__name__ = run_adaptive.__qualname__ = name
-            task = self.flow.function_task(backend="local")(run_adaptive)
+            task = self.flow.function_task(backend=self.adaptive_backend)(run_adaptive)
             self._offloaded_fns[adaptive_fn] = task
         return task
+
+    def _check_adaptive_backend(self) -> None:
+        """Fail before any work if `adaptive_backend` is not on the engine.
+
+        An unknown name is not reported to the caller: asyncflow looks it up
+        in its background submit path, and the error shuts the engine down.
+        The engine's backend table is private, so the check is skipped when
+        it cannot be read.
+        """
+        if self.adaptive_backend is None:
+            return
+        backends = getattr(self.flow, "_backends", None)
+        if isinstance(backends, dict) and self.adaptive_backend not in backends:
+            raise ValueError(
+                f"adaptive_backend={self.adaptive_backend!r} is not a backend "
+                f"of this engine; it has {sorted(backends)}"
+            )
 
     async def start(
         self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]
@@ -192,6 +210,7 @@ class ImpressManager:
                 configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
+        self._check_adaptive_backend()
 
         if self._telemetry_config:
             self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
