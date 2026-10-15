@@ -104,7 +104,7 @@ all** — they are exercised only where rhapsody is installed.
    changes dev-path stdio, because `LocalExecutionBackend` ignores `capture_stdio` (below).
    **Blocked, found 2026-10-15:** `LocalExecutionBackend` cannot run a quoted command. The
    engine `shlex.split`s the command an executable task returns (`workflow_manager.py:654-661`).
-   The backend's shell mode then re-joins the parts with `" ".join` (`backends.py:318`), which
+   The backend's shell mode then re-joins the parts with `" ".join` (`backends.py:320`), which
    drops the quoting, so `bash -c 'echo a; echo b'` runs as `bash -c echo a; echo b`. Every
    stage that wraps its command in `logged_command()` returns exactly that shape, so the swap
    would break five of smb's seven tool stages. Upstream fix: `shlex.join(parts)`, or default
