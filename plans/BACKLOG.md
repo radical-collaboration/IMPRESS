@@ -16,6 +16,10 @@ off the event loop, and the `DragonExecutionBackendV3` import fix.
 
 Tier = (measured impact or failure prevented) × (examples that benefit) ÷ effort; 1 is highest.
 
+F14–F17 come from the 2026-10-15 review of PR 1 against asyncflow 0.5.1's own patterns
+(`examples/04-concurrent_backends.py`): where the engine now has an idiom, the escape goes
+back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
+
 | # | Item | Tier | Status | Doc |
 |---|---|---|---|---|
 | F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | open; blocks merging PR 1 | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md) |
@@ -30,14 +34,21 @@ Tier = (measured impact or failure prevented) × (examples that benefit) ÷ effo
 | F10 | Staggered pipeline start as a manager option (smb `start_delay`; OOM on `22714785` without it) | 3 | open | [pr3](2026-10-08-framework-pr3.md#f10) |
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
-| F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
+| F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
+| F14 | Adaptive backend declared (`adaptive_backend=`), not probed out of `flow._backends` (`impress_manager.py:162-164`); today an engine whose pool is not named `local` silently falls back to a thread | 2 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14) |
+| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
+| F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
+| F17 | Drop `pipeline.telemetry`'s `flow._telemetry` fallback (`impress_pipeline.py:101`); the manager already injects the public handle | 3 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17) |
 
 ## Order
 
 1. F1, then merge PR 1.
-2. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move smb 20 to teardown).
-3. PR 3: F8–F10.
-4. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers.
+2. PR 2: F2–F7, plus F14 and F17. F3 and F4 first (bug fix, then a test that may move smb 20
+   to teardown). F14 is the per-runner half of F7, so land them together.
+3. F15 next: it restores local coverage of defaults PR 1 has already shipped.
+4. PR 3: F8–F10.
+5. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
+   F16 waits for its answer.
 
 Each PR also migrates the examples off the code it replaces, updates `docs/`, and adds a revision
 row to each touched example's CLAUDE.md.
