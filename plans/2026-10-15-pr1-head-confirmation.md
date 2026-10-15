@@ -1,6 +1,6 @@
 # F18 — PR 1 branch-head confirmation run on Delta
 
-**Status:** submitted 2026-10-15 as job `22927576` (`<allocation A>`, `gpuA40x4-interactive`, 1 node, 1 h, 32 pipelines, from `9f91e46`) · **Branch:** `framework-defaults-pr1` · **Blocks:** pushing and merging PR 1 · **Items:** F18; confirms F14, F17
+**Status:** **passed** on job `22927576` (`<allocation A>`, `gpuA40x4-interactive`, gpub071, 1 node, 1 h, 32 pipelines, from `9f91e46`; 17:18:29 → 18:18:56, `TIMEOUT` 1:00:27 at the limit as planned). See [Result](#result) · **Branch:** `framework-defaults-pr1` · **Blocks:** pushing and merging PR 1 · **Items:** F18; confirms F14, F17
 
 ## Why
 
@@ -63,3 +63,31 @@ Score with the F1 method: per node-h counted from minute 10. It reproduces `2271
 - Update the smb CLAUDE.md 2026-10-15 row, which says "No Delta run".
 - If it passes, push and merge PR 1, then delete the F1 and F18 rows.
 - If the startup check fails, fix it, add a test, and rerun before pushing.
+
+<a id="result"></a>
+## Result — job `22927576` (scored 2026-10-15)
+
+Scored with the F1 scripts (per node-h from minute 10). Sources: `logs/22927576/telemetry/*.jsonl`,
+`logs/22927576/nvsmi.csv`, `impress_22927576.out`.
+
+| Check | `22927576` | Reference | Verdict |
+|---|---|---|---|
+| Startup | `IMPRESS MANAGER STARTING`, then p1's first rfd3 at 17:18:46; all 32 pipelines active by 17:26. No `ValueError` | — | pass |
+| Adaptive routing | 2043 of 2043 adaptive TaskQueued on `local`, all labelled `p<N>:adaptive`; 0.31 % of wall clock, p50 0.003 s, p99 0.041 s, max 0.103 s | F1 `22767771`: 0.47 %, p99 0.140 s | pass |
+| Telemetry handle | 2043 `impress.LocalStage`, all `completed`, 0 duplicates; 1:1 with completions (backbone 321 = rfd3, sequence 972 = mpnn, packmin 303, fastrelax 228, fold 99 = boltz) | — | pass |
+| Labels | 4118 of 4118 tasks labelled | — | pass |
+| Failures | 0 `TaskFailed`, 0 tracebacks; no smb 16 recurrence | 0 | pass |
+| Throughput (min 10–60, per node-h) | rfd3 **337.1** (+6.8 %), boltz **108.0** (+14.5 %), mpnn 1043.8 (−2.7 %) | `22718758`: 315.5 / 94.3 / 1073 | pass |
+| Completion stalls > 15 s after min 10 | 2 (24 s, 17 s; 41 s total) | `22718758`: 3 (57 s); `22767771`: 8 (198 s) | no large stall |
+| Storage | 60,138 run + 4,172 session files for 2075 tool tasks = **31.0/task**; 3.2 GB | F1: 30.7 | pass |
+
+Other measurements:
+- GPU busy after minute 10: mean 71–80 %, at 100 % for 44–61 % of the time, against 70–76 % on `22718758`.
+- Manager: median inter-task gap 0.275 s, pipelines in a task 98.2 % of the time, local stages 0.24 % of wall clock.
+- Node memory peaked at 63.1 % (ResourceUpdate), against 61.5 % on `22718758`. seff's 87 % comes from `MaxRSS`, which was ~201 GB on both earlier runs too.
+
+**F1's caveat is settled.** With no injected failure and no smb 16 event, the branch head ran
+above the reference rather than 16 % below it. That supports the F1 attribution: the shortfall
+on `22767771` came from the Dragon completion stall and the lost pipelines, not from PR 1.
+
+**F14 and F17 are confirmed on Dragon.** The branch is ready to push and merge.
