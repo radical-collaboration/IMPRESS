@@ -17,7 +17,7 @@ Offline evidence is strong but has gaps:
 
 Three parts of PR 1 depend on Dragon behaviour that the offline tests did not exercise:
 - the stderr path is rebuilt from private engine attributes (`flow._backends`, `backend._work_dir`, `fut.task['uid']`);
-- Dragon raises `SystemExit(code)` rather than `RuntimeError(path)`;
+- Dragon raises `SystemExit(code)` rather than `RuntimeError(path)` (it surfaces as `RuntimeError('<code>')`: see [Result](#result));
 - smb's `rfd3` and `boltz` used to be the only captured tasks. Now all seven tool stages write `.stdout`/`.stderr` into the session dir, roughly 2 more files per task, which matters for the inode quota (smb 18).
 
 ## Run

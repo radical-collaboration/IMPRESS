@@ -22,7 +22,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 
 | # | Item | Tier | Status | Doc |
 |---|---|---|---|---|
-| F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | **passed** on `22767771` (2026-10-15): labels, local stages, adaptive offload, stderr tails and storage all pass. Full-window rfd3 264.3/node-h (−16 %) is attributed to a 76 s Dragon completion stall beside an smb 16 failure; before the stall the rate was +6 %. Next: merge PR 1, then delete this row | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md#result) |
+| F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | **passed** on `22767771` (2026-10-15): labels, local stages, adaptive offload, stderr tails and storage all pass. Full-window rfd3 264.3/node-h (−16 %) is attributed to a 76 s Dragon completion stall beside an smb 16 failure; before the stall the rate was +6 %. Next: land F14, F17 and F15 part 2 on the branch, then merge PR 1 and delete this row | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md#result) |
 | F2 | Per-task resources translated per backend: thread caps and GPU pinning (`_tool_task_description` in smb). `gpus_per_rank` is silently ignored by Dragon in discontinuous_scaffolds | 2 | open | [pr2](2026-10-08-framework-pr2.md#f2) |
 | F3 | `register_pipeline_tasks()` runs in `__init__` before subclass attributes and `self.logger` exist; crashed `22692267` | 2 (bug) | open | [pr2](2026-10-08-framework-pr2.md#f3) |
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
@@ -35,19 +35,22 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
 | F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
-| F14 | Adaptive backend declared (`adaptive_backend=`), not probed out of `flow._backends` (`impress_manager.py:162-164`); today an engine whose pool is not named `local` silently falls back to a thread | 2 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14) |
-| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
+| F14 | Adaptive backend declared (`adaptive_backend=`), not probed out of `flow._backends` (`impress_manager.py:162-164`); today an engine whose pool is not named `local` silently falls back to a thread. A misnamed backend would shut the whole engine down at submit, so `start()` validates the name | 2 | **in PR 1**, not yet implemented | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14) |
+| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split: the test variant (part 2) is **in PR 1**, not yet implemented; the runner swap (part 1) is PR 2, because `small_molecule_binding.py:739` is on the Dragon path | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
 | F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
-| F17 | Drop `pipeline.telemetry`'s `flow._telemetry` fallback (`impress_pipeline.py:101`); the manager already injects the public handle | 3 | open | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17) |
+| F17 | Drop `pipeline.telemetry`'s `flow._telemetry` fallback (`impress_pipeline.py:101`); the manager already injects the public handle | 3 | **in PR 1**, not yet implemented | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17) |
 
 ## Order
 
-1. F1, then merge PR 1.
-2. PR 2: F2–F7, plus F14 and F17. F3 and F4 first (bug fix, then a test that may move smb 20
-   to teardown). F14 is the per-runner half of F7, so land them together.
-3. F15 next: it restores local coverage of defaults PR 1 has already shipped.
-4. PR 3: F8–F10.
-5. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
+1. F1 (passed), then F14, F17, F15 part 2 and the `stdio.py` docstring on the PR 1 branch,
+   then merge PR 1.
+   - F14 changes PR 1's own new API, so it should not reach `main` in its first form.
+   - The rest is a one-line deletion, tests or docs. None of it changes the Delta path F1
+     measured ([pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#order-revised-2026-10-15)).
+2. PR 2: F2–F7, plus F15 part 1 beside F7. F3 and F4 first (bug fix, then a test that may move
+   smb 20 to teardown).
+3. PR 3: F8–F10.
+4. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
    F16 waits for its answer.
 
 Each PR also migrates the examples off the code it replaces, updates `docs/`, and adds a revision

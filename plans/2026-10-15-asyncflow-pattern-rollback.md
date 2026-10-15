@@ -1,6 +1,6 @@
 # Roll back the asyncflow escapes where asyncflow now has the pattern (F14–F17)
 
-**Status:** open, design only · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), local test run 115 passed / 5 skipped · **Depends on:** F1 (PR 1 must land first); F16 also on F13
+**Status:** re-scoped 2026-10-15. F14, F17, F15 part 2 and the `stdio.py` docstring land **with PR 1**, not yet implemented. F15 part 1 goes to PR 2. F16 is open and needs a decision · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), F1 job `22767771`, a test run without rhapsody (115 passed / 5 skipped) · **Depends on:** F1 passed; F16 also on F13
 
 ## Why
 
@@ -40,16 +40,33 @@ for and nothing reports.
 - `None` means `asyncio.to_thread`, today's fallback;
 - `adaptive_offload=False` keeps its current meaning (run on the loop).
 
-An unknown name cannot be validated at construction without the same private table, and
-asyncflow only raises `KeyError` at submit (`workflow_manager.py:1369`), so wrap the first
-call and re-raise with the engine's backend names asked for in F13. Runners that want the
-current behaviour pass `adaptive_backend="local"`; this is the per-runner half of **F7**, so
-land the two together.
+**An unknown name must be caught before the first submission (corrected 2026-10-15).** The
+first draft said asyncflow "raises `KeyError` at submit", so the manager could wrap the first
+call and re-raise. It does not reach the caller:
+- the lookup `self._backends[b_name]` runs in the engine's background submit path
+  (`workflow_manager.py:1381`);
+- `submit()` logs and re-raises the error (`:1387-1389`);
+- the run loop catches it and calls `_handle_shutdown_signal` (`:1317-1319`).
 
-**Test.** Extend `tests/unit/test_manager_adaptive_logic.py::TestAdaptiveOffload`: a named
-backend routes there (replacing `test_uses_local_backend_when_present`, which asserts the
-probe); no name runs in a thread; a name the engine does not have raises an error naming the
-backend, instead of silently threading.
+So a misspelled `adaptive_backend` would shut down the **whole engine** at the first adaptive
+call, with every pipeline's tasks in flight. `ImpressManager.start()` therefore validates the
+name before it submits any pipeline. If the engine's backend table is readable, a missing name
+raises `ValueError` naming the backend asked for and the ones the engine has. That keeps one
+guarded read of `flow._backends`. It is now a check that fails loudly, not a silent mode
+switch, and it goes when F13's `has_backend` ask lands. If the table is not readable (a mock
+engine), the check is skipped.
+
+The smb runner passes `adaptive_backend="local"`, which reaches the same
+`function_task(backend="local")` path F1 measured. Every other runner has no `local` backend
+and keeps `asyncio.to_thread`, so F14 no longer has to wait for **F7**.
+
+**Test.** Extend `tests/unit/test_manager_adaptive_logic.py::TestAdaptiveOffload`:
+- a declared backend is routed to. This replaces `test_uses_local_backend_when_present`,
+  which asserts the probe, and keeps its assertions: registered once as
+  `("adaptive_decision", "local")`, labelled `p<N>:adaptive`;
+- with a `local` backend present but no name declared, the callback runs in a thread;
+- `start()` raises `ValueError` naming a backend the engine does not have, before any
+  pipeline runs.
 
 <a id="f15"></a>
 ## F15 — Use asyncflow's own `LocalExecutionBackend` on the dev path, and cover PR 1's defaults locally
@@ -62,9 +79,10 @@ the other runners use (`examples/dummy.py:90`,
 `examples/small_molecule_binding/run_test_small_molecule_binding.py:151`). Example 04 uses it
 as its `compute` backend.
 
-The cost of the current arrangement is test coverage. On a checkout without rhapsody,
-`.venv/bin/python -m pytest -q -rs` gives **115 passed, 5 skipped**, against the 120 the PR 1
-commit message reports from Delta, and the skips are precisely PR 1's own defaults:
+The cost of the current arrangement is test coverage. `pyproject.toml` requires only
+`radical.pilot` and `radical-asyncflow`, so rhapsody is optional. On a checkout without it,
+`.venv/bin/python -m pytest -q -rs` gives **115 passed, 5 skipped**. With rhapsody installed
+(`ve/impress_a` on Delta) all 120 pass. The skips are precisely PR 1's own defaults:
 
 | Skipped | Why |
 |---|---|
@@ -74,14 +92,17 @@ commit message reports from Delta, and the skips are precisely PR 1's own defaul
 So stdio capture, the stderr tail and the `LocalStage` event have **no local coverage at
 all** — they are exercised only where rhapsody is installed.
 
-**Change.** Two parts, same PR:
+**Change.** Two parts, split across PRs since 2026-10-15:
 
-1. Runners: `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")` on the non-Dragon
+1. **PR 2.** Runners: `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")` on the non-Dragon
    branch, dropping the rhapsody import from the dev path. Keep `DragonExecutionBackend` for
    production. Also replace the `isinstance(self.flow.backend, ConcurrentExecutionBackend)`
    env branch (`examples/small_molecule_binding/small_molecule_binding.py:739`), which forces
    a rhapsody import at pipeline-definition time, with a check that does not name a class.
-2. Tests: add a `LocalExecutionBackend` variant of `test_task_defaults.py`. It cannot assert
+   This part stays out of PR 1. The line-739 branch chooses the env and GPU-pinning shape for
+   *every* tool task, Dragon included, so it is on the path F1 measured. The runner swap also
+   changes dev-path stdio, because `LocalExecutionBackend` ignores `capture_stdio` (below).
+2. **PR 1.** Tests only, no runtime change: add a `LocalExecutionBackend` variant of `test_task_defaults.py`. It cannot assert
    the current file-path behaviour, because that backend **ignores `capture_stdio`** — it
    pipes and decodes (`backends.py:311-343`; `capture_stdio` appears nowhere in that module
    outside two docstrings) and the engine then wraps the stderr *text* into the exception
@@ -151,9 +172,13 @@ passing; add one asserting `telemetry is None` for a manager-less pipeline.
   (`workflow_manager.py:756`) and consumed by its own public dependency API (`:915`), so it is
   undocumented but not private; the genuine privates are the backend table and
   `backend._work_dir` (`src/impress/utils/stdio.py:61-63`). The reconstruction is only
-  load-bearing for Dragon, which raises `SystemExit(<exit code>)`: rhapsody's Concurrent puts
-  the path in the message, and `LocalExecutionBackend` puts the text there. Narrow the module
-  docstring to say exactly that.
+  load-bearing for Dragon. rhapsody's Concurrent backend puts the path in the message, and
+  `LocalExecutionBackend` puts the text there.
+  **Correction from F1:** Dragon does not surface `SystemExit(<exit code>)`, as this doc and
+  `stdio.py:7` said. rhapsody sets `task["exception"] = SystemExit(code)`, but asyncflow keeps
+  only `Exception` subclasses and wraps anything else as `RuntimeError(str(...))`
+  (`workflow_manager.py:1563-1568`). So the caller sees `RuntimeError('<exit code>')`, as p32
+  did on `22767771`. Narrow the module docstring to say exactly that, **in PR 1** (docs only).
 - **`logged_command()`.** Partly redundant with `capture_stdio`, but it serves a different
   consumer: a log next to the task's outputs, which `scripts/validate_run.py` and operators
   read. Keep it, and note its cost — it makes the command start with `bash`, and
@@ -173,8 +198,21 @@ Also not an escape: `_run_to_completion`'s `asyncio.run` in a worker thread and 
 `run_adaptive` async shim. asyncflow's own error tells callers to wrap sync functions in
 `async def` (`workflow_manager.py:666`).
 
-## Order
+## Order (revised 2026-10-15)
 
-F14 and F17 are small and independent — land them with PR 2, F14 beside F7 (same two-backend
-layout). F15 next, because it restores local coverage of defaults PR 1 already shipped. F16
-last, after F13 has an upstream answer and the trace-schema decision is made.
+1. **With PR 1, before it merges:** F17, F14, F15 part 2 and the `stdio.py` docstring.
+   - F14 changes PR 1's own new API. Changing it after merge would break callers.
+   - The rest is a one-line deletion, tests or docs.
+2. **PR 2:** F15 part 1, beside F7. Both touch the runners' backend layout, and F15 part 1
+   touches the env branch every Dragon task takes.
+3. **Last:** F16, after F13 has an upstream answer and the trace-schema decision is made.
+
+**Risk to F1.** F1 passed on `e3926d8`, which has none of these changes. They leave the Delta
+path unchanged by construction:
+- smb declares the `local` backend it already used, so the same `function_task(backend="local")`
+  registration happens;
+- telemetry is still injected by the manager;
+- the docstring and the tests change no code that runs.
+
+They are proven by the unit tests and the smb mock run (same stage sequence and adaptive
+decisions as PR 1 recorded), not by a new Delta run.
