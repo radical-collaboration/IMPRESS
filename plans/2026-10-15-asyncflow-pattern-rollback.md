@@ -1,6 +1,6 @@
 # Roll back the asyncflow escapes where asyncflow now has the pattern (F14–F17)
 
-**Status:** re-scoped 2026-10-15. F14, F17, F15 part 2 and the `stdio.py` docstring land **with PR 1**, not yet implemented. F15 part 1 goes to PR 2. F16 is open and needs a decision · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), F1 job `22767771`, a test run without rhapsody (115 passed / 5 skipped) · **Depends on:** F1 passed; F16 also on F13
+**Status:** re-scoped 2026-10-15. F14, F17, F15 part 2 and the `stdio.py` docstring are **fixed on `framework-defaults-pr1` (`a74b71d`)**. They are not yet merged and need no Delta run (see [Order](#order-revised-2026-10-15)). F15 part 1 goes to PR 2 and is blocked on an asyncflow quoting defect. F16 is open and needs a decision · **Items:** F14–F17 · **Evidence:** commit `7327c84` (PR 1), radical.asyncflow 0.5.1 (`main` @ `v0.5.1-1-g038d52a`), F1 job `22767771`, a test run without rhapsody (115 passed / 5 skipped) · **Depends on:** F1 passed; F16 also on F13
 
 ## Why
 
@@ -102,6 +102,13 @@ all** — they are exercised only where rhapsody is installed.
    This part stays out of PR 1. The line-739 branch chooses the env and GPU-pinning shape for
    *every* tool task, Dragon included, so it is on the path F1 measured. The runner swap also
    changes dev-path stdio, because `LocalExecutionBackend` ignores `capture_stdio` (below).
+   **Blocked, found 2026-10-15:** `LocalExecutionBackend` cannot run a quoted command. The
+   engine `shlex.split`s the command an executable task returns (`workflow_manager.py:654-661`).
+   The backend's shell mode then re-joins the parts with `" ".join` (`backends.py:318`), which
+   drops the quoting, so `bash -c 'echo a; echo b'` runs as `bash -c echo a; echo b`. Every
+   stage that wraps its command in `logged_command()` returns exactly that shape, so the swap
+   would break five of smb's seven tool stages. Upstream fix: `shlex.join(parts)`, or default
+   to exec mode. Added to F13's asks.
 2. **PR 1.** Tests only, no runtime change: add a `LocalExecutionBackend` variant of `test_task_defaults.py`. It cannot assert
    the current file-path behaviour, because that backend **ignores `capture_stdio`** — it
    pipes and decodes (`backends.py:311-343`; `capture_stdio` appears nowhere in that module
@@ -112,6 +119,11 @@ all** — they are exercised only where rhapsody is installed.
 **Test.** `pytest -q` on a checkout without rhapsody runs the new integration variant rather
 than skipping the module; the rhapsody variant still runs on Delta. Pass: both report the
 stage name and the failing command's last stderr lines in the raised exception.
+
+**Part 2 result (`a74b71d`).** `tests/integration/test_task_defaults_local.py` passes. With
+rhapsody imports blocked, the suite gives 122 passed / 5 skipped; the 5 are the `LocalStage`
+tests, which F16 removes. The test runs script files rather than `bash -c '...'`, because of the
+quoting defect above.
 
 <a id="f16"></a>
 ## F16 — Local stages as function tasks on a named backend
@@ -182,7 +194,7 @@ passing; add one asserting `telemetry is None` for a manager-less pipeline.
 - **`logged_command()`.** Partly redundant with `capture_stdio`, but it serves a different
   consumer: a log next to the task's outputs, which `scripts/validate_run.py` and operators
   read. Keep it, and note its cost — it makes the command start with `bash`, and
-  `comp_desc["executable"] = shlex.split(cmd)[0]` (`workflow_manager.py:648`) is what
+  `comp_desc["executable"] = shlex.split(cmd)[0]` (`workflow_manager.py:654-660`) is what
   `_tel_executable` prefers over the function name (`:739-741`). It is part of why the
   telemetry label needs `workflow_id` at all.
 - **Per-call `workflow_id={pipeline}:{stage}`.** `flow.workflow_scope()`
