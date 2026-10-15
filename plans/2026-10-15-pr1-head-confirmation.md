@@ -1,6 +1,6 @@
 # F18 — PR 1 branch-head confirmation run on Delta
 
-**Status:** open, not yet submitted · **Branch:** `framework-defaults-pr1` · **Blocks:** pushing and merging PR 1 · **Items:** F18; confirms F14, F17
+**Status:** submitted 2026-10-15 as job `22927576` (`<allocation A>`, `gpuA40x4-interactive`, 1 node, 1 h, 32 pipelines, from `9f91e46`) · **Branch:** `framework-defaults-pr1` · **Blocks:** pushing and merging PR 1 · **Items:** F18; confirms F14, F17
 
 ## Why
 
