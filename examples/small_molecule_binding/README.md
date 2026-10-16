@@ -119,8 +119,8 @@ Sequence analysis (`analysis_sequence`) always sets `pass=True`; routing is hand
 
 The `adaptive_decision` function in `run_small_molecule_binding.py` runs after every analysis step and sets `pipeline.next_step`. It uses an **ensemble-based selective average** to determine whether the current result is in a productive neighbourhood of the search space.
 
-> **Performance contract.** `adaptive_decision` is an `async` wrapper that runs its synchronous body
-> (`_adaptive_decision_sync`) via `asyncio.to_thread`, and the similarity readers it depends on
+> **Performance contract.** `adaptive_decision` runs off the event loop (`ImpressManager` runs every
+> adaptive function on the engine's `local` thread-pool backend), and the similarity readers it depends on
 > (`_read_fasta_seq`, `_parse_pdb_ca_coords`) are memoised. Both are load-bearing: the selective
 > average compares the current result against *every* prior entry of its type, so an uncached reader
 > costs O(ensemble) blocking filesystem reads per decision, and because the manager is one process
