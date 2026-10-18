@@ -46,7 +46,7 @@ Pre-flight (2026-10-17):
 - project inodes at 1.92M of the 2.55M soft limit, which leaves room for ~630k;
 - no other job running.
 
-Job: _pending_
+Job: `22967619` (submitted 2026-10-17).
 
 ## Comparison
 
