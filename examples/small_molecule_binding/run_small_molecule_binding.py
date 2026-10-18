@@ -107,24 +107,9 @@ else:
 _ap = argparse.ArgumentParser(add_help=False)
 _ap.add_argument("--n-pipelines", type=int, default=None)
 _ap.add_argument("--work-dir", default=None)
-_args, _ = _ap.parse_known_args()
-
-# Run config is taken from the command line first, environment second.
-#
-# The CLI path exists because environment variables DO NOT reach this process on
-# a multi-node run.  `dragon -w ssh` propagates only a fixed allowlist to the
-# backends (dragon/launcher/wlm/ssh.py:29-41 BASE_ENV_VARNAMES: PATH, PYTHONPATH,
-# LD_LIBRARY_PATH, PYTHONSTARTUP, VIRTUAL_ENV and DRAGON_*), so IMPRESS_N_PIPELINES
-# / IMPRESS_WORK_DIR set by delta_gpu_run.sh are silently dropped and the defaults
-# below would be used instead.  Confirmed on job 22466127, which ran the built-in
-# defaults rather than the config the launcher asked for.  (MPNN_DIR / BOLTZ_CACHE
-# / FOUNDRY_SIF_PATH / SCRATCH survive that hop only because ~/.bashrc exports them
-# and the ssh login shell sources it -- do not rely on that for new settings.)
-# Dragon passes everything after PROG straight through to us, so argv is the one
-# channel that always works.  parse_known_args so any extra argv is ignored.
-_ap = argparse.ArgumentParser(add_help=False)
-_ap.add_argument("--n-pipelines", type=int, default=None)
-_ap.add_argument("--work-dir", default=None)
+# Pass-through routing (nonadaptive_decision) instead of adaptive_decision, for
+# a baseline that differs from the adaptive run in routing alone.
+_ap.add_argument("--nonadaptive", action="store_true")
 _args, _ = _ap.parse_known_args()
 
 cfg = PROD
@@ -134,8 +119,8 @@ cfg = PROD
 # each pipeline keeps roughly one GPU busy -- delta_gpu_run.sh sets this to the
 # allocated GPU count.  Requires a matching p{i}_in/ dir per pipeline (the
 # launcher caps it at however many exist).  replace() rather than mutating
-# PROD in place: it is a module-level singleton that run_nonadaptive.py and
-# run_test_small_molecule_binding.py also import.
+# PROD in place: it is a module-level singleton that
+# run_test_small_molecule_binding.py also imports.
 _n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
 if _n_pipelines:
     cfg = replace(cfg, n_pipelines=int(_n_pipelines))
@@ -422,6 +407,38 @@ def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
     )
 
 
+def nonadaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
+    """Pass-through callback, the baseline for adaptive_decision (--nonadaptive).
+
+    Every stage advances whatever its analysis found: rfd3 -> mpnn/packmin
+    cycles -> fastrelax -> filter_shape -> boltz -> a fresh unguided rfd3.  No
+    retries, no escalation, no ensemble comparison and no guided backbone
+    feedback.  Pass/fail is still computed and logged by the analysis stages.
+    """
+    step = pipeline.state.get('last_analysis_step')
+    routes = {
+        'backbone':  STEP_MPNN,
+        'sequence':  STEP_MPNN,
+        'packmin':   STEP_MPNN,
+        'fastrelax': STEP_INTERFACE,
+        'interface': STEP_AF2,
+    }
+    if step == 'fold':
+        pipeline.state['rfd3_input_pdb'] = None
+        pipeline.next_step = STEP_RFD3
+    elif step in routes:
+        pipeline.next_step = routes[step]
+    else:
+        pipeline.logger.pipeline_log(f"[nonadaptive] Unknown step: {step!r}")
+        pipeline.next_step = STEP_DONE
+
+    passed = (pipeline.state.get('last_analysis_metrics') or {}).get('pass')
+    pipeline.logger.pipeline_log(
+        f"[nonadaptive/{step}] passed={passed} next_step={pipeline.next_step} "
+        f"ensemble={len(pipeline.state.get('ensemble', []))}"
+    )
+
+
 async def impress_smallmol_bind() -> None:
     """Execute the small-molecule binding pipeline."""
     # Resolve paths before launching Dragon (os.getcwd() is the examples dir).
@@ -492,6 +509,8 @@ async def impress_smallmol_bind() -> None:
     print(f"[GPU] devices per node: {gpus or 'none'}; pipeline -> GPU: "
           + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
           flush=True)
+    policy = nonadaptive_decision if _args.nonadaptive else adaptive_decision
+    print(f"[POLICY] {policy.__name__}", flush=True)
     if any(_delay_for(i) for i in range(1, cfg.n_pipelines + 1)):
         print(f"[GPU] staggered start ({slots} GPU slots, {START_STAGGER_S}s per group): "
               + ", ".join(f"p{i}:{_delay_for(i)}s" for i in range(1, cfg.n_pipelines + 1)),
@@ -501,7 +520,7 @@ async def impress_smallmol_bind() -> None:
         PipelineSetup(
             name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_decision,
+            adaptive_fn=policy,
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),

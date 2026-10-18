@@ -18,7 +18,7 @@
 #
 # Example:
 #   sbatch delta_gpu_run.sh
-#   sbatch delta_gpu_run.sh run_nonadaptive.py   # non-adaptive runner
+#   IMPRESS_NONADAPTIVE=1 sbatch delta_gpu_run.sh   # pass-through baseline routing
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
 ##SBATCH --account=<project>-delta-gpu
@@ -245,6 +245,12 @@ RUNNER="${1:-run_small_molecule_binding.py}"
 
 # Run config forwarded as argv (see the comment at the dragon invocations below).
 RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_DIR}" )
+# IMPRESS_NONADAPTIVE=1: route with nonadaptive_decision (pass-through, no
+# retries, escalation or guided feedback) as a baseline for the adaptive run.
+if [ "${IMPRESS_NONADAPTIVE:-0}" = "1" ]; then
+    RUNNER_ARGS+=( --nonadaptive )
+fi
+echo "NONADAPTIVE:       ${IMPRESS_NONADAPTIVE:-0}"
 
 # The runner records how it ended here; see the check after the run.
 RUNNER_STATUS_FILE="${IMPRESS_WORK_DIR}/runner_status"
