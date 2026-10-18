@@ -67,6 +67,57 @@ Caveat: 1 h with a ~4 min stagger measures early-campaign behaviour. The adaptiv
 ensemble history, which drives guided feedback, barely builds in that time.
 
 <a id="result"></a>
-## Result
+## Result — job `22967619` (scored 2026-10-17)
 
-_pending_
+`TIMEOUT` at 01:00:27 on gpub015, as planned. 0 `TaskFailed`, 0 tracebacks. The log shows
+`[POLICY] nonadaptive_decision`, 32 pipelines and the same 60 s stagger as the reference.
+
+The scoring script is `score_run.py`, kept outside the repo. It reproduces `22927576` as 337.0 /
+107.9 / 1043.5 against F18's 337.1 / 108.0 / 1043.8, and also reproduces its stalls, policy share
+and GPU busy figures. The window runs from minute 10 to the last telemetry event, 0.834 h for
+both runs. A fold is the best-`complex_plddt` model of one boltz task, timed by its confidence
+file.
+
+| Metric (min 10–60) | `22927576` adaptive | `22967619` pass-through | ratio |
+|---|---|---|---|
+| rfd3 / mpnn / boltz per node-h | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | 0.78 / 0.50 / 2.46 |
+| boltz per rfd3 | 0.32 | 1.01 | |
+| folds / passed (pass rate) | 90 / 75 (83.3 %) | 222 / 170 (76.6 %) | |
+| high quality (pLDDT ≥ 90, ligand ipTM ≥ 0.8) | 38 (42 % of folds) | 74 (33 %) | |
+| median `complex_plddt` / `ligand_iptm` | 89.6 / 0.836 | 86.7 / 0.810 | |
+| **passing folds per GPU-h** | 22.5 | **51.0** | **2.27×** |
+| **high-quality folds per GPU-h** | 11.4 | **22.2** | **1.95×** |
+| GPU busy (mean / at 100 %) | 70–81 % / 44–61 % | 58–62 % / 36–38 % | |
+| completion stalls > 15 s | 2 (41 s) | 8 (150 s) | |
+| policy task share of wall clock | 0.31 % (2043) | 0.28 % (1774) | |
+
+Whole-run totals for `22967619`: 240 folds, 185 passed and 80 high quality. The analysis stages
+logged 17 backbone, 106 fastrelax, 30 interface and 55 fold failures. Under pass-through every
+one went straight to the next stage.
+
+**Over this 1 h window, pass-through routing produces about 2× the high-quality folds per GPU-h
+of adaptive routing.**
+- The adaptive policy spends about 3.7 mpnn per rfd3 on sequence retries and fastrelax/interface
+  resequencing, and sends only a third of its backbones to boltz.
+- Pass-through runs 2 mpnn per backbone and folds every one.
+- Gating does raise quality per fold: the pass rate is 83 % against 77 %, and the high-quality
+  share is 42 % against 33 %. That gain is too small to pay for the extra work.
+
+Other observations:
+- GPU busy fell by about 15 points while output rose. Each pass-through backbone also runs
+  fastrelax and filter_shape on the CPU, so fewer GPU tasks are in flight at once. The GPU was
+  not the binding limit for this policy.
+- There were more Dragon completion stalls (8 against 2) but none over 30 s (smb 22).
+- Memory peaked at 196 GB of 240 (seff). CPU efficiency was 59 %. The run directory holds
+  1.6 GB.
+
+Limits of the comparison:
+- One run of each policy.
+- The window is 1 h, which is early-campaign behaviour. The adaptive policy's guided feedback
+  depends on ensemble history that barely exists by minute 60. A multi-hour pair is needed
+  before saying pass-through wins in steady state.
+- High-quality per GPU-h is the right headline only if downstream capacity is not the limit.
+  Pass-through hands on more folds, and a larger share of them are weak.
+
+Figure: `figures/nonadaptive_benchmark.py` (house style; panels: cumulative passing and
+high-quality folds, tool throughput, pLDDT × ipTM per fold).
