@@ -110,6 +110,10 @@ _ap.add_argument("--work-dir", default=None)
 # Pass-through routing (nonadaptive_decision) instead of adaptive_decision, for
 # a baseline that differs from the adaptive run in routing alone.
 _ap.add_argument("--nonadaptive", action="store_true")
+# How each analysis stage picks among the candidates its tool produced: "best"
+# (the default) or "first". "first" makes the pipeline open-loop, for the naive
+# reference run; see SmallMoleculeBindingPipeline.selection.
+_ap.add_argument("--selection", choices=("best", "first"), default="best")
 _args, _ = _ap.parse_known_args()
 
 cfg = PROD
@@ -510,7 +514,7 @@ async def impress_smallmol_bind() -> None:
           + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
           flush=True)
     policy = nonadaptive_decision if _args.nonadaptive else adaptive_decision
-    print(f"[POLICY] {policy.__name__}", flush=True)
+    print(f"[POLICY] {policy.__name__}, selection={_args.selection}", flush=True)
     if any(_delay_for(i) for i in range(1, cfg.n_pipelines + 1)):
         print(f"[GPU] staggered start ({slots} GPU slots, {START_STAGGER_S}s per group): "
               + ", ".join(f"p{i}:{_delay_for(i)}s" for i in range(1, cfg.n_pipelines + 1)),
@@ -540,6 +544,7 @@ async def impress_smallmol_bind() -> None:
                 "max_tasks":                 cfg.max_tasks,
                 "gpu_index":                 _gpu_for(i),
                 "start_delay":               _delay_for(i),
+                "selection":                 _args.selection,
             }
         )
         for i in range(1, cfg.n_pipelines + 1)

@@ -19,6 +19,7 @@
 # Example:
 #   sbatch delta_gpu_run.sh
 #   IMPRESS_NONADAPTIVE=1 sbatch delta_gpu_run.sh   # pass-through baseline routing
+#   IMPRESS_NONADAPTIVE=1 IMPRESS_SELECTION=first sbatch delta_gpu_run.sh  # naive reference
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
 ##SBATCH --account=<project>-delta-gpu
@@ -250,7 +251,14 @@ RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_
 if [ "${IMPRESS_NONADAPTIVE:-0}" = "1" ]; then
     RUNNER_ARGS+=( --nonadaptive )
 fi
+# IMPRESS_SELECTION=first: each analysis stage keeps the first candidate its
+# tool produced instead of the best-scoring one, so no metric influences the
+# work (the naive reference). Default "best".
+if [ "${IMPRESS_SELECTION:-best}" = "first" ]; then
+    RUNNER_ARGS+=( --selection first )
+fi
 echo "NONADAPTIVE:       ${IMPRESS_NONADAPTIVE:-0}"
+echo "SELECTION:         ${IMPRESS_SELECTION:-best}"
 
 # The runner records how it ended here; see the check after the run.
 RUNNER_STATUS_FILE="${IMPRESS_WORK_DIR}/runner_status"
