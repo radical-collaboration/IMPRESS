@@ -58,7 +58,7 @@ Pre-flight (2026-10-18): clean tree; `p1_in`…`p32_in` populated; project inode
 2.55M soft limit, ~588k free (`22967619` cost ~36.5k files / 1.6 GB); no other job queued or
 running.
 
-Job: _pending_
+Job: `22970061` (submitted 2026-10-18).
 
 ## Risk: this run may lose pipelines
 
