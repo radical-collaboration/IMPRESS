@@ -114,6 +114,11 @@ _ap.add_argument("--nonadaptive", action="store_true")
 # (the default) or "first". "first" makes the pipeline open-loop, for the naive
 # reference run; see SmallMoleculeBindingPipeline.selection.
 _ap.add_argument("--selection", choices=("best", "first"), default="best")
+# Per-pipeline ensemble budget. PROD's 300 was sized for a 1 h run and never
+# bound there (the fastest pipeline reached 65). Over 4 h it does bind, and a
+# pipeline that retires mid-run drops the node's concurrency, so per-node-hour
+# rates stop being comparable across runs. Raise it for long runs.
+_ap.add_argument("--max-tasks", type=int, default=None)
 _args, _ = _ap.parse_known_args()
 
 cfg = PROD
@@ -128,6 +133,10 @@ cfg = PROD
 _n_pipelines = _args.n_pipelines or os.getenv("IMPRESS_N_PIPELINES")
 if _n_pipelines:
     cfg = replace(cfg, n_pipelines=int(_n_pipelines))
+
+_max_tasks = _args.max_tasks or os.getenv("IMPRESS_MAX_TASKS")
+if _max_tasks:
+    cfg = replace(cfg, max_tasks=int(_max_tasks))
 
 # Thread caps are NOT set here.  Every tool-running stage is an asyncflow task
 # whose backend launches it with its own per-task env
@@ -514,7 +523,8 @@ async def impress_smallmol_bind() -> None:
           + ", ".join(f"p{i}:{_gpu_for(i)}" for i in range(1, cfg.n_pipelines + 1)),
           flush=True)
     policy = nonadaptive_decision if _args.nonadaptive else adaptive_decision
-    print(f"[POLICY] {policy.__name__}, selection={_args.selection}", flush=True)
+    print(f"[POLICY] {policy.__name__}, selection={_args.selection}, "
+          f"max_tasks={cfg.max_tasks}", flush=True)
     if any(_delay_for(i) for i in range(1, cfg.n_pipelines + 1)):
         print(f"[GPU] staggered start ({slots} GPU slots, {START_STAGGER_S}s per group): "
               + ", ".join(f"p{i}:{_delay_for(i)}s" for i in range(1, cfg.n_pipelines + 1)),
