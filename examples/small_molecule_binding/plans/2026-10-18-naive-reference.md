@@ -111,6 +111,53 @@ Caveat, as for smb 23: 1 h with a ~4 min stagger is early-campaign behaviour, an
 per configuration.
 
 <a id="result"></a>
-## Result
+## Result — job `22970061` (scored 2026-10-18): **inconclusive, rerun needed**
 
-_pending_
+`TIMEOUT` at 01:00:26 on gpub002, as planned. `[POLICY] nonadaptive_decision, selection=first`.
+
+**The Dragon fault above cost 18 of the 32 pipelines.** Active pipelines by 5-minute bucket: 32
+for the first 10 minutes, then **14 for the rest of the run**. The whole scoring window therefore
+ran at 44 % of the intended concurrency, so this job's per-node-h rates measure the fault, not
+the selection policy. They are reported below only to be explicit about what was lost.
+
+| Per node-h (min 10–end) | `22927576` adaptive | `22967619` pass-through | `22970061` naive |
+|---|---|---|---|
+| surviving pipelines | 32 | 32 | **14** |
+| rfd3 / mpnn / boltz | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | 127.9 / 259.4 / 127.9 |
+| passing folds / GPU-h | 22.5 | 51.0 | 24.4 |
+| high-quality / GPU-h | 11.4 | 22.2 | 8.8 |
+| GPU busy (mean) | 70–81 % | 58–62 % | 17–42 % |
+| `TaskFailed`, stalls > 15 s | 0, 2 | 0, 8 | **18**, 27 |
+
+Normalising by surviving pipeline instead, which at least divides by the work actually attempted:
+
+| Per surviving pipeline-h | adaptive | pass-through | naive |
+|---|---|---|---|
+| passing folds | 2.81 | 6.37 | 6.96 |
+| high-quality folds | 1.42 | 2.77 | 2.52 |
+| high-quality share of folds | 42.2 % | 33.3 % | 27.6 % |
+| median `complex_plddt` | 89.6 | 86.7 | 86.4 |
+
+**This does not settle the question, and the per-pipeline figures must not be quoted as if it
+did.** With 14 pipelines on 4 GPUs the naive run had far less GPU contention than the 32-pipeline
+runs (GPUs 17–42 % busy against 58–62 %), which flatters any per-pipeline rate. The honest
+reading is only the direction of the quality effect, which is consistent with the other two runs:
+dropping within-stage picking lowers the high-quality share again, 42.2 % → 33.3 % → 27.6 %, and
+the median `complex_plddt` barely moves after the first step.
+
+**Implementation gap found while scoring.** The `pool_best_*` metrics do reach
+`last_analysis_metrics`, but nothing writes them to disk — there is no log line and telemetry does
+not carry the metrics dict — so `grep pool_best impress_22970061.out` returns 0 and the
+"what was the picking buying" measurement did not land. Before the rerun, each analysis stage
+should log its chosen and pool-best values, so the cost of selection is recoverable from the job
+log.
+
+### Next
+
+1. Add the `pool_best` log line (above).
+2. Rerun the same job for a clean hour at 32 pipelines, and only then fill in the three-way
+   comparison.
+3. The fault itself is evidence for smb 15 (one failed stage kills its pipeline — 5 immediate
+   `NoneType` deaths here, and 18 pipelines gone in total) and possibly smb 22. A single
+   runtime hiccup costing 56 % of a run's concurrency is a resilience problem worth its own
+   item, independent of this benchmark.
