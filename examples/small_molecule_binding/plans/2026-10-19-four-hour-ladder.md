@@ -89,7 +89,28 @@ Fallback for the third is `--account=bblj-delta-gpu`; lower fairshare, so expect
 and say so in the write-up if it sampled the cluster at a different time. Cost is 48 GPU-hours
 against balances of 18,737 (`bdyk`) and 2,852 (`bblj`).
 
-Jobs: (to be recorded at submission).
+Jobs, submitted 2026-10-19 15:38: **`23020138`** adaptive, **`23020139`** pass-through,
+**`23020140`** naive. All three `PENDING` on `bdyk-delta-gpu`.
+
+Pre-flight at submission:
+- clean tree at `fbbb097` on `smb-nonadaptive-benchmark`;
+- 768,433 inodes free of the 2,550,000 soft limit, against a ~665,000 projection. Under the
+  800,000 gate because job `23019576` had not yet finished re-archiving the `22534628` snapshot,
+  but the margin *improves* during the runs: they accumulate ~166k files/h over 4 h, while the
+  snapshot deletion frees 383,415 within the hour;
+- `p1_in`…`p32_in` all hold `ALR.params`, `ALR.smiles` and `ALR_binder_design.json`, one distinct
+  checksum each across all 32 (BACKLOG 9 — the launcher does not check this itself, and an
+  incomplete input dir silently cost `22670942` seven of its eight pipelines);
+- `WORK_DIR`, `FOUNDRY_SIF_PATH`, `MPNN_DIR` and `BOLTZ_CACHE` set in the submitting shell, so
+  `--export=ALL` carries them and all three use the shared `foundry.sif` rather than each
+  extracting a sandbox to `/tmp`;
+- launcher audited for shared-submit-dir writes: every one is per-job scoped or idempotent, and
+  the `ddict_orc_*` sweep is age-scoped.
+
+`sbatch --test-only` estimated 2026-10-21T00:33 for both allocations, with 1,488 jobs pending
+against 263 running on the partition — so there was no queue advantage in splitting across
+`bblj-delta-gpu`, and all three went to `bdyk`. Treat that estimate as an upper bound: on
+2026-10-06 `--test-only` said Oct 25 for one allocation and the real start was the same morning.
 
 ## Comparison
 
