@@ -85,7 +85,33 @@ RUN_STYLES: dict[str, RunStyle] = {
     "22999614": RunStyle(
         label="naive / open-loop (22999614)", short="naive",
         color="#9e3f1c", cmap="OrRd", marker="^", tier="lowest"),
+
+    # The 4 h ladder (smb 25). Same three configurations, so each keeps the
+    # hue its 1 h counterpart has: colour follows the *entity*, and the entity
+    # being compared is the policy, not the job. That also keeps the palette at
+    # the four validated hues -- a fifth would mean re-running the dataviz
+    # validator over all pairs.
+    "23020138": RunStyle(
+        label="adaptive, 4 h (23020138)", short="adaptive 4h",
+        color="#ae8a16", cmap="YlOrBr", marker="s", tier="lower"),
+    "23020139": RunStyle(
+        label="pass-through, 4 h (23020139)", short="pass-through 4h",
+        color="#2176c7", cmap="Blues", marker="o", tier="best"),
+    "23020140": RunStyle(
+        label="naive / open-loop, 4 h (23020140)", short="naive 4h",
+        color="#9e3f1c", cmap="OrRd", marker="^", tier="lowest"),
 }
+
+# The 1 h and 4 h ladders are two independent comparisons, each cut to its own
+# equal window: WINDOW_MIN for the three 1 h runs, WINDOW_4H_MIN for the three
+# 4 h ones. They are never drawn on one time axis -- a 1 h run beside a 4 h run
+# compares depth of search, not policy, which is the thing the equal-window
+# rule exists to prevent. Cross-ladder comparison belongs in a rate table.
+WINDOW_4H_MIN = 240
+
+# The runs in each ladder, in the order figures should draw them.
+LADDER_1H = ["22927576", "22967619", "22999614"]
+LADDER_4H = ["23020138", "23020139", "23020140"]
 
 # The equal window, in minutes. Wall clocks differ between runs, and a time
 # series drawn to each run's own end compares a deep search against a shallow
@@ -98,7 +124,17 @@ WINDOW_MIN = 60
 # are therefore comparable on rate; a failed run is evidence, not a rate.
 ORDER = list(RUN_STYLES)
 CLEAN_ORDER = [j for j, s in RUN_STYLES.items() if s.tier != "failed"]
-BEST = next((j for j, s in RUN_STYLES.items() if s.tier == "best"), None)
+
+
+def best_of(ladder: list[str]) -> str | None:
+    """The best-tier run within one ladder.
+
+    Takes a ladder rather than scanning RUN_STYLES, because tiers repeat once
+    a project has more than one comparison in flight: both 22967619 and
+    23020139 are tier "best", each within its own ladder. A module-level
+    `BEST = next(... tier == "best")` would silently return whichever was
+    declared first, so it is gone -- pass LADDER_1H or LADDER_4H."""
+    return next((j for j in ladder if RUN_STYLES[j].tier == "best"), None)
 
 
 def style_for(job: str) -> RunStyle:
