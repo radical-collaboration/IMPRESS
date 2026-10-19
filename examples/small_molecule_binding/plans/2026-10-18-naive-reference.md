@@ -60,6 +60,27 @@ running.
 
 Job: `22970061` (submitted 2026-10-18).
 
+## In-flight fault on `22970061` (2026-10-18 00:27)
+
+**Not the selection risk below — a Dragon runtime fault.** At 00:27:13–00:27:33, ~9 minutes in,
+18 tasks failed at once, all with
+`RuntimeError('ProcessGroup manager is not in state State.DEAD')`, across every stage type
+(`rfd3`, `fastrelax`, `boltz`) and 18 different pipelines. Nothing in the selection change can
+produce a simultaneous failure of tasks that were already running, and the error comes from
+Dragon's process-group layer, not from the pipeline.
+
+Five pipelines then died through smb 15 (`'NoneType' object is not subscriptable` after a
+`TaskFailed`): p9, p10, p15, p19, p20. The run continued, with 28 of 32 pipelines active a minute
+later, and no further `State.DEAD` errors in the following minutes.
+
+Decision (user, 2026-10-18): let it finish and score it with the caveat. **The throughput figures
+from this job are therefore a floor, not a clean measurement** — some concurrency was lost from
+roughly minute 9. The Result section must report surviving pipelines over time beside the rates,
+and a clean rerun is needed before the three-way comparison is quoted as final.
+
+This is new evidence for smb 15 (a failed stage kills its pipeline) and possibly for smb 22
+(Dragon delivery faults). It is not evidence about open-loop selection.
+
 ## Risk: this run may lose pipelines
 
 Taking `model_0` regardless of clashes feeds structurally bad backbones downstream, and
