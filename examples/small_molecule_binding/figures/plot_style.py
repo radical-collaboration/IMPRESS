@@ -79,6 +79,12 @@ RUN_STYLES: dict[str, RunStyle] = {
     "22967619": RunStyle(
         label="pass-through (22967619)", short="pass-through",
         color="#2176c7", cmap="Blues", marker="o", tier="best"),
+    # Tied with pass-through on yield (51.4 vs 51.0 passing folds/GPU-h), so
+    # the tier here is not a ranking against it -- blue was assigned to
+    # pass-through first and colour follows the entity, never its rank.
+    "22999614": RunStyle(
+        label="naive / open-loop (22999614)", short="naive",
+        color="#9e3f1c", cmap="OrRd", marker="^", tier="lowest"),
 }
 
 # The equal window, in minutes. Wall clocks differ between runs, and a time

@@ -159,9 +159,70 @@ log.
    mock, `first` logs `chosen_id=1 conf=0.3366 pool_best_conf=0.5670` against `best`'s
    `chosen_id=3 conf=0.5670`.
 2. Rerun the same job for a clean hour at 32 pipelines, and only then fill in the three-way
-   comparison. **Submitted as `22999614`** (2026-10-18). Scoring must first confirm 32 surviving
-   pipelines; if the fault recurs, the rerun is evidence about Dragon, not about selection.
+   comparison. **Done: `22999614` passed** — see the Result below.
 3. The fault itself is evidence for smb 15 (one failed stage kills its pipeline — 5 immediate
    `NoneType` deaths here, and 18 pipelines gone in total) and possibly smb 22. A single
    runtime hiccup costing 56 % of a run's concurrency is a resilience problem worth its own
    item, independent of this benchmark.
+
+
+<a id="result2"></a>
+## Result — job `22999614` (scored 2026-10-18): the clean rerun
+
+`TIMEOUT` at 01:00:14 on gpub091, as planned. **0 `TaskFailed`, 0 `State.DEAD`, 0 `NoneType`
+deaths, and 32 of 32 pipelines active in every 10-minute bucket**, so unlike `22970061` this one
+is comparable. 4 completion stalls > 15 s (max 22 s).
+
+| Min 10–60 | `22927576` adaptive | `22967619` pass-through | `22999614` naive |
+|---|---|---|---|
+| rfd3 / mpnn / boltz per node-h | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | 252.6 / 505.3 / 252.6 |
+| boltz per rfd3 | 0.32 | 1.01 | 1.00 |
+| folds / passed (pass rate) | 90 / 75 (83.3 %) | 222 / 170 (76.6 %) | 212 / 171 (**80.7 %**) |
+| high quality | 38 (42.2 %) | 74 (33.3 %) | 67 (31.6 %) |
+| median `complex_plddt` / `ligand_iptm` | 89.6 / 0.836 | 86.7 / 0.810 | 87.7 / 0.815 |
+| **passing folds per GPU-h** | 22.5 | 51.0 | **51.4** |
+| **high-quality folds per GPU-h** | 11.4 | 22.2 | 20.2 |
+| GPU busy (mean) | 70–81 % | 58–62 % | 61–69 % |
+| `TaskFailed`, stalls > 15 s | 0, 2 | 0, 8 | 0, 4 |
+
+**Removing within-stage selection changed almost nothing.** Naive matches pass-through on
+passing folds per GPU-h (51.4 vs 51.0, +0.8 %) and is 9 % below it on high-quality folds
+(20.2 vs 22.2) — while its pass rate is *higher* (80.7 % vs 76.6 %) and its median pLDDT is
+*higher* (87.7 vs 86.7). Those differences point in opposite directions and come from one run
+each, so the honest conclusion is that **greedy per-stage picking is worth roughly nothing here**,
+not that it is harmful or helpful.
+
+### Why: the candidate pools are nearly homogeneous
+
+The new `[selection/*]` log lines say it directly, over the whole run:
+
+| Selection point | Calls | What picking the best was buying |
+|---|---|---|
+| backbone (pool of 4 rfd3 models) | 256 | the first model already tied the pool's best on ligand clashes **253/256 times (99 %)**; it had more clashes only 3 times (1 %). Median `max_ca_deviation` penalty **0.008 Å**, mean 0.059, worst 0.951 — against a 1.0 Å threshold |
+| sequence (pool of 40, then 4) | 496 | median confidence left on the table **0.0132** (chosen 0.4623 vs pool best 0.4777, ~3 %); worst case 0.0565 |
+
+RFD3 with the same spec produces four backbones of near-identical quality, and LigandMPNN's
+candidates sit in a narrow confidence band, so "best of N" and "first of N" are almost the same
+structure. That is a property of these pools, not a general result: a tool whose candidates vary
+widely would make selection matter.
+
+### What the three runs say together
+
+1. **Adaptive routing is the expensive part, and it did not pay for itself over 1 h.** It spends
+   ~3.7 mpnn per rfd3 on retries and folds a third of its backbones, for 22.5 passing folds per
+   GPU-h against ~51 for both open-loop variants. Its folds *are* better (42.2 % high quality vs
+   ~32 %), but not by enough to cover a 2.3× yield gap.
+2. **Within-stage picking is nearly free to drop**, for the reason above.
+3. So the yield difference in this workflow comes almost entirely from **how many backbones reach
+   boltz**, not from which candidate each stage picks.
+
+### Limits
+
+- One run per configuration; no spread. The naive-vs-pass-through differences here are within
+  what run-to-run variation would plausibly produce, which is the basis for calling them a tie.
+- 1 h, ~4 min of it stagger. The adaptive policy's guided feedback depends on ensemble history
+  that barely exists by minute 60, so this measures early-campaign behaviour. A multi-hour pair
+  is the next thing to run before any of this is treated as settled.
+- Quality here means Boltz self-confidence (pLDDT, ligand ipTM), not an experimental result.
+
+Figure: `figures/nonadaptive_benchmark.py` → `figures/nonadaptive_benchmark.png`, all three runs.
