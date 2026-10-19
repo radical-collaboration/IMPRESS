@@ -154,9 +154,13 @@ log.
 
 ### Next
 
-1. Add the `pool_best` log line (above).
+1. Add the `pool_best` log line (above). **Done** (`6905313`): `analysis_backbone` and
+   `analysis_sequence` each log `[selection/<stage>] mode=... chosen=... pool_best_...`. In the
+   mock, `first` logs `chosen_id=1 conf=0.3366 pool_best_conf=0.5670` against `best`'s
+   `chosen_id=3 conf=0.5670`.
 2. Rerun the same job for a clean hour at 32 pipelines, and only then fill in the three-way
-   comparison.
+   comparison. **Submitted as `22999614`** (2026-10-18). Scoring must first confirm 32 surviving
+   pipelines; if the fault recurs, the rerun is evidence about Dragon, not about selection.
 3. The fault itself is evidence for smb 15 (one failed stage kills its pipeline — 5 immediate
    `NoneType` deaths here, and 18 pipelines gone in total) and possibly smb 22. A single
    runtime hiccup costing 56 % of a run's concurrency is a resilience problem worth its own
