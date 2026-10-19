@@ -891,6 +891,16 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     'pool_best_dev':     pool_best_dev[1] if pool_best_dev else None,
                 },
             })
+            # One line per call so the cost of picking is recoverable from the
+            # job log: last_analysis_metrics stays in memory and telemetry does
+            # not carry it.
+            self.logger.pipeline_log(
+                f"[selection/backbone] mode={self.selection} "
+                f"chosen={best['file']} clashes={best['clashes']} dev={best['dev']} "
+                f"pool_best_clashes={pool_best_dev[0] if pool_best_dev else None} "
+                f"pool_best_dev={pool_best_dev[1] if pool_best_dev else None} "
+                f"pool_n={len(json_files)}"
+            )
             self.state['ensemble'].append((
                 ETYPE_BACKBONE, best['ss'], self.state.get('rfd3_input_pdb'), backbone_path,
             ))
@@ -1022,6 +1032,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 # Recorded for the selection benchmark; nothing reads it.
                 'pool_best_confidence':    pool_best_conf,
             }
+            self.logger.pipeline_log(
+                f"[selection/sequence] mode={self.selection} chosen_id={best_id} "
+                f"conf={best_conf:.4f} pool_best_conf={pool_best_conf:.4f}"
+            )
             self.state['ensemble'].append((
                 ETYPE_SEQUENCE, best_conf,
                 self.state.get('best_backbone_path'), self.state.get('last_seq_fasta'),

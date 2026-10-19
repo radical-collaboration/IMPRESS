@@ -226,6 +226,10 @@ def register_mock_tasks(pipeline):
             'best_ligand_confidence':  best_lig_conf,
             'pool_best_confidence':    pool_best_conf,
         }
+        pipeline.logger.pipeline_log(
+            f"[selection/sequence] mode={pipeline.selection} chosen_id={best_id} "
+            f"conf={best_conf:.4f} pool_best_conf={pool_best_conf:.4f}"
+        )
         pipeline.state['ensemble'].append((
             ETYPE_SEQUENCE, best_conf, pipeline.state.get('best_backbone_path'),
             pipeline.state.get('last_seq_fasta'),
