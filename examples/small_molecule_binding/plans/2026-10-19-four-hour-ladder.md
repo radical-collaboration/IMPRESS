@@ -135,6 +135,82 @@ Also check the `[selection/backbone]` and `[selection/sequence]` lines: whether 
 candidate pools of hour 1 stay that way over 4 h is the mechanism behind the 1 h tie, and the
 thing most likely to move.
 
-## Result
+<a id="result"></a>
+## Result — first three runs (scored 2026-10-19)
 
-(to be filled in after the runs)
+All three reached `TIMEOUT` at 4 h as planned. **`23020138` is not a clean comparator**: the
+Dragon `ProcessGroup` fault (BACKLOG 26) hit it at minute 23 and killed 10 of 32 pipelines in a
+16 s burst, so it spent ~97 % of the window at 22. It is re-run as `23029475`, with `23029868`
+submitted alongside as insurance against a repeat.
+
+| Metric (min 10–240) | `23020138` adaptive | `23020139` pass-through | `23020140` naive |
+|---|---|---|---|
+| pipelines surviving | **22** of 32 | 32 of 32 | 31 of 32 |
+| rfd3 / mpnn / boltz per node-h | 290.8 / 912.8 / 117.1 | 271.0 / 540.2 / 269.4 | 273.4 / 545.9 / 274.7 |
+| boltz per rfd3 | 0.40 | 0.99 | 1.00 |
+| folds / passed (pass rate) | 449 / 415 (**92.4 %**) | 1030 / 814 (79.0 %) | 1050 / 805 (76.7 %) |
+| high quality | 272 (**60.6 %**) | 342 (33.2 %) | 317 (30.2 %) |
+| median `complex_plddt` / `ligand_iptm` | **93.3** / 0.864 | 87.0 / 0.819 | 86.3 / 0.810 |
+| **passing folds per GPU-h** | 27.1 | **53.2** | 52.5 |
+| **high-quality folds per GPU-h** | 17.8 | **22.4** | 20.7 |
+| per pipeline-h: passing / high quality | 4.93 / **3.23** | 6.65 / 2.80 | 6.78 / 2.67 |
+| host RAM peak (`hostmem.csv`) | 168.4 GB (69 %) | 165.8 GB (68 %) | 170.4 GB (70 %) |
+| `TaskFailed` | 10 | **0** | 2 |
+| policy task share of wall clock | 0.41 % | 0.30 % | 0.30 % |
+
+### The 1 h result does not survive the longer window
+
+High-quality folds per GPU-h, 1 h → 4 h:
+
+| | adaptive | pass-through | naive |
+|---|---|---|---|
+| 1 h | 11.4 | 22.2 | 20.2 |
+| 4 h | **17.8** (+56 %) | 22.4 (+1 %) | 20.7 (+2 %) |
+
+**Adaptive improves with time; the policies that keep no books do not.** The pass-through to
+adaptive ratio falls from **1.95× to 1.26×**. That is the mechanism both earlier plan docs
+predicted and could not test: adaptive's guided feedback runs on ensemble history, which barely
+exists at minute 60. Pass-through and naive have nothing to accumulate, and accumulated nothing.
+
+Adaptive reached that while **handicapped by 10 lost pipelines**. Per pipeline-hour it already
+leads on quality — 3.23 high-quality folds against 2.80 and 2.67.
+
+**This is not yet a claim that adaptive wins.** Per-pipeline flatters it: 22 pipelines on 4 GPUs
+is less contention per pipeline, so that normalisation is unfair in adaptive's favour exactly as
+per-GPU-h is unfair against it. The defensible statement is narrower: *the ~2× gap measured at
+1 h is an artefact of the window, and the true 4 h gap is at or below 1.26×.* `23029475` settles
+it at 32 pipelines.
+
+Pass-through vs naive is unchanged by the longer window: 53.2 vs 52.5 passing folds per GPU-h is
+still a tie, and pass-through's 8 % edge on high quality (22.4 vs 20.7) matches its 1 h margin.
+Four hours of deeper search does not make within-stage picking start to matter.
+
+### Host RAM: the 93 % high-water mark was a measurement artefact
+
+The new `hostmem.csv` sampler (1,440 samples per run) peaks at **68–70 %** of the 243 GB request,
+while `seff` reports 82–92 % for the same runs — a gap of 31–54 GB. `seff`'s Memory Utilized is
+MaxRSS summed across processes, which double-counts pages shared between the many concurrent tool
+subprocesses. The telemetry's `node_memory_utilization`, sampled every ~5 min, agreed with
+`hostmem.csv` all along; `seff` was the outlier.
+
+Over a 4× longer window the peak rose only from ~135 GB (1 h) to ~170 GB, so this is a
+concurrency ceiling rather than accumulation. **The `--mem` headroom concern was overstated**, and
+host RAM is not the binding constraint at 32 pipelines. The `240G → 243G` change was harmless but
+unnecessary.
+
+### Other observations
+
+- **Storage, measured:** the three runs cost 671,412 inodes against a 665,032 projection — linear
+  extrapolation from the 1 h runs was accurate to 1 %. Adaptive is the expensive one (282,695
+  paths against ~192k), because retries mean more tasks per fold.
+- `23020139` ran **0 `TaskFailed` across 4 h and 32 pipelines**, so the stack is sound; the fault
+  is sporadic rather than load-induced.
+- The policy callback stayed cheap at 4 h: 0.30–0.41 % of wall clock over ~7,400 calls per run,
+  against the 67.1 % that capped `22534628`.
+
+### Limits
+
+- One run per configuration, and the adaptive one is compromised.
+- `23020138` and `23020139` overlapped in time; `23020140` started later. Different nodes
+  throughout (gpub051 / gpub072 / gpub061).
+- Quality is still Boltz self-confidence, not an experimental result.
