@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from impress import ImpressManager
+from impress import ImpressManager, PipelineSetup
 
 from .test_manager_core import MockPipeline
 
@@ -25,8 +25,10 @@ class TestAdaptiveFunctions:
 
         await impress_manager._run_adaptive_fn(pipeline)
 
-        # Check that adaptive function was called
-        adaptive_fn.assert_called_once_with(pipeline)
+        # Called with the live pipeline, labelled for telemetry
+        adaptive_fn.assert_called_once_with(
+            pipeline, workflow_id="test_pipeline:adaptive"
+        )
 
         # Check that flags were reset
         assert pipeline.invoke_adaptive_step is False
@@ -61,7 +63,9 @@ class TestAdaptiveFunctions:
         await impress_manager._run_adaptive_fn(pipeline)
 
         # Check that exception was handled
-        adaptive_fn.assert_called_once_with(pipeline)
+        adaptive_fn.assert_called_once_with(
+            pipeline, workflow_id="test_pipeline:adaptive"
+        )
 
         # Check that flags were reset even after exception
         assert pipeline.invoke_adaptive_step is False
@@ -104,10 +108,41 @@ def _adaptive_pipeline(name="p1", fn=None):
     return pipeline
 
 
-class TestAdaptiveOffload:
-    async def test_blocking_callback_does_not_stall_the_loop(self, impress_manager):
-        def blocking(pipeline):
-            time.sleep(0.5)  # stands in for blocking file I/O
+class TestAdaptiveRouting:
+    """The caller declares the backend; the manager only awaits the task.
+
+    There is one execution path, so these cover the task being awaited and
+    labelled, and anything that is not a task being rejected up front.
+    """
+
+    async def test_declared_task_is_awaited_and_labelled(self):
+        flow = LocalBackendFlow()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
+        calls = []
+
+        async def adaptive_decision(pipeline):
+            calls.append(pipeline.name)
+
+        task = flow.function_task(backend="local")(adaptive_decision)
+        for name in ("p1", "p2"):
+            await manager._run_adaptive_fn(_adaptive_pipeline(name, task))
+
+        assert calls == ["p1", "p2"]
+        # Declared once by the caller; the manager never registers it again.
+        assert flow.registered == [("adaptive_decision", "local")]
+        assert [c["workflow_id"] for c in flow.calls] == ["p1:adaptive", "p2:adaptive"]
+
+    async def test_declared_task_runs_off_the_loop(self):
+        """The engine owns execution, so a body with no awaits cannot stall it."""
+        flow = LocalBackendFlow()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
+        seen = {}
+
+        async def no_awaits(pipeline):
+            seen["thread"] = threading.get_ident()
+            time.sleep(0.3)  # stands in for blocking file I/O
 
         ticks = 0
 
@@ -117,104 +152,75 @@ class TestAdaptiveOffload:
                 await asyncio.sleep(0.01)
                 ticks += 1
 
+        task = flow.function_task(backend="local")(no_awaits)
         tick_task = asyncio.create_task(ticker())
-        await impress_manager._run_adaptive_fn(_adaptive_pipeline(fn=blocking))
+        await manager._run_adaptive_fn(_adaptive_pipeline(fn=task))
         tick_task.cancel()
+
+        assert seen["thread"] != threading.get_ident()
         assert ticks > 10
 
-    async def test_async_callback_without_awaits_runs_off_loop(self, impress_manager):
-        seen = {}
+    async def test_mutations_reach_the_live_pipeline(self):
+        flow = LocalBackendFlow()
+        manager = ImpressManager(flow, use_colors=False)
+        manager.logger = Mock()
 
-        async def no_awaits(pipeline):
-            seen["thread"] = threading.get_ident()
-
-        await impress_manager._run_adaptive_fn(_adaptive_pipeline(fn=no_awaits))
-        assert seen["thread"] != threading.get_ident()
-
-    async def test_sync_callback_result_applied_to_live_pipeline(self, impress_manager):
-        def decide(pipeline):
+        async def decide(pipeline):
             pipeline.next_step = 3
 
-        pipeline = _adaptive_pipeline(fn=decide)
-        await impress_manager._run_adaptive_fn(pipeline)
+        pipeline = _adaptive_pipeline(fn=flow.function_task(backend="local")(decide))
+        await manager._run_adaptive_fn(pipeline)
         assert pipeline.next_step == 3
         assert pipeline._adaptive_barrier.is_set()
 
-    async def test_offload_disabled_runs_on_loop(self, mock_flow):
-        manager = ImpressManager(mock_flow, use_colors=False, adaptive_offload=False)
+    @pytest.mark.parametrize(
+        "fn, kind",
+        [
+            (lambda pipeline: None, "callable"),
+            (AsyncMock(), "callable"),
+        ],
+        ids=["sync-def", "async-mock"],
+    )
+    async def test_undeclared_adaptive_fn_rejected_before_any_pipeline(
+        self, mock_flow, fn, kind
+    ):
+        manager = ImpressManager(mock_flow, use_colors=False)
         manager.logger = Mock()
-        seen = {}
+        setup = PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=fn)
 
-        async def on_loop(pipeline):
-            seen["thread"] = threading.get_ident()
+        with pytest.raises(TypeError, match=r"p1'.*not an engine task"):
+            manager.submit_new_pipelines([setup])
 
-        await manager._run_adaptive_fn(_adaptive_pipeline(fn=on_loop))
-        assert seen["thread"] == threading.get_ident()
+        # Nothing started: the whole batch is checked first.
+        assert manager.pipeline_tasks == {}
 
-    async def test_routes_to_declared_backend(self):
-        flow = LocalBackendFlow()
-        manager = ImpressManager(flow, use_colors=False, adaptive_backend="local")
+    async def test_bare_coroutine_function_names_its_kind(self, mock_flow):
+        manager = ImpressManager(mock_flow, use_colors=False)
         manager.logger = Mock()
-        calls = []
 
-        def adaptive_decision(pipeline):
-            calls.append(pipeline.name)
+        async def not_a_task(pipeline):
+            pass
 
-        for name in ("p1", "p2"):
-            await manager._run_adaptive_fn(_adaptive_pipeline(name, adaptive_decision))
+        setup = PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=not_a_task)
+        with pytest.raises(TypeError, match="plain coroutine function"):
+            manager.submit_new_pipelines([setup])
 
-        assert calls == ["p1", "p2"]
-        # Registered once, labelled after the callback, routed to "local".
-        assert flow.registered == [("adaptive_decision", "local")]
-        assert [c["workflow_id"] for c in flow.calls] == ["p1:adaptive", "p2:adaptive"]
-
-    async def test_backend_present_but_not_declared_uses_a_thread(self):
-        flow = LocalBackendFlow()
-        manager = ImpressManager(flow, use_colors=False)
+    async def test_no_adaptive_fn_is_allowed(self, mock_flow):
+        manager = ImpressManager(mock_flow, use_colors=False)
         manager.logger = Mock()
-        seen = {}
+        manager._check_adaptive_fns(
+            [PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=None)]
+        )
 
-        def adaptive_decision(pipeline):
-            seen["thread"] = threading.get_ident()
-
-        await manager._run_adaptive_fn(_adaptive_pipeline(fn=adaptive_decision))
-        assert seen["thread"] != threading.get_ident()
-        assert flow.registered == []  # no silent switch to "local"
-
-    async def test_start_rejects_unknown_backend_before_any_work(self):
-        flow = LocalBackendFlow()
-        manager = ImpressManager(flow, use_colors=False, adaptive_backend="callbacks")
-        manager.logger = Mock()
-        manager.submit_new_pipelines = Mock()
-
-        with pytest.raises(ValueError, match="'callbacks'.*\\['local'\\]"):
-            await manager.start(pipeline_setups=[])
-        manager.submit_new_pipelines.assert_not_called()
-
-    async def test_start_skips_check_when_backend_table_unreadable(self, mock_flow):
-        manager = ImpressManager(mock_flow, use_colors=False, adaptive_backend="local")
-        manager._check_adaptive_backend()  # no _backends on the mock: no error
-
-    async def test_flow_task_passed_through(self):
+    async def test_exception_still_releases_barrier(self):
         flow = LocalBackendFlow()
         manager = ImpressManager(flow, use_colors=False)
         manager.logger = Mock()
-        calls = []
 
-        async def already_a_task(pipeline):
-            calls.append(pipeline.name)
-
-        task = flow.function_task(backend="local")(already_a_task)
-        flow.registered.clear()
-        await manager._run_adaptive_fn(_adaptive_pipeline(fn=task))
-        assert calls == ["p1"]
-        assert flow.registered == []  # not wrapped a second time
-
-    async def test_offloaded_exception_still_releases_barrier(self, impress_manager):
-        def raises(pipeline):
+        async def raises(pipeline):
             raise ValueError("bad decision")
 
-        pipeline = _adaptive_pipeline(fn=raises)
-        await impress_manager._run_adaptive_fn(pipeline)
-        impress_manager.logger.adaptive_failed.assert_called_once()
+        pipeline = _adaptive_pipeline(fn=flow.function_task(backend="local")(raises))
+        await manager._run_adaptive_fn(pipeline)
+        manager.logger.adaptive_failed.assert_called_once()
         assert pipeline._adaptive_barrier.is_set()

@@ -25,7 +25,11 @@ async def _make_flow(work_dir):
     compute = await LocalExecutionBackend(
         ThreadPoolExecutor(max_workers=2), name="compute"
     )
-    local = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=2), name="local")
+    # Named threads, so a test can prove which pool a callback ran on.
+    local = await LocalExecutionBackend(
+        ThreadPoolExecutor(max_workers=2, thread_name_prefix="localpool"),
+        name="local",
+    )
     return await WorkflowEngine.create(backend=[compute, local], work_dir=str(work_dir))
 
 
@@ -81,14 +85,17 @@ async def test_failure_explained_and_adaptive_on_declared_backend(
     flow = await _make_flow(tmp_path)
     seen = {}
 
-    def decide(pipeline):  # a plain sync callback
+    async def decide(pipeline):  # asyncflow's task shape: no awaits needed
         seen["thread"] = threading.get_ident()
+        seen["thread_name"] = threading.current_thread().name
         seen["state"] = dict(pipeline.state)
 
-    manager = ImpressManager(flow, use_colors=False, adaptive_backend="local")
+    decide_task = flow.function_task(backend="local")(decide)
+
+    manager = ImpressManager(flow, use_colors=False)
     try:
         await manager.start(
-            [PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide)]
+            [PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide_task)]
         )
     finally:
         await flow.shutdown()
@@ -106,17 +113,23 @@ async def test_failure_explained_and_adaptive_on_declared_backend(
     assert len(failures) == 1
     assert "e25" in failures[0]
 
-    # The adaptive callback ran in a worker thread, on the declared backend.
+    # The adaptive callback ran on the backend it was declared on — not just
+    # off the loop, but on that backend's own pool.
     assert seen["thread"] != threading.get_ident()
-    assert list(manager._offloaded_fns.values())
+    assert seen["thread_name"].startswith("localpool")
 
 
 @pytest.mark.integration
-async def test_undeclared_backend_fails_before_any_work(tmp_path):
+async def test_undeclared_adaptive_fn_fails_before_any_work(tmp_path):
+    """A callback the caller never declared is refused up front.
+
+    The manager has no execution path of its own to fall back to, so this has
+    to fail rather than silently run somewhere.
+    """
     flow = await _make_flow(tmp_path)
-    manager = ImpressManager(flow, use_colors=False, adaptive_backend="callbacks")
+    manager = ImpressManager(flow, use_colors=False)
     try:
-        with pytest.raises(ValueError, match="callbacks"):
+        with pytest.raises(TypeError, match="not an engine task"):
             await manager.start(
                 [
                     PipelineSetup(

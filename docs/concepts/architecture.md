@@ -118,9 +118,9 @@ expressed as a static graph.
 1. Inside `run()`, the pipeline calls `await self.run_adaptive_step(wait=True)`
    (or `wait=False` to continue concurrently). This sets
    `invoke_adaptive_step = True`.
-2. On its next poll, `ImpressManager` notices the flag and runs the
-   pipeline's registered `adaptive_fn(pipeline)` as a background task,
-   **off the event loop** (see below).
+2. On its next poll, `ImpressManager` notices the flag and awaits the
+   pipeline's registered `adaptive_fn(pipeline)` as a background task. That
+   callback is an engine task, so it runs **off the event loop** (see below).
 3. `adaptive_fn` inspects/mutates the pipeline's `state` and attributes
    (for example, comparing a current score against a previous one), and may
    call `pipeline.submit_child_pipeline_request(new_config)` to request
@@ -135,29 +135,49 @@ expressed as a static graph.
 6. A pipeline can set `self.kill_parent = True` at any point to have the
    manager cancel its own task on the next tick (self-termination).
 
-**Adaptive functions run off the event loop.** One event loop drives every
-pipeline's task dispatch, so an adaptive function that blocks it, even an
-`async def` that never awaits, stalls all pipelines while it runs. On an
-8-node, 32-pipeline run this held the loop for 67% of wall clock and cut
-throughput to 37% of baseline. The manager therefore runs each adaptive
-function in a worker thread, against the live pipeline object:
+**An adaptive function is an engine task, declared by the caller.** One event
+loop drives every pipeline's task dispatch, so an adaptive function that
+blocks it — even an `async def` that never awaits — stalls all pipelines
+while it runs. On an 8-node, 32-pipeline run this held the loop for 67% of
+wall clock and cut throughput to 37% of baseline.
 
-- With `ImpressManager(..., adaptive_backend="<name>")`, the function runs on
-  that engine backend as a `flow.function_task`, which bounds concurrency and
-  shows it in telemetry as `{pipeline}:adaptive`. Use a thread-pool backend
-  for it, such as
-  `ConcurrentExecutionBackend(ThreadPoolExecutor(), name="local")`: a
-  process pool would mutate a pickled copy of the pipeline. `start()` raises
-  `ValueError` if the engine has no backend of that name, because asyncflow
-  would otherwise fail inside its submit loop and shut the engine down.
-- With no `adaptive_backend` (the default), it runs in `asyncio.to_thread`,
-  whatever backends the engine has.
-- A function that is already a flow task runs as it is.
+The manager therefore does not run adaptive functions itself. A runner
+declares where the callback runs, the way asyncflow's own examples declare any
+task, and passes the result as `adaptive_fn`:
 
-Pass `ImpressManager(..., adaptive_offload=False)` for an adaptive function
-that must await objects bound to the main loop, such as engine tasks.
-Module-level caches an adaptive function shares across pipelines may now be
-touched from several threads at once.
+```python
+local = await ConcurrentExecutionBackend(
+    ThreadPoolExecutor(max_workers=n_pipelines), name="local")
+flow = await WorkflowEngine.create(backend=[compute, local])
+
+@flow.function_task(backend="local")
+async def adaptive_decision(pipeline):
+    ...
+
+PipelineSetup(name="p1", type=MyPipeline, adaptive_fn=adaptive_decision)
+```
+
+The manager awaits that task and labels each call `{pipeline}:adaptive` in
+telemetry. Routing is declared, never discovered, so there is one execution
+path and no mode to infer:
+
+- The backend must be a **thread** pool. The callback mutates the live
+  pipeline object, and a process pool would mutate a pickled copy.
+- The body must be `async def`. asyncflow rejects a sync function outright;
+  it needs no `await` inside, which is the normal shape for a task body.
+- `submit_new_pipelines()` raises `TypeError` for an `adaptive_fn` that is not
+  a task, before any pipeline starts. The manager has no path of its own to
+  fall back to, so this fails rather than silently running somewhere.
+- A child pipeline's config must carry the **declared task**, not the bare
+  function, or it hits that same check when the child is submitted.
+
+Module-level caches an adaptive function shares across pipelines may be
+touched from several of the pool's threads at once. A reader reachable from a
+loop over accumulated history must be memoised — keyed on path, with negative
+results left uncached — or every decision costs one blocking read per prior
+entry, which is the O(entries²) half of the 37% collapse above. Size any
+`lru_cache` for (entries × pipelines), since one manager process serves them
+all.
 
 Because child pipelines can themselves have an `adaptive_fn` that spawns
 further children, this protocol supports arbitrarily deep or wide trees of

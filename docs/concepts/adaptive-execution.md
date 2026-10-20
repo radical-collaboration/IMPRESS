@@ -62,7 +62,7 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
             'parent_name': pipeline.name,           # Set parent reference
             'max_generations': pipeline.max_generations,
         },
-        'adaptive_fn': adaptive_optimization_strategy  # Same adaptive function
+        'adaptive_fn': adaptive_task  # the DECLARED task, not the bare function
     }
     
     # Submit child pipeline to manager
@@ -82,13 +82,19 @@ The pipeline manager is configured to support adaptive behavior:
 
 ```python
 async def run() -> None:
+    global adaptive_task
+
     execution_backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=execution_backend)
     manager: ImpressManager = ImpressManager(flow)
 
+    # Declare where the callback runs; the manager only awaits it.  This
+    # engine's one backend is already a thread pool, so no name is needed.
+    adaptive_task = flow.function_task(adaptive_optimization_strategy)
+
     pipeline_setups = [PipelineSetup(name=f'p{i}',
                                      type=DummyProteinPipeline,
-                                     adaptive_fn=adaptive_optimization_strategy)  # Adaptive function registered
+                                     adaptive_fn=adaptive_task)  # a declared engine task
                        for i in range(1, 4)]
 
     try:
@@ -97,8 +103,14 @@ async def run() -> None:
         await flow.shutdown()
 ```
 
-**Critical setup element:**
-- `adaptive_fn=adaptive_optimization_strategy` registers the adaptive function with each pipeline
+**Critical setup elements:**
+- `adaptive_fn` must be an **engine task**, declared by the caller with
+  `flow.function_task(...)`. The manager awaits it and chooses nothing; a bare
+  function raises `TypeError` before any pipeline starts. The backend must be a
+  thread pool, since the callback mutates the live pipeline object.
+- A child config must carry that same declared task, which is why
+  `adaptive_task` is module-level here: the recursion passes the task on, not
+  the raw coroutine.
 - The manager handles the lifecycle of dynamically created child pipelines
 
 ## Adaptive Execution Flow

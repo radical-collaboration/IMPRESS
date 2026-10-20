@@ -185,6 +185,78 @@ needed.
 **Test.** Existing `LocalStage` unit tests, which inject telemetry through the manager, keep
 passing; add one asserting `telemetry is None` for a manager-less pipeline.
 
+<a id="f19"></a>
+## F19 — Pass the adaptive function itself as a declared task (2026-10-20)
+
+**Status:** fixed, not yet run on Delta · **Supersedes:** F14's `adaptive_backend=` kwarg
+
+**Evidence.** F14 moved routing from a private backend probe to a manager kwarg, which fixed
+the silent mode switch but left the manager choosing between three paths in
+`_invoke_adaptive_fn`: the loop, `asyncio.to_thread` via `_run_to_completion`, or a named
+backend. asyncflow puts that choice on the author instead —
+`@flow.function_task(backend="compute")` in `examples/04-concurrent_backends.py:53-71` — and
+the engine owns execution from there. Two measurements against the pinned checkout
+(`038d52a`, the revision installed):
+
+- **21 of 21** task bodies in asyncflow's `examples/` are `async def` with no `await` in their
+  own frame. The shape is the idiom, not a defect; what makes it safe upstream is that every
+  such body is handed to the engine.
+- **`flow.function_task` appeared exactly once in all of IMPRESS** (`impress_manager.py:175`).
+  Tool stages adopted `executable_task` faithfully (32 registrations, matching
+  `examples/06-dragon_execution_backend.py:44-51`); the in-process case upstream handles with
+  `function_task` was hand-rolled.
+
+So `22534628` was not "an `async def` with no `await`" — it was IMPRESS driving a coroutine the
+engine should have owned.
+
+**Change.** `adaptive_fn` is an engine task the caller declares; the manager awaits it.
+
+- `_invoke_adaptive_fn` is one `await`, now passing `workflow_id=f"{pipeline.name}:adaptive"`.
+  **This also fixes a latent gap:** the old pass-through branch (`:153-155`) omitted it, so a
+  caller-declared task lost its label.
+- Deleted: `_run_to_completion`, `_maybe_await`, `_backend_task`, `_offloaded_fns`,
+  `_check_adaptive_backend`, `adaptive_offload`, `adaptive_backend`. `_is_flow_task` stays,
+  promoted from a branch condition to the validation gate. The manager no longer reads
+  `flow._backends`; only `impress.utils.stdio` does (F13).
+- `submit_new_pipelines()` raises `TypeError` for an `adaptive_fn` that is not a task, checking
+  the whole batch before any pipeline starts. There is no path to fall back to, so this must
+  fail rather than run somewhere unasked.
+- Two constraints, both verified upstream: the body must be `async def`
+  (`workflow_manager.py:675-679` rejects a sync function outright, so smb's callback returns to
+  `async def`, reversing PR 1), and the backend must be a **thread** pool, since the callback
+  mutates the live pipeline.
+- A child config must carry the declared task. `discontinuous_scaffolds` and `dummy_adaptive`
+  hold it in a module-level `adaptive_task`; `protein_binding` decorates its nested closure, so
+  the name rebinds and the existing child config passes the task on.
+- Carries **F7**: `protein_binding`, `discontinuous_scaffolds` and smb's `run_nonadaptive` had
+  no thread-pool backend to declare, so each gained the `compute` + `local` layout.
+
+**Correction to "Keep", below.** That section called `_run_to_completion`'s `asyncio.run` in a
+worker thread "not an escape", on the grounds that asyncflow tells callers to wrap sync
+functions in `async def`. That reasoning covered the shim's *shape* but not its *placement*:
+running the coroutine at all is the engine's job, and doing it in `asyncio.to_thread` leaves the
+work unbounded and absent from the trace — which is what F7's own evidence said about the two
+runners that took that path.
+
+**Test.** Done offline:
+- 125/125 pass, including a real-engine test asserting the callback ran on the declared
+  backend's own pool — the executor's threads are named, so this is checked, not inferred.
+- The smb mock run gives a **byte-identical 496-event sequence** before and after, compared
+  against a worktree at `4cd860b`: 124 adaptive calls, 124 completions, 0 failures, every
+  per-stage `next_step` the same.
+- `dummy_adaptive.py` runs to `p3_g2_g2`, exercising a declared task through
+  `submit_child_pipeline_request` -> `PipelineSetup.from_dict` -> the new gate.
+- `ruff check` and `ruff format --check` clean on `src` and `tests`.
+
+**Deviation from the BACKLOG's Conventions rule,** which asks for an opt-out with every
+framework default change: this removes two and adds none, deliberately, because the opt-out
+*was* the fallback. A caller needing loop-bound awaits calls their logic from `pipeline.run()`
+rather than registering an `adaptive_fn`.
+
+**Acceptance.** Same shape as F18 (`22927576`: 1 node, 32 pipelines, 1 h): 0 task failures,
+every adaptive call on the declared backend, occupancy well under F18's 0.31 % of wall clock,
+rfd3 and boltz per node-hour within noise of 337.1 and 108.0.
+
 ## Keep (no change, narrower documentation)
 
 - **`utils/stdio.py`'s path reconstruction.** No public replacement exists. Two corrections to

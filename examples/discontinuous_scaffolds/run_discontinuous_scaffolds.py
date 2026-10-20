@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor,ProcessPoolExecutor
 from typing import List
 
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
-from rhapsody.backends import DragonExecutionBackend
+from rhapsody.backends import ConcurrentExecutionBackend, DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
 from discontinuous_scaffolds import (
@@ -62,6 +62,9 @@ SEQ_OVERALL_CONF_BOUNDS  = (0.42,1)   # overall_confidence
 # Stop spawning fold-redesign branches when either limit is hit.
 MAX_REDESIGN_DEPTH   = 3     # max redesign branches per model lineage
 MIN_RMSD_IMPROVEMENT = 0.10  # Å; branch is skipped if RMSD doesn't improve by this much
+
+# Benchmark inputs to run, one pipeline per scripts/mcsa_41-{i}.json.
+PIPELINE_INDICES = range(24, 29)
 
 
 # ── Helper functions ─────────────────────────────────────────────────────────
@@ -173,6 +176,15 @@ def _shared_pipeline_kwargs(pipeline):
 
 # ── Adaptive function ───────────────────────────────────────────────────────
 
+# Set in run_discontinuous_scaffolds(), once the engine exists.  ImpressManager
+# takes an engine task, not a bare function, so the branch configs below pass
+# this on rather than the raw coroutine.  Declaring it matters more here than
+# in the other examples: this callback shells out to create_redesign.py with a
+# blocking subprocess.run, which on the shared event loop would stall every
+# pipeline for the length of a structure-alignment run.
+adaptive_task = None
+
+
 async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
     """
     Multi-point adaptive decision function for the discontinuous scaffolds
@@ -259,7 +271,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             pipeline.submit_child_pipeline_request({
                 'name':                 f"{pipeline.name}",
                 'type':                 DiscontinuousScaffoldsPipeline,
-                'adaptive_fn':          adaptive_decision,
+                'adaptive_fn':          adaptive_task,
                 'start_step':           STEP_BACKBONE_GEN,
                 'branch_ct':            pipeline.branch_ct,
                 'branch_id':            branch_id,
@@ -319,7 +331,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
             pipeline.submit_child_pipeline_request({
                 'name':                 f"{pipeline.name}",
                 'type':                 DiscontinuousScaffoldsPipeline,
-                'adaptive_fn':          adaptive_decision,
+                'adaptive_fn':          adaptive_task,
                 'start_step':           STEP_SEQ_PRED,
                 'branch_ct':            pipeline.branch_ct,
                 'branch_id':            branch_id,
@@ -407,7 +419,7 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
                 pipeline.submit_child_pipeline_request({
                     'name':               f"{pipeline.name}_R",
                     'type':               DiscontinuousScaffoldsPipeline,
-                    'adaptive_fn':        adaptive_decision,
+                    'adaptive_fn':        adaptive_task,
                     'start_step':         STEP_BACKBONE_GEN,
                     'branch_id':          branch_id,
                     'branch_ct':          0,
@@ -437,18 +449,29 @@ async def adaptive_decision(pipeline: DiscontinuousScaffoldsPipeline) -> None:
 
 async def run_discontinuous_scaffolds() -> None:
     """Set up the IMPRESS manager and launch the discontinuous scaffolds pipeline."""
-    #backend = await LocalExecutionBackend(ProcessPoolExecutor())
-    # For HPC execution use:
-    backend = await DragonExecutionBackend()
+    global adaptive_task
 
-    flow = await WorkflowEngine.create(backend=backend)
+    # Two named backends on one engine, as asyncflow's example 04 does:
+    #   compute -- the default; every pipeline stage runs here.
+    #   local   -- an in-process thread pool for adaptive_decision, which
+    #              mutates the live pipeline and runs a blocking subprocess.
+    #              A process pool would mutate a pickled copy.
+    #compute = await LocalExecutionBackend(ProcessPoolExecutor(), name="compute")
+    # For HPC execution use:
+    compute = await DragonExecutionBackend(name="compute")
+    local = await ConcurrentExecutionBackend(
+        ThreadPoolExecutor(max_workers=len(PIPELINE_INDICES)), name="local")
+
+    flow = await WorkflowEngine.create(backend=[compute, local])
     manager: ImpressManager = ImpressManager(flow)
+
+    adaptive_task = flow.function_task(backend="local")(adaptive_decision)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=f"disco_p{i}",
             type=DiscontinuousScaffoldsPipeline,
-            adaptive_fn=adaptive_decision,
+            adaptive_fn=adaptive_task,
             kwargs={
                 "scripts_path":             SCRIPTS_PATH,
                 "foundry_sif_path":         FOUNDRY_SIF_PATH,
@@ -471,7 +494,7 @@ async def run_discontinuous_scaffolds() -> None:
                 "seq_overall_conf_bounds":  SEQ_OVERALL_CONF_BOUNDS,
             }
         )
-        for i in range(24,29)
+        for i in PIPELINE_INDICES
     ]
 
     try:

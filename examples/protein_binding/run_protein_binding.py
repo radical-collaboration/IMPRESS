@@ -25,7 +25,12 @@ if BACKEND == "dragon":
     from rhapsody.backends import DragonExecutionBackend
 else:
     from concurrent.futures import ProcessPoolExecutor
-    from rhapsody.backends import ConcurrentExecutionBackend
+
+# The `local` backend below is a thread pool whatever IMPRESS_BACKEND is, so
+# this import is unconditional.
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
+from rhapsody.backends import ConcurrentExecutionBackend  # noqa: E402
 
 N_PIPELINES            = int(os.environ.get("IMPRESS_N_PIPELINES", "16"))
 MAX_PASSES             = int(os.environ.get("IMPRESS_MAX_PASSES", "10"))
@@ -82,12 +87,20 @@ def adaptive_criteria(current_score: float, previous_score: float) -> bool:
 
 
 async def impress_protein_bind() -> None:
+    # Two named backends on one engine, as asyncflow's example 04 does:
+    #   compute -- the default; every pipeline stage runs here.
+    #   local   -- an in-process thread pool for the adaptive callback, which
+    #              mutates the live pipeline object.  A process pool would
+    #              mutate a pickled copy, so this one cannot be `compute`.
     if BACKEND == "dragon":
-        backend = await DragonExecutionBackend()
+        compute = await DragonExecutionBackend(name="compute")
     else:
-        backend = await ConcurrentExecutionBackend.create(ProcessPoolExecutor())
+        compute = await ConcurrentExecutionBackend(
+            ProcessPoolExecutor(), name="compute")
+    local = await ConcurrentExecutionBackend(
+        ThreadPoolExecutor(max_workers=N_PIPELINES), name="local")
 
-    flow = await WorkflowEngine.create(backend=backend)
+    flow = await WorkflowEngine.create(backend=[compute, local])
 
     manager: ImpressManager = ImpressManager(
         flow,
@@ -100,6 +113,12 @@ async def impress_protein_bind() -> None:
 
     # adaptive_decision closes over `manager` so it can emit events via
     # manager.telemetry, which is set inside start() before any pipeline runs.
+    #
+    # Declared on `local`, so the engine runs it on that thread pool and the
+    # manager only awaits it.  The decorator rebinds this name to the task, so
+    # the child config's 'adaptive_fn': adaptive_decision below passes the task
+    # on to child pipelines rather than the bare coroutine.
+    @flow.function_task(backend="local")
     async def adaptive_decision(pipeline: ProteinBindingPipeline) -> Optional[Dict[str, Any]]:
         MAX_SUB_PIPELINES: int = MAX_SUB_PIPELINES_OVERRIDE if MAX_SUB_PIPELINES_OVERRIDE is not None else 3
         tel = manager.telemetry

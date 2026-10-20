@@ -24,8 +24,6 @@ class ImpressManager:
         use_colors: bool = True,
         telemetry_config: Optional[dict[str, Any]] = None,
         telemetry_subscribers: Optional[list[Callable]] = None,
-        adaptive_offload: bool = True,
-        adaptive_backend: Optional[str] = None,
     ) -> None:
         """
         Initialize the ImpressManager.
@@ -40,21 +38,21 @@ class ImpressManager:
                 checkpoint_path, resource_poll_interval). Pass None to disable.
             telemetry_subscribers: Callables registered via telemetry.subscribe()
                 immediately after telemetry starts.
-            adaptive_offload: Run each adaptive function off the event loop
-                (default True). The loop is shared by every pipeline, so a
-                callback that blocks it, even an `async def` that never
-                awaits, stalls task dispatch for all of them. The callback
-                runs in a thread, against the live pipeline object: on
-                `adaptive_backend` if one is named, otherwise in
-                `asyncio.to_thread`. Set False for a callback that must await
-                objects bound to the main event loop, such as engine tasks.
-            adaptive_backend: Name of an engine backend to run offloaded
-                adaptive functions on, as a `flow.function_task`. That bounds
-                them by the backend's pool and labels them
-                `{pipeline}:adaptive` in telemetry. It must be a thread pool:
-                a process pool would mutate a pickled copy of the pipeline.
-                `start()` raises ValueError if the engine has no backend of
-                that name. None (the default) uses `asyncio.to_thread`.
+
+        A `PipelineSetup`'s `adaptive_fn` must be an engine task, declared by
+        the caller the way asyncflow's own examples declare one:
+
+            @flow.function_task(backend="local")
+            async def adaptive_decision(pipeline):
+                ...
+
+        The manager awaits that task and does not choose where it runs:
+        routing is declared, never discovered. The backend named must be a
+        **thread** pool, because an adaptive function mutates the live
+        pipeline object and a process pool would mutate a pickled copy. The
+        loop is shared by every pipeline, so a callback left on it — even an
+        `async def` that never awaits — stalls task dispatch for all of them;
+        handing it to the engine is what prevents that.
         """
         self.flow: WorkflowEngine = flow
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
@@ -64,9 +62,6 @@ class ImpressManager:
         self._telemetry_config: dict[str, Any] = telemetry_config or {}
         self._telemetry_subscribers: list[Callable] = telemetry_subscribers or []
         self.telemetry: Any = None
-        self.adaptive_offload: bool = adaptive_offload
-        self.adaptive_backend: Optional[str] = adaptive_backend
-        self._offloaded_fns: dict[Callable, Callable] = {}
 
     def _normalize_pipeline_setup(
         self, setup: Union[dict[str, Any], PipelineSetup]
@@ -100,11 +95,13 @@ class ImpressManager:
         Raises:
             ValueError: If pipeline type is not a subclass
                 of ImpressBasePipeline
+            TypeError: If a setup's `adaptive_fn` is not an engine task.
+                The whole batch is checked before any pipeline starts.
         """
-        for setup_input in pipeline_setups:
-            # Normalize to PipelineSetup object
-            setup = self._normalize_pipeline_setup(setup_input)
+        setups = [self._normalize_pipeline_setup(s) for s in pipeline_setups]
+        self._check_adaptive_fns(setups)
 
+        for setup in setups:
             # Create pipeline instance with config and kwargs merged
             pipeline_kwargs = {**setup.config, **setup.kwargs}
             pipeline: ImpressBasePipeline = setup.type(
@@ -146,51 +143,34 @@ class ImpressManager:
     async def _invoke_adaptive_fn(
         self, adaptive_fn: Callable, pipeline: ImpressBasePipeline
     ) -> None:
-        """Call an adaptive function, off the event loop unless disabled.
+        """Await the engine task the caller declared for this pipeline.
 
-        A function already registered as an engine task runs as it is.
+        `workflow_id` is the label, not the routing: asyncflow names a
+        function task after its own `__name__` otherwise, which collides
+        across pipelines sharing one callback.
         """
-        if not self.adaptive_offload or _is_flow_task(adaptive_fn):
-            await _maybe_await(adaptive_fn(pipeline))
-            return
+        await adaptive_fn(pipeline, workflow_id=f"{pipeline.name}:adaptive")
 
-        if self.adaptive_backend is None:
-            await asyncio.to_thread(_run_to_completion, adaptive_fn, pipeline)
-            return
+    def _check_adaptive_fns(self, setups: list[PipelineSetup]) -> None:
+        """Fail before any pipeline starts if an `adaptive_fn` is not a task.
 
-        backend_task = self._backend_task(adaptive_fn)
-        await backend_task(pipeline, workflow_id=f"{pipeline.name}:adaptive")
-
-    def _backend_task(self, adaptive_fn: Callable) -> Callable:
-        """`adaptive_fn` as a function task on `self.adaptive_backend`."""
-        task = self._offloaded_fns.get(adaptive_fn)
-        if task is None:
-
-            async def run_adaptive(pipeline):
-                return await _maybe_await(adaptive_fn(pipeline))
-
-            # Telemetry labels a function task by its __name__.
-            name = getattr(adaptive_fn, "__name__", "adaptive_fn")
-            run_adaptive.__name__ = run_adaptive.__qualname__ = name
-            task = self.flow.function_task(backend=self.adaptive_backend)(run_adaptive)
-            self._offloaded_fns[adaptive_fn] = task
-        return task
-
-    def _check_adaptive_backend(self) -> None:
-        """Fail before any work if `adaptive_backend` is not on the engine.
-
-        An unknown name is not reported to the caller: asyncflow looks it up
-        in its background submit path, and the error shuts the engine down.
-        The engine's backend table is private, so the check is skipped when
-        it cannot be read.
+        A plain callable would otherwise have to be run by the manager
+        itself, on the loop every pipeline shares. Reporting it here keeps
+        that decision with the caller, who is the only one who knows which
+        backend the callback belongs on.
         """
-        if self.adaptive_backend is None:
-            return
-        backends = getattr(self.flow, "_backends", None)
-        if isinstance(backends, dict) and self.adaptive_backend not in backends:
-            raise ValueError(
-                f"adaptive_backend={self.adaptive_backend!r} is not a backend "
-                f"of this engine; it has {sorted(backends)}"
+        for setup in setups:
+            fn = setup.adaptive_fn
+            if fn is None or _is_flow_task(fn):
+                continue
+            kind = (
+                "coroutine function" if inspect.iscoroutinefunction(fn) else "callable"
+            )
+            raise TypeError(
+                f"adaptive_fn for pipeline {setup.name!r} is a plain {kind}, "
+                f"not an engine task. Declare it on a thread-pool backend, "
+                f"e.g. flow.function_task(backend='local')(adaptive_decision), "
+                f"and pass the result as adaptive_fn."
             )
 
     async def start(
@@ -210,7 +190,6 @@ class ImpressManager:
                 configurations (dicts or PipelineSetup objects)
         """
         self.logger.separator("IMPRESS MANAGER STARTING")
-        self._check_adaptive_backend()
 
         if self._telemetry_config:
             self.telemetry = await self.flow.start_telemetry(**self._telemetry_config)
@@ -340,17 +319,3 @@ def _is_flow_task(fn: Callable) -> bool:
     and `functools.wraps` copies the mark onto the wrapper it returns.
     """
     return hasattr(fn, "__task_description__")
-
-
-async def _maybe_await(result: Any) -> Any:
-    if inspect.isawaitable(result):
-        return await result
-    return result
-
-
-def _run_to_completion(fn: Callable, *args: Any) -> Any:
-    """Call `fn` in a worker thread, running it to completion if it is async."""
-    result = fn(*args)
-    if inspect.isawaitable(result):
-        return asyncio.run(_maybe_await(result))
-    return result

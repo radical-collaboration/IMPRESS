@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 2026-04-09 | d46a051 | protein_binding_run.py added (LLM-adaptive runner) |
 | 2026-04-18 | 758d868 | Fix post-exec staging cp paths |
 | 2026-09-30 | — | s4 is Boltz-2 only; paths moved to env vars; `protein_binding_run.py` removed |
+| 2026-10-20 | — | Two-backend engine (`compute` + a `local` thread pool); `adaptive_decision` is declared with `@flow.function_task(backend="local")` and passed to `ImpressManager` as a task (framework PR 2). Not yet run on Delta |
 
 ## Context
 
@@ -127,7 +128,12 @@ Key attributes on the `ProteinBindingPipeline` instance:
 
 ### Execution backends
 
-`run_protein_binding.py` selects its backend from `IMPRESS_BACKEND`: `dragon` (the default) uses `rhapsody.backends.DragonExecutionBackend` for multi-node HPC runs, and `local` uses `ConcurrentExecutionBackend(ProcessPoolExecutor())` for single-node development on non-Dragon machines. The runner creates the `WorkflowEngine`, passes it to `ImpressManager`, and shuts it down in a `finally` block.
+`run_protein_binding.py` builds one `WorkflowEngine` over two named backends, and asyncflow routes each task by name:
+
+- **`compute`** (the default): every pipeline stage. Selected by `IMPRESS_BACKEND` — `dragon` (the default) uses `rhapsody.backends.DragonExecutionBackend` for multi-node HPC runs, `local` uses `ConcurrentExecutionBackend(ProcessPoolExecutor())` for single-node development on non-Dragon machines.
+- **`local`**: a `ConcurrentExecutionBackend(ThreadPoolExecutor(N_PIPELINES))` for `adaptive_decision`, which is declared on it with `@flow.function_task(backend="local")` and passed to `ImpressManager` as a task. It must stay a **thread** pool: the callback mutates the live pipeline object, and a process pool would mutate a pickled copy. The decorator rebinds the name, so the child-pipeline config's `'adaptive_fn': adaptive_decision` passes the task on — a bare function there is rejected when the child is submitted.
+
+The runner creates the `WorkflowEngine`, passes it to `ImpressManager`, and shuts it down in a `finally` block.
 
 GPU placement is left to the execution backend — the workflow does not pin tasks to devices.
 

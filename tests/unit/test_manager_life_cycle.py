@@ -93,7 +93,7 @@ class TestManagerLifecycle:
             type=FastPipelineSlowAdaptive,
             config={},
             kwargs={},
-            adaptive_fn=slow_adaptive_fn,
+            adaptive_fn=impress_manager.flow.function_task(slow_adaptive_fn),
         )
 
         start_time = asyncio.get_event_loop().time()

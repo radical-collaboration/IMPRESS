@@ -152,11 +152,17 @@ async def run_mock_test() -> None:
     flow = await WorkflowEngine.create(backend=backend)
     manager: ImpressManager = ImpressManager(flow)
 
+    # The engine's only backend is already a thread pool, so the callback is
+    # declared on the default one.  The production runner names "local"
+    # because its default backend is `compute`; both arrive here as a task,
+    # so this mock run now rehearses production's routing, not a second path.
+    adaptive_task = flow.function_task(adaptive_decision)
+
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=pipeline_name,
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_decision,
+            adaptive_fn=adaptive_task,
             kwargs={
                 "mock":               True,
                 "base_path":          BASE_PATH,
