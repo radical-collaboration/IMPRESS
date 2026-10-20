@@ -214,3 +214,17 @@ unnecessary.
 - `23020138` and `23020139` overlapped in time; `23020140` started later. Different nodes
   throughout (gpub051 / gpub072 / gpub061).
 - Quality is still Boltz self-confidence, not an experimental result.
+
+### Data and the next session
+
+All three runs are archived as per-pipeline part sets under
+`/work/hdd/bdyk/hooten1/impress_run_archive/` (6.0 G, 99 parts, entry counts verified exact
+against the live trees), and the live `logs/` trees are pruned to their scoring kernels —
+`telemetry/`, `nvsmi.csv`, `hostmem.csv` and the per-fold `confidence_*.json` at their original
+paths. Scoring and figures work on the cluster unchanged; anything else, including the
+`[selection/*]` lines and the mpnn candidate pools, exists only in the tarballs.
+
+**`ANALYSIS_BRIEF.md`** in that directory carries the brief for the session that picks this up
+after download: what is settled and must not be re-derived, the five open questions, the scoring
+conventions, the traps (pipeline survival, the two normalisations, `seff`'s memory overcount, the
+equal-window rule) and the defects that shape the data.
