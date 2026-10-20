@@ -92,6 +92,12 @@ against balances of 18,737 (`bdyk`) and 2,852 (`bblj`).
 Jobs, submitted 2026-10-19 15:38: **`23020138`** adaptive, **`23020139`** pass-through,
 **`23020140`** naive. All three `PENDING` on `bdyk-delta-gpu`.
 
+`23020138` was then lost to the Dragon fault (BACKLOG 26) and re-run on 2026-10-20 as
+**`23029475`** (clean, 32/32 — the comparator this plan needed) with **`23029868`** alongside as
+insurance against a repeat. See the [clean ladder result](#result2); the
+[first-three result](#result) below is kept because `23020138` is still a usable data point at a
+different operating point.
+
 Pre-flight at submission:
 - clean tree at `fbbb097` on `smb-nonadaptive-benchmark`;
 - 768,433 inodes free of the 2,550,000 soft limit, against a ~665,000 projection. Under the
@@ -134,6 +140,88 @@ gap holds over time is the entire question.
 Also check the `[selection/backbone]` and `[selection/sequence]` lines: whether the near-identical
 candidate pools of hour 1 stay that way over 4 h is the mechanism behind the 1 h tie, and the
 thing most likely to move.
+
+<a id="result2"></a>
+## Result — the clean ladder (scored 2026-10-20)
+
+`23029475` re-ran adaptive with **0 `TaskFailed` and 32 of 32 pipelines alive**, so this is the
+comparison the campaign was for. `23029868`, submitted as insurance, lost 3 pipelines (p14, p18,
+p27) and serves as a replicate.
+
+| Metric (min 10–240) | **adaptive `23029475`** | pass-through `23020139` | naive `23020140` |
+|---|---|---|---|
+| pipelines surviving | 32 of 32 | 32 of 32 | 31 of 32 |
+| rfd3 / mpnn / boltz per node-h | 344.1 / 1067.2 / 144.3 | 271.0 / 540.2 / 269.4 | 273.4 / 545.9 / 274.7 |
+| boltz per rfd3 | 0.42 | 0.99 | 1.00 |
+| folds / passed (pass rate) | 552 / 507 (**91.8 %**) | 1030 / 814 (79.0 %) | 1050 / 805 (76.7 %) |
+| high quality | 326 (**59.1 %**) | 342 (33.2 %) | 317 (30.2 %) |
+| median `complex_plddt` / `ligand_iptm` | **93.3** / 0.868 | 87.0 / 0.819 | 86.3 / 0.810 |
+| passing folds per GPU-h | 33.1 | **53.2** | 52.5 |
+| **high-quality folds per GPU-h** | 21.3 | **22.4** | 20.7 |
+| policy task share of wall clock | 0.48 % | 0.30 % | 0.30 % |
+
+### The 1 h penalty was an artefact of the window
+
+High-quality folds per GPU-h, and the pass-through-to-adaptive ratio:
+
+| window | adaptive | pass-through | ratio |
+|---|---|---|---|
+| 1 h (`22927576`) | 11.4 | 22.2 | **1.95×** |
+| 4 h, faulted (`23020138`, 22 pipelines) | 17.8 | 22.4 | 1.26× |
+| 4 h, **clean** (`23029475`, 32 pipelines) | **21.3** | 22.4 | **1.05×** |
+
+At 4 h all three sit within 8 % of each other and **adaptive beats naive** (21.3 vs 20.7).
+
+**Per hour of the run, adaptive starts worst and ends best:**
+
+| high-quality folds per GPU-h | adaptive | pass-through | naive |
+|---|---|---|---|
+| hour 0–1 | **7.8** | 19.5 | 15.0 |
+| hour 1–2 | 23.0 | 20.5 | 20.3 |
+| hour 2–3 | 25.5 | 24.0 | 24.8 |
+| hour 3–4 | **25.8** | 23.8 | 20.0 |
+
+Adaptive climbs monotonically — 7.8 → 23.0 → 25.5 → 25.8 — overtakes both baselines in hour 2 and
+leads for the rest of the run. The baselines flatten around 20–24 with no trend. **The 1 h
+benchmark measured adaptive during its single worst hour**, which is exactly the "early-campaign
+behaviour" caveat that smb 23 and 24 both flagged and neither could test. The policy needs
+ensemble history, hour 1 is when it has none, and the 2× penalty recorded at 1 h is not a
+property of the policy at all.
+
+Do not over-read the last hour: these are single runs, and naive's 24.8 → 20.0 drop between hours
+3 and 4 is within the noise one run supports. The monotone adaptive trend across four hours is
+the solid part; "adaptive leads by 2 points in hour 4" is not.
+
+### The replicate agrees to 0.4 %
+
+`23029868` lost 3 pipelines, so per-GPU-h is not comparable, but per pipeline-hour is:
+
+| run | pipelines | high-quality folds per pipeline-h |
+|---|---|---|
+| `23029475` | 32 | **2.664** |
+| `23029868` | 29 | **2.675** |
+
+Two runs, different nodes (gpub098 / gpub027), different surviving pipeline counts, agreeing to
+0.4 %. The 21.3 figure is reproducible rather than a lucky run.
+
+### What adaptive buys, and what it costs
+
+It is **not** a free win. Adaptive yields 33.1 passing folds per GPU-h against 53.2 — it folds
+0.42 boltz per rfd3 where the baselines fold ~1.0, and spends ~3.1 mpnn per rfd3 on retries and
+resequencing. What it buys is quality: a 91.8 % pass rate against 79 %, a **59.1 % high-quality
+share against 33 %**, and a median `complex_plddt` of 93.3 against 87.0.
+
+So the headline depends on the bottleneck, and that should be stated wherever the number appears:
+
+- **If downstream triage is the limit** — someone has to look at every fold — adaptive is at
+  parity on high-quality yield while handing on **half** as many folds to sift, and those folds
+  are better. That is a clear win.
+- **If GPU time is the limit and all passing folds are equally useful**, pass-through still wins
+  on volume, 53.2 against 33.1.
+
+Pass-through vs naive is unchanged by the longer window: 53.2 vs 52.5 passing folds per GPU-h is
+still a tie, and pass-through's edge on high quality (22.4 vs 20.7) matches its 1 h margin. Four
+hours of deeper search does not make within-stage picking start to matter.
 
 <a id="result"></a>
 ## Result — first three runs (scored 2026-10-19)
