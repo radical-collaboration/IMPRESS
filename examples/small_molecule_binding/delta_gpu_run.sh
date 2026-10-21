@@ -18,7 +18,9 @@
 #
 # Example:
 #   sbatch delta_gpu_run.sh
-#   sbatch delta_gpu_run.sh run_nonadaptive.py   # non-adaptive runner
+#   IMPRESS_NONADAPTIVE=1 sbatch delta_gpu_run.sh   # pass-through baseline routing
+#   IMPRESS_NONADAPTIVE=1 IMPRESS_SELECTION=first sbatch delta_gpu_run.sh  # naive reference
+#   IMPRESS_MAX_TASKS=1200 sbatch delta_gpu_run.sh   # raise the per-pipeline budget
 #
 # Account: set SBATCH_ACCOUNT=<project>-delta-gpu before calling sbatch
 ##SBATCH --account=<project>-delta-gpu
@@ -27,7 +29,7 @@
 #SBATCH --tasks-per-node=1
 #SBATCH --cpus-per-task=64
 #SBATCH --gpus-per-node=4
-#SBATCH --mem=240G
+#SBATCH --mem=243G
 #SBATCH --time=12:00:00
 # Sizing notes (measured, do not shrink casually):
 #   cpus-per-task=64 — the whole node.  Requesting 4 GPUs already reserves and
@@ -36,9 +38,12 @@
 #     resolve to the gpu term, 2000).  `seff` on the three 4h TIMEOUT runs
 #     (21933600/21945304/21960876) showed 97.7-98.1% CPU efficiency on 16 cores
 #     — the job was CPU-starved, which is why those runs never finished.
-#   mem=240G — node RealMemory is 257637MB but MemSpecLimit=8450 is reserved,
-#     so 249187MB is the allocatable ceiling.  Those same runs used only ~65GB
-#     for 4 pipelines (~16GB each), so 240G covers 8+ pipelines with headroom.
+#   mem=243G — node RealMemory is 257637MB but MemSpecLimit=8450 is reserved,
+#     so 249187MB (243.3GiB) is the allocatable ceiling and this asks for all
+#     of it.  Raised from 240G because `seff` on the three 1h/32-pipeline runs
+#     (22927576/22967619/22999614) shows 208.7/196.2/224.0GB used — the naive
+#     run reached 93% of the 240G request.  There is no further headroom to
+#     buy; if that high-water mark rises, the next lever is fewer pipelines.
 #   time=12:00:00 — NOT the 48h partition maximum, deliberately.  Sized as
 #     ~6.8h expected compute (measured on job 22491438; unchanged by allocation
 #     width, since each pipeline independently accumulates its own max_tasks
@@ -245,6 +250,27 @@ RUNNER="${1:-run_small_molecule_binding.py}"
 
 # Run config forwarded as argv (see the comment at the dragon invocations below).
 RUNNER_ARGS=( --n-pipelines "${IMPRESS_N_PIPELINES}" --work-dir "${IMPRESS_WORK_DIR}" )
+# IMPRESS_NONADAPTIVE=1: route with nonadaptive_decision (pass-through, no
+# retries, escalation or guided feedback) as a baseline for the adaptive run.
+if [ "${IMPRESS_NONADAPTIVE:-0}" = "1" ]; then
+    RUNNER_ARGS+=( --nonadaptive )
+fi
+# IMPRESS_SELECTION=first: each analysis stage keeps the first candidate its
+# tool produced instead of the best-scoring one, so no metric influences the
+# work (the naive reference). Default "best".
+if [ "${IMPRESS_SELECTION:-best}" = "first" ]; then
+    RUNNER_ARGS+=( --selection first )
+fi
+# IMPRESS_MAX_TASKS: per-pipeline ensemble budget, overriding PROD's 300.  That
+# default never bound in a 1 h run (fastest pipeline reached 65) but does over
+# 4 h, and a pipeline retiring mid-run drops the node's concurrency, so rates
+# stop being comparable between runs.  Raise it for anything multi-hour.
+if [ -n "${IMPRESS_MAX_TASKS:-}" ]; then
+    RUNNER_ARGS+=( --max-tasks "${IMPRESS_MAX_TASKS}" )
+fi
+echo "NONADAPTIVE:       ${IMPRESS_NONADAPTIVE:-0}"
+echo "SELECTION:         ${IMPRESS_SELECTION:-best}"
+echo "MAX_TASKS:         ${IMPRESS_MAX_TASKS:-default}"
 
 # The runner records how it ended here; see the check after the run.
 RUNNER_STATUS_FILE="${IMPRESS_WORK_DIR}/runner_status"
@@ -263,8 +289,30 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     echo "GPU log:           ${IMPRESS_WORK_DIR}/nvsmi.csv (pid ${NVSMI_PID})"
 fi
 
+# Host RAM every 10 s.  Telemetry carries node_memory_utilization, but the
+# resource poll is 15 s and ResourceUpdate lands only every ~5 min in practice
+# (11-12 samples per hour), which is far too coarse to tell a transient
+# concurrency peak from steady accumulation.  `seff` gives one number for the
+# whole job and only after it ends.  Host RAM is what OOM-killed 22714785, and
+# the 1 h runs peaked at 87-93% of the request, so over a multi-hour run this
+# needs measuring rather than inferring.  Batch node only, like nvsmi above.
+HOSTMEM_PID=""
+{
+    echo "timestamp,used_mb,available_mb,total_mb"
+    while :; do
+        free -m | awk -v t="$(date +%s)" '/^Mem:/ {print t","$3","$7","$2}'
+        sleep 10
+    done
+} > "${IMPRESS_WORK_DIR}/hostmem.csv" 2>&1 &
+HOSTMEM_PID=$!
+echo "Host RAM log:      ${IMPRESS_WORK_DIR}/hostmem.csv (pid ${HOSTMEM_PID})"
+
 if [ "${IMPRESS_BACKEND}" = "dragon" ]; then
-    rm -f ddict_orc*
+    # Stale DDict persistence metadata from earlier runs.  Scoped by age, not
+    # removed wholesale: these land in the shared submit dir, so a bare
+    # `rm -f ddict_orc*` deletes the metadata of any job already running here.
+    # 6 h is above any run length we submit, so a live file is never touched.
+    find . -maxdepth 1 -name 'ddict_orc_*' -mmin +360 -delete 2>/dev/null || true
     if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
         # Multi-node.  Do NOT use `dragon -m` here: its slurm backend launcher
         # builds `srun --nodelist=` from gethostname(), which on Delta returns
@@ -327,6 +375,7 @@ fi
 # error), which only run_small_molecule_binding.py writes, so the other
 # runners are only warned about.
 [ -n "${NVSMI_PID}" ] && kill "${NVSMI_PID}" 2>/dev/null || true
+[ -n "${HOSTMEM_PID}" ] && kill "${HOSTMEM_PID}" 2>/dev/null || true
 RUNNER_STATUS="$(cat "${RUNNER_STATUS_FILE}" 2>/dev/null || echo missing)"
 echo "=== Small Molecule Binding pipeline done: $(date) (runner status: ${RUNNER_STATUS}) ==="
 if [ "${RUNNER_STATUS}" != "ok" ]; then

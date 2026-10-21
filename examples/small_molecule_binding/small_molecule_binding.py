@@ -669,6 +669,12 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
         self.fold_min_plddt            = kwargs.get("fold_min_plddt",            70.0)
         self.fold_min_ligand_iptm      = kwargs.get("fold_min_ligand_iptm",      None)
         self.max_tasks                 = kwargs.get("max_tasks",                 300)
+        # "best" (default) or "first": how analysis_backbone and analysis_sequence
+        # choose among the candidates their tool produced. "first" makes the
+        # pipeline open-loop -- no metric influences what goes downstream -- for
+        # the naive reference run. The candidate pools are unchanged either way,
+        # so the compute per backbone is identical and only the choice differs.
+        self.selection                 = kwargs.get("selection",                 "best")
 
         # Output paths (legacy)
         self.output_path         = os.path.join(self.base_path, "myoutputs", self.name)
@@ -815,7 +821,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             ]
 
             best = None
-            for jf in json_files:
+            pool_best_dev = None
+            for jf in sorted(json_files):
                 with open(f"{out_dir}/{jf}") as fh:
                     data = json.load(fh)
                 m = data.get('metrics', {})
@@ -837,10 +844,18 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 dev = m.get('max_ca_deviation', float('inf'))
                 ss  = m.get('helix_fraction', 0) + m.get('sheet_fraction', 0)
 
-                if best is None or clashes < best['clashes'] or (
+                cand = {'file': jf, 'clashes': clashes, 'dev': dev, 'ss': ss,
+                        'guided': guided}
+                if pool_best_dev is None or (clashes, dev) < pool_best_dev:
+                    pool_best_dev = (clashes, dev)
+                if self.selection == "first":
+                    # Open-loop: keep the first model (sorted order, *_model_0)
+                    # and never look at the rest.
+                    best = best or cand
+                elif best is None or clashes < best['clashes'] or (
                     clashes == best['clashes'] and dev < best['dev']
                 ):
-                    best = {'file': jf, 'clashes': clashes, 'dev': dev, 'ss': ss, 'guided': guided}
+                    best = cand
 
             if best is None:
                 self.state.update({
@@ -870,8 +885,22 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     'ligand_clashes':   best['clashes'],
                     'max_ca_deviation': best['dev'],
                     'ss_fraction':      best['ss'],
+                    # What the pool's best candidate scored, whichever one was
+                    # taken. Recorded for the selection benchmark; nothing reads it.
+                    'pool_best_clashes': pool_best_dev[0] if pool_best_dev else None,
+                    'pool_best_dev':     pool_best_dev[1] if pool_best_dev else None,
                 },
             })
+            # One line per call so the cost of picking is recoverable from the
+            # job log: last_analysis_metrics stays in memory and telemetry does
+            # not carry it.
+            self.logger.pipeline_log(
+                f"[selection/backbone] mode={self.selection} "
+                f"chosen={best['file']} clashes={best['clashes']} dev={best['dev']} "
+                f"pool_best_clashes={pool_best_dev[0] if pool_best_dev else None} "
+                f"pool_best_dev={pool_best_dev[1] if pool_best_dev else None} "
+                f"pool_n={len(json_files)}"
+            )
             self.state['ensemble'].append((
                 ETYPE_BACKBONE, best['ss'], self.state.get('rfd3_input_pdb'), backbone_path,
             ))
@@ -944,7 +973,8 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
             best_id       = None
             best_seq      = None
 
-            for fa_file in [f for f in os.listdir(seqs_dir) if f.endswith('.fa')]:
+            pool_best_conf = -1.0
+            for fa_file in sorted(f for f in os.listdir(seqs_dir) if f.endswith('.fa')):
                 with open(f"{seqs_dir}/{fa_file}") as fh:
                     content = fh.read()
                 # LigandMPNN writes ONE file per input structure containing MULTIPLE
@@ -971,7 +1001,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     except (ValueError, IndexError):
                         continue
 
-                    if conf > best_conf:
+                    pool_best_conf = max(pool_best_conf, conf)
+                    if self.selection == "first":
+                        # Open-loop: keep the first candidate record (id=1) and
+                        # never compare confidences.
+                        if best_id is None:
+                            best_conf, best_lig_conf = conf, lig_conf
+                            best_id,   best_seq      = cand_id, seq
+                    elif conf > best_conf:
                         best_conf     = conf
                         best_lig_conf = lig_conf
                         best_id       = cand_id
@@ -991,7 +1028,14 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                 'pass':                    True,
                 'best_overall_confidence': best_conf,
                 'best_ligand_confidence':  best_lig_conf,
+                # The pool's best confidence, whichever candidate was taken.
+                # Recorded for the selection benchmark; nothing reads it.
+                'pool_best_confidence':    pool_best_conf,
             }
+            self.logger.pipeline_log(
+                f"[selection/sequence] mode={self.selection} chosen_id={best_id} "
+                f"conf={best_conf:.4f} pool_best_conf={pool_best_conf:.4f}"
+            )
             self.state['ensemble'].append((
                 ETYPE_SEQUENCE, best_conf,
                 self.state.get('best_backbone_path'), self.state.get('last_seq_fasta'),
@@ -1184,6 +1228,10 @@ class SmallMoleculeBindingPipeline(ImpressBasePipeline):
                     "GPU/predict failure"
                 )
 
+            # No `selection` branch here: boltz.sh runs --diffusion_samples 1, so
+            # each task writes a single confidence file and this loop has
+            # nothing to choose between. If that default ever rises, this
+            # becomes a third selection point and should honour self.selection.
             best_complex_plddt = -1.0
             best_model         = None
             best_ligand_iptm   = None
