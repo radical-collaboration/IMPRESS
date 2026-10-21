@@ -165,11 +165,18 @@ path and no mode to infer:
   pipeline object, and a process pool would mutate a pickled copy.
 - The body must be `async def`. asyncflow rejects a sync function outright;
   it needs no `await` inside, which is the normal shape for a task body.
-- `submit_new_pipelines()` raises `TypeError` for an `adaptive_fn` that is not
-  a task, before any pipeline starts. The manager has no path of its own to
-  fall back to, so this fails rather than silently running somewhere.
+- `PipelineSetup` raises `TypeError` for an `adaptive_fn` that is not a task,
+  when the setup is constructed — so before any pipeline starts, and without
+  needing a manager. The manager has no path of its own to fall back to, so
+  this fails rather than silently running somewhere.
 - A child pipeline's config must carry the **declared task**, not the bare
-  function, or it hits that same check when the child is submitted.
+  function. These are harder to tell apart than they look: asyncflow marks
+  the function it decorates, not only the wrapper it returns, so the bare
+  body carries `__task_description__` too. `PipelineSetup` separates them by
+  the wrapper being a plain function where the body is a coroutine function,
+  and names that case in its error. Left unchecked it is near-silent — the
+  call fails inside the adaptive task, where the manager catches and logs it,
+  then releases the pipeline to continue as though a decision had been made.
 
 Module-level caches an adaptive function shares across pipelines may be
 touched from several of the pool's threads at once. A reader reachable from a
@@ -195,8 +202,9 @@ differently — see each page's Adaptive Flow section for specifics.
   actually be one).
 - `config` — configuration dict merged into the pipeline's constructor
   kwargs.
-- `adaptive_fn` — optional `adaptive_fn(pipeline) -> None`, a plain
-  function or a coroutine function.
+- `adaptive_fn` — optional `adaptive_fn(pipeline) -> None`. Must be an
+  engine task the caller declared on a thread-pool backend; validated on
+  construction, including for a child config going through `from_dict()`.
 - `kwargs` — additional constructor kwargs.
 
 `PipelineSetup.from_dict()`/`.to_dict()` let a plain dict (such as the

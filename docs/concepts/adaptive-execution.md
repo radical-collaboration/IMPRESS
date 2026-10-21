@@ -106,11 +106,14 @@ async def run() -> None:
 **Critical setup elements:**
 - `adaptive_fn` must be an **engine task**, declared by the caller with
   `flow.function_task(...)`. The manager awaits it and chooses nothing; a bare
-  function raises `TypeError` before any pipeline starts. The backend must be a
-  thread pool, since the callback mutates the live pipeline object.
+  function raises `TypeError` when the `PipelineSetup` is constructed, before
+  any pipeline starts. The backend must be a thread pool, since the callback
+  mutates the live pipeline object.
 - A child config must carry that same declared task, which is why
   `adaptive_task` is module-level here: the recursion passes the task on, not
-  the raw coroutine.
+  the raw coroutine. Passing `adaptive_optimization_strategy` instead of
+  `adaptive_task` is refused by name — declaring a callback marks the bare
+  function too, so the two are easy to confuse and worth checking for.
 - The manager handles the lifecycle of dynamically created child pipelines
 
 ## Adaptive Execution Flow

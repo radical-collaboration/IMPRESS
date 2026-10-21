@@ -124,19 +124,47 @@ async def test_undeclared_adaptive_fn_fails_before_any_work(tmp_path):
     """A callback the caller never declared is refused up front.
 
     The manager has no execution path of its own to fall back to, so this has
-    to fail rather than silently run somewhere.
+    to fail rather than silently run somewhere. Passed as a dict, the shape a
+    child config arrives in, so `start()` is what normalizes and refuses it.
     """
     flow = await _make_flow(tmp_path)
     manager = ImpressManager(flow, use_colors=False)
     try:
-        with pytest.raises(TypeError, match="not an engine task"):
+        with pytest.raises(TypeError, match=r"p1'.*not an engine task"):
             await manager.start(
-                [
-                    PipelineSetup(
-                        name="p1", type=ShellPipeline, adaptive_fn=lambda p: None
-                    )
-                ]
+                [{"name": "p1", "type": ShellPipeline, "adaptive_fn": lambda p: None}]
             )
         assert manager.pipeline_tasks == {}
+    finally:
+        await flow.shutdown()
+
+
+@pytest.mark.integration
+async def test_declared_elsewhere_but_passed_bare_is_refused(tmp_path):
+    """The bare body of a declared callback is refused, against the real engine.
+
+    asyncflow marks the function it decorates, not just the wrapper it
+    returns, so after a callback has been declared the bare body carries
+    `__task_description__` too. The mark alone therefore cannot tell them
+    apart, and a child config that passes the bare name — the recursion
+    mistake the docs warn about — would otherwise reach the engine and fail
+    as a caught `adaptive_failed`, leaving the pipeline to carry on with no
+    decision taken.
+    """
+    flow = await _make_flow(tmp_path)
+    try:
+
+        async def adaptive_decision(pipeline):
+            pass
+
+        adaptive_task = flow.function_task(backend="local")(adaptive_decision)
+
+        # Upstream's own behaviour, asserted so this test fails loudly if a
+        # future asyncflow stops marking the original.
+        assert hasattr(adaptive_decision, "__task_description__")
+
+        PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=adaptive_task)
+        with pytest.raises(TypeError, match="undecorated function"):
+            PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=adaptive_decision)
     finally:
         await flow.shutdown()
