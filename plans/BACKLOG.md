@@ -9,10 +9,10 @@ Example-specific work is tracked separately, e.g.
 [small_molecule_binding/plans/BACKLOG.md](../examples/small_molecule_binding/plans/BACKLOG.md)
 (cited below as "smb N").
 
-Origin: the categorised, ranked plan of 2026-10-08. PR 1 (Tier 1) is on branch
-`framework-defaults-pr1` (`7327c84`): stdio captured by default, `{pipeline}:{stage}` task labels,
-stderr tail on failure, `impress.LocalStage` for local tasks, `logged_command`, adaptive functions
-off the event loop, and the `DragonExecutionBackendV3` import fix.
+Origin: the categorised, ranked plan of 2026-10-08. PR 1 (Tier 1, `7327c84` onwards) **merged to
+`main` as PR #72 (`9a413cd`, 2026-10-21)**: stdio captured by default, `{pipeline}:{stage}` task
+labels, stderr tail on failure, `impress.LocalStage` for local tasks, `logged_command`, adaptive
+functions as declared engine tasks (F19, F20), and the `DragonExecutionBackendV3` import fix.
 
 Tier = (measured impact or failure prevented) × (examples that benefit) ÷ effort; 1 is highest.
 
@@ -22,7 +22,6 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 
 | # | Item | Tier | Status | Doc |
 |---|---|---|---|---|
-| F1 | PR 1 has not run on Delta. Acceptance: a 1-node, 1-hour run at 8 pipelines/GPU, compared with `22718758` | 1 | **passed** on `22767771` (2026-10-15): labels, local stages, adaptive offload, stderr tails and storage all pass. Full-window rfd3 264.3/node-h (−16 %) is attributed to a 76 s Dragon completion stall beside an smb 16 failure; before the stall the rate was +6 %. F14, F17 and F15 part 2 are now on the branch (`a74b71d`). Next: merge PR 1, then delete this row | [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md#result) |
 | F2 | Per-task resources translated per backend: thread caps and GPU pinning (`_tool_task_description` in smb). `gpus_per_rank` is silently ignored by Dragon in discontinuous_scaffolds | 2 | open | [pr2](2026-10-08-framework-pr2.md#f2) |
 | F3 | `register_pipeline_tasks()` runs in `__init__` before subclass attributes and `self.logger` exist; crashed `22692267` | 2 (bug) | open | [pr2](2026-10-08-framework-pr2.md#f3) |
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
@@ -35,30 +34,16 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
 | F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
-| F14 | Adaptive backend declared (`adaptive_backend=`), not probed out of `flow._backends` (`impress_manager.py:162-164`); today an engine whose pool is not named `local` silently falls back to a thread. A misnamed backend would shut the whole engine down at submit, so `start()` validates the name | 2 | fixed on the PR 1 branch (`a74b71d`), confirmed on Dragon by `22927576` (F18); not yet merged. **Superseded by F19**, which drops the `adaptive_backend=` kwarg this item added and moves the declaration to the function itself; F14's principle (declared, never discovered) is what F19 completes | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14) |
 | F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: fixed on the PR 1 branch (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
 | F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
-| F17 | Drop `pipeline.telemetry`'s `flow._telemetry` fallback (`impress_pipeline.py:101`); the manager already injects the public handle | 3 | fixed on the PR 1 branch (`a74b71d`), confirmed on Dragon by `22927576` (F18: `LocalStage` 1:1); not yet merged | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17) |
-| F18 | Confirm the PR 1 branch head on Delta: F14's `start()` check and declared `local` routing, F17's telemetry injection, and F1's throughput caveat without an injected failure. Same shape as `22767771` | 1 | **passed** on `22927576` (2026-10-15): 0 failures; adaptive 2043/2043 on `local` at 0.31 %; `LocalStage` 1:1; rfd3 337.1/node-h (+6.8 % vs `22718758`), boltz 108.0 (+14.5 %). Next: push and merge PR 1, then delete this row | [pr1-head-confirmation](2026-10-15-pr1-head-confirmation.md) |
-| F19 | Adaptive functions are passed to the manager as declared asyncflow tasks. `ImpressManager` chose between three paths (loop / `asyncio.to_thread` / named backend) from two constructor flags; asyncflow's idiom is that the author declares routing at the definition site (`examples/04-concurrent_backends.py`), which F14 adopted for a manager kwarg but not for the function. `_invoke_adaptive_fn` is now one `await`; `_run_to_completion`, `_maybe_await`, `_backend_task`, `_check_adaptive_backend`, `adaptive_offload` and `adaptive_backend` are deleted, and `submit_new_pipelines()` raises `TypeError` for an `adaptive_fn` that is not a task. Also fixes a latent gap: the old pass-through branch never sent `workflow_id`, so a caller-declared task lost its `p<N>:adaptive` label | 2 | **passed** on `23062773` + `23065238` (2026-10-20). `23062773`: 1604/1604 adaptive on `local` at 0.28 %, 3239/3239 labelled, `LocalStage` 1:1, 0 adaptive failures. Throughput unscored: 11 of 32 pipelines killed by backend faults (2 smb 16, one 9-pipeline Dragon `ProcessGroup` burst, smb 26 on `smb-nonadaptive-benchmark`); per live pipeline-h within noise of F18. Rerun `23065238`: rfd3 306.2 / boltz 108.9 per node-h (−9.2 % / +0.8 % vs F18), pass; 1 smb 26 loss. Adaptive share 0.35 % (0.28 % on `23062773`; per-call cost unchanged, p50 0.003 s), accepted against a restated ≤ 0.5 % bar. Next: push and merge PR 1, then delete this row ([f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)). Verified offline: 125/125 tests pass, including a real-engine test asserting the callback ran on the declared backend's own thread pool; the smb mock run gives a byte-identical 496-event sequence before and after (124 adaptive calls, 0 failures, every per-stage `next_step` the same). **Deviates from the Conventions rule below:** it removes the opt-out rather than adding one, deliberately — the opt-out *was* the fallback. A caller who needs loop-bound awaits calls their logic from `pipeline.run()` instead of registering an `adaptive_fn`. Acceptance: same shape as F18 (`22927576`). **The `workflow_id` claim in this row is corrected by F20:** it is a telemetry label, not collision avoidance — asyncflow names a task `function.__name__` regardless, and identity is a separate uid. The label earned its place anyway: it is what attributed adaptive share per pipeline on both runs above | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f19) |
-| F20 | Retire `ImpressManager`'s two adaptive wrappers and move the "must be a declared task" contract into `PipelineSetup` as a field validator. Three findings against the asyncflow **0.6.0** checkout (`175cf76`): (a) the gate has a hole — asyncflow marks the *original* function (`workflow_manager.py:559`), so a function declared elsewhere and passed **bare** into a child config passes `_is_flow_task` and then fails at run time as a caught `adaptive_failed`, leaving the pipeline to continue with no decision and no child; probed on a real 0.6.0 engine, and invisible to F19's acceptance because the smb runner spawns no children; (b) `__task_description__` is written once upstream and read nowhere, so the check keys on a vestigial attribute; (c) `_invoke_adaptive_fn` buys a readable trace, not correctness (see F19 correction above). `inspect.iscoroutinefunction` separates the engine's sync wrapper from a bare `async def` and closes (a). No example source changes; no Delta run | 3 | **fixed, not yet confirmed** on `framework-defaults-pr1`. 123 passed / 5 skipped (from 120/5); both new regressions give `DID NOT RAISE TypeError` against a worktree at `6aadc2e`, so the hole was real; `dummy_adaptive` runs to `p2_g2_g2`; ruff clean; `git diff examples/` empty. **One criterion unrun:** the smb mock event-sequence comparison needs rhapsody, which is not installed here — run it before merging ([Result](2026-10-21-adaptive-wrapper-retirement.md#result)) | [adaptive-wrapper-retirement](2026-10-21-adaptive-wrapper-retirement.md#f20) |
 
 ## Order
 
-1. F1 (passed), then F14, F17, F15 part 2 and the `stdio.py` docstring on the PR 1 branch
-   (done, `a74b71d`), then F18 on Delta (passed, `22927576`), then F19 (`22a1f82`; passed on `23062773` +
-   `23065238`), then push and merge PR 1.
-   - F14 changes PR 1's own new API, so it should not reach `main` in its first form.
-   - The rest is a one-line deletion, tests or docs. None of it changes the Delta path F1
-     measured ([pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#order-revised-2026-10-15)).
-2. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move
+1. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move
    smb 20 to teardown).
-3. PR 3: F8–F10.
-4. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
+2. PR 3: F8–F10.
+3. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
    F16 and F15 part 1 wait for its answer.
-5. F20 after PR 1 merges. It narrows a gate PR 1 introduced, so it should not land in the same
-   PR as the gate itself; it touches no example and needs no Delta run, F19's acceptance being
-   complete.
 
 **asyncflow 0.6.0 survey (2026-10-21, checkout `175cf76`).** The checkout moved from `038d52a`
 (0.5.1) to 0.6.0, including a task→component handling refactor. Everything F14–F20 rely on
@@ -73,6 +58,31 @@ upgrading is its own decision.
 
 Each PR also migrates the examples off the code it replaces, updates `docs/`, and adds a revision
 row to each touched example's CLAUDE.md.
+
+## Closed
+
+Closed by PR #72 (`9a413cd`, merged 2026-10-21), each with the run that confirmed it.
+
+- **F1**: PR 1 acceptance on Delta. Passed on `22767771`; the full-window shortfall was attributed
+  to a Dragon completion stall. Doc: [pr1-delta-acceptance](2026-10-08-pr1-delta-acceptance.md#result)
+- **F14**: declared, not probed, adaptive backend (`a74b71d`). Confirmed on `22927576`, then
+  **superseded by F19**, which removed the `adaptive_backend=` kwarg it added. Doc:
+  [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f14)
+- **F17**: `pipeline.telemetry` returns only the injected handle (`a74b71d`). Confirmed on
+  `22927576` (`LocalStage` 1:1). Doc: [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f17)
+- **F18**: PR 1 branch-head confirmation. Passed on `22927576`: 0 failures, rfd3 337.1 / boltz
+  108.0 per node-h. Doc: [pr1-head-confirmation](2026-10-15-pr1-head-confirmation.md)
+- **F19**: adaptive functions passed as declared asyncflow tasks (`22a1f82`). Passed on `23062773`
+  and `23065238`: every adaptive task on `local`, rfd3 / boltz within 10 % of F18, and adaptive
+  share 0.28 % / 0.35 % against the restated ≤ 0.5 % bar. Its pass-through counterpart was
+  confirmed on `23074256` (smb 23). Doc: [f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)
+- **F20**: the declared-task contract moved into a `PipelineSetup` validator (`0446e96`). No Delta
+  run, by design. Its one unrun criterion, the smb mock comparison, was run 2026-10-21 on merge
+  `0cefeb2` of `main` into `smb-benchmark-f19`. In all three modes (adaptive, `--nonadaptive`,
+  `--nonadaptive --selection first`), the stage sequences and decision lines were identical to
+  the pre-merge head `fd01231`, apart from the scratch run path. Adaptive was also identical to
+  PR 1's head `4011f0d`. pytest 128 passed / 0 skipped with rhapsody present. Doc:
+  [adaptive-wrapper-retirement](2026-10-21-adaptive-wrapper-retirement.md#result)
 
 ## Conventions
 
