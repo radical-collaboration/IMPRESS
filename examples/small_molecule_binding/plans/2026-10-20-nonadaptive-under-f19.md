@@ -1,6 +1,6 @@
 # Pass-through routing under F19 (smb 23 re-run)
 
-**Status:** submitted as job `23074256` (2026-10-20, from `0ad0583`) · **Branch:** `smb-benchmark-f19` (merge `d571de2` of
+**Status:** **passed** on `23074256` (2026-10-20, gpub002, from `0ad0583`): 1736/1736 callbacks on `local` at 0.22 %; rfd3 271.1 / boltz 262.7 per node-h and 55.5 / 20.4 passing / high-quality folds per GPU-h, all within 10 % of `22967619`. See [Result](#result) · **Branch:** `smb-benchmark-f19` (merge `d571de2` of
 `smb-nonadaptive-benchmark` onto `framework-defaults-pr1`) · **Items:** smb 23; framework F7, F19
 
 ## Why
@@ -55,4 +55,40 @@ published figures. Per node-h from minute 10.
 
 - Add a Result section.
 - Update smb 23 and framework F7.
-- Add the job to `RUNS.md`.
+- Add the job to `RUNS.md` once it is archived.
+
+<a id="result"></a>
+## Result — job `23074256` (scored 2026-10-21)
+
+gpub002, 23:47:43 → 00:48:10, `TIMEOUT` 1:00:27 as planned. Scored with `score_run.py`, which
+reproduced `22967619` exactly before the run (262.7 / 265.1 per node-h, 50.97 / 22.19 per GPU-h,
+0.28 %). Sources: `logs/23074256/telemetry/*.jsonl`, `nvsmi.csv`, `hostmem.csv`,
+`impress_23074256.out`.
+
+**Verdict: pass.** The pass-through body runs as a declared task on `local` under F19, with
+throughput and yield within 10 % of the pre-F19 baseline.
+
+| Check | `23074256` | Reference `22967619` | Verdict |
+|---|---|---|---|
+| Startup | `[POLICY] nonadaptive_decision, selection=best, max_tasks=300`; no `TypeError` | same policy | pass |
+| Callback routing | 1736 of 1736 TaskQueued on `local`, all `p<N>:adaptive`; 0.22 % of wall clock | 0.28 % (1774) | pass |
+| Labels / `LocalStage` | 3504 of 3504 labelled; 1736 `LocalStage` = 1736 callbacks | — | pass |
+| Failures | 1: `p25:boltz` at 00:45 (min 57), Dragon `ProcessGroup manager is not in state State.DEAD` (smb 26), a single raise; 31 of 32 pipelines to the end | 0 | under the 3-pipeline limit; counted against smb 26 |
+| Throughput, per node-h, min 10–60 | rfd3 **271.1** (+3.2 %), boltz **262.7** (−0.9 %), mpnn 527.7 | 262.7 / 265.1 / 526.5 | pass |
+| Yield, per GPU-h | passing **55.5** (+8.8 %), high-quality **20.4** (−8.1 %) | 51.0 / 22.2 | pass |
+| Completion stalls > 15 s after min 10 | 2 (18 s, 15 s) | 8 (150 s) | — |
+| Storage | 32,464 run + 3,552 session files for 1768 tool tasks = 20.4/task | — | see below |
+
+**Storage, against the ~30/task in the criteria.** That figure came from adaptive runs. Files
+per stage are unchanged against adaptive `23065238`: mpnn 48 vs 52, rfd3 7, boltz 11, packmin 3.
+Pass-through runs about 2 mpnn per rfd3 instead of about 3, and mpnn is the heavy stage, so the
+mix gives fewer files per task. Not a regression.
+
+Other measurements:
+- Fold pass rate 83.0 % in the window (185 of 223), against 76.6 %. The pass rate shifted while
+  passing folds per GPU-h stayed within 10 %, which reads as run-to-run spread over about 220 folds.
+- GPU busy 60–70 % mean (33–46 % at 100 %), against 58–62 %.
+- `hostmem.csv` peak 174 GB of 243; seff reports 76 %.
+
+**Not recorded in `RUNS.md`:** that tracker lists archived runs, and none of `23062773`,
+`23065238` or this run is archived yet.
