@@ -48,7 +48,7 @@ pipeline; they don't normally need to be supplied.
 | `s4_post_exec` | local | Copies the best-model PDB (renaming Boltz chain IDs `pdz`/`pep` → `A`/`B`) into `best_models/` and `mpnn/job_<N>/`, and the confidence JSON into `best_ptm/` | CPU |
 | `s5` | HPC | `scripts/s5_plddt_extract.sh` → `plddt_extract_pipeline.py` (PyRosetta + BioPandas) | CPU |
 
-- `s1` and `s4` are registered with `capture_stdio=True`. No GPU
+- `s1`, `s4` and `s5` capture their stdio (the framework default). No GPU
   placement hints are set on the tasks or in the scripts; GPU assignment
   is left to the execution backend.
 - `s1` always designs chain `A`. On pass 2+ its input is the previous

@@ -1,6 +1,6 @@
 # Adaptive callback serialized the whole job (job 22534628)
 
-**Severity:** critical · **Status:** fixed on `scaling-wide`; **validated at scale** on `22701168` (2026-10-06, 32 pipelines, 4 h)
+**Severity:** critical · **Status:** fixed on `main` (merged from `scaling-wide`, PR #70); since moved into `ImpressManager` as the default (framework PR 1); **validated at scale** on `22701168` (2026-10-06, 32 pipelines, 4 h)
 **Evidence:** job `22534628`, 8 nodes / 32 pipelines, `TIMEOUT` at `Elapsed=12:00:10`
 **Artifacts:** `<hdd work dir>/impress-data-after-fixes/smb_8node/small_molecule_binding/`
 

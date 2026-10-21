@@ -100,7 +100,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
     def register_pipeline_tasks(self):
         """Register all pipeline tasks"""
 
-        @self.auto_register_task(capture_stdio=True)  # MPNN
+        @self.auto_register_task()  # MPNN
         async def s1():  # noqa: B006
             self.step_id += 1
             mpnn_script = os.path.join(self.base_path, "mpnn_wrapper.py")
@@ -182,7 +182,7 @@ class ProteinBindingPipeline(ImpressBasePipeline):
 
             return fasta_file_to_return
 
-        @self.auto_register_task(capture_stdio=True)
+        @self.auto_register_task()
         async def s4(target_fasta):  # noqa: B006
             self.step_id += 1
             cmd = (

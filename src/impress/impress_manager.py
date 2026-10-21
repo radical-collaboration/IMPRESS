@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any, Optional, Union
 
 from radical.asyncflow import WorkflowEngine
@@ -37,6 +37,21 @@ class ImpressManager:
                 checkpoint_path, resource_poll_interval). Pass None to disable.
             telemetry_subscribers: Callables registered via telemetry.subscribe()
                 immediately after telemetry starts.
+
+        A `PipelineSetup`'s `adaptive_fn` must be an engine task, declared by
+        the caller the way asyncflow's own examples declare one:
+
+            @flow.function_task(backend="local")
+            async def adaptive_decision(pipeline):
+                ...
+
+        The manager awaits that task and does not choose where it runs:
+        routing is declared, never discovered. The backend named must be a
+        **thread** pool, because an adaptive function mutates the live
+        pipeline object and a process pool would mutate a pickled copy. The
+        loop is shared by every pipeline, so a callback left on it — even an
+        `async def` that never awaits — stalls task dispatch for all of them;
+        handing it to the engine is what prevents that.
         """
         self.flow: WorkflowEngine = flow
         self.pipeline_tasks: dict[ImpressBasePipeline, asyncio.Task] = {}
@@ -79,11 +94,14 @@ class ImpressManager:
         Raises:
             ValueError: If pipeline type is not a subclass
                 of ImpressBasePipeline
+            TypeError: If a setup's `adaptive_fn` is not an engine task.
+                `PipelineSetup` raises it; the whole batch is normalized
+                below before any pipeline starts, so the first bad setup
+                stops the batch.
         """
-        for setup_input in pipeline_setups:
-            # Normalize to PipelineSetup object
-            setup = self._normalize_pipeline_setup(setup_input)
+        setups = [self._normalize_pipeline_setup(s) for s in pipeline_setups]
 
+        for setup in setups:
             # Create pipeline instance with config and kwargs merged
             pipeline_kwargs = {**setup.config, **setup.kwargs}
             pipeline: ImpressBasePipeline = setup.type(
@@ -91,6 +109,7 @@ class ImpressManager:
             )
 
             pipeline._adaptive_fn = setup.adaptive_fn
+            pipeline._telemetry = self.telemetry
 
             self.logger.pipeline_started(pipeline.name)
 
@@ -104,16 +123,27 @@ class ImpressManager:
         The adaptive function updates the pipeline's
         submit_child_pipeline_request property.
 
+        `adaptive_fn` is an engine task the caller declared, so the engine
+        owns its execution and this method only awaits it. The call carries
+        `workflow_id={pipeline}:adaptive` as a telemetry label: asyncflow
+        names every task after its function (`workflow_manager.py:749`)
+        regardless, and several pipelines usually share one callback, so
+        without the label an adaptive call cannot be attributed to a
+        pipeline in the trace. It is not collision avoidance — tasks are
+        identified by a uid (`:750`), never by name — and the backend field
+        is no substitute, since an adaptive task's lifecycle events name the
+        default backend rather than the one it ran on (F13).
+
         Args:
             pipeline: Pipeline to run adaptive function for
         """
         try:
             self.logger.adaptive_started(pipeline.name)
-            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Awaitable[None]]] = (
-                getattr(pipeline, "_adaptive_fn", None)
+            adaptive_fn: Optional[Callable[[ImpressBasePipeline], Any]] = getattr(
+                pipeline, "_adaptive_fn", None
             )
             if adaptive_fn:
-                await adaptive_fn(pipeline)
+                await adaptive_fn(pipeline, workflow_id=f"{pipeline.name}:adaptive")
                 self.logger.adaptive_completed(pipeline.name)
         except Exception as e:
             self.logger.adaptive_failed(pipeline.name, str(e))
