@@ -230,6 +230,10 @@ engine should have owned.
   the name rebinds and the existing child config passes the task on.
 - Carries **F7**: `protein_binding`, `discontinuous_scaffolds` and smb's `run_nonadaptive` had
   no thread-pool backend to declare, so each gained the `compute` + `local` layout.
+  *Update (2026-10-20):* merging `smb-nonadaptive-benchmark` (`d571de2`) deleted smb's
+  `run_nonadaptive.py` in favour of `run_small_molecule_binding.py --nonadaptive`, so its
+  pass-through `nonadaptive_decision` is now an `async def` declared on the main runner's
+  `local` pool.
 
 **Correction to "Keep", below.** That section called `_run_to_completion`'s `asyncio.run` in a
 worker thread "not an escape", on the grounds that asyncflow tells callers to wrap sync
