@@ -1,22 +1,23 @@
 {
  "code": {
-  "head": "ffac4b0",
+  "head": "c163fe2",
+  "branch": "merge-impress-a",
   "packages": {
-   "tools": 1506,
+   "tools": 1547,
    "runtime": 1027,
    "control": 928,
    "core": 848,
    "policy": 769,
    "exec": 512,
+   "cli": 439,
    "compose": 433,
-   "cli": 423,
    "manager.py": 115,
    "__main__.py": 3,
    "__init__.py": 0
   },
-  "src_total": 6564,
-  "test_lines": 3791,
-  "tests_collected": 165,
+  "src_total": 6621,
+  "test_lines": 3855,
+  "tests_collected": 168,
   "tools": [
    "boltz_predict",
    "fastrelax",
@@ -49,9 +50,9 @@
    "  cycles   : 2",
    "  stop     : target front size 3 reached",
    "  nodes    : 4  front: 3",
-   "    n000001-b6b2 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
-   "    n000003-b6b2 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
-   "    n000004-b6b2 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
+   "    n000001-2719 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
+   "    n000003-2719 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
+   "    n000004-2719 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
   ],
   "admissions": [
    {
@@ -96,7 +97,7 @@
   ],
   "nodes": [
    {
-    "node": "n000001-b6b2",
+    "node": "n000001-2719",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
@@ -112,7 +113,7 @@
     }
    },
    {
-    "node": "n000002-b6b2",
+    "node": "n000002-2719",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
@@ -128,7 +129,7 @@
     }
    },
    {
-    "node": "n000003-b6b2",
+    "node": "n000003-2719",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
@@ -144,7 +145,7 @@
     }
    },
    {
-    "node": "n000004-b6b2",
+    "node": "n000004-2719",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
@@ -161,9 +162,9 @@
    }
   ],
   "front": [
-   "n000001-b6b2",
-   "n000003-b6b2",
-   "n000004-b6b2"
+   "n000001-2719",
+   "n000003-2719",
+   "n000004-2719"
   ],
   "stop": "target front size 3 reached",
   "cycles": 2,
@@ -756,7 +757,7 @@
     "mpnn_ensemble_size": 10.0,
     "rfd3_partial_t": 10.0
    },
-   "head": "5f12c1a"
+   "head": "c163fe2"
   },
   "measured": {
    "source": "IMPRESS small-molecule performance report (impress-smallmol-performance/report.md), over impress_runs_export_nvme_2026-10-08.tar.gz",

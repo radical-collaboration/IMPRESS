@@ -33,13 +33,14 @@
 //   R.code/mock/patterns/shape   mined from this checkout on every build
 //   R.analysis                   our own twelve-section performance analysis, transcribed:
 //                                recomputable, but only from the run archive
-//   R.baseline.code              mined from the reference pipeline's checkout
+//   R.baseline.code              mined from examples/small_molecule_binding, in THIS repo
+//                                since the fold - so both halves share one commit
 //   R.baseline.measured          transcribed from the reference pipeline's own report
 //   R.delta                      the Delta jobs, transcribed from plans/
 //
 // Any slide showing a transcribed figure repeats its source in the footer. A fabricated zero
-// is worse than a missing number, so an absent reference checkout renders as a sentence
-// saying so.
+// is worse than a missing number, so a missing reference example renders as a sentence
+// saying so - now the exceptional case rather than the usual one.
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -130,7 +131,7 @@ const pct = (v) => `${Math.round(Number(v) * 100)}%`;
     `attempt, all four objectives valued. Job 22728140: the same shape promoted, then ` +
     `${TRUST["22728140"].trusted_cycles} consecutive trusted cycles with no demotion`,
     M + 0.3, 4.6, 7.1, 0.7, { fontSize: 13, color: "9FB0BD" });
-  text(s, `Lab code walk, in three acts · main @ ${CODE.head} · ` +
+  text(s, `Lab code walk, in three acts · agent/ · ${CODE.branch} @ ${CODE.head} · ` +
     `${(CODE.src_total / 1000).toFixed(1)}k lines of source, ${CODE.tests_collected} tests, ` +
     `${CODE.n_tools} tools in ${CODE.n_toolkits} toolkits`,
     M + 0.3, 6.45, 8.5, 0.3, { fontSize: 12, color: "7E8F9C" });
@@ -253,7 +254,7 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
       `${pct(BL.busy_share[0])}–${pct(BL.busy_share[1])} of the time.` },
   ], M + 0.16, 2.58, 12.0, 0.46, { fontSize: 10, color: C.text });
 
-  // ---- band B: what it costs to CHANGE it, mined from its own checkout
+  // ---- band B: what it costs to CHANGE it, mined from their code in examples/
   const where = BC ? [
     ["the stage graph", `${BC.next_step_sites} next_step assignments in one ` +
       `${BC.decision_fn_lines}-line decision function, over ${BC.steps.length} STEP_ constants`,
@@ -265,20 +266,21 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
       "out of pipeline.state", "small_molecule_binding.py:1154"],
     ["the adaptive hook", "a plain Python closure with full object access, defined in the " +
       "runner script", "briefs/impress.md:112"],
-  ] : [["the reference checkout is not on this machine",
-        "run_model.py found no IMPRESS checkout, so this half is null rather than guessed",
+  ] : [["the reference example is not in this tree",
+        "run_model.py found no examples/small_molecule_binding, so this half is null "
+        + "rather than guessed",
         "run.json: baseline.code"]];
   text(s, [
     { text: "And what it costs to change it: ", options: { bold: true, color: C.ink } },
     { text: BC ? `one use case is a ${BC.lines.pipeline.toLocaleString()}-line pipeline class ` +
       `plus a ${BC.lines.runner}-line runner; its non-adaptive variant is ` +
-      `${BC.lines.nonadaptive} lines.` : "the reference checkout is absent.",
+      `${BC.lines.nonadaptive} lines.` : "the reference example is absent.",
       options: { color: C.text } },
   ], M, 3.22, 12.33, 0.26, { fontSize: 12 });
   tbl(s, ["where the pipeline's shape lives", "what is actually written down", "file"],
     where, M, 3.56, [2.5, 7.35, 2.48],
-    { mono: [2], mfs: 8.5, fs: 10, hfill: C.base,
-      rowH: [0.26, 0.28, 0.28, 0.28, 0.28], margin: 0.06 });
+    { mono: [2], mfs: 7.5, fs: 10, hfill: C.base,   // 7.5: the longest file name is 33 mono
+      rowH: [0.26, 0.28, 0.28, 0.28, 0.28], margin: 0.06 });  // chars and must not wrap mid-line-number
 
   // ---- band C: the two measured facts that argue for composition
   card(s, M, 5.3, 6.08, 1.18, "Its adaptivity is a re-sampler, not a ratchet", [
@@ -302,13 +304,13 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
     { text: "it paid for lessons we inherited for free, including the NVMe fix this project " +
       "ported out of its PR #67. Nothing here divides its numbers by ours." },
   ], M, 6.62, 12.33, 0.3, { fontSize: 11.5 });
-  footer(s, `${BL_SRC}; structural counts mined from that checkout at ${BC ? BC.head : "absent"}.`);
+  footer(s, `${BL_SRC}; structural counts mined from examples/small_molecule_binding in this repo at ${BC ? BC.head : "absent"}.`);
   s.addNotes(
 `[1:35] What this is compared against. Not a blank page.
 
 The reference IMPRESS pipeline does adaptive protein design at a scale we have not touched — twenty-four thousand task directories, nine hundred passing folds, no task failures on the clean runs. It also solved the thing we have not: eight pipelines per GPU takes utilisation from twelve percent to seventy and cuts cost per fold threefold. And its orchestration is not the overhead, at under two percent of the manager's wall clock.
 
-So the question is not whether an adaptive pipeline works. It does. The question is what it costs to change one — the middle band, mined from their checkout rather than quoted. The shape of the graph is nineteen assignments to next_step inside one decision function; the thresholds are a dataclass in the runner; the QC verdict is computed inside the coroutine that parses the output; the hook is a plain closure with full object access and no schema. One use case is fourteen hundred lines plus a runner — and the non-adaptive version of the same science is a hundred-line routing table, which is what a declarative rewrite actually looks like.
+So the question is not whether an adaptive pipeline works. It does. The question is what it costs to change one — the middle band, mined from their own code rather than quoted. The shape of the graph is nineteen assignments to next_step inside one decision function; the thresholds are a dataclass in the runner; the QC verdict is computed inside the coroutine that parses the output; the hook is a plain closure with full object access and no schema. One use case is fourteen hundred lines plus a runner — and the non-adaptive version of the same science is a hundred-line routing table, which is what a declarative rewrite actually looks like.
 
 The bottom cards are why I think composition is worth the trouble, and they are their numbers. Their guided feedback, against its own parent fold, is flat — plus nought point nought one one pLDDT, p of nought point eight five. A cheap re-sampler, not a ratchet — and still worth having at four times cheaper per fold. And eight hundred passing folds are five hundred and ninety-six clusters: width buys independent searches, depth refines one.
 
@@ -381,8 +383,9 @@ The last line is owed rather than implied — that pipeline paid for lessons we 
     { text: "The weak column is the middle one, and specifically performance at scale.  ",
       options: { bold: true, color: "F09A8C" } },
     { text: `Every figure in it comes from one lineage on one GPU: ${TRUST.acceptance_rate.of} ` +
-      "complete six-stage runs, all of them serial. replicas > 1 has never executed, so the " +
-      "invariant that N lineages must produce N independent nodes is unexercised — and it is " +
+      "complete six-stage runs, all of them serial. On real tools replicas > 1 has never "
+      + "executed — only against mocks — so the invariant that N lineages must produce N "
+      + "independent nodes is unexercised, and it is " +
       "the one most likely to be silently wrong. There is no head-to-head against the reference " +
       "pipeline and I am not going to construct one.", options: { color: "DCE5EC" } },
   ], M + 0.2, 5.88, 11.95, 0.88, { fontSize: 12.5 });
@@ -751,7 +754,7 @@ And the limit, from our own limitations doc: this buys examination and delay, no
      `total_score ≤ ${OURG.fastrelax.total_score.max}, fa_rep ≤ ${OURG.fastrelax.fa_rep.max}, ` +
        "no interaction_energy",
      BC ? `< ${BC.prod.fastrelax_max_score}, < ${BC.prod.fastrelax_max_fa_rep}, < ` +
-       `${BC.prod.fastrelax_max_interact} — THEY ARE` : "(reference checkout absent)"],
+       `${BC.prod.fastrelax_max_interact} — THEY ARE` : "(reference example absent)"],
   ], M, 5.02, [1.85, 2.3, 2.15], { fs: 9, hfs: 9.5, hfill: C.tool,
       rowH: [0.26, 0.5, 0.3, 0.46], margin: 0.06,
       cell: (i, j) => (i === 2 && j === 2 ? { color: C.fail, bold: true } : {}) });
@@ -772,14 +775,14 @@ And the limit, from our own limitations doc: this buys examination and delay, no
     '        return {"result": "backbone", ...,',
     '                "outputs": {"designs": "noodle"},',
     '                "metrics": {"ss_fraction": 0.02, "designability": 0.91}}',
-  ], rx, 2.0, rwd, 1.55, { anchor: "tools/mock_agents.py:73–84  ·  EDITED", fs: 10 });
+  ], rx, 2.0, rwd, 1.55, { anchor: "tools/mock_agents.py:84–95  ·  EDITED", fs: 10 });
   code(s, [
     'assert not res.failures, "the tool must SUCCEED - that is',
     '                          what makes it silent"',
     'assert res.merged_metrics()["designability"] > 0.9',
     'assert res.merged_qc().verdict is QCVerdict.FAIL',
   ], rx, 3.90, rwd, 0.85,
-    { anchor: "test_campaign.py:81–83  ·  EDITED (one string wrapped)", fs: 10,
+    { anchor: "tests/test_campaign.py:96–98  ·  EDITED (wrapped, messages dropped)", fs: 10,
       fill: "243240" });
 
   card(s, rx, 5.02, rwd, 1.92, "Where this defence is still thin", [
@@ -1297,7 +1300,8 @@ The table underneath is three later jobs that changed nothing about the science 
   text(s, [
     { text: "The honest state of this slide:  ", options: { bold: true, color: "F09A8C" } },
     { text: "the machinery for width is written, typed and unit-tested, and " +
-      "replicas > 1 has never executed. Worse, the cheap route to it is closed: the pattern " +
+      "replicas > 1 has run against mocks only, never on the real chain. Worse, the cheap " +
+      "route to it is closed: the pattern " +
       "signature includes replica multiplicity, so the trust earned at one lineage does not " +
       "transfer to four — a four-lineage graph starts untrusted, under a cap it already " +
       "exceeds. That is backlog A10 and it is ask 5.", options: { color: "DCE5EC" } },
@@ -1312,7 +1316,7 @@ Bottom left is the pair worth staring at. Their eight hundred and four passing f
 
 Right side is what this project does about it, and the dotted borders are doing the work. Replicas-N means N independent lineages, one node each, and the executor never funnels them back into one candidate. The front is deliberately not monotonic, so a node promoted on an optimistic prediction gets demoted by its own assay. Trust is scored on shape, so breadth has an identity of its own.
 
-All of it dotted — written, typed, unit-tested, never executed. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.`);
+All of it dotted — written, typed, unit-tested, and never executed on real tools; the only lineages that have run are mock ones. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.`);
 }
 
 // ================================================================ 17. Four defects
@@ -1619,8 +1623,8 @@ Which is also the answer to the third use case. As a component in someone else's
                "durable ledger.",
              `Four control models plus conduct() reasoners over one executor — ` +
                `${CODE.n_tools} tools, and adding one has never touched the composer.`],
-      not: ["replicas > 1 has NEVER executed. N independent lineages is the invariant most " +
-              "likely to be silently wrong.",
+      not: ["replicas > 1 has NEVER executed on real tools, only against mocks. N independent "
+              + "lineages is the invariant most likely to be silently wrong.",
             "No measurement has superseded a prediction, so calibration is untested — and " +
               "that is the capability a composed graph has and a fixed one does not.",
             `${R.patterns.unused.length} of the 8 compute patterns have no member, P7 ` +
@@ -1685,7 +1689,7 @@ Which is also the answer to the third use case. As a component in someone else's
   s.addNotes(
 `[1:30] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else. Three columns, three green rows and three red rows each, and the equal lengths are the argument.
 
-Functionality: a real six-stage campaign end to end, the whole engine, four control models over one executor, and adding a tool has never touched the composer. Against that — replicas greater than one has never run; no measurement has superseded a prediction, which is exactly the capability a composed graph has and a written-down one does not; and six of the eight compute patterns have no member, including the one reserved for running their pipeline as one of ours.
+Functionality: a real six-stage campaign end to end, the whole engine, four control models over one executor, and adding a tool has never touched the composer. Against that — replicas greater than one has never run on real tools; no measurement has superseded a prediction, which is exactly the capability a composed graph has and a written-down one does not; and six of the eight compute patterns have no member, including the one reserved for running their pipeline as one of ours.
 
 Performance: the trusted path promoted after the second run and held three cycles with no safety net; the scrutiny is measured and free; both ends of the Dragon lifecycle bounded against real lost allocations. Against that — no serial baseline; one GPU of four ever works; and no node has reached a plain pass, which wants more draws rather than more code.
 

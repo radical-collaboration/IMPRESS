@@ -4,18 +4,20 @@ Every code block that appears on a slide, keyed by snippet ID, anchored, and mar
 Companion to [`DECK_OUTLINE.md`](DECK_OUTLINE.md) and `build_deck.js`; slide numbers and snippet IDs
 match across all three.
 
-**Derived against `main` @ `ffac4b0`.** Every anchor below is checked mechanically, and the
+**Derived against `merge-impress-a` @ `c163fe2`.** Every anchor below is checked mechanically, and the
 script reports the count rather than this file restating it:
 
 ```sh
 python3 ~/.claude/skills/code-walk-deck/scripts/check_anchors.py \
-    --anchors slides/anchors.json --root <workspace>
+    --anchors agent/slides/anchors.json --root .        # from the IMPRESS repo root
 ```
 
-The root is the *parent* of this checkout, because the table also anchors the reference IMPRESS
-pipeline's own code: the deck's argument is a comparison with it, its authors are in the room, and
-a structural claim about their file should be as checkable as one about ours. Those entries report
-`MISSING` rather than drifting if that checkout is not beside this one.
+Paths are relative to the **IMPRESS repo root**, not to `agent/`, because the table also anchors
+the reference pipeline's own code under `examples/small_molecule_binding`: the deck's argument is a
+comparison with it, its authors are in the room, and a structural claim about their file should be
+as checkable as one about ours. Both subprojects have been in one repository since `0553688`, so
+one root reaches every anchor. (The table carried the old two-checkout prefixes for a while after
+that fold, and reported 0/52 until they were repointed.)
 
 **Fidelity marking, on every block:**
 
@@ -40,8 +42,8 @@ no block says the code does something it does not do.
 | S12-B | 12 | `exec/dispatch.py:182–190` | **EDITED** | the `workflow_id` conditional collapsed to its taken branch; comments shortened. The `topo_order` loop and the unawaited `gather` are verbatim |
 | S13-A | 13 | `exec/backend.py:128–176` | **EDITED** | condensed: the `Future`/`wrap_future` setup, the heartbeat task and both `BackendConstructionTimeout` messages are elided. Control flow and ordering are exact |
 | S10-A | 10 | `toolkits/rosetta/tools/filter_shape/spec.yaml` | **EDITED** | comments and `toolkit:`/`version:` dropped; `inputs`/`outputs` folded to one line each |
-| S10-B | 10 | `tools/mock_agents.py:73–84` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
-| S10-C | 10 | `tests/test_campaign.py:81–83` | **EDITED** | one assertion message wrapped across two lines to fit |
+| S10-B | 10 | `tools/mock_agents.py:84–95` | **EDITED** | annotations dropped, docstring shortened, one dict key elided as `...` |
+| S10-C | 10 | `tests/test_campaign.py:96–98` | **EDITED** | first assertion message wrapped across two lines to fit; the other two messages dropped |
 | B2-A | B2 | `core/types.py:12–32`, `compose/composer.py:45`, `compose/validate.py:106`, `tools/spec.py:107` | **EDITED** | four excerpts from three files, stacked. The eight enum members are dropped (the slide's table carries them); `@property`, docstrings and return annotations dropped from `is_inline`/`is_external`; gate 4's `ValidationFailure` keyword arguments collapsed to `reason=...`. Every condition is exact |
 | S18-A | 18 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
 | S18-B | 18 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
@@ -211,9 +213,9 @@ daemon thread is abandoned for free.
 
 ```sh
 S=~/.claude/skills/code-walk-deck/scripts
-PYTHONPATH=src python3 slides/run_model.py                     # run.json, from this checkout
-python3 $S/check_anchors.py --anchors slides/anchors.json \
-    --root <workspace>                             # do not present a drifted anchor
+cd agent && PYTHONPATH=src python3 slides/run_model.py         # run.json, from this checkout
+python3 $S/check_anchors.py --anchors agent/slides/anchors.json \
+    --root <repo root>                             # do not present a drifted anchor
 python3 $S/make_script.py --deck slides/build_deck.js          # DECK_SCRIPT.md, from the notes
 NODE_PATH=<dir with pptxgenjs> node slides/build_deck.js
 ```

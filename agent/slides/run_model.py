@@ -59,9 +59,14 @@ def code_stats() -> dict:
     tools = sorted(p.parent.name for p in (ROOT / "toolkits").glob("*/tools/*/spec.yaml"))
     kits = sorted(p.name for p in (ROOT / "toolkits").iterdir()
                   if (p / "SKILL.md").exists())
-    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-                          capture_output=True, text=True).stdout.strip()
-    return {"head": head, "packages": dict(sorted(pkgs.items(), key=lambda kv: -kv[1])),
+    def _git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=ROOT,
+                              capture_output=True, text=True).stdout.strip()
+    # Mined, not typed: this deck printed `main @ ffac4b0` for a while after the subproject
+    # was folded into IMPRESS, which is a branch it was not on and a commit filter-repo had
+    # already rewritten away.
+    head, branch = _git("rev-parse", "--short", "HEAD"), _git("rev-parse", "--abbrev-ref", "HEAD")
+    return {"head": head, "branch": branch, "packages": dict(sorted(pkgs.items(), key=lambda kv: -kv[1])),
             "src_total": sum(pkgs.values()), "test_lines": tests,
             "tests_collected": int(collected.split()[0]), "tools": tools,
             "n_tools": len(tools), "toolkits": kits, "n_toolkits": len(kits),
@@ -275,8 +280,10 @@ DELTA = {
 #   baseline["measured"]  TRANSCRIBED from that pipeline's own performance report, which reads
 #                         run archives no checkout can reproduce. Every slide showing one of
 #                         these repeats the source in its footer.
-# The reference pipeline is this repository's own example once impress_a lives in IMPRESS
-# under agent/; IMPRESS_ROOT points elsewhere if the deck is built from another checkout.
+# Since the fold (0553688) the reference pipeline is this very repository's own example, one
+# directory up from agent/ - so both halves of the comparison are mined at the same commit,
+# and `absent` is now the exceptional case rather than the usual one. IMPRESS_ROOT still
+# points elsewhere when the deck is built against a different IMPRESS checkout.
 REF = Path(os.environ.get("IMPRESS_ROOT") or Path(__file__).resolve().parents[2]) \
     / "examples" / "small_molecule_binding"
 

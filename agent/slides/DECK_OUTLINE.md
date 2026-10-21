@@ -9,13 +9,13 @@ pipeline that works already exists next door, at a scale this project has not to
 here is therefore framed as *what composing a graph buys over writing one down* — and the slides
 say, in red, where that buys nothing yet.
 
-**Derived against `main` @ `ffac4b0`.** Companion files:
+**Derived against `merge-impress-a` @ `c163fe2`.** Companion files:
 
 | File | Role |
 |---|---|
 | `build_deck.js` | the deck. Shared machinery comes from the code-walk-deck skill's `deck_lib.js`; every diagram is native editable shapes, never an image |
 | `deck.json` | title, the three acts, the running orders, what to protect and what to say out loud — read by `make_script.py` |
-| `run_model.py` → `run.json` | every number on a slide: mined from this checkout, mined from the reference checkout, or transcribed with its source named |
+| `run_model.py` → `run.json` | every number on a slide: mined from `agent/`, mined from the reference pipeline in `examples/`, or transcribed with its source named |
 | `anchors.json` | every `file:line` the deck prints, including the five into the reference pipeline |
 | `CODE_FOR_DECK.md` | every on-slide code block, keyed `S<slide>-<letter>`, anchored and fidelity-marked |
 | `DECK_SCRIPT.md` | the spoken script, **generated** from the deck's own `addNotes`, with measured timings |
@@ -47,7 +47,9 @@ reason is `replicas > 1`.
 22692304 ran all six stages to `6/6 tasks ok` in 2m53s with all four objectives valued, and
 22728140's pattern then held trust for three consecutive cycles. What that does *not* cover:
 
-- `replicas > 1` has **never executed**, so the independence invariant is unexercised — and its
+- `replicas > 1` has **never executed on real tools** — only against the mock toolkit, where
+  the deck's own mock run does two lineages per run — so the independence invariant is
+  unexercised where it matters — and its
   cheap route is dead: the pattern signature includes replica multiplicity, so trust earned at
   width 1 does not transfer (slide 18, backlog A10).
 - **No node has ever reached plain `pass`**, at a ~31% acceptance rate over sixteen runs. More
@@ -70,7 +72,7 @@ The reference pipeline's authors are in the room and can check every one of thes
 3. **Do not claim "we catch silent failure and they do not."** On the two Rosetta stages we share,
    *their* thresholds are stricter — `total_score < -250`, `fa_rep < 100`, an `interaction_energy`
    we never compute, against our `≤ 0.0` and `≤ 500.0` and nothing (backlog G4/G5). Slide 10 prints
-   both columns, mined from both checkouts. The defensible claim is about **where the verdict lives
+   both columns, mined from both subprojects. The defensible claim is about **where the verdict lives
    and whether it can be omitted**, not about strictness.
 
 Two more that are easy to trip over: **P7, the pattern reserved for running an IMPRESS pipeline as
@@ -109,7 +111,7 @@ baseline terms.
 
 **3 — The baseline is not a blank page.** ★ The slide that makes the deck an argument rather than a
 tour. Three bands: what IMPRESS already does (measured, from its own report); what it costs to
-change it (mined from its checkout — 19 `next_step` assignments in one decision function,
+change it (mined from their code in `examples/` — 19 `next_step` assignments in one decision function,
 thresholds in a `PROD` dataclass, the verdict computed inside the parsing coroutine, the hook a
 plain closure); and the two measured facts that argue for composing (guided feedback is flat
 against its own parent, ΔpLDDT +0.011 at p = 0.85; 804 folds are 596 clusters). Ends on the credit
@@ -170,8 +172,8 @@ now; do not put them back to fill time.
 
 ## Delivery notes
 
-- **Open two terminals.** One in the repo root, one in `../IMPRESS`. Five anchors on these slides
-  point into *their* checkout, and this audience may well ask you to open them.
+- **Five anchors point into *their* code**, at `examples/small_molecule_binding/` — same repository
+  since the fold, one directory up from `agent/`. This audience may well ask you to open them.
 - **Have `run.json` open.** Every number is in it, and "let me show you where that came from" is a
   stronger answer than repeating the number.
 - **If the room goes deep on the engine or the backend**, stay on 13 and go to 21 if they ask about
@@ -190,7 +192,7 @@ now; do not put them back to fill time.
 ```sh
 S=~/.claude/skills/code-walk-deck/scripts
 PYTHONPATH=src python3 slides/run_model.py
-python3 $S/check_anchors.py --anchors slides/anchors.json --root <workspace>
+python3 $S/check_anchors.py --anchors agent/slides/anchors.json --root <repo root>
 python3 $S/make_script.py --deck slides/build_deck.js
 NODE_PATH=<dir with pptxgenjs> node slides/build_deck.js
 soffice --headless --convert-to pdf --outdir slides slides/impress-a-codewalk.pptx

@@ -22,11 +22,11 @@ realistic rate for technical material delivered with pauses.
 | 7. The loop (F1) | 1.2 | | 19. ACT 3 - Usability | 0.5 |
 | 8. Architecture (F2) | 0.7 | | 20. Running it | 0.9 |
 | 9. Admission | 1.4 | | 21. The control plane | 1.6 |
-| 10. Tools are data | 1.9 | | 22. Status | 1.5 |
+| 10. Tools are data | 1.9 | | 22. Status | 1.6 |
 | 11. ACT 2 - Performance | 0.5 | | 23. Asks | 1.9 |
 | 12. The seam: dispatch | 1.4 | | | |
 
-**Main path: 4531 words = 29.2 minutes of speech.** Backups add 4.3 min if used.
+**Main path: 4548 words = 29.3 minutes of speech.** Backups add 4.3 min if used.
 
 | Act | The question it answers | Slides | What it concedes |
 |---|---|---|---|
@@ -36,13 +36,13 @@ realistic rate for technical material delivered with pauses.
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **29.2** | a 35-minute slot, or a working session where questions land inline |
-| **B · default** | drop 17, 18, 20 | **25.5** | a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence |
-| **C · hard twenty** | drop 8, 9, 13, 15, 17, 18, 20 | **20.3** | a hard 20 that leaves real room for discussion - the baseline, the three dividers, the dispatch seam, both measured performance slides, status and asks |
+| **A · full** | every main slide | **29.3** | a 35-minute slot, or a working session where questions land inline |
+| **B · default** | drop 17, 18, 20 | **25.6** | a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence |
+| **C · hard twenty** | drop 8, 9, 13, 15, 17, 18, 20 | **20.4** | a hard 20 that leaves real room for discussion - the baseline, the three dividers, the dispatch seam, both measured performance slides, status and asks |
 
 **Protect 3, 4, 14, 16, 22 and 23.** Three and four are what make this a comparison rather than a tour; 14 and 16 are the only measured performance claims in the deck; 22 is status and 23 is the asks. Never cut a divider: a cut deck without them is a list of slides. Backups B1 (typed hops) and B2 (compute patterns) are already out of every order - do not put them back to fill time.
 
-**Say these out loud even if nothing prompts them:** that every run so far is a single lineage and `replicas > 1` has never executed; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer.
+**Say these out loud even if nothing prompts them:** that every REAL run so far is a single lineage, and `replicas > 1` has only ever executed against the mock toolkit - the deck's own mock run in run.json does two lineages per run - never on the six-stage chain; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer.
 
 ---
 
@@ -72,7 +72,7 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
 
 The reference IMPRESS pipeline does adaptive protein design at a scale we have not touched — twenty-four thousand task directories, nine hundred passing folds, no task failures on the clean runs. It also solved the thing we have not: eight pipelines per GPU takes utilisation from twelve percent to seventy and cuts cost per fold threefold. And its orchestration is not the overhead, at under two percent of the manager's wall clock.
 
-So the question is not whether an adaptive pipeline works. It does. The question is what it costs to change one — the middle band, mined from their checkout rather than quoted. The shape of the graph is nineteen assignments to next_step inside one decision function; the thresholds are a dataclass in the runner; the QC verdict is computed inside the coroutine that parses the output; the hook is a plain closure with full object access and no schema. One use case is fourteen hundred lines plus a runner — and the non-adaptive version of the same science is a hundred-line routing table, which is what a declarative rewrite actually looks like.
+So the question is not whether an adaptive pipeline works. It does. The question is what it costs to change one — the middle band, mined from their own code rather than quoted. The shape of the graph is nineteen assignments to next_step inside one decision function; the thresholds are a dataclass in the runner; the QC verdict is computed inside the coroutine that parses the output; the hook is a plain closure with full object access and no schema. One use case is fourteen hundred lines plus a runner — and the non-adaptive version of the same science is a hundred-line routing table, which is what a declarative rewrite actually looks like.
 
 The bottom cards are why I think composition is worth the trouble, and they are their numbers. Their guided feedback, against its own parent fold, is flat — plus nought point nought one one pLDDT, p of nought point eight five. A cheap re-sampler, not a ratchet — and still worth having at four times cheaper per fold. And eight hundred passing folds are five hundred and ninety-six clusters: width buys independent searches, depth refines one.
 
@@ -212,7 +212,7 @@ Bottom left is the pair worth staring at. Their eight hundred and four passing f
 
 Right side is what this project does about it, and the dotted borders are doing the work. Replicas-N means N independent lineages, one node each, and the executor never funnels them back into one candidate. The front is deliberately not monotonic, so a node promoted on an optimistic prediction gets demoted by its own assay. Trust is scored on shape, so breadth has an identity of its own.
 
-All of it dotted — written, typed, unit-tested, never executed. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.
+All of it dotted — written, typed, unit-tested, and never executed on real tools; the only lineages that have run are mock ones. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.
 
 ## 17. Four defects — *1.3 min*
 
@@ -266,11 +266,11 @@ The gap is honest and annoying: all of this is reachable from the test suite and
 
 Which is also the answer to the third use case. As a component in someone else's workflow there is no evidence at all: nothing external has ever driven a campaign outside tests, there is no resume, and the site files are read by no code. One of your pipelines running as a tool of ours would be the obvious proof, and that is the P7 row with no member.
 
-## 22. Status — *1.5 min*
+## 22. Status — *1.6 min*
 
 [1:30] I will not compress this slide, because an audience that catches you overclaiming stops believing everything else. Three columns, three green rows and three red rows each, and the equal lengths are the argument.
 
-Functionality: a real six-stage campaign end to end, the whole engine, four control models over one executor, and adding a tool has never touched the composer. Against that — replicas greater than one has never run; no measurement has superseded a prediction, which is exactly the capability a composed graph has and a written-down one does not; and six of the eight compute patterns have no member, including the one reserved for running their pipeline as one of ours.
+Functionality: a real six-stage campaign end to end, the whole engine, four control models over one executor, and adding a tool has never touched the composer. Against that — replicas greater than one has never run on real tools; no measurement has superseded a prediction, which is exactly the capability a composed graph has and a written-down one does not; and six of the eight compute patterns have no member, including the one reserved for running their pipeline as one of ours.
 
 Performance: the trusted path promoted after the second run and held three cycles with no safety net; the scrutiny is measured and free; both ends of the Dragon lifecycle bounded against real lost allocations. Against that — no serial baseline; one GPU of four ever works; and no node has reached a plain pass, which wants more draws rather than more code.
 
