@@ -1,6 +1,8 @@
 # F20 — Retire the manager's adaptive wrappers; move the contract into `PipelineSetup`
 
-**Status:** open, not started · **Items:** F20 · **Evidence:** commit `22a1f82` (F19, **passed**
+**Status:** **fixed, not yet confirmed** — implemented on `framework-defaults-pr1`; 5 of 6
+criteria pass, criterion 5 (smb mock comparison) **could not be run here**, rhapsody is not
+installed. See [Result](#result) · **Items:** F20 · **Evidence:** commit `22a1f82` (F19, **passed**
 on `23062773` + `23065238`), radical.asyncflow **0.6.0** checkout (`175cf76`,
 `v0.5.1-14-g175cf76`), engine probe of 2026-10-21, test baseline 120 passed / 5 skipped
 · **Branch:** `framework-defaults-pr1` (verified not an ancestor of `origin/main`)
@@ -227,6 +229,38 @@ If a Delta run happens for another reason before PR 1 merges, check that adaptiv
 still 100 % labelled `p<N>:adaptive` and that adaptive share stays within the restated
 **≤ 0.5 %** bar (`23062773` 0.28 %, `23065238` 0.35 %;
 [decision](2026-10-20-f19-delta-acceptance.md#rerun)).
+
+<a id="result"></a>
+
+## Result (2026-10-21, implementation)
+
+| # | Criterion | Measured | Verdict |
+|---|---|---|---|
+| 1 | Suite ≥ 120 passed / 5 skipped / 0 failed | **123 passed, 5 skipped, 0 failed** (+3: two new regressions, one split) | pass |
+| 2 | Bare-but-marked rejected at construction; fails before the change | raises `TypeError` naming the pipeline. Both new tests run against a worktree at `6aadc2e` give **`Failed: DID NOT RAISE TypeError`** | pass |
+| 3 | `ruff check` / `ruff format --check` clean | clean (ruff auto-fixed 3 × F541, redundant `f` prefixes, in the new validator) | pass |
+| 4 | `dummy_adaptive.py` reaches a third generation | ran to **`p2_g2_g2`**, child configs through `from_dict` → the new validator, clean exit | pass |
+| 5 | smb mock event sequence byte-identical | **not run** — `run_test_small_molecule_binding.py` imports `run_small_molecule_binding`, which imports `rhapsody`; `ModuleNotFoundError` in both trees. Same absence skips the 5 tests above | **blocked** |
+| 6 | No example source changes | `git diff --stat examples/` empty | pass |
+
+**Criterion 5 is the one gap, and it is an environment limit, not a result.** The mock run is
+what F19 used to show the refactor changed no observable behaviour, so it should be run on a
+machine with rhapsody before this merges. What covers the same ground meanwhile: criterion 4
+exercises the full adaptive protocol including child spawning, and
+`tests/integration/test_task_defaults_local.py` exercises the real engine on a declared
+backend — including the new real-engine regression, which asserts upstream's marking
+behaviour directly so it fails loudly if a future asyncflow stops marking the original.
+
+**Scope note.** Three tests in `tests/unit/test_pipeline_setup.py` (`test_all_fields`,
+`test_known_fields_separated`, `test_adaptive_fn_included_when_set`) used a bare
+`async def fn(p)` as a stand-in `adaptive_fn` while testing dict round-tripping. They are not
+about the adaptive contract, so they now take a declared task from a `_declared_task(mock_flow)`
+helper rather than being exempted from it. This was not in the plan; it is the blast radius of
+moving validation into the model, and the right correction — a stand-in that the model rejects
+is not a valid stand-in.
+
+**Not done, deliberately:** the sixth F13 ask (a public "is this a task of mine?" predicate).
+It is listed below and belongs with the other upstream asks, not in this change.
 
 ## What this gives up
 

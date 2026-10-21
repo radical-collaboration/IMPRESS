@@ -6,10 +6,18 @@ from impress import PipelineSetup
 from .test_manager_core import MockPipeline
 
 
+def _declared_task(mock_flow):
+    """An `adaptive_fn` of the only shape PipelineSetup accepts."""
+
+    async def adaptive_decision(pipeline):
+        pass
+
+    return mock_flow.function_task(adaptive_decision)
+
+
 class TestPipelineSetupConstruction:
-    def test_all_fields(self):
-        async def fn(p):
-            pass
+    def test_all_fields(self, mock_flow):
+        fn = _declared_task(mock_flow)
 
         setup = PipelineSetup(
             name="my_pipe",
@@ -47,9 +55,8 @@ class TestPipelineSetupConstruction:
 
 
 class TestFromDict:
-    def test_known_fields_separated(self):
-        async def fn(p):
-            pass
+    def test_known_fields_separated(self, mock_flow):
+        fn = _declared_task(mock_flow)
 
         data = {
             "name": "p1",
@@ -109,9 +116,8 @@ class TestToDict:
         d = setup.to_dict()
         assert "adaptive_fn" not in d
 
-    def test_adaptive_fn_included_when_set(self):
-        async def fn(p):
-            pass
+    def test_adaptive_fn_included_when_set(self, mock_flow):
+        fn = _declared_task(mock_flow)
 
         setup = PipelineSetup(name="p", type=MockPipeline, adaptive_fn=fn)
         d = setup.to_dict()

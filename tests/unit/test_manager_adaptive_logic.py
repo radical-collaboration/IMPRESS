@@ -174,43 +174,56 @@ class TestAdaptiveRouting:
         assert pipeline._adaptive_barrier.is_set()
 
     @pytest.mark.parametrize(
-        "fn, kind",
-        [
-            (lambda pipeline: None, "callable"),
-            (AsyncMock(), "callable"),
-        ],
+        "fn",
+        [lambda pipeline: None, AsyncMock()],
         ids=["sync-def", "async-mock"],
     )
-    async def test_undeclared_adaptive_fn_rejected_before_any_pipeline(
-        self, mock_flow, fn, kind
-    ):
-        manager = ImpressManager(mock_flow, use_colors=False)
-        manager.logger = Mock()
-        setup = PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=fn)
-
+    async def test_undeclared_adaptive_fn_rejected_at_construction(self, fn):
         with pytest.raises(TypeError, match=r"p1'.*not an engine task"):
-            manager.submit_new_pipelines([setup])
+            PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=fn)
 
-        # Nothing started: the whole batch is checked first.
-        assert manager.pipeline_tasks == {}
-
-    async def test_bare_coroutine_function_names_its_kind(self, mock_flow):
-        manager = ImpressManager(mock_flow, use_colors=False)
-        manager.logger = Mock()
-
+    async def test_bare_coroutine_function_names_its_kind(self):
         async def not_a_task(pipeline):
             pass
 
-        setup = PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=not_a_task)
         with pytest.raises(TypeError, match="plain coroutine function"):
-            manager.submit_new_pipelines([setup])
+            PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=not_a_task)
 
-    async def test_no_adaptive_fn_is_allowed(self, mock_flow):
+    async def test_declared_elsewhere_but_passed_bare_is_rejected(self, mock_flow):
+        """The case the `__task_description__` mark alone cannot catch.
+
+        asyncflow sets the mark on the function it decorates, so once a
+        callback has been declared the bare body carries it too. Passing
+        the bare body — the mistake a child config invites — would
+        otherwise reach the engine and fail as a caught `adaptive_failed`,
+        leaving the pipeline to continue with no decision made.
+        """
+
+        async def adaptive_decision(pipeline):
+            pass
+
+        adaptive_task = mock_flow.function_task(adaptive_decision)
+        assert hasattr(adaptive_decision, "__task_description__")  # marked anyway
+
+        PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=adaptive_task)
+        with pytest.raises(TypeError, match="undecorated function"):
+            PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=adaptive_decision)
+
+    async def test_nothing_starts_when_one_setup_in_a_batch_is_bad(self, mock_flow):
+        """A child config arrives as a dict, so it is normalized here."""
         manager = ImpressManager(mock_flow, use_colors=False)
         manager.logger = Mock()
-        manager._check_adaptive_fns(
-            [PipelineSetup(name="p1", type=MockPipeline, adaptive_fn=None)]
-        )
+        good = PipelineSetup(name="p1", type=MockPipeline)
+        bad = {"name": "p2", "type": MockPipeline, "adaptive_fn": lambda p: None}
+
+        with pytest.raises(TypeError, match=r"p2'.*not an engine task"):
+            manager.submit_new_pipelines([good, bad])
+
+        # The whole batch is normalized before the first pipeline is built.
+        assert manager.pipeline_tasks == {}
+
+    async def test_no_adaptive_fn_is_allowed(self):
+        assert PipelineSetup(name="p1", type=MockPipeline).adaptive_fn is None
 
     async def test_exception_still_releases_barrier(self):
         flow = LocalBackendFlow()

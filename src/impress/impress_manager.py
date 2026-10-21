@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 from collections.abc import Callable
 from typing import Any, Optional, Union
 
@@ -96,10 +95,11 @@ class ImpressManager:
             ValueError: If pipeline type is not a subclass
                 of ImpressBasePipeline
             TypeError: If a setup's `adaptive_fn` is not an engine task.
-                The whole batch is checked before any pipeline starts.
+                `PipelineSetup` raises it; the whole batch is normalized
+                below before any pipeline starts, so the first bad setup
+                stops the batch.
         """
         setups = [self._normalize_pipeline_setup(s) for s in pipeline_setups]
-        self._check_adaptive_fns(setups)
 
         for setup in setups:
             # Create pipeline instance with config and kwargs merged
@@ -123,6 +123,17 @@ class ImpressManager:
         The adaptive function updates the pipeline's
         submit_child_pipeline_request property.
 
+        `adaptive_fn` is an engine task the caller declared, so the engine
+        owns its execution and this method only awaits it. The call carries
+        `workflow_id={pipeline}:adaptive` as a telemetry label: asyncflow
+        names every task after its function (`workflow_manager.py:749`)
+        regardless, and several pipelines usually share one callback, so
+        without the label an adaptive call cannot be attributed to a
+        pipeline in the trace. It is not collision avoidance — tasks are
+        identified by a uid (`:750`), never by name — and the backend field
+        is no substitute, since an adaptive task's lifecycle events name the
+        default backend rather than the one it ran on (F13).
+
         Args:
             pipeline: Pipeline to run adaptive function for
         """
@@ -132,46 +143,13 @@ class ImpressManager:
                 pipeline, "_adaptive_fn", None
             )
             if adaptive_fn:
-                await self._invoke_adaptive_fn(adaptive_fn, pipeline)
+                await adaptive_fn(pipeline, workflow_id=f"{pipeline.name}:adaptive")
                 self.logger.adaptive_completed(pipeline.name)
         except Exception as e:
             self.logger.adaptive_failed(pipeline.name, str(e))
         finally:
             pipeline.invoke_adaptive_step = False
             pipeline._adaptive_barrier.set()
-
-    async def _invoke_adaptive_fn(
-        self, adaptive_fn: Callable, pipeline: ImpressBasePipeline
-    ) -> None:
-        """Await the engine task the caller declared for this pipeline.
-
-        `workflow_id` is the label, not the routing: asyncflow names a
-        function task after its own `__name__` otherwise, which collides
-        across pipelines sharing one callback.
-        """
-        await adaptive_fn(pipeline, workflow_id=f"{pipeline.name}:adaptive")
-
-    def _check_adaptive_fns(self, setups: list[PipelineSetup]) -> None:
-        """Fail before any pipeline starts if an `adaptive_fn` is not a task.
-
-        A plain callable would otherwise have to be run by the manager
-        itself, on the loop every pipeline shares. Reporting it here keeps
-        that decision with the caller, who is the only one who knows which
-        backend the callback belongs on.
-        """
-        for setup in setups:
-            fn = setup.adaptive_fn
-            if fn is None or _is_flow_task(fn):
-                continue
-            kind = (
-                "coroutine function" if inspect.iscoroutinefunction(fn) else "callable"
-            )
-            raise TypeError(
-                f"adaptive_fn for pipeline {setup.name!r} is a plain {kind}, "
-                f"not an engine task. Declare it on a thread-pool backend, "
-                f"e.g. flow.function_task(backend='local')(adaptive_decision), "
-                f"and pass the result as adaptive_fn."
-            )
 
     async def start(
         self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]
@@ -310,12 +288,3 @@ class ImpressManager:
 
             if not any_activity:
                 await asyncio.sleep(0.5)
-
-
-def _is_flow_task(fn: Callable) -> bool:
-    """True for a function already wrapped by a flow task decorator.
-
-    asyncflow marks the functions it registers with `__task_description__`,
-    and `functools.wraps` copies the mark onto the wrapper it returns.
-    """
-    return hasattr(fn, "__task_description__")
