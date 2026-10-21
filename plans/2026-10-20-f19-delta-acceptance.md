@@ -1,6 +1,6 @@
 # F19 — declared adaptive tasks, acceptance run on Delta
 
-**Status:** `23062773` (2026-10-20, gpub001, `TIMEOUT` 1:00:05 as planned): routing, labels, telemetry and storage **pass**; throughput **unscored** after backend faults killed 11 of 32 pipelines. See [Result](#result). Rerun `23065238` (18:13–19:13, `TIMEOUT` as planned): throughput **passes** (rfd3 −9.2 %, boltz +0.8 %); adaptive share 0.35 % vs a ≤ 0.31 % bar, **needs decision**. See [Rerun](#rerun) · **Branch:** `framework-defaults-pr1` at `22a1f82` · **Blocks:** pushing and merging PR 1 · **Items:** F19
+**Status:** `23062773` (2026-10-20, gpub001, `TIMEOUT` 1:00:05 as planned): routing, labels, telemetry and storage **pass**; throughput **unscored** after backend faults killed 11 of 32 pipelines. See [Result](#result). Rerun `23065238` (18:13–19:13, `TIMEOUT` as planned): throughput **passes** (rfd3 −9.2 %, boltz +0.8 %); adaptive share 0.35 %, accepted against the restated ≤ 0.5 % bar. **F19 passed.** See [Rerun](#rerun) · **Branch:** `framework-defaults-pr1` at `22a1f82` · **Blocks:** pushing and merging PR 1 · **Items:** F19
 
 ## Why
 
@@ -35,6 +35,7 @@ Out of scope: F7's other runners (`protein_binding`, `discontinuous_scaffolds`,
   `ALR_binder_design.json` (smb 9); project inodes 1.43M of 2.55M (smb 18); no other job
   writing under `logs/`.
 
+<a id="pass-criteria"></a>
 ## Pass criteria
 
 Scored with the F1/F18 method: per node-h counted from minute 10.
@@ -136,5 +137,9 @@ i.e. this is run-to-run spread around 0.3 % of wall clock (≈ 12 s of decision 
 Accepting it means restating the criterion as "≤ 0.5 %, the same order as F18"; that is a
 choice for a reviewer, not something to fix silently here.
 
-**Overall: F19 passes on Dragon** for routing, labels, telemetry, storage and throughput. The one
-open point is whether the adaptive-share bar was set too tight.
+**Decision (2026-10-20, reviewer):** accepted. The adaptive-share criterion is restated as
+"≤ 0.5 % of wall clock, the same order as F18"; both runs meet it (0.28 %, 0.35 %). The original
+≤ 0.31 % bar is left in the [Pass criteria](#pass-criteria) table as written before the runs.
+
+**Overall: F19 passes on Dragon** for routing, labels, telemetry, storage and throughput, with
+the adaptive-share bar restated as above. Next: push and merge PR 1.
