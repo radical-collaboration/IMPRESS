@@ -1,6 +1,6 @@
 # F19 — declared adaptive tasks, acceptance run on Delta
 
-**Status:** `23062773` (2026-10-20, gpub001, `TIMEOUT` 1:00:05 as planned): routing, labels, telemetry and storage **pass**; throughput **unscored** after backend faults killed 11 of 32 pipelines. See [Result](#result). Rerun `23065238` submitted · **Branch:** `framework-defaults-pr1` at `22a1f82` · **Blocks:** pushing and merging PR 1 · **Items:** F19
+**Status:** `23062773` (2026-10-20, gpub001, `TIMEOUT` 1:00:05 as planned): routing, labels, telemetry and storage **pass**; throughput **unscored** after backend faults killed 11 of 32 pipelines. See [Result](#result). Rerun `23065238` (18:13–19:13, `TIMEOUT` as planned): throughput **passes** (rfd3 −9.2 %, boltz +0.8 %); adaptive share 0.35 % vs a ≤ 0.31 % bar, **needs decision**. See [Rerun](#rerun) · **Branch:** `framework-defaults-pr1` at `22a1f82` · **Blocks:** pushing and merging PR 1 · **Items:** F19
 
 ## Why
 
@@ -110,5 +110,31 @@ matches F18, but the node-h criterion needs a run that keeps its pipelines.
 <a id="rerun"></a>
 ## Rerun
 
-Job `23065238` submitted 2026-10-20, identical shape, from `22a1f82` (code unchanged; only plans
-differ), to score the throughput criterion.
+Job `23065238`, identical shape, from `22a1f82` (code unchanged; only plans differ), to score
+the throughput criterion. gpub001, 18:13:32 → 19:13:47, `TIMEOUT` 1:00:15 as planned. Same
+scoring script.
+
+| Check | `23065238` | Reference `22927576` | Verdict |
+|---|---|---|---|
+| Adaptive routing | 2070 of 2070 adaptive TaskQueued on `local`, all labelled; 0.35 % of wall clock (12.4 s), p50 0.003 s, p99 0.054 s, max 0.188 s | 0.31 % (11.2 s), p99 0.041 s | routing pass; **share exceeds the ≤ 0.31 % bar by 0.04 points** (below) |
+| Telemetry handle | 2070 `impress.LocalStage` = 2070 analysis-feeding completions | 1:1 | pass |
+| Labels | 4171 of 4171 | 4118 of 4118 | pass |
+| Failures | 1: `p1:fastrelax` at min 19.7, `ProcessGroup manager is not in state State.DEAD` (smb 26); no burst followed | 0 | fail on the letter; backend fault, not F19 |
+| Throughput, per node-h, min 10–60 | rfd3 **306.2** (−9.2 %), boltz **108.9** (+0.8 %), mpnn 1066.1 (+2.1 %), with 31 of 32 pipelines from min 19.7 | 337.1 / 108.0 / 1043.8 | **pass** (within 10 %) |
+| Throughput, per live pipeline-h | rfd3 9.81, boltz 3.49, mpnn 34.17 (25.8 live pipeline-h) | 10.54 / 3.37 / 32.62 | −7 % / +4 % / +5 % |
+| Completion stalls > 15 s after min 10 | 5, all ≤ 26 s, all in min 10–21 | 2 (≤ 24 s) | no large stall |
+| Storage | 57,664 run + 4,228 session files for 2101 tool tasks = **29.5/task**; 3.0 GB | 31.0 | pass |
+
+seff: CPU 63.4 %, memory 76.7 % of 240 GB.
+
+**Adaptive share — needs decision.** 0.35 % is above the ≤ 0.31 % bar written before the runs, and
+above the rollback doc's "well under F18's 0.31 %". Neither bar had a reason to expect a drop:
+F18's runner already declared `function_task(backend="local")`, so F19 changes who makes the
+call, not where it runs. Per call the cost is unchanged (p50 0.003 s in all three runs; mean
+6.0 ms here, 5.5 ms on `22927576`), and `23062773` gave 0.28 %. The three runs span 0.28–0.35 %,
+i.e. this is run-to-run spread around 0.3 % of wall clock (≈ 12 s of decision time per hour).
+Accepting it means restating the criterion as "≤ 0.5 %, the same order as F18"; that is a
+choice for a reviewer, not something to fix silently here.
+
+**Overall: F19 passes on Dragon** for routing, labels, telemetry, storage and throughput. The one
+open point is whether the adaptive-share bar was set too tight.
