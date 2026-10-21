@@ -1,6 +1,6 @@
 # Pass-through routing under F19 (smb 23 re-run)
 
-**Status:** planned, not yet submitted · **Branch:** `smb-benchmark-f19` (merge `d571de2` of
+**Status:** submitted as job `23074256` (2026-10-20, from `0ad0583`) · **Branch:** `smb-benchmark-f19` (merge `d571de2` of
 `smb-nonadaptive-benchmark` onto `framework-defaults-pr1`) · **Items:** smb 23; framework F7, F19
 
 ## Why
