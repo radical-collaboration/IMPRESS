@@ -18,7 +18,6 @@ counterparts there (F5, F11, F11, F4, F6).
 | 2 | Dragon `flow.shutdown()` teardown hang — no watchdog, wall limit is the only backstop | high | open | [dragon-teardown-watchdog](2026-09-30-dragon-teardown-watchdog.md) |
 | 3 | `fastrelax` passes only 58% — the real scientific bottleneck, 510 failures / 833 backbone escalations | medium | open, needs decision | [fastrelax-pass-rate](2026-09-30-fastrelax-pass-rate.md) |
 | 4 | `fold_min_ligand_iptm` gate is disabled; data supports enabling at 0.7 | low | open, needs decision | [ligand-iptm-gate](2026-09-30-ligand-iptm-gate.md) |
-| 5 | `README.md` still documents `IMPRESS_TEST_MODE` and the `PROD`/`TEST` pair, both removed by PR #64 | low | open | — (doc-only; noted in CLAUDE.md 2026-09-28 row) |
 | 7 | Dragon Batch pool workers and managers busy-spin when idle (~21–25 cores/node; primary 3.8% idle on `22670942`); pool size hardcoded `num_cpus // 2` = 32/node | high | open, upstream; local pool-shrink workaround drafted, not applied | [upstream/dragon-batch-idle-spin](upstream/dragon-batch-idle-spin.md) |
 | 8 | asyncflow telemetry: Started/Completed/Failed carry the default backend's name; `node_id` never set on task events, so placement can't be read from the trace | medium | open, upstream | [upstream/asyncflow-telemetry-backend-and-node-id](upstream/asyncflow-telemetry-backend-and-node-id.md) |
 | 9 | `delta_gpu_run.sh` caps pipelines by counting `p*_in` dirs, never checks their contents; `p2_in`–`p8_in` held only `ALR.smiles` and 7/8 pipelines died on `22669434`. Its "byte-identical, verified by checksum" comment is stale | low | open (dirs restored from `p1_in`; the `/work/nvme` copy of all 32 verified identical; no pre-flight check yet) | — |
@@ -33,6 +32,10 @@ counterparts there (F5, F11, F11, F4, F6).
 | 20 | Runner does not exit when every pipeline has failed: `22726386` idled from 03:39 to its 06:59 `TIMEOUT` (~27 node-h), no `runner_status` written. Related to 2 | high | open | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
 | 21 | Job evidence split across the submit dir: `impress_%j.out`, `asyncflow.session.*`, `ddict_orc_*` land outside `IMPRESS_WORK_DIR` | low | open | [run-storage-footprint](2026-10-08-run-storage-footprint.md) |
 | 22 | Dragon completion delivery stalls: no completion for 76 s on `22767771` (min 28.4; then 26 at once) and 152 s on `22714866`, idling every pipeline; 3 silences ≤ 20 s on `22718758`; 2 (≤ 24 s) on `22927576`, which had no smb 16 event either. Suspected: rhapsody's monitor thread blocks in `batch_task.get(block=True)` (`dragon.py:236`) | medium | open, upstream; diagnosed from telemetry only. Next: `py-spy dump` on a silence > 30 s | [upstream/rhapsody-dragon-completion-stall](upstream/rhapsody-dragon-completion-stall.md) |
+
+## Closed 2026-10-21
+
+- **5** — `README.md` no longer documents `IMPRESS_TEST_MODE` or the `PROD`/`TEST` pair. Doc-only, closed by `a5bc68e`.
 
 ## Closed 2026-10-06 by the 32-pipeline scale gate (`22701168`; [scale-gate](2026-10-06-scale-gate.md))
 

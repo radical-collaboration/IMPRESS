@@ -445,8 +445,8 @@ async def impress_smallmol_bind() -> None:
     #              fastrelax, filter_shape, boltz) goes here, so placement across
     #              nodes, per-task env and process lifecycle are the backend's.
     #   local   -- an in-process thread pool for Python callbacks that must see
-    #              the live pipeline objects.  ImpressManager runs every
-    #              adaptive_fn here when an engine has a backend of this name.
+    #              the live pipeline objects.  The adaptive_fn is declared on
+    #              this backend below; ImpressManager only awaits the task.
     # The constructors, not .create(), because .create() takes no name.
     if BACKEND == "dragon":
         compute = await DragonExecutionBackend(name="compute")

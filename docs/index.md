@@ -30,7 +30,6 @@ class MyPipeline(ImpressBasePipeline):
 
     async def run(self):
         await self.analyze()
-        await self.run_adaptive_step(wait=False)
 
 async def run_dummy_pipelines():
     backend = await LocalExecutionBackend(ThreadPoolExecutor())

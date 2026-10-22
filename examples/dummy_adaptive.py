@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import Dict, Any
+from typing import Any
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
@@ -11,12 +11,15 @@ from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
-    def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
+    # ImpressManager spreads a setup's `config` dict into keyword arguments,
+    # so the lineage fields arrive as keywords, not as one `configs` dict.
+    def __init__(self, name: str, flow: Any, generation: int = 1,
+                 parent_name: str = 'root', max_generations: int = 3, **kwargs):
         self.iter_seqs: str = 'MKFLVLACGT'
-        self.generation: int = configs.get('generation', 1)
-        self.parent_name: str = configs.get('parent_name', 'root')
-        self.max_generations: int = configs.get('max_generations', 3)
-        super().__init__(name, flow, **configs, **kwargs)
+        self.generation: int = generation
+        self.parent_name: str = parent_name
+        self.max_generations: int = max_generations
+        super().__init__(name, flow, **kwargs)
 
     def register_pipeline_tasks(self) -> None:
         @self.auto_register_task()

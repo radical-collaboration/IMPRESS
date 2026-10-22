@@ -52,7 +52,9 @@ We use:
     from concurrent.futures import ThreadPoolExecutor
     from radical.asyncflow import LocalExecutionBackend
 
-    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    async def run_pipelines():
+        backend = await LocalExecutionBackend(ThreadPoolExecutor())
+        ...
     ```
 
 ## Step 2: Define a Custom Pipeline
@@ -61,13 +63,13 @@ This simulates a simple workflow operating on dummy protein sequences.
 
 ```python
 class ProteinPipeline(ImpressBasePipeline):
-    def __init__(self, name, flow, configs={}, **kwargs):
+    def __init__(self, name, flow, **kwargs):
         # Simulated sequence data and scores
         self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}
         self.current_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
         self.previous_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
 
-        super().__init__(name, flow, **configs, **kwargs)
+        super().__init__(name, flow, **kwargs)
 ```
 
 Here we:
@@ -76,6 +78,9 @@ Here we:
 - Call the parent constructor to properly set up the pipeline. The
   constructor calls `register_pipeline_tasks()`, so any attributes your
   tasks need should be set before `super().__init__()`.
+- Pass `**kwargs` through. The manager calls the constructor with the keys
+  of a setup's `config` dict as keyword arguments, so a pipeline that takes
+  settings declares them as keyword parameters.
 
 ### 2.2 Register Tasks
 ```python
@@ -97,6 +102,11 @@ Here we define 3 tasks. Each one is registered on the pipeline by
 `auto_register_task()` and becomes callable as `self.s1()`, `self.s2()`,
 `self.s3()`. A task returns the shell command to execute; the commands
 above are placeholders for your own tools.
+
+Stdout and stderr are captured to files by default. On rhapsody's backends,
+`await self.s1()` therefore returns the path of the stdout file, not the
+text; register with `@self.auto_register_task(capture_stdio=False)` to get
+the text instead. See [Architecture](../concepts/architecture.md).
 
 ### 2.3 Run the Pipeline
 
@@ -160,6 +170,12 @@ Here:
 
 You can add more pipelines by adding more entries to the list.
 
+To make a pipeline adaptive, pass `adaptive_fn=` to `PipelineSetup`. It must
+be an engine task declared on a thread-pool backend, e.g.
+`@flow.function_task(backend="local")`, not a bare function; see
+[Adaptive Execution](../concepts/adaptive-execution.md) and
+`examples/dummy_adaptive.py`.
+
 ## Step 4: Run the Script
 Finally, add the entry point to run everything with `asyncio`:
 
@@ -185,12 +201,12 @@ from rhapsody.backends import RadicalExecutionBackend
 
 
 class ProteinPipeline(ImpressBasePipeline):
-    def __init__(self, name, flow, configs={}, **kwargs):
+    def __init__(self, name, flow, **kwargs):
         self.iter_seqs = {f"protein_{i}": f"sequence_{i}" for i in range(1, 4)}
         self.current_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
         self.previous_scores = {f"protein_{i}": i * 10 for i in range(1, 4)}
 
-        super().__init__(name, flow, **configs, **kwargs)
+        super().__init__(name, flow, **kwargs)
 
     def register_pipeline_tasks(self):
         @self.auto_register_task()

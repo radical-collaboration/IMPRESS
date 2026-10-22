@@ -1,8 +1,8 @@
 # F20 — Retire the manager's adaptive wrappers; move the contract into `PipelineSetup`
 
-**Status:** **fixed, not yet confirmed** — implemented on `framework-defaults-pr1`; 5 of 6
-criteria pass, criterion 5 (smb mock comparison) **could not be run here**, rhapsody is not
-installed. See [Result](#result) · **Items:** F20 · **Evidence:** commit `22a1f82` (F19, **passed**
+**Status:** **closed** — merged with PR 1 (#72, `9a413cd`); all 6 criteria pass. Criterion 5
+(the smb mock comparison) was run on 2026-10-21, after the merge, on a machine with rhapsody (see
+[Criterion 5](#criterion-5)). See [Result](#result) · **Items:** F20 · **Evidence:** commit `22a1f82` (F19, **passed**
 on `23062773` + `23065238`), radical.asyncflow **0.6.0** checkout (`175cf76`,
 `v0.5.1-14-g175cf76`), engine probe of 2026-10-21, test baseline 120 passed / 5 skipped
 · **Branch:** `framework-defaults-pr1` (verified not an ancestor of `origin/main`)
@@ -240,7 +240,7 @@ still 100 % labelled `p<N>:adaptive` and that adaptive share stays within the re
 | 2 | Bare-but-marked rejected at construction; fails before the change | raises `TypeError` naming the pipeline. Both new tests run against a worktree at `6aadc2e` give **`Failed: DID NOT RAISE TypeError`** | pass |
 | 3 | `ruff check` / `ruff format --check` clean | clean (ruff auto-fixed 3 × F541, redundant `f` prefixes, in the new validator) | pass |
 | 4 | `dummy_adaptive.py` reaches a third generation | ran to **`p2_g2_g2`**, child configs through `from_dict` → the new validator, clean exit | pass |
-| 5 | smb mock event sequence byte-identical | **not run** — `run_test_small_molecule_binding.py` imports `run_small_molecule_binding`, which imports `rhapsody`; `ModuleNotFoundError` in both trees. Same absence skips the 5 tests above | **blocked** |
+| 5 | smb mock event sequence byte-identical | **not run at implementation; run 2026-10-21, pass** ([below](#criterion-5)) — `run_test_small_molecule_binding.py` imports `run_small_molecule_binding`, which imports `rhapsody`; `ModuleNotFoundError` in both trees. Same absence skips the 5 tests above | **blocked** |
 | 6 | No example source changes | `git diff --stat examples/` empty | pass |
 
 **Criterion 5 is the one gap, and it is an environment limit, not a result.** The mock run is
@@ -258,6 +258,28 @@ about the adaptive contract, so they now take a declared task from a `_declared_
 helper rather than being exempted from it. This was not in the plan; it is the blast radius of
 moving validation into the model, and the right correction — a stand-in that the model rejects
 is not a valid stand-in.
+
+<a id="criterion-5"></a>
+**Criterion 5, run 2026-10-21.** The smb mock was run with `ve/small_mol`, which has rhapsody, on
+merge `0cefeb2` (`main` with F20, merged into `smb-benchmark-f19`), and compared with the
+pre-merge head `fd01231`. The comparison covered all three runner modes: adaptive,
+`--nonadaptive`, and `--nonadaptive --selection first`.
+
+| Mode | Stages | Decisions | Selection lines | Errors |
+|---|---|---|---|---|
+| adaptive | 124, identical | 136, identical | identical | 0 |
+| `--nonadaptive` | 180, identical | 180, identical | identical | 0 |
+| `--nonadaptive --selection first` | 180, identical | 180, identical | identical (60 `mode=first`) | 0 |
+
+- **"Identical" excludes one thing.** The guided-backbone path printed in two adaptive `fold`
+  lines contains the scratch run directory, so it differs between any two runs; that path is
+  normalised before comparing.
+- **Adaptive also matches PR 1's head.** The adaptive run is identical to a mock of PR 1's head
+  `4011f0d` as well.
+- **No `TypeError` from the new validator.** Both runners pass the declared wrapper,
+  `flow.function_task(...)(policy)`.
+- **The suite has no skips here.** With rhapsody present it is 128 passed / 0 skipped: the
+  123 + 5 above, with the 5 now running.
 
 **Not done, deliberately:** the sixth F13 ask (a public "is this a task of mine?" predicate).
 It is listed below and belongs with the other upstream asks, not in this change.

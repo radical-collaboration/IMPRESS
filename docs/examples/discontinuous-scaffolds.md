@@ -52,9 +52,13 @@ entirely.
 | Sequence | `seq_ligand_conf_bounds` | `ligand_confidence` |
 | Sequence | `seq_overall_conf_bounds` | `overall_confidence` |
 
-Benchmark input files live under `scripts/`: `mcsa_41-{1..41}.json` (one
-per protein), `mcsa_41_rfd3.json` (all-in-one), `mcsa_41_one.json`
-(single-entry test file).
+Benchmark input files under `scripts/`: `mcsa_41_rfd3.json` (all 41
+entries, produced from `rfd3_benchmark/mcsa_41.json` by
+`reformat_mcsa41.py`), `mcsa_41_one.json` (single-entry test file), and
+`mcsa_mod8-{1..6}.json` (8-entry chunks from `generate_batch_inputs.py`).
+The runner expects one file per protein, `{SCRIPTS_PATH}/mcsa_41-{i}.json`;
+these are not in the repository and must be split out of
+`mcsa_41_rfd3.json` before a run.
 
 ## Pipeline Stages
 
@@ -176,19 +180,30 @@ Edit the path and threshold constants at the top of
 `DiscontinuousScaffoldsPipeline` is launched per benchmark input file.
 The runner launches pipelines `disco_p24` through `disco_p28`.
 
-The runner creates the backend and engine itself and hands the engine to
-the manager. `DragonExecutionBackendV3()` (from `rhapsody.backends`) is
-active by default for HPC. For local testing, swap in the commented-out
-`LocalExecutionBackend(ProcessPoolExecutor())`:
+The runner creates the engine itself over two named backends and hands it
+to the manager. `compute` runs every stage: `DragonExecutionBackend` (from
+`rhapsody.backends`) by default; for local testing, swap in the
+commented-out `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")`.
+`local` is a thread pool for `adaptive_decision`, which mutates the live
+pipeline and so cannot run in a process pool:
 
 ```python
-backend = await DragonExecutionBackendV3()
-# backend = await LocalExecutionBackend(ProcessPoolExecutor())
+compute = await DragonExecutionBackend(name="compute")
+# compute = await LocalExecutionBackend(ProcessPoolExecutor(), name="compute")
+local = await ConcurrentExecutionBackend(
+    ThreadPoolExecutor(max_workers=len(PIPELINE_INDICES)), name="local")
 
-flow = await WorkflowEngine.create(backend=backend)
+flow = await WorkflowEngine.create(backend=[compute, local])
 manager = ImpressManager(flow)
+
+adaptive_task = flow.function_task(backend="local")(adaptive_decision)
+# ... PipelineSetup(..., adaptive_fn=adaptive_task) per input file
+
 try:
     await manager.start(pipeline_setups=pipeline_setups)
 finally:
     await flow.shutdown()
 ```
+
+Child pipelines spawned by `adaptive_decision` are given the same
+`adaptive_task`; passing the bare `adaptive_decision` raises `TypeError`.

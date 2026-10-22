@@ -9,13 +9,19 @@ This documentation walks through the adaptive capabilities of the IMPRESS pipeli
 The `DummyProteinPipeline` class is configured to support adaptive behavior through several key attributes:
 
 ```python
-def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
+def __init__(self, name: str, flow: Any, generation: int = 1,
+             parent_name: str = 'root', max_generations: int = 3, **kwargs):
     self.iter_seqs: str = 'MKFLVLACGT'
-    self.generation: int = configs.get('generation', 1)           # Track generation level
-    self.parent_name: str = configs.get('parent_name', 'root')    # Track parent pipeline
-    self.max_generations: int = configs.get('max_generations', 3) # Limit recursion depth
-    super().__init__(name, flow, **configs, **kwargs)
+    self.generation: int = generation            # Track generation level
+    self.parent_name: str = parent_name          # Track parent pipeline
+    self.max_generations: int = max_generations  # Limit recursion depth
+    super().__init__(name, flow, **kwargs)
 ```
+
+`ImpressManager` builds each pipeline as
+`type(name=..., flow=..., **config, **kwargs)`: the keys of a setup's
+`config` dict arrive as keyword arguments, so the constructor declares them
+as keywords. A `configs: dict` parameter would always be empty.
 
 **Key adaptive attributes:**
 - `generation`: Tracks the current generation level of the pipeline
@@ -36,9 +42,13 @@ async def run(self) -> None:
 ```
 
 **`run_adaptive_step(wait=True)`**:
-- This method calls the registered adaptive function
-- `wait=True` ensures the current pipeline waits for the adaptive logic to complete
-- Any child pipelines spawned will be submitted to the manager at this point
+- This method flags the pipeline for an adaptive step; it does not call the
+  adaptive function itself. The manager sees the flag on its next poll and
+  awaits the pipeline's declared `adaptive_fn` task.
+- `wait=True` blocks the pipeline until that task has finished; `wait=False`
+  returns at once.
+- Child requests made by the adaptive function are picked up and submitted
+  by the manager on a later poll, not at this call.
 
 ### 3. Adaptive Strategy Function
 

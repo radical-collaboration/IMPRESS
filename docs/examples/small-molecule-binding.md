@@ -12,15 +12,17 @@ gating alone.
 
 ## Inputs
 
-Place all input files in `<base_path>/<pipeline_name>_in/` (default:
-`p1_in/`).
+Each pipeline reads its inputs from `input_dir` when given (absolute, or
+relative to `base_path`), else from `<base_path>/<pipeline_name>_in/`. The
+runner passes the absolute `examples/small_molecule_binding/p{i}_in/`, one
+directory per pipeline.
 
 | File | Required | Description |
 |---|---|---|
 | `ALR_binder_design.json` | Yes | RFDiffusion3 design config (target structure, hotspot residues, diffusion settings) |
 | `fixed_residues.txt` | Yes | Space-separated residue indices held fixed during MPNN sequence design |
 | `<ligand>.params` | Yes | Rosetta ligand parameter file (e.g. `ALR.params`); filename must match `ligand_params` |
-| `<ligand>/` | Yes | Directory of ligand PDB/SDF files for shape-complementarity analysis |
+| `<ligand>.smiles` | Yes (`boltz`) | Ligand SMILES for Boltz-2 co-folding (e.g. `ALR.smiles`); stem must match `ligand_params` |
 | `common_filenames.txt` | Yes (`filter_energy`) | Accepted filenames for ligand energy filtering |
 | `input_pdbs/` | Optional | Target PDB files referenced by the diffusion config |
 
@@ -29,15 +31,25 @@ Place all input files in `<base_path>/<pipeline_name>_in/` (default:
 | Parameter | Default | Description |
 |---|---|---|
 | `base_path` | `os.getcwd()` | Root directory for all task subdirectories and inputs |
-| `mpnn_dir` | cluster-specific path | Path to a LigandMPNN checkout |
-| `foundry_sif_path` | cluster-specific path | Apptainer image containing RFDiffusion3 |
-| `colabfold_path` | cluster-specific path | LocalColabFold installation |
-| `ligand_params` | `ALR.params` | Ligand parameter filename (relative to `<name>_in/`) |
+| `input_dir` | `<name>_in` | Input directory (absolute, or relative to `base_path`) |
+| `scripts_path` | `<base_path>/scripts` | Directory holding the tool wrapper scripts |
+| `mpnn_dir` | env `MPNN_DIR` | Path to a LigandMPNN checkout (required; `ValueError` if unset) |
+| `foundry_sif_path` | env `FOUNDRY_SIF_PATH` | Apptainer image containing RFDiffusion3 (required) |
+| `boltz_cache_path` | env `BOLTZ_CACHE` | Boltz-2 model cache (required) |
+| `ligand_params` | `ALR.params` | Ligand parameter filename (relative to the input directory) |
 | `mock` | `False` | Run with lightweight mock tasks — no HPC tools required |
 | `num_refine_cycles` | `3` | MPNN → PackMin cycles per backbone attempt |
-| `mpnn_ensemble_size` | `10` | Independent sequence batches generated on cycle 0 |
-| `diffusion_batch_size` | `1` | Backbone models generated per RFDiffusion3 call |
+| `mpnn_ensemble_size` | `1` | Independent sequence batches generated on cycle 0 |
+| `diffusion_batch_size` | `2` | Backbone models generated per RFDiffusion3 call |
+| `rfd3_partial_t` | `10.0` | RFD3 partial-diffusion noise (Å) for guided backbone feedback |
 | `max_tasks` | `300` | Total ensemble entries before the pipeline stops |
+| `start_delay` | `0` | Seconds `run()` waits before its first stage (set by the runner to stagger pipelines sharing a GPU) |
+
+These are the class defaults. The runner's `PROD` config
+(`run_small_molecule_binding.py`) overrides several of them and the
+thresholds below, e.g. `diffusion_batch_size=4`, `num_refine_cycles=2`,
+`mpnn_ensemble_size=10`, `backbone_max_ca_deviation=1.0`,
+`fold_min_plddt=75.0`.
 
 ### Quality thresholds
 
@@ -49,7 +61,8 @@ Place all input files in `<base_path>/<pipeline_name>_in/` (default:
 | `fastrelax_max_total_score` | `0.0 REU` | Total Rosetta score |
 | `fastrelax_max_fa_rep` | `150.0 REU` | Steric clash energy |
 | `interface_min_sc` | `0.5` | Minimum shape complementarity |
-| `fold_min_plddt` | `70.0` | Minimum mean pLDDT from ColabFold |
+| `fold_min_plddt` | `70.0` | Minimum mean pLDDT from Boltz-2 |
+| `fold_min_ligand_iptm` | `None` (off) | Minimum Boltz-2 protein-ligand interface confidence |
 
 ## Pipeline Stages
 
@@ -57,7 +70,7 @@ Place all input files in `<base_path>/<pipeline_name>_in/` (default:
 |---|---|---|---|
 | `rfd3` | HPC | `scripts/rfd3.sh` (RFDiffusion3 via Apptainer) | GPU |
 | `analysis_backbone` | local | Reads JSON metrics from the `rfd3` output directory | CPU |
-| `mpnn` | HPC | `scripts/mpnn.sh` → `scripts/mpnn_wrapper.sh` (LigandMPNN) | CPU |
+| `mpnn` | HPC | `scripts/mpnn.sh` → `scripts/mpnn_run.py` (LigandMPNN) | CPU |
 | `analysis_sequence` | local | Reads `.fa` headers from MPNN `seqs/` output | CPU |
 | `packmin` | HPC | `scripts/packmin.sh` → `scripts/packmin.py` (PyRosetta pack + minimize) | CPU |
 | `analysis_packmin` | local | Reads `_packmin_score.json` | CPU |
@@ -65,8 +78,11 @@ Place all input files in `<base_path>/<pipeline_name>_in/` (default:
 | `analysis_fastrelax` | local | Reads the `.fasc` score file | CPU |
 | `filter_shape` | HPC | `scripts/filter_shape.sh` → `scripts/filter_shape.py` (PyRosetta shape complementarity) | CPU |
 | `analysis_interface` | local | Reads `shape_complementarity_values.txt` | CPU |
-| `af2` | HPC | `scripts/af2.sh` (ColabFold/LocalColabFold) | GPU |
-| `analysis_fold` | local | Reads ColabFold `_scores.json` files | CPU |
+| `boltz` | HPC | `scripts/boltz.sh` (Boltz-2 protein-ligand co-folding) | GPU |
+| `analysis_fold` | local | Reads Boltz-2 `confidence_*.json` files | CPU |
+
+The fold step is still called `STEP_AF2` in the state machine; the name
+predates the switch from ColabFold to Boltz-2.
 
 The pipeline runs as a `while self.next_step != STEP_DONE` state machine,
 calling `adaptive_decision()` after every analysis step:
@@ -116,8 +132,8 @@ A result is in a **productive neighbourhood** when
 | `sequence` | `selective_avg < overall_avg`, retries `< 3` | `STEP_RETRY_SEQ` — rerun MPNN, same cycle |
 | `sequence` | Retries exhausted (`>= 3`) | `STEP_RFD3` — abandon this backbone |
 | `packmin` | Always | `STEP_MPNN` — continue refinement cycle |
-| `fastrelax` | Pass / fail | `STEP_INTERFACE` / `STEP_MPNN` retry (up to 5x, then `STEP_RFD3`) |
-| `interface` | Pass / fail | `STEP_AF2` / `STEP_MPNN` retry (up to 5x, then `STEP_RFD3`) |
+| `fastrelax` | Pass / fail | `STEP_INTERFACE` / `STEP_MPNN` retry; `STEP_RFD3` once retry metrics stop improving, or after 5 attempts |
+| `interface` | Pass / fail | `STEP_AF2` / `STEP_MPNN` retry; `STEP_RFD3` once retry metrics stop improving, or after 5 attempts |
 | `fold` | `selective_avg > overall_avg` | `STEP_RFD3`, with the current fold decoy fed back as `rfd3_input_pdb` (guided diffusion) |
 | `fold` | Otherwise | `STEP_RFD3`, with `rfd3_input_pdb` cleared (start from scratch) |
 
@@ -128,27 +144,42 @@ entries have accumulated.
 ## Output Structure
 
 ```
-<base_path>/
-  <pipeline_name>_in/          # user inputs
-  1_rfd3/out/                  # backbone diffusion outputs
-  2_mpnn/out/seqs/              # FASTA files with confidence scores
-  2_mpnn/out/packed/             # packed PDB structures
-  3_packmin/out/                 # minimized PDB + score JSON
-  ...
-  <N>_alphafold/out/           # ColabFold rank PDBs + score JSONs
+<base_path>/                     # the runner's work dir
+  <pipeline_name>/
+    <N>_rfd3/out/                # backbone diffusion outputs
+    <N>_mpnn/out/seqs/           # FASTA files with confidence scores
+    <N>_mpnn/out/packed/         # packed PDB structures
+    <N>_packmin/out/             # minimized PDB + score JSON
+    ...
+    <N>_boltz/out/               # Boltz-2 predictions + confidence JSONs
 ```
+
+`<N>` is the pipeline's running task count, so the numbers depend on the
+route taken, not on the stage.
 
 ## Running It
 
+On NCSA Delta, `delta_env_setup.sh` builds the environment and
+`sbatch delta_gpu_run.sh` launches the runner under Dragon. To run it
+directly:
+
 ```bash
 cd examples/small_molecule_binding
-python run_small_molecule_binding.py
+export MPNN_DIR=... FOUNDRY_SIF_PATH=... BOLTZ_CACHE=...
+IMPRESS_BACKEND=local python run_small_molecule_binding.py --n-pipelines 1
 ```
 
-Edit the threshold constants and tool paths at the top of
-`run_small_molecule_binding.py` first. `LocalExecutionBackend(ProcessPoolExecutor())`
-is active by default; swap in `DragonExecutionBackendV3()` for HPC
-production runs.
+| Setting | Default | Description |
+|---|---|---|
+| `IMPRESS_BACKEND` | `dragon` | The `compute` backend: `dragon` → `DragonExecutionBackend`; anything else → `ConcurrentExecutionBackend(ProcessPoolExecutor())`. A second, `local` thread pool runs the declared adaptive callback |
+| `--n-pipelines` / `IMPRESS_N_PIPELINES` | `PROD.n_pipelines` (4) | Number of pipelines; each needs its own `p{i}_in/` |
+| `--work-dir` / `IMPRESS_WORK_DIR` | `examples/small_molecule_binding/logs` | Run directory, passed as `base_path` |
+| `MPNN_DIR`, `FOUNDRY_SIF_PATH`, `BOLTZ_CACHE` | — | Tool paths (required) |
+
+Prefer the command-line flags under Dragon: on a multi-node run,
+environment variables set by the launcher do not reach the runner. Pipeline
+thresholds live in the `PROD` `RunConfig` at the top of
+`run_small_molecule_binding.py`.
 
 Two alternate entry points are also provided:
 
@@ -159,3 +190,8 @@ Two alternate entry points are also provided:
   routing to `mock.py`'s placeholder tasks) that exercises the full state
   machine and adaptive routing logic with no external HPC tools required;
   terminates after 100 ensemble entries.
+
+The mock run still constructs the real pipeline class and imports the
+runner, so set placeholder tool paths and a non-Dragon backend:
+`MPNN_DIR=x FOUNDRY_SIF_PATH=x BOLTZ_CACHE=x IMPRESS_BACKEND=local python run_test_small_molecule_binding.py`.
+It writes `p1/` into the current directory, so run it from a scratch copy.
