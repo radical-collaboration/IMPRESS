@@ -1,6 +1,6 @@
 import asyncio
 import random
-from typing import Dict, Any
+from typing import Any
 
 from impress import PipelineSetup
 from impress import ImpressBasePipeline
@@ -11,12 +11,15 @@ from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 
 class DummyProteinPipeline(ImpressBasePipeline):
-    def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
+    # ImpressManager spreads a setup's `config` dict into keyword arguments,
+    # so the lineage fields arrive as keywords, not as one `configs` dict.
+    def __init__(self, name: str, flow: Any, generation: int = 1,
+                 parent_name: str = 'root', max_generations: int = 3, **kwargs):
         self.iter_seqs: str = 'MKFLVLACGT'
-        self.generation: int = configs.get('generation', 1)
-        self.parent_name: str = configs.get('parent_name', 'root')
-        self.max_generations: int = configs.get('max_generations', 3)
-        super().__init__(name, flow, **configs, **kwargs)
+        self.generation: int = generation
+        self.parent_name: str = parent_name
+        self.max_generations: int = max_generations
+        super().__init__(name, flow, **kwargs)
 
     def register_pipeline_tasks(self) -> None:
         @self.auto_register_task()
@@ -51,6 +54,12 @@ class DummyProteinPipeline(ImpressBasePipeline):
         pass
 
 
+# Set in run(), once the engine exists.  A child pipeline inherits the same
+# declared task as its parent: ImpressManager takes an engine task, not a bare
+# function, so the raw coroutine below cannot be passed on directly.
+adaptive_task = None
+
+
 async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None:
     if pipeline.generation >= pipeline.max_generations or random.random() >= 0.5:
         return
@@ -64,20 +73,27 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
             'parent_name': pipeline.name,
             'max_generations': pipeline.max_generations,
         },
-        'adaptive_fn': adaptive_optimization_strategy
+        'adaptive_fn': adaptive_task
     }
     pipeline.submit_child_pipeline_request(new_config)
 
 
 async def run() -> None:
+    global adaptive_task
+
     execution_backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=execution_backend)
     manager: ImpressManager = ImpressManager(flow)
 
+    # The engine's only backend is a thread pool, so the callback is declared
+    # on the default one.  It mutates the live pipeline, which is why it must
+    # not be a process pool.
+    adaptive_task = flow.function_task(adaptive_optimization_strategy)
+
     pipeline_setups = [PipelineSetup(
         name=f'p{i}',
         type=DummyProteinPipeline,
-        adaptive_fn=adaptive_optimization_strategy)  for i in range(1, 4)]
+        adaptive_fn=adaptive_task)  for i in range(1, 4)]
 
     try:
         await manager.start(pipeline_setups=pipeline_setups)

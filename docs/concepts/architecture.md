@@ -75,12 +75,36 @@ required methods, plus one optional one:
   spawns a child pipeline (for example, to remove migrated work items from
   the parent's tracking state).
 
-`auto_register_task(local_task=False, **task_kwargs)` decides how a task
-runs: by default it wraps the function via
+`auto_register_task(local_task=False, capture_stdio=True, **task_kwargs)`
+decides how a task runs: by default it wraps the function via
 `self.flow.executable_task(**task_kwargs)`, submitting it as an
 HPC-executable task through the workflow engine; with `local_task=True` the
 function runs as a plain in-process coroutine (used for lightweight local
 work like parsing a CSV or ranking sequences).
+
+Defaults that every pipeline gets without asking:
+
+- **stdio is captured.** An executable task's stdout and stderr go to
+  `{task uid}.stdout` / `.stderr` in the backend's work dir, which is
+  `{work_dir}/{engine uid}` for the `work_dir` passed to
+  `WorkflowEngine.create()`. The task's future then resolves to the stdout
+  file path, not the text; pass `capture_stdio=False` to get the text.
+  This applies to rhapsody's backends (Concurrent, Dragon). asyncflow's
+  `LocalExecutionBackend` ignores `capture_stdio`: futures resolve to the
+  text, and a failure's stderr is already in the exception.
+- **failures explain themselves.** When an executable task fails, the last
+  lines of its captured stderr are logged and attached to the exception as
+  a note (Python 3.11+), on backends that capture stdio. Without this, the error is only a file path or an
+  exit code.
+- **tasks are labelled.** Each call is tagged `{pipeline}:{stage}` in
+  telemetry unless the caller passes `workflow_id=`. Otherwise asyncflow
+  names a task after its executable, which is usually just `bash`.
+- **local tasks are traced.** When telemetry is enabled, each call of a
+  `local_task=True` stage emits one `impress.LocalStage` telemetry event (stage, pipeline, duration,
+  status), since local tasks never reach the engine.
+
+For a per-task log file next to a task's outputs, return
+`self.logged_command(log_file, cmd)` instead of `cmd`.
 
 A pipeline's `self.state` dict is the conventional place to pass data
 between stages — task methods write intermediate results into it (file
@@ -97,9 +121,9 @@ expressed as a static graph.
 1. Inside `run()`, the pipeline calls `await self.run_adaptive_step(wait=True)`
    (or `wait=False` to continue concurrently). This sets
    `invoke_adaptive_step = True`.
-2. On its next poll, `ImpressManager` notices the flag and runs the
-   pipeline's registered `adaptive_fn(pipeline)` coroutine as a background
-   task.
+2. On its next poll, `ImpressManager` notices the flag and awaits the
+   pipeline's registered `adaptive_fn(pipeline)` as a background task. That
+   callback is an engine task, so it runs **off the event loop** (see below).
 3. `adaptive_fn` inspects/mutates the pipeline's `state` and attributes
    (for example, comparing a current score against a previous one), and may
    call `pipeline.submit_child_pipeline_request(new_config)` to request
@@ -113,6 +137,59 @@ expressed as a static graph.
    new pipeline.
 6. A pipeline can set `self.kill_parent = True` at any point to have the
    manager cancel its own task on the next tick (self-termination).
+
+**An adaptive function is an engine task, declared by the caller.** One event
+loop drives every pipeline's task dispatch, so an adaptive function that
+blocks it — even an `async def` that never awaits — stalls all pipelines
+while it runs. On an 8-node, 32-pipeline run this held the loop for 67% of
+wall clock and cut throughput to 37% of baseline.
+
+The manager therefore does not run adaptive functions itself. A runner
+declares where the callback runs, the way asyncflow's own examples declare any
+task, and passes the result as `adaptive_fn`:
+
+```python
+local = await ConcurrentExecutionBackend(
+    ThreadPoolExecutor(max_workers=n_pipelines), name="local")
+flow = await WorkflowEngine.create(backend=[compute, local])
+
+@flow.function_task(backend="local")
+async def adaptive_decision(pipeline):
+    ...
+
+PipelineSetup(name="p1", type=MyPipeline, adaptive_fn=adaptive_decision)
+```
+
+The manager awaits that task and labels each call `{pipeline}:adaptive` in
+telemetry. Routing is declared, never discovered, so there is one execution
+path and no mode to infer:
+
+- The backend must be a **thread** pool. The callback mutates the live
+  pipeline object, and a process pool would mutate a pickled copy.
+- The body must be `async def`. asyncflow rejects a sync function outright;
+  it needs no `await` inside, which is the normal shape for a task body.
+- `PipelineSetup` raises `TypeError` for an `adaptive_fn` that is not a task,
+  when the setup is constructed — so, for the setups passed to `start()`,
+  before any pipeline starts, and without needing a manager. A child config
+  is converted on the manager's poll after the request, so a bad child
+  `adaptive_fn` raises out of `manager.start()` mid-run. The manager has no path of its own to fall back to, so
+  this fails rather than silently running somewhere.
+- A child pipeline's config must carry the **declared task**, not the bare
+  function. These are harder to tell apart than they look: asyncflow marks
+  the function it decorates, not only the wrapper it returns, so the bare
+  body carries `__task_description__` too. `PipelineSetup` separates them by
+  the wrapper being a plain function where the body is a coroutine function,
+  and names that case in its error. Left unchecked it is near-silent — the
+  call fails inside the adaptive task, where the manager catches and logs it,
+  then releases the pipeline to continue as though a decision had been made.
+
+Module-level caches an adaptive function shares across pipelines may be
+touched from several of the pool's threads at once. A reader reachable from a
+loop over accumulated history must be memoised — keyed on path, with negative
+results left uncached — or every decision costs one blocking read per prior
+entry, which is the O(entries²) half of the 37% collapse above. Size any
+`lru_cache` for (entries × pipelines), since one manager process serves them
+all.
 
 Because child pipelines can themselves have an `adaptive_fn` that spawns
 further children, this protocol supports arbitrarily deep or wide trees of
@@ -130,7 +207,9 @@ differently — see each page's Adaptive Flow section for specifics.
   actually be one).
 - `config` — configuration dict merged into the pipeline's constructor
   kwargs.
-- `adaptive_fn` — optional `async def adaptive_fn(pipeline) -> None`.
+- `adaptive_fn` — optional `adaptive_fn(pipeline) -> None`. Must be an
+  engine task the caller declared on a thread-pool backend; validated on
+  construction, including for a child config going through `from_dict()`.
 - `kwargs` — additional constructor kwargs.
 
 `PipelineSetup.from_dict()`/`.to_dict()` let a plain dict (such as the
@@ -159,7 +238,7 @@ The execution backend is any backend object supported by
 `LocalExecutionBackend` (from `radical.asyncflow`) wrapping a
 `ThreadPoolExecutor` or `ProcessPoolExecutor`. For HPC production runs, use
 a backend from [`rhapsody`](https://pypi.org/project/rhapsody-py/)
-(`rhapsody.backends`): `DragonExecutionBackend`/`DragonExecutionBackendV3`,
+(`rhapsody.backends`): `DragonExecutionBackend`,
 `RadicalExecutionBackend` (configured with resource requirements such as
 GPUs, cores, runtime, and target machine), or
 `ConcurrentExecutionBackend`.

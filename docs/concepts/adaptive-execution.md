@@ -9,13 +9,19 @@ This documentation walks through the adaptive capabilities of the IMPRESS pipeli
 The `DummyProteinPipeline` class is configured to support adaptive behavior through several key attributes:
 
 ```python
-def __init__(self, name: str, flow: Any, configs: Dict[str, Any] = {}, **kwargs):
+def __init__(self, name: str, flow: Any, generation: int = 1,
+             parent_name: str = 'root', max_generations: int = 3, **kwargs):
     self.iter_seqs: str = 'MKFLVLACGT'
-    self.generation: int = configs.get('generation', 1)           # Track generation level
-    self.parent_name: str = configs.get('parent_name', 'root')    # Track parent pipeline
-    self.max_generations: int = configs.get('max_generations', 3) # Limit recursion depth
-    super().__init__(name, flow, **configs, **kwargs)
+    self.generation: int = generation            # Track generation level
+    self.parent_name: str = parent_name          # Track parent pipeline
+    self.max_generations: int = max_generations  # Limit recursion depth
+    super().__init__(name, flow, **kwargs)
 ```
+
+`ImpressManager` builds each pipeline as
+`type(name=..., flow=..., **config, **kwargs)`: the keys of a setup's
+`config` dict arrive as keyword arguments, so the constructor declares them
+as keywords. A `configs: dict` parameter would always be empty.
 
 **Key adaptive attributes:**
 - `generation`: Tracks the current generation level of the pipeline
@@ -36,9 +42,13 @@ async def run(self) -> None:
 ```
 
 **`run_adaptive_step(wait=True)`**:
-- This method calls the registered adaptive function
-- `wait=True` ensures the current pipeline waits for the adaptive logic to complete
-- Any child pipelines spawned will be submitted to the manager at this point
+- This method flags the pipeline for an adaptive step; it does not call the
+  adaptive function itself. The manager sees the flag on its next poll and
+  awaits the pipeline's declared `adaptive_fn` task.
+- `wait=True` blocks the pipeline until that task has finished; `wait=False`
+  returns at once.
+- Child requests made by the adaptive function are picked up and submitted
+  by the manager on a later poll, not at this call.
 
 ### 3. Adaptive Strategy Function
 
@@ -62,7 +72,7 @@ async def adaptive_optimization_strategy(pipeline: DummyProteinPipeline) -> None
             'parent_name': pipeline.name,           # Set parent reference
             'max_generations': pipeline.max_generations,
         },
-        'adaptive_fn': adaptive_optimization_strategy  # Same adaptive function
+        'adaptive_fn': adaptive_task  # the DECLARED task, not the bare function
     }
     
     # Submit child pipeline to manager
@@ -82,13 +92,19 @@ The pipeline manager is configured to support adaptive behavior:
 
 ```python
 async def run() -> None:
+    global adaptive_task
+
     execution_backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=execution_backend)
     manager: ImpressManager = ImpressManager(flow)
 
+    # Declare where the callback runs; the manager only awaits it.  This
+    # engine's one backend is already a thread pool, so no name is needed.
+    adaptive_task = flow.function_task(adaptive_optimization_strategy)
+
     pipeline_setups = [PipelineSetup(name=f'p{i}',
                                      type=DummyProteinPipeline,
-                                     adaptive_fn=adaptive_optimization_strategy)  # Adaptive function registered
+                                     adaptive_fn=adaptive_task)  # a declared engine task
                        for i in range(1, 4)]
 
     try:
@@ -97,8 +113,17 @@ async def run() -> None:
         await flow.shutdown()
 ```
 
-**Critical setup element:**
-- `adaptive_fn=adaptive_optimization_strategy` registers the adaptive function with each pipeline
+**Critical setup elements:**
+- `adaptive_fn` must be an **engine task**, declared by the caller with
+  `flow.function_task(...)`. The manager awaits it and chooses nothing; a bare
+  function raises `TypeError` when the `PipelineSetup` is constructed, before
+  any pipeline starts. The backend must be a thread pool, since the callback
+  mutates the live pipeline object.
+- A child config must carry that same declared task, which is why
+  `adaptive_task` is module-level here: the recursion passes the task on, not
+  the raw coroutine. Passing `adaptive_optimization_strategy` instead of
+  `adaptive_task` is refused by name — declaring a callback marks the bare
+  function too, so the two are easy to confuse and worth checking for.
 - The manager handles the lifecycle of dynamically created child pipelines
 
 ## Adaptive Execution Flow

@@ -38,7 +38,7 @@ class TestIntegration:
             type=AdaptiveMockPipeline,
             config={},
             kwargs={},
-            adaptive_fn=adaptive_fn,
+            adaptive_fn=impress_manager.flow.function_task(adaptive_fn),
         )
 
         # Run the manager
@@ -87,7 +87,7 @@ class TestIntegration:
             type=ComplexPipeline,
             config={},
             kwargs={"create_child": True},
-            adaptive_fn=tracking_adaptive_fn,
+            adaptive_fn=impress_manager.flow.function_task(tracking_adaptive_fn),
         )
 
         # Run the manager

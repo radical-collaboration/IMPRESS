@@ -20,6 +20,12 @@ What a run writes (sizes are apparent bytes):
 | `22718758` | 1 node, 32 pipelines, 1 h | 59k | 3.2 GB | 1.8 GB | 1.0 GB |
 | `22670942` | 2 nodes, 8 pipelines, 1 h | 21k | 1.1 GB | 0.65 GB | 0.37 GB |
 
+Framework PR 1 captures every tool stage's stdio by default. It did not add files per task. On
+`22767771` (1 node, 32 pipelines, 1 h, 2.8 GB) the run dir held 51,409 files and the session dir
+3,590, for 1790 tool tasks: 30.7 files per task. `22718758` had 30.4: 59,432 + 4,216 files for 2090
+tasks. Its session dir already held a `.stdout`/`.stderr` pair for every task. Source: framework
+[F1 result](../../../plans/2026-10-08-pr1-delta-acceptance.md#result).
+
 About 90% of the bytes and most of the files are LigandMPNN's per-candidate PDBs. In `22670942`, `packed/` and
 `backbones/` each held 8,628 files from 337 mpnn tasks, about 26 per task each. But
 `SmallMoleculeBindingPipeline` reads exactly one of them afterwards:

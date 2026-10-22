@@ -119,8 +119,8 @@ Sequence analysis (`analysis_sequence`) always sets `pass=True`; routing is hand
 
 The `adaptive_decision` function in `run_small_molecule_binding.py` runs after every analysis step and sets `pipeline.next_step`. It uses an **ensemble-based selective average** to determine whether the current result is in a productive neighbourhood of the search space.
 
-> **Performance contract.** `adaptive_decision` is an `async` wrapper that runs its synchronous body
-> (`_adaptive_decision_sync`) via `asyncio.to_thread`, and the similarity readers it depends on
+> **Performance contract.** `adaptive_decision` runs off the event loop (the runner declares it as an
+> engine task on its `local` thread-pool backend, with `flow.function_task(backend="local")`), and the similarity readers it depends on
 > (`_read_fasta_seq`, `_parse_pdb_ca_coords`) are memoised. Both are load-bearing: the selective
 > average compares the current result against *every* prior entry of its type, so an uncached reader
 > costs O(ensemble) blocking filesystem reads per decision, and because the manager is one process
@@ -271,8 +271,8 @@ Mock mode (`mock=True`, `mock.py`) mirrors this same layout with hardcoded fixtu
 
 1. One-time environment setup: `bash delta_env_setup.sh` (creates the venv, installs all dependencies including Boltz-2 and PyRosetta, warms the Boltz weights cache). See that script's header comment for required env vars (`WORK_DIR`, etc.).
 2. Derive each ligand's SMILES once: `python scripts/derive_ligand_smiles.py <ligand>.params <reference>.pdb`, then copy the resulting `.smiles` file into every `<pipeline_name>_in/` directory that uses that ligand.
-3. Adjust `PROD`/`TEST` in `run_small_molecule_binding.py` if the default thresholds don't fit your target (class defaults above are permissive; `PROD` is tuned tighter — e.g. `fastrelax_max_fa_rep=100.0`, `interface_min_sc=0.55`, `fold_min_plddt=75.0`).
-4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `WORK_DIR`-relative defaults, or export them yourself beforehand to override — see that script's header comment). Pass `IMPRESS_TEST_MODE=1` before `sbatch` to run the inert `TEST` config instead of `PROD`.
+3. Adjust `PROD` in `run_small_molecule_binding.py` if the default thresholds don't fit your target (class defaults above are permissive; `PROD` is tuned tighter — e.g. `fastrelax_max_fa_rep=100.0`, `interface_min_sc=0.55`, `fold_min_plddt=75.0`).
+4. Submit: `sbatch delta_gpu_run.sh` (sets `MPNN_DIR`/`FOUNDRY_SIF_PATH`/`BOLTZ_CACHE` from `WORK_DIR`-relative defaults, or export them yourself beforehand to override — see that script's header comment). For a dry run without HPC tools, use `run_test_small_molecule_binding.py` (mock tasks) instead.
 
 After a run, validate the output against expected invariants (ligand identity preserved through the guided-RFD3 path, Boltz output shape, no regression to rejected design states, etc.):
 
@@ -310,6 +310,6 @@ The following values are embedded in the code and not exposed as constructor kwa
 
 ### Execution backend
 
-`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs (`IMPRESS_BACKEND=dragon`, the default). Set `IMPRESS_BACKEND=local` before running to use `ConcurrentExecutionBackend.create(ProcessPoolExecutor())` (from `rhapsody.backends`) instead for single-node/non-Dragon development.
+`run_small_molecule_binding.py` uses `DragonExecutionBackend` for HPC production runs (`IMPRESS_BACKEND=dragon`, the default). Set `IMPRESS_BACKEND=local` before running to use `ConcurrentExecutionBackend(ProcessPoolExecutor(), name="compute")` (from `rhapsody.backends`) instead for single-node/non-Dragon development.
 
 The caller owns the `WorkflowEngine`: the runner creates the backend, creates the engine, passes it to `ImpressManager`, and shuts it down in a `finally`. GPU placement is the backend's responsibility -- the example does no explicit pinning.

@@ -191,23 +191,20 @@ START_STAGGER_S = 60
 async def adaptive_decision(pipeline: SmallMoleculeBindingPipeline) -> None:
     """Adaptive callback: picks pipeline.next_step from the last analysis.
 
-    The body is entirely synchronous, so calling this directly on the event
-    loop blocks every pipeline for its duration -- the defect that capped job
-    22534628 at 37% of baseline.  impress_smallmol_bind() therefore runs it as
-    a flow.function_task on the `local` thread-pool backend; run it the same
-    way anywhere more than a toy number of pipelines share the loop.
+    `async def` with no await, which is asyncflow's shape for a task body: the
+    engine runs it, so it never occupies the loop. The runner declares where,
+    with flow.function_task(backend="local") in impress_smallmol_bind -- this
+    function is passed to ImpressManager already wrapped, and the manager only
+    awaits it. Do not pass it undeclared: the body reads ensemble files, and on
+    the loop that blocks every pipeline for its duration, the defect that
+    capped job 22534628 at 37% of baseline.
 
-    Safe to run off-loop because the body only reads pipeline.state and assigns
+    Safe off-loop because the body only reads pipeline.state and assigns
     pipeline.state[...] / pipeline.next_step, and ImpressManager awaits each
-    pipeline's adaptive task before advancing that pipeline (see
-    src/impress/impress_manager.py:100-122), so there is no concurrent writer to
-    the same pipeline's state.  It must stay on a THREAD pool: a process pool
-    would mutate a pickled copy of the pipeline.
+    pipeline's adaptive task before advancing that pipeline, so there is no
+    concurrent writer to the same pipeline's state. It must stay on a THREAD
+    pool: a process pool would mutate a pickled copy of the pipeline.
     """
-    _adaptive_decision_sync(pipeline)
-
-
-def _adaptive_decision_sync(pipeline: SmallMoleculeBindingPipeline) -> None:
     step     = pipeline.state.get('last_analysis_step')
     metrics  = pipeline.state.get('last_analysis_metrics', {})
     passed   = metrics.get('pass', False)
@@ -448,7 +445,8 @@ async def impress_smallmol_bind() -> None:
     #              fastrelax, filter_shape, boltz) goes here, so placement across
     #              nodes, per-task env and process lifecycle are the backend's.
     #   local   -- an in-process thread pool for Python callbacks that must see
-    #              the live pipeline objects (adaptive_decision).
+    #              the live pipeline objects.  The adaptive_fn is declared on
+    #              this backend below; ImpressManager only awaits the task.
     # The constructors, not .create(), because .create() takes no name.
     if BACKEND == "dragon":
         compute = await DragonExecutionBackend(name="compute")
@@ -480,9 +478,12 @@ async def impress_smallmol_bind() -> None:
         telemetry_subscribers=[_on_task_event],
     )
 
-    # Runs off the event loop, bounded by the local pool, and shows up in
-    # telemetry as a task with target_backend=local.
-    adaptive_fn = flow.function_task(backend="local")(adaptive_decision)
+    # Declare where the adaptive callback runs, the way asyncflow's own
+    # examples declare a task's backend.  `local` is the ThreadPoolExecutor
+    # above: the body mutates the live pipeline, so a process pool would
+    # mutate a pickled copy.  ImpressManager awaits this task and makes no
+    # routing decision of its own.
+    adaptive_task = flow.function_task(backend="local")(adaptive_decision)
 
     # One GPU per pipeline, round-robin: p1 -> gpus[0], p2 -> gpus[1], ...
     # A pipeline runs its stages one at a time, so it never has more than one
@@ -508,7 +509,7 @@ async def impress_smallmol_bind() -> None:
         PipelineSetup(
             name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=adaptive_fn,
+            adaptive_fn=adaptive_task,
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),

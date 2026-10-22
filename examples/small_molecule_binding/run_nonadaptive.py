@@ -1,9 +1,10 @@
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from radical.asyncflow import WorkflowEngine
-from rhapsody.backends import DragonExecutionBackend
+from rhapsody.backends import ConcurrentExecutionBackend, DragonExecutionBackend
 
 from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import (
@@ -65,15 +66,22 @@ async def impress_smallmol_nonadaptive() -> None:
     os.makedirs(work_dir, exist_ok=True)
     input_dir = os.path.join(examples_dir, "p1_in")
 
-    backend = await DragonExecutionBackend()
-    flow = await WorkflowEngine.create(backend=backend)
+    # Two named backends, as the adaptive runner uses: `compute` runs the
+    # tool stages, `local` is an in-process thread pool for the routing
+    # callback, which mutates the live pipeline object.
+    compute = await DragonExecutionBackend(name="compute")
+    local = await ConcurrentExecutionBackend(
+        ThreadPoolExecutor(max_workers=len(PIPELINE_INDICES)), name="local")
+    flow = await WorkflowEngine.create(backend=[compute, local])
     manager: ImpressManager = ImpressManager(flow)
+
+    nonadaptive_task = flow.function_task(backend="local")(nonadaptive_decision)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
             name=f"p{str(i)}",
             type=SmallMoleculeBindingPipeline,
-            adaptive_fn=nonadaptive_decision,
+            adaptive_fn=nonadaptive_task,
             kwargs={
                 "base_path":                 work_dir,
                 "scripts_path":              os.path.join(examples_dir, "scripts"),

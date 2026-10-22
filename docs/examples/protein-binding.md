@@ -48,14 +48,17 @@ pipeline; they don't normally need to be supplied.
 | `s4_post_exec` | local | Copies the best-model PDB (renaming Boltz chain IDs `pdz`/`pep` → `A`/`B`) into `best_models/` and `mpnn/job_<N>/`, and the confidence JSON into `best_ptm/` | CPU |
 | `s5` | HPC | `scripts/s5_plddt_extract.sh` → `plddt_extract_pipeline.py` (PyRosetta + BioPandas) | CPU |
 
-- `s1` and `s4` are registered with `capture_stdio=True`. No GPU
+- `s1`, `s4` and `s5` capture their stdio (the framework default). No GPU
   placement hints are set on the tasks or in the scripts; GPU assignment
   is left to the execution backend.
 - `s1` always designs chain `A`. On pass 2+ its input is the previous
   pass's best-model PDB.
 - `s3` checks for pre-computed MSAs under `~/boltz/msa_cache/boltz_results_<name>/msa/`.
   If both chain MSAs exist it references them in the FASTA; otherwise it
-  writes `empty` and Boltz runs in single-sequence mode.
+  writes `empty` and Boltz runs in single-sequence mode. This path is
+  hard-coded (`protein_binding.py:152`) and does not follow
+  `delta_env_setup.sh`, which writes MSAs to `${WORK_DIR}/boltz/msa_cache`;
+  link one to the other until that is fixed (framework backlog F23).
 - `s4`/`s4_post_exec` run concurrently across all structures in a pass via
   `asyncio.gather`. If every `s4_post_exec` fails the pass raises
   `RuntimeError` rather than scoring empty output.
@@ -90,8 +93,9 @@ s1 (mpnn) --> s2 (rank seqs) --> s3 (write FASTA) --> s4 (Boltz-2 x N, parallel)
                                                         passes += 1 (up to max_passes)
 ```
 
-`adaptive_decision()` (defined in `run_protein_binding.py`) runs after each
-pass and reads `<output_base_path>/af_stats_<name>_pass_<N>.csv`:
+`adaptive_decision()` (defined inside `impress_protein_bind()` in
+`run_protein_binding.py`, and declared on the `local` backend with
+`@flow.function_task(backend="local")`) runs after each pass and reads `<output_base_path>/af_stats_<name>_pass_<N>.csv`:
 
 | Pass | Condition | Action |
 |---|---|---|
@@ -140,7 +144,7 @@ variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `IMPRESS_BACKEND` | `dragon` | `dragon` → `DragonExecutionBackend`; anything else → `ConcurrentExecutionBackend(ProcessPoolExecutor())` (both from `rhapsody.backends`) |
+| `IMPRESS_BACKEND` | `dragon` | The `compute` backend: `dragon` → `DragonExecutionBackend`; anything else → `ConcurrentExecutionBackend(ProcessPoolExecutor())` (both from `rhapsody.backends`). A second, `local` thread-pool backend always runs the adaptive callback |
 | `IMPRESS_N_PIPELINES` | `16` | Number of root pipelines (`p1` … `pN`) |
 | `IMPRESS_MAX_PASSES` | `10` | `max_passes` for each pipeline |
 | `IMPRESS_SCRIPTS_DIR` | the example directory | Passed as `base_path` |
@@ -157,49 +161,64 @@ export IMPRESS_BACKEND=local IMPRESS_N_PIPELINES=2 IMPRESS_MAX_PASSES=2
 python run_protein_binding.py
 ```
 
-The runner follows the standard IMPRESS pattern — it creates the backend
-and engine, passes the engine to the manager, and shuts it down itself:
+The runner follows the standard IMPRESS pattern: it creates the engine over
+two named backends, passes the engine to the manager, declares the adaptive
+callback on the `local` thread pool, and shuts the engine down itself:
 
 ```python
-backend = await DragonExecutionBackend()
-flow = await WorkflowEngine.create(backend=backend)
+compute = await DragonExecutionBackend(name="compute")
+local = await ConcurrentExecutionBackend(
+    ThreadPoolExecutor(max_workers=N_PIPELINES), name="local")
+flow = await WorkflowEngine.create(backend=[compute, local])
 manager = ImpressManager(
     flow,
     telemetry_config={"checkpoint_path": "./telemetry/", "resource_poll_interval": 5.0},
     telemetry_subscribers=[_on_task_event],
 )
+
+@flow.function_task(backend="local")
+async def adaptive_decision(pipeline): ...
+
 try:
     await manager.start(pipeline_setups=pipeline_setups)
 finally:
     await flow.shutdown()
 ```
 
+The callback must run on a thread pool, because it mutates the live
+pipeline object. The decorator rebinds `adaptive_decision` to the task, so
+child configs that pass `'adaptive_fn': adaptive_decision` carry the task,
+not the bare function.
+
 ### On NCSA Delta
 
 Two helper scripts target Delta's `gpuA40x4` partition:
 
 - **`delta_env_setup.sh`** — run once on a login node (requires
-  `$SCRATCH`; options `--env-dir`, `--impress-dir`, `--python`). Creates a
-  Python ≥ 3.11 venv with `radical-asyncflow`,
+  `WORK_DIR`, e.g. `/work/nvme/<project>/$USER`; options `--env-dir`,
+  `--impress-dir`, `--python`). Creates a Python ≥ 3.11 venv in
+  `${WORK_DIR}/ve/impress` with `radical-asyncflow`,
   `rhapsody-py[dragon,telemetry]`, IMPRESS (editable), PyTorch, and
-  PyRosetta; builds a separate Boltz environment in `~/ve/boltz`; warms the
-  Boltz cache in `~/boltz`; and pre-computes MSAs into
-  `~/boltz/msa_cache` for every `prod_in/p*_in/*.pdb` under
-  `$IMPRESS_BASE_DIR`.
+  PyRosetta; builds a separate Boltz conda env in `${WORK_DIR}/ve/boltz`;
+  warms the Boltz cache in `${WORK_DIR}/boltz`; and pre-computes MSAs into
+  `${WORK_DIR}/boltz/msa_cache` for every `prod_in/p*_in/*.pdb` under
+  `$IMPRESS_BASE_DIR` (default `${WORK_DIR}/IMPRESS_inputs`).
 - **`delta_gpu_run.sh`** — the batch job (`sbatch delta_gpu_run.sh`; create
   `logs/` in the example directory first, since Slurm writes the job logs
-  there). Sets up Delta's CUDA/MPI/libfabric paths, activates the
-  IMPRESS venv, configures Dragon, exports `MPNN_PATH`, `BOLTZ_VENV`,
-  `BOLTZ_CACHE_DIR`, and the `IMPRESS_*` path variables (under
-  `$SCRATCH/$USER/`), and launches `dragon run_protein_binding.py`
-  (`dragon -m` for multi-node jobs).
+  there; requires `WORK_DIR`). Sets up Delta's CUDA/MPI/libfabric paths,
+  activates `${IMPRESS_VENV:-${WORK_DIR}/ve/impress}`, configures Dragon,
+  exports `MPNN_PATH`, `BOLTZ_VENV`, `BOLTZ_CACHE_DIR`, and the `IMPRESS_*`
+  path variables (`IMPRESS_BASE_DIR=${WORK_DIR}/IMPRESS_inputs`,
+  `IMPRESS_OUTPUT_DIR=${WORK_DIR}/IMPRESS_outputs`), and launches
+  `dragon -s run_protein_binding.py` (`-m` for multi-node jobs), or plain
+  `python3` when `IMPRESS_BACKEND=local`.
 
 !!! note
 
-    Review the paths in `delta_gpu_run.sh` before submitting: it activates
-    `${IMPRESS_VENV:-~/ve/impress_A}`, while `delta_env_setup.sh` creates
-    `/u/$USER/ve/impress` by default, and the two scripts use slightly different
-    default input/output roots.
+    `delta_gpu_run.sh` defaults `BOLTZ_VENV` to `${HOME}/ve/boltz`, while
+    `delta_env_setup.sh` builds the Boltz env in `${WORK_DIR}/ve/boltz`.
+    Export `BOLTZ_VENV=${WORK_DIR}/ve/boltz` before `sbatch` until the
+    default is aligned (framework backlog F23).
 
 ### Alternate entry point
 

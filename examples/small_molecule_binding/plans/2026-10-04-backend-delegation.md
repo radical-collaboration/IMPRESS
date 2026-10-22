@@ -1,6 +1,6 @@
 # Tool stages delegated to asyncflow/rhapsody instead of the runner
 
-**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke (`22670942`), 4-node 1 h (`22675825`) and post-merge gate (`22684833`) all passed on Delta with 0 failures; **throughput gate passed** on `22701168` (8 nodes / 32 pipelines / 4 h, 15.71 rfd3/pipeline/h, 0 failures)
+**Severity:** medium (architecture; one latent GPU defect) · **Status:** implemented on `scaling-wide` and merged to `main` in PR #70 (`59a9e20`, plus `rfd3`/`boltz` caps 2026-10-05); 2-node smoke (`22670942`), 4-node 1 h (`22675825`) and post-merge gate (`22684833`) all passed on Delta with 0 failures; **throughput gate passed** on `22701168` (8 nodes / 32 pipelines / 4 h, 15.71 rfd3/pipeline/h, 0 failures)
 **Evidence:** branch history `976c0cf`..`90d6be3`, plus `d8c1b4b` and `8ddeb10` before it
 
 ## Why

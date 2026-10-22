@@ -25,9 +25,10 @@ pip install "rhapsody-py[dragon,telemetry]"
 ## Example
 ```python
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from radical.asyncflow import WorkflowEngine
-from rhapsody.backends import DragonExecutionBackend
+from rhapsody.backends import ConcurrentExecutionBackend, DragonExecutionBackend
 
 from impress import ImpressBasePipeline, ImpressManager, PipelineSetup
 
@@ -48,18 +49,23 @@ class MyPipeline(ImpressBasePipeline):
         await self.run_adaptive_step(wait=True)
 
 
-async def adaptive_decision(pipeline: MyPipeline) -> None:
-    # Inspect pipeline.state and optionally spawn a child pipeline:
-    # pipeline.submit_child_pipeline_request({...})
-    pass
-
-
 async def main() -> None:
     # The caller owns the engine: create it, hand it to the manager,
-    # and shut it down when done.
-    backend = await DragonExecutionBackend()
-    flow = await WorkflowEngine.create(backend=backend)
+    # and shut it down when done.  Stages run on `compute`; the adaptive
+    # callback runs on `local`, a thread pool, because it mutates the live
+    # pipeline object.
+    compute = await DragonExecutionBackend(name="compute")
+    local = await ConcurrentExecutionBackend(ThreadPoolExecutor(), name="local")
+    flow = await WorkflowEngine.create(backend=[compute, local])
     manager = ImpressManager(flow)
+
+    # adaptive_fn must be a declared engine task; a bare function raises
+    # TypeError in PipelineSetup.
+    @flow.function_task(backend="local")
+    async def adaptive_decision(pipeline: MyPipeline) -> None:
+        # Inspect pipeline.state and optionally spawn a child pipeline:
+        # pipeline.submit_child_pipeline_request({...})
+        pass
 
     try:
         await manager.start(pipeline_setups=[

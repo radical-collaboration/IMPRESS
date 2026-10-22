@@ -195,7 +195,12 @@ Called by `adaptive_decision()` when fold models fail `rmsd_threshold`. For each
 
 ### Execution backends
 
-`run_discontinuous_scaffolds.py` has `DragonExecutionBackendV3()` active by default (HPC). Switch to the commented-out `LocalExecutionBackend(ThreadPoolExecutor())` for local testing.
+`run_discontinuous_scaffolds.py` builds one `WorkflowEngine` over two named backends, and asyncflow routes each task by name:
+
+- **`compute`** (the default): every pipeline step. `DragonExecutionBackend(name="compute")` is active by default (HPC); switch to the commented-out `LocalExecutionBackend(ProcessPoolExecutor(), name="compute")` for local testing. It used to import `DragonExecutionBackendV3` from `rhapsody.backends`, which rhapsody 0.5.0 no longer exports there, so the runner failed at import.
+- **`local`**: a `ConcurrentExecutionBackend(ThreadPoolExecutor(len(PIPELINE_INDICES)))` for `adaptive_decision`. The runner declares it with `flow.function_task(backend="local")` and assigns the result to the module-level `adaptive_task`, which is what every `PipelineSetup` and branch config passes as `adaptive_fn` — `ImpressManager` takes an engine task and rejects a bare function before any pipeline starts.
+
+Declaring it matters more here than in the other examples: `adaptive_decision` runs `create_redesign.py` through a blocking `subprocess.run`, so on the shared event loop it would stall every pipeline for the length of a structure-alignment run. It must stay a **thread** pool, because the callback mutates the live pipeline object.
 
 ### Benchmark data
 
