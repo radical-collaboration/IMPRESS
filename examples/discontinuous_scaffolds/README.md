@@ -8,14 +8,14 @@ A three-stage protein design campaign within the [IMPRESS](../../README.md) fram
 python run_discontinuous_scaffolds.py
 ```
 
-Edit the path and threshold constants at the top of `run_discontinuous_scaffolds.py` before running. To run locally (without HPC), swap the backend in `run_discontinuous_scaffolds()`:
+Edit the path and threshold constants at the top of `run_discontinuous_scaffolds.py` before running. The engine has two named backends: `compute` for every stage and `local`, a thread pool, for the adaptive callback, which is declared on it with `flow.function_task(backend="local")`. To run locally (without HPC), swap the `compute` backend in `run_discontinuous_scaffolds()`:
 
 ```python
-# Local (testing)
-backend = await LocalExecutionBackend(ThreadPoolExecutor())
-
 # HPC (default)
-backend = await DragonExecutionBackendV3()
+compute = await DragonExecutionBackend(name="compute")
+
+# Local (testing)
+compute = await LocalExecutionBackend(ProcessPoolExecutor(), name="compute")
 ```
 
 ---
