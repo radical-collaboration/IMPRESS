@@ -11,8 +11,30 @@ invoke, the thread caps, the GPU pinning and the local analysis steps are all
 inherited, so the two examples place the same demands on an allocation and
 their results are comparable.
 
-**This is experimental.** It has no production record. The reference pipeline
-is what a campaign should use until this one has one.
+**This is experimental.** Two one-hour single-node runs on Delta (2026-10-22)
+and nothing else; the reference pipeline has months of multi-node campaigns
+behind it, and is what a real campaign should use.
+
+First results, both 1 node / 4 pipelines / 1 h:
+
+| | smoke (`scripted`) | live (`claude-sonnet-5-5`) |
+|---|---|---|
+| job | `23110801` | `23112484` |
+| tool calls | 294 | 154 (turn-limited at 40/pipeline) |
+| task failures | 0 | 0 |
+| invalid tool calls / degraded | n/a | 0 / 0 |
+| folds passed | 36/47 | 10/16 |
+| throughput | 13.1 rfd3/pipeline/h (= the reference's) | not time-matched |
+| ended | `TIMEOUT` at the wall clock | by itself at 37:54, `runner_status: ok` |
+| LLM cost | none | ~$2.21 (1.06 M prompt tokens) |
+
+The live run answered the design's open question — a Delta compute node can
+reach the endpoint — and showed the model doing things the state machine
+cannot: three of four pipelines chose to stop, with an accurate account of
+what they had produced, and one diagnosed the `fa_rep` relax bottleneck
+unprompted. It also showed two weaknesses: it skips the cheap
+`score_interface` gate before expensive folds, and it almost never calls
+`inspect_ensemble`. See `CLAUDE.md` for the full record.
 
 ## What is different
 

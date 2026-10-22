@@ -6,8 +6,9 @@ Guidance for working in `examples/agentic_small_molecule_binding/`.
 
 | Date | Commit | Notes |
 |---|---|---|
+| 2026-10-22 | — | **First two runs on Delta, both on one node / 4 pipelines / `gpuA40x4-interactive` / 1 h.** Smoke (`23110801`, scripted profile): 294 tool calls, **0 failures**, all six tools on all four pipelines, GPUs pinned 0-3 and all active (10.0/10.2/11.1/11.2 % mean), 36/47 folds passed, **13.1 rfd3/pipeline/h — the reference's own figure** (`22675825`, `22684833`), so the inherited toolkit performs identically. `TIMEOUT` at 01:00:29 with no `runner_status`, as expected for a job with no natural stop. Live (`23112484`, `claude-sonnet-5-5`, `--max-llm-turns 40`): finished by itself in **37:54**, `runner_status: ok`, Dragon teardown clean in 4 s — the hang of BACKLOG 2 did not occur. **0 invalid tool calls and 0 degraded fallbacks over 137 turns**, so the endpoint held and the guards were never needed. 10/16 folds passed; 1.06 M prompt + 9.8 k completion tokens ≈ **$2.21**, negligible beside the GPU time. **A Delta compute node can reach `api.anthropic.com`** (the launcher's probe, HTTP 400 = routable) — the plan's one open risk, now closed. Behaviour: 3 of 4 pipelines called `finish` deliberately with an accurate summary of their own results, and p2 diagnosed the `fa_rep` relax bottleneck (BACKLOG 3) unprompted. Guided partial diffusion correlates with yield — p3 used it 3× for 4/4 folds, p4 never and got 1/3. Two weaknesses: `score_interface` was called 13× against 27 `relax` (the cheap CPU gate before an expensive fold is being skipped), and `inspect_ensemble` was called **once in 137 turns**. Not a fair throughput comparison: the live run was turn-limited, the smoke run time-limited |
 | 2026-10-22 | — | **`claude-opus-5-5` declines this workload through the OpenAI-compatibility endpoint** (`finish_reason=content_filter`, 0 completion tokens), with the system prompt and without it, so it is the design task and not the prompt's wording; `claude-sonnet-5-5` answers the identical request normally and opens with `design_backbone`. Multi-turn tool round-trip verified on Sonnet (4 turns, ~10k prompt / 194 completion tokens). `models.yaml` and `README.md` now say to use the `claude-sonnet` profile. Do **not** try to reword the prompt around this: the bare user message refuses too, and the native API's remedy for a false-positive decline is the server-side `fallbacks` parameter, which this endpoint does not expose |
-| 2026-10-21 | — | Example created. An LLM drives the reference small-molecule binding toolkit directly through tool calls, on the same asyncflow/Dragon execution and the same task allocation. Model reached through an OpenAI-compatible endpoint so several can be compared run for run. Offline test passes (54 checks); **never run on Delta** |
+| 2026-10-21 | — | Example created. An LLM drives the reference small-molecule binding toolkit directly through tool calls, on the same asyncflow/Dragon execution and the same task allocation. Model reached through an OpenAI-compatible endpoint so several can be compared run for run. Offline test passes (54 checks) |
 
 ## What this is
 
@@ -16,8 +17,10 @@ and asks `adaptive_decision()` which step comes next. This example removes the
 state machine: the model is given the toolkit and calls it. Everything else is
 the reference's.
 
-It is **experimental and unproven on hardware.** Do not present its numbers
-alongside the reference's as if both were validated.
+It is **experimental.** Two one-hour runs on Delta (2026-10-22) and nothing
+more; the reference has months of multi-node campaigns behind it. Do not
+present its numbers alongside the reference's as if both carried the same
+weight.
 
 ## The one rule that matters
 
@@ -84,10 +87,16 @@ attributed to the model.
 
 ## Not yet done
 
-- Never run on Delta. The smoke gate is in the plan: 1 node, 4 pipelines,
-  `gpuA40x4-interactive`, 1 h, with zero task failures, every tool exercised,
-  all four GPUs active in `nvsmi.csv`, `runner_status` = `ok`, and a transcript
-  per pipeline.
+- **No time-matched comparison with the reference yet.** The live run was
+  limited by `--max-llm-turns 40`, not the clock, so its folds-per-hour cannot
+  be set against the reference's. The next run should give the agent the same
+  wall clock with a turn cap high enough not to bind.
+- **`score_interface` is under-used** (13 calls against 27 `relax`). Its tool
+  description leads with the ordering rule, which reads as a restriction rather
+  than as the thing to do after a relax. Worth rewording and re-measuring.
+- **`inspect_ensemble` was called once in 137 turns.** Either it is not worth
+  its place in the tool list, or the prompt does not make a free tool feel
+  free. Decide with data before adding more tools.
 - The live-endpoint check has been run: Sonnet drives the loop correctly over
   four turns. Opus declines (see the revision row above).
 - Outbound HTTPS from a Delta *compute* node is unverified. The login node
