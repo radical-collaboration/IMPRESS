@@ -3,7 +3,8 @@
 Open work for the framework itself (`src/impress/`): lifting fixes proven in the examples into
 `ImpressBasePipeline`, `ImpressManager` and the asyncflow interface, so each example stops
 rediscovering them. One line per item; details live in the linked doc. Keep `Status` current, and
-delete rows once the change is merged **and** a run confirms it.
+move a row to **Closed**, with the confirming evidence, once the change is merged **and** a run
+confirms it.
 
 Example-specific work is tracked separately, e.g.
 [small_molecule_binding/plans/BACKLOG.md](../examples/small_molecule_binding/plans/BACKLOG.md)
@@ -26,7 +27,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F3 | `register_pipeline_tasks()` runs in `__init__` before subclass attributes and `self.logger` exist; crashed `22692267` | 2 (bug) | open | [pr2](2026-10-08-framework-pr2.md#f3) |
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
 | F5 | Telemetry defaults (`checkpoint_interval`, `resource_poll_interval`, absolute path) and a bounded shutdown helper (smb 2) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f5) |
-| F6 | Engine `work_dir` should be the job dir, so captured stdio (now on by default) stays with the run (smb 21) | 2 | open; more urgent now that PR 1 captures every task's stdio | [pr2](2026-10-08-framework-pr2.md#f6) |
+| F6 | Engine `work_dir` should be the job dir, so captured stdio (now on by default) stays with the run (smb 21) | 2 | open; stdio capture is the default on `main` since PR #72, so every task's `.stdout`/`.stderr` lands in the engine's `work_dir` | [pr2](2026-10-08-framework-pr2.md#f6) |
 | F7 | Document and adopt the two-backend engine layout (`compute` + `local` thread pool) in all runners | 2 | adopted everywhere, **awaiting a Delta run**. `protein_binding`, `discontinuous_scaffolds` and smb's `run_nonadaptive` now build `compute` + a `local` thread pool and declare their adaptive callback on it (F19); `docs/concepts/architecture.md` carries the layout and the declaration. Row stays until a run confirms it | [pr2](2026-10-08-framework-pr2.md#f7) |
 | F8 | Task-directory helper: `taskcount` + `{n}_{stage}/in,out` is repeated 7× in smb and 8× in discontinuous | 3 | open | [pr3](2026-10-08-framework-pr3.md#f8) |
 | F9 | Adaptive function exceptions are logged and swallowed; the pipeline continues on stale state | 3 | open | [pr3](2026-10-08-framework-pr3.md#f9) |
@@ -34,7 +35,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
 | F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
-| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: fixed on the PR 1 branch (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
+| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: merged in PR #72 (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
 | F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
 
 ## Order
@@ -75,7 +76,7 @@ Closed by PR #72 (`9a413cd`, merged 2026-10-21), each with the run that confirme
 - **F19**: adaptive functions passed as declared asyncflow tasks (`22a1f82`). Passed on `23062773`
   and `23065238`: every adaptive task on `local`, rfd3 / boltz within 10 % of F18, and adaptive
   share 0.28 % / 0.35 % against the restated ≤ 0.5 % bar. Its pass-through counterpart was
-  confirmed on `23074256` (smb 23). Doc: [f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)
+  confirmed on `23074256` (smb 23, on `smb-benchmark-f19`, not yet on `main`). Doc: [f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)
 - **F20**: the declared-task contract moved into a `PipelineSetup` validator (`0446e96`). No Delta
   run, by design. Its one unrun criterion, the smb mock comparison, was run 2026-10-21 on merge
   `0cefeb2` of `main` into `smb-benchmark-f19`. In all three modes (adaptive, `--nonadaptive`,
