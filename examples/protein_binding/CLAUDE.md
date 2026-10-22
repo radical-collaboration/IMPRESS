@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 2026-04-18 | 758d868 | Fix post-exec staging cp paths |
 | 2026-09-30 | — | s4 is Boltz-2 only; paths moved to env vars; `protein_binding_run.py` removed |
 | 2026-10-20 | — | Two-backend engine (`compute` + a `local` thread pool); `adaptive_decision` is declared with `@flow.function_task(backend="local")` and passed to `ImpressManager` as a task (framework PR 2). Not yet run on Delta |
+| 2026-10-21 | a5bc68e | Docs only: `docs/examples/protein-binding.md` shows the two-backend engine and the `WORK_DIR` Delta layout. Two path defaults still disagree with `delta_env_setup.sh` (hard-coded `~/boltz/msa_cache` in `s3`, `BOLTZ_VENV` under `$HOME`); tracked as framework F23 ([docs-drift](../../plans/2026-10-21-docs-drift-findings.md#f23)). No code change |
 
 ## Context
 

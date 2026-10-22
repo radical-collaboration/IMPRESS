@@ -37,6 +37,9 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
 | F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: merged in PR #72 (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
 | F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
+| F21 | A child config with a bare `adaptive_fn` raises `TypeError` out of `manager.start()` mid-run (`PipelineSetup.from_dict` in the poll loop, `impress_manager.py:203`), not before any pipeline starts; found in the docs review of `9a413cd` | 3 | open, needs decision: drop that child and continue, or fail fast by contract | [docs-drift](2026-10-21-docs-drift-findings.md#f21) |
+| F22 | `pyproject.toml:22` floors `radical-asyncflow>=0.4.0`, but the code needs named backends, `function_task(backend=)` and `capture_stdio`; only 0.5.0/0.5.1 have been run (F19 acceptance). No rhapsody floor | 3 | open | [docs-drift](2026-10-21-docs-drift-findings.md#f22) |
+| F23 | protein_binding: `protein_binding.py:152` reads MSAs from hard-coded `~/boltz/msa_cache` while `delta_env_setup.sh:165` writes `${WORK_DIR}/boltz/msa_cache`; `delta_gpu_run.sh:63` defaults `BOLTZ_VENV` to `$HOME`. Documented with a workaround in `a5bc68e`; not run | 3 | open | [docs-drift](2026-10-21-docs-drift-findings.md#f23) |
 
 ## Order
 
@@ -45,6 +48,9 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 2. PR 3: F8–F10.
 3. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
    F16 and F15 part 1 wait for its answer.
+4. F21–F23, from the post-PR #72 docs review. F23 is a small example fix that can ride with any
+   protein_binding change; F21 needs its decision first; F22 needs a check against an older
+   asyncflow.
 
 **asyncflow 0.6.0 survey (2026-10-21, checkout `175cf76`).** The checkout moved from `038d52a`
 (0.5.1) to 0.6.0, including a task→component handling refactor. Everything F14–F20 rely on
