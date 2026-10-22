@@ -72,6 +72,17 @@ fallbacks. That is a deliberate trade: one request shape across every model
 under comparison is the point. A single-model study should use the Anthropic
 SDK directly instead.
 
+**Measured 2026-10-22: use the `claude-sonnet` profile, not `claude-opus`.**
+`claude-opus-5-5` declines this workload through that endpoint — every request
+returns `finish_reason=content_filter` with zero completion tokens, with the
+system prompt and without it, so it is the design task rather than the prompt's
+wording. `claude-sonnet-5-5` answers the identical request normally and opens
+with `design_backbone`. An Opus run would hit the endpoint-failure path on turn
+one and finish on the scripted route, which is not the experiment. On the
+native API the documented remedy for a false-positive decline is the
+server-side `fallbacks` parameter; the compatibility endpoint does not offer
+it.
+
 Each pipeline writes `{work_dir}/{name}/llm_transcript.jsonl`: every assistant
 turn with its tool calls and token counts, every tool result, and the run's
 start and end. That file is the comparison data, and it is what makes a run

@@ -14,6 +14,16 @@ profiles:
   # takes this request shape but does not expose Claude's own controls
   # (adaptive thinking, effort, server-side fallbacks); one request shape
   # across every model is the trade this example is making deliberately.
+  #
+  # MEASURED 2026-10-22: claude-opus-5-5 DECLINES this workload. Every request
+  # comes back finish_reason=content_filter with 0 completion tokens -- with
+  # the system prompt and without it, so it is the design task itself and not
+  # the prompt's wording. claude-sonnet-5-5 answers the identical request
+  # normally (tool_calls, the correct opening move). Use claude-sonnet until
+  # that changes; the example's degraded path would otherwise turn an Opus run
+  # into the scripted route on turn one. On the native API the documented
+  # remedy is the server-side `fallbacks` parameter, which the compatibility
+  # endpoint does not expose.
   claude-opus:
     kind: openai_compat
     base_url: https://api.anthropic.com/v1/
@@ -21,6 +31,7 @@ profiles:
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 4096
 
+  # Works today -- the profile to use for a live run.
   claude-sonnet:
     kind: openai_compat
     base_url: https://api.anthropic.com/v1/

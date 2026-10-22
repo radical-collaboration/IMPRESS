@@ -6,6 +6,7 @@ Guidance for working in `examples/agentic_small_molecule_binding/`.
 
 | Date | Commit | Notes |
 |---|---|---|
+| 2026-10-22 | — | **`claude-opus-5-5` declines this workload through the OpenAI-compatibility endpoint** (`finish_reason=content_filter`, 0 completion tokens), with the system prompt and without it, so it is the design task and not the prompt's wording; `claude-sonnet-5-5` answers the identical request normally and opens with `design_backbone`. Multi-turn tool round-trip verified on Sonnet (4 turns, ~10k prompt / 194 completion tokens). `models.yaml` and `README.md` now say to use the `claude-sonnet` profile. Do **not** try to reword the prompt around this: the bare user message refuses too, and the native API's remedy for a false-positive decline is the server-side `fallbacks` parameter, which this endpoint does not expose |
 | 2026-10-21 | — | Example created. An LLM drives the reference small-molecule binding toolkit directly through tool calls, on the same asyncflow/Dragon execution and the same task allocation. Model reached through an OpenAI-compatible endpoint so several can be compared run for run. Offline test passes (54 checks); **never run on Delta** |
 
 ## What this is
@@ -87,6 +88,8 @@ attributed to the model.
   `gpuA40x4-interactive`, 1 h, with zero task failures, every tool exercised,
   all four GPUs active in `nvsmi.csv`, `runner_status` = `ok`, and a transcript
   per pipeline.
+- The live-endpoint check has been run: Sonnet drives the loop correctly over
+  four turns. Opus declines (see the revision row above).
 - Outbound HTTPS from a Delta *compute* node is unverified. The login node
   reaches `api.anthropic.com` (HTTP 401, i.e. routable). The launcher's probe
   runs on the batch node and fails fast if a compute node cannot.
