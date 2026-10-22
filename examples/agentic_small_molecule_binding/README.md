@@ -36,6 +36,35 @@ unprompted. It also showed two weaknesses: it skips the cheap
 `score_interface` gate before expensive folds, and it almost never calls
 `inspect_ensemble`. See `CLAUDE.md` for the full record.
 
+## The 4-hour paired comparison (2026-10-22)
+
+`23114772` (reference) and `23114775` (agentic, `claude-sonnet-5-5`) submitted
+together, 1 node / 4 pipelines / 4 h / `gpuA40x4`, same inputs and thresholds.
+Both ran to `TIMEOUT` with 0 task failures and 0 degraded turns. Measured off
+the tool outputs on disk by one script over both arms:
+
+| | reference | agentic |
+|---|---|---|
+| rfd3 / pipeline-hour | 15.5 | 16.2 |
+| distinct passing designs | 53 | **176** |
+| passing designs / node-hour | 13.25 | **44.0** |
+| GPU-h per passing design | 0.302 | **0.083** |
+| backbones yielding a passing fold | 53/248 (21 %) | **192/260 (74 %)** |
+| `fastrelax` pass rate | 87/176 (49 %) | **213/242 (88 %)** |
+| mpnn tasks | 858 | 349 |
+| median pLDDT | 89.6 | 94.2 |
+| LLM cost | — | $25.40 ($0.14/design) |
+
+Throughput is equal, so the model's round trip costs nothing measurable; the
+difference is entirely in which work the funnel chooses to do.
+
+**Two caveats, and they matter.** The reference arm came in about 2× worse than
+its own record (`22701168`: 0.160 GPU-h per passing fold), so an unknown part
+of this gap is a weak baseline rather than agent skill — do not quote the
+ratio until that is explained. And the `fastrelax` gap, 88 % against 49 % on
+the same tool with the same thresholds, is unexplained and is where the
+difference actually originates.
+
 ## What is different
 
 | | Reference | Here |
