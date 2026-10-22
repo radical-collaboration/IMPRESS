@@ -52,7 +52,10 @@ Use `pip install -e .` instead if you plan to modify Impress itself.
 
 ### HPC execution backends (optional)
 
-Local runs only need `radical.asyncflow`'s built-in `LocalExecutionBackend`.
+Local runs of your own pipelines only need `radical.asyncflow`'s built-in
+`LocalExecutionBackend`. The example runners under `examples/` need rhapsody
+even with `IMPRESS_BACKEND=local`: their local mode uses its
+`ConcurrentExecutionBackend`.
 HPC backends such as `DragonExecutionBackend` and `RadicalExecutionBackend`
 come from [`rhapsody`](https://pypi.org/project/rhapsody-py/), which is not
 installed automatically. The example workflows under `examples/` import it:

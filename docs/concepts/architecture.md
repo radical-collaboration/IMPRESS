@@ -89,15 +89,18 @@ Defaults that every pipeline gets without asking:
   `{work_dir}/{engine uid}` for the `work_dir` passed to
   `WorkflowEngine.create()`. The task's future then resolves to the stdout
   file path, not the text; pass `capture_stdio=False` to get the text.
+  This applies to rhapsody's backends (Concurrent, Dragon). asyncflow's
+  `LocalExecutionBackend` ignores `capture_stdio`: futures resolve to the
+  text, and a failure's stderr is already in the exception.
 - **failures explain themselves.** When an executable task fails, the last
   lines of its captured stderr are logged and attached to the exception as
-  a note (Python 3.11+). Without this, the error is only a file path or an
+  a note (Python 3.11+), on backends that capture stdio. Without this, the error is only a file path or an
   exit code.
 - **tasks are labelled.** Each call is tagged `{pipeline}:{stage}` in
   telemetry unless the caller passes `workflow_id=`. Otherwise asyncflow
   names a task after its executable, which is usually just `bash`.
-- **local tasks are traced.** Each call of a `local_task=True` stage emits
-  one `impress.LocalStage` telemetry event (stage, pipeline, duration,
+- **local tasks are traced.** When telemetry is enabled, each call of a
+  `local_task=True` stage emits one `impress.LocalStage` telemetry event (stage, pipeline, duration,
   status), since local tasks never reach the engine.
 
 For a per-task log file next to a task's outputs, return
@@ -166,8 +169,10 @@ path and no mode to infer:
 - The body must be `async def`. asyncflow rejects a sync function outright;
   it needs no `await` inside, which is the normal shape for a task body.
 - `PipelineSetup` raises `TypeError` for an `adaptive_fn` that is not a task,
-  when the setup is constructed — so before any pipeline starts, and without
-  needing a manager. The manager has no path of its own to fall back to, so
+  when the setup is constructed — so, for the setups passed to `start()`,
+  before any pipeline starts, and without needing a manager. A child config
+  is converted on the manager's poll after the request, so a bad child
+  `adaptive_fn` raises out of `manager.start()` mid-run. The manager has no path of its own to fall back to, so
   this fails rather than silently running somewhere.
 - A child pipeline's config must carry the **declared task**, not the bare
   function. These are harder to tell apart than they look: asyncflow marks
@@ -233,7 +238,7 @@ The execution backend is any backend object supported by
 `LocalExecutionBackend` (from `radical.asyncflow`) wrapping a
 `ThreadPoolExecutor` or `ProcessPoolExecutor`. For HPC production runs, use
 a backend from [`rhapsody`](https://pypi.org/project/rhapsody-py/)
-(`rhapsody.backends`): `DragonExecutionBackend`/`DragonExecutionBackendV3`,
+(`rhapsody.backends`): `DragonExecutionBackend`,
 `RadicalExecutionBackend` (configured with resource requirements such as
 GPUs, cores, runtime, and target machine), or
 `ConcurrentExecutionBackend`.
