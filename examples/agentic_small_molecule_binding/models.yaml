@@ -1,0 +1,45 @@
+# Model profiles for the agentic small-molecule binding example.
+#
+# Every profile is an OpenAI-compatible /chat/completions endpoint with tool
+# calling, so comparing models is a matter of changing --model-profile and
+# nothing else. Add one per model under comparison and keep the rest identical.
+#
+# api_key_env must be exported by the launcher, and on a multi-node run it must
+# also survive the `dragon -w ssh` hop -- Dragon forwards only BASE_ENV_VARNAMES,
+# so put it in ~/.bashrc, the same way MPNN_DIR and friends are handled.
+
+profiles:
+
+  # Claude through Anthropic's OpenAI-compatibility endpoint. That endpoint
+  # takes this request shape but does not expose Claude's own controls
+  # (adaptive thinking, effort, server-side fallbacks); one request shape
+  # across every model is the trade this example is making deliberately.
+  claude-opus:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-opus-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  claude-sonnet:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-sonnet-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  # A model served on or near the cluster. Point base_url at the server; if it
+  # runs inside the allocation it takes a GPU away from the tool pool, which
+  # changes the comparison against the reference -- size the allocation for it.
+  local-vllm:
+    kind: openai_compat
+    base_url: http://localhost:8000/v1
+    model: REPLACE-ME
+    api_key_env: null
+    max_tokens: 4096
+
+  # No network, no key: replays the reference non-adaptive route as tool calls.
+  # Used by the offline test, and as the degraded mode when an endpoint fails
+  # mid-run.
+  scripted:
+    kind: scripted

@@ -36,6 +36,16 @@ Run artifacts archived at
 - **10** — GPU tools all on GPU 0. Spread confirmed at 8 nodes: 32/32 GPUs at 9.4–15.3 % mean. Doc: [gpu0-only](2026-10-05-gpu0-only.md).
 - **13** — follow-up on job `22701168`. Done; it passed every criterion.
 
+## Related
+
+- An agentic variant of this workflow lives in
+  [`examples/agentic_small_molecule_binding/`](../../agentic_small_molecule_binding/README.md):
+  the same toolkit and the same task allocation, with an LLM calling the tools in place of
+  `run()` and `adaptive_decision()`. It subclasses `SmallMoleculeBindingPipeline` and
+  overrides only `run()`, so changes to `_register_real_tasks()` here reach it directly —
+  its offline test asserts the two classes' `task_description` defaults are identical, and
+  will fail if they diverge. Experimental; never run on Delta as of 2026-10-21.
+
 ## Conventions
 
 - Cite the job ID and the archived artifact path for every claim, the way the CLAUDE.md
