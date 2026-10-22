@@ -170,10 +170,16 @@ async def _run_pipeline(client, *, max_llm_turns=60, max_tasks=12, name="p1"):
             holder.append(pipeline)
         pipeline.state['_llm_tool_calls'] = pipeline.llm_turn()
 
+    # The manager rejects a plain coroutine: the callback has to arrive as an
+    # engine task so it runs on a thread pool rather than the event loop. The
+    # engine's only backend here is already a thread pool, so no name is
+    # needed; the runner names `local` because its default backend is `compute`.
+    adaptive_task = flow.function_task(adaptive_fn)
+
     setup = PipelineSetup(
         name=name,
         type=AgenticSMBPipeline,
-        adaptive_fn=adaptive_fn,
+        adaptive_fn=adaptive_task,
         kwargs={
             "base_path": base,
             "scripts_path": os.path.join(_REF_DIR, "scripts"),
