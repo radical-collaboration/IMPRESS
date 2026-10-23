@@ -1,0 +1,10 @@
+{
+  "why": "`rosetta_agents._NO_RESULT` (src/impress_a/tools/rosetta_agents.py:142), verbatim. A PyRosetta worker subprocess exited 0 and left no readable result.json - PyRosetta dying after its own cleanup, or a truncated write. `_read_metrics` returns None for this rather than raising, because reading unconditionally turned it into a FileNotFoundError escaping run(), which the campaign then recorded as an infrastructure crash. It is not: the tool ran and produced no result, which is a QC failure and belongs in the tree as one.",
+  "failing_gates": ["output_present", "metrics_reported"],
+  "output": {
+    "result": null,
+    "count": 0,
+    "outputs": {},
+    "metrics": {}
+  }
+}

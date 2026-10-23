@@ -1,0 +1,10 @@
+{
+  "why": "The `if not cif_models` branch of RFD3DesignAgent.run (src/impress_a/tools/rfd3_agents.py:69-71), verbatim: rfd3 exited 0 and out_dir contains no *.cif.gz. The upstream IMPRESS pipeline records exactly this from running the container with --writable-tmpfs, where rfd3 writes its output into the throwaway overlay and the real out_dir is left empty. Our invocation deliberately omits that flag for this reason (rfd3_agents.py:51-58), so this fixture records a failure we chose to design out - and the gate that would catch it if the choice is ever reversed.",
+  "failing_gates": ["output_present", "has_secondary_structure"],
+  "output": {
+    "result": null,
+    "count": 0,
+    "outputs": {},
+    "metrics": {"ss_fraction": 0.0}
+  }
+}

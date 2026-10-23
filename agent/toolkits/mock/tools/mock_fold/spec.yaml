@@ -1,0 +1,18 @@
+id: mock_fold
+toolkit: mock
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.mock_agents.FoldAgent
+resources: {gpus: 1, cores: 4, walltime_s: 60}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  sequences: {type: ProteinSequence}
+outputs:
+  complex: {type: Complex}
+parameters:
+  recycles: {type: int, default: 3, min: 1, max: 12, trades: "accuracy vs wall-clock"}
+metrics: [iptm, sc_rmsd, ss_fraction]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.25}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.03}}
