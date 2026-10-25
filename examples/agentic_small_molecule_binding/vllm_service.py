@@ -42,6 +42,9 @@ def node_hostnames() -> list[str]:
     return [Node(h).hostname for h in System().nodes]
 
 
+_DEFAULT_CUDA_HOME = "/opt/nvidia/hpc_sdk/Linux_x86_64/26.5/cuda/13.2"
+
+
 def endpoint_for(host: str, port: int) -> str:
     """The address the runner will poll and the clients will use.
 
@@ -75,12 +78,20 @@ def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
         f" --tool-call-parser {tool_parser}"
         f" {extra_args}"
     ).strip()
+    # The venv's bin must be on PATH, not just used to find `vllm`: vLLM
+    # shells out to its own build tools during engine start. Invoking
+    # {venv}/bin/vllm directly is not enough -- the engine died with
+    # FileNotFoundError: 'ninja' on job 23178420 having already loaded the
+    # model and captured CUDA graphs, because ninja sits in that same bin and
+    # nothing had put it on PATH. CUDA_HOME likewise lets it find nvcc.
+    env = (
+        f"export PATH={venv}/bin:$PATH; "
+        f"export CUDA_HOME=${{CUDA_HOME:-{_DEFAULT_CUDA_HOME}}}; "
+    )
     # setsid so the server outlives the launching task's process group, and
-    # </dev/null so it never blocks on stdin. The echo is the task's result:
-    # an executable task's future resolves to its stdout, which is the only
-    # channel asyncflow gives us for handing the address to the runner.
+    # </dev/null so it never blocks on stdin.
     return (
-        f"bash -c 'mkdir -p $(dirname {log_file}); "
+        f"bash -c '{env}mkdir -p $(dirname {log_file}); "
         f"setsid nohup {cmd} > {log_file} 2>&1 < /dev/null & "
         f"echo {host}:{port}'"
     )

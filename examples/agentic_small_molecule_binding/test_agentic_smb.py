@@ -456,6 +456,12 @@ def test_service_task_signatures() -> None:
           v.endpoint_for("h", 1) == "http://h:1", v.endpoint_for("h", 1))
     check("server binds every interface, not a single FQDN",
           "--host 0.0.0.0" in cmd, cmd[:160])
+    # vLLM shells out to its own build tools (ninja) during engine start, so
+    # the venv's bin has to be on PATH -- invoking {venv}/bin/vllm is not
+    # enough. Job 23178420 died exactly there, after loading the model.
+    check("serve command puts the venv's bin on PATH",
+          "export PATH=/v/bin:$PATH" in cmd, cmd[:200])
+    check("serve command sets CUDA_HOME", "CUDA_HOME=" in cmd, cmd[:200])
 
 
 def test_schemas() -> None:
