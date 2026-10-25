@@ -42,6 +42,17 @@ def node_hostnames() -> list[str]:
     return [Node(h).hostname for h in System().nodes]
 
 
+def endpoint_for(host: str, port: int) -> str:
+    """The address the runner will poll and the clients will use.
+
+    Derived from the host and port we chose, never from the launch task's
+    result: with `capture_stdio=True` an executable task's future resolves to
+    the *path* of its stdout file, not its contents, so parsing an address out
+    of it yields a filename (seen on job 23175312).
+    """
+    return f"http://{host}:{port}"
+
+
 def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
                   tp_size: int = 1, gpu_fraction: float = 0.90,
                   tool_parser: str = "hermes", extra_args: str = "") -> str:
@@ -52,9 +63,12 @@ def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
     comes back as ordinary text and the agent sees no calls at all. `hermes` is
     the parser for the Qwen2.5 instruct family.
     """
+    # Bind every interface and advertise the node's own name: binding to a
+    # specific FQDN can fail outright if it does not resolve to a local
+    # interface, and the failure would only show up as a health-check timeout.
     cmd = (
         f"{venv}/bin/vllm serve {model}"
-        f" --host {host} --port {port}"
+        f" --host 0.0.0.0 --port {port}"
         f" --tensor-parallel-size {tp_size}"
         f" --gpu-memory-utilization {gpu_fraction}"
         " --enable-auto-tool-choice"

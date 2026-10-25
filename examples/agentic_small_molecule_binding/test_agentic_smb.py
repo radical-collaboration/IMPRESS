@@ -448,6 +448,14 @@ def test_service_task_signatures() -> None:
           cmd[:160])
     check("stop command targets the right port",
           "--port 1" in v.stop_command(1), v.stop_command(1))
+    # The endpoint must come from the host/port we chose. An executable task's
+    # future resolves to the PATH of its stdout file under capture_stdio, so
+    # parsing the address out of the task result yields a filename (job
+    # 23175312 spent its allocation polling one).
+    check("endpoint is derived, not parsed from task output",
+          v.endpoint_for("h", 1) == "http://h:1", v.endpoint_for("h", 1))
+    check("server binds every interface, not a single FQDN",
+          "--host 0.0.0.0" in cmd, cmd[:160])
 
 
 def test_schemas() -> None:

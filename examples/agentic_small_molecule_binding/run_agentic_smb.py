@@ -195,10 +195,9 @@ async def impress_agentic_smb() -> None:
             task_description=vllm_service.service_task_description(
                 model_host, list(range(n_gpus))),
             workflow_id="vllm:launch")
-        addr = (out or "").strip().splitlines()
-        endpoint = "http://" + (addr[-1] if addr else f"{model_host}:{port}")
-        print(f"[LLM] launch task returned {endpoint}; waiting for it to load",
-              flush=True)
+        endpoint = vllm_service.endpoint_for(model_host, port)
+        print(f"[LLM] launch task done (stdout at {out}); "
+              f"waiting for {endpoint} to load", flush=True)
         served = vllm_service.wait_healthy(
             endpoint, timeout_s=float(srv.get("ready_timeout_s", 1800)),
             log=lambda m: print(m, flush=True))
