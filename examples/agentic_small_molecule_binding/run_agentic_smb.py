@@ -108,7 +108,7 @@ async def llm_turn(pipeline: AgenticSMBPipeline) -> None:
 async def _vllm_launch(venv: str, model: str, host: str, port: int,
                        log_file: str, tp_size: int, gpu_fraction: float,
                        tool_parser: str, extra_args: str,
-                       task_description: dict = None):
+                       task_description: dict = {}):  # noqa: B006
     """Executable task: start the server detached, print its address."""
     return vllm_service.serve_command(
         venv=venv, model=model, host=host, port=port, log_file=log_file,
@@ -116,7 +116,7 @@ async def _vllm_launch(venv: str, model: str, host: str, port: int,
         extra_args=extra_args)
 
 
-async def _vllm_stop(port: int, task_description: dict = None):
+async def _vllm_stop(port: int, task_description: dict = {}):  # noqa: B006
     """Executable task: stop the server on the node it was placed on."""
     return vllm_service.stop_command(port)
 

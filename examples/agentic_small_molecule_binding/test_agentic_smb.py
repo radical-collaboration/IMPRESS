@@ -422,6 +422,34 @@ def test_compaction() -> None:
           pipeline._summarised_through == 1, pipeline._summarised_through)
 
 
+def test_service_task_signatures() -> None:
+    print("\n[9] vLLM service tasks survive asyncflow's decorator validation")
+    # asyncflow validates signatures at decoration time -- a task_description
+    # default of None raises TypeError. That used to surface only once a job
+    # was running on two nodes (job 23174527), so it is checked here now.
+    import run_agentic_smb as r
+
+    flow = _RecordingFlow(_concurrent_backend())
+    for fn in (r._vllm_launch, r._vllm_stop):
+        try:
+            flow.executable_task(capture_stdio=True)(fn)
+            ok, detail = True, ""
+        except Exception as exc:
+            ok, detail = False, repr(exc)
+        check(f"{fn.__name__} decorates cleanly", ok, detail)
+
+    import vllm_service as v
+    cmd = v.serve_command(venv="/v", model="m", host="h", port=1,
+                          log_file="/l/x.log", tp_size=1)
+    check("serve command detaches and echoes its address",
+          "setsid" in cmd and "echo h:1" in cmd, cmd[:120])
+    check("serve command enables tool calling",
+          "--enable-auto-tool-choice" in cmd and "--tool-call-parser" in cmd,
+          cmd[:160])
+    check("stop command targets the right port",
+          "--port 1" in v.stop_command(1), v.stop_command(1))
+
+
 def test_schemas() -> None:
     print("\n[6] schemas and handlers agree")
     from tools import HANDLERS
@@ -438,6 +466,7 @@ if __name__ == "__main__":
     test_no_tool_calls()
     test_compaction()
     test_pin_host()
+    test_service_task_signatures()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} check(s) failed: {FAILURES}")
