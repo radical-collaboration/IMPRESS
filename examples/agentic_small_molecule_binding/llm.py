@@ -76,6 +76,11 @@ class ModelProfile:
     request_timeout_s: float = 300.0
     max_retries: int = 4
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # kind == "dragon_vllm": the model is served inside the allocation and
+    # base_url is discovered at run time, not configured here. The client is
+    # still OpenAICompatClient -- vLLM's own server speaks the same protocol,
+    # tool calls included, which is the whole point of serving it this way.
+    serve: dict[str, Any] = field(default_factory=dict)
 
 
 def load_profiles(path: str) -> dict[str, ModelProfile]:
@@ -90,6 +95,12 @@ def load_profiles(path: str) -> dict[str, ModelProfile]:
 def build_client(profile: ModelProfile) -> LLMClient:
     if profile.kind == "scripted":
         return ScriptedClient()
+    if profile.kind == "dragon_vllm" and not profile.base_url:
+        raise LLMError(
+            f"profile {profile.name!r} is served inside the allocation; its "
+            "base_url is set by the runner once the server is healthy. "
+            "Building a client before then is a bug."
+        )
     return OpenAICompatClient(profile)
 
 

@@ -32,6 +32,7 @@ for _p in (_HERE, _REF_DIR):
 import logging  # noqa: E402
 
 import rhapsody  # noqa: E402
+import vllm_service  # noqa: E402
 from agentic_pipeline import AgenticSMBPipeline  # noqa: E402
 from llm import build_client, load_profiles  # noqa: E402
 
@@ -104,6 +105,22 @@ async def llm_turn(pipeline: AgenticSMBPipeline) -> None:
     pipeline.state['_llm_tool_calls'] = pipeline.llm_turn()
 
 
+async def _vllm_launch(venv: str, model: str, host: str, port: int,
+                       log_file: str, tp_size: int, gpu_fraction: float,
+                       tool_parser: str, extra_args: str,
+                       task_description: dict = None):
+    """Executable task: start the server detached, print its address."""
+    return vllm_service.serve_command(
+        venv=venv, model=model, host=host, port=port, log_file=log_file,
+        tp_size=tp_size, gpu_fraction=gpu_fraction, tool_parser=tool_parser,
+        extra_args=extra_args)
+
+
+async def _vllm_stop(port: int, task_description: dict = None):
+    """Executable task: stop the server on the node it was placed on."""
+    return vllm_service.stop_command(port)
+
+
 async def impress_agentic_smb() -> None:
     work_dir = _args.work_dir or os.environ.get(
         "IMPRESS_WORK_DIR", os.path.join(_HERE, "logs"))
@@ -141,6 +158,56 @@ async def impress_agentic_smb() -> None:
     )
 
     adaptive_fn = flow.function_task(backend="local")(llm_turn)
+
+    # ── Optionally host the model inside this allocation ──────────────────
+    # The server is an asyncflow task on the Dragon backend like any other, so
+    # Dragon is still reached through rhapsody. It has to detach and exit
+    # rather than run as a service task, because asyncflow's service support
+    # is inert on this backend -- see vllm_service for the detail.
+    pin_host = None
+    stop_server = None
+    if profile.kind == "dragon_vllm":
+        hosts = vllm_service.node_hostnames()
+        if len(hosts) < 2:
+            raise SystemExit(
+                f"profile {profile.name!r} hosts the model in-allocation and "
+                f"needs >= 2 nodes so the model and the pipelines do not share "
+                f"GPUs; this allocation has {len(hosts)}. "
+                f"Submit with --nodes=2.")
+        srv = dict(profile.serve or {})
+        model_host = hosts[int(srv.get("node_index", -1))]
+        pin_host = hosts[0] if model_host != hosts[0] else hosts[-1]
+        port = int(srv.get("port", 8000))
+        n_gpus = int(srv.get("gpus", 4))
+        log_file = os.path.join(work_dir, "vllm_server.log")
+        print(f"[LLM] serving {profile.model} on {model_host} "
+              f"(gpus 0-{n_gpus - 1}); pipelines pinned to {pin_host}",
+              flush=True)
+
+        launch = flow.executable_task(capture_stdio=True)(_vllm_launch)
+        out = await launch(
+            venv=srv.get("venv", os.environ.get("VLLM_VENV", "")),
+            model=profile.model, host=model_host, port=port,
+            log_file=log_file, tp_size=int(srv.get("tp_size", 1)),
+            gpu_fraction=float(srv.get("gpu_fraction", 0.90)),
+            tool_parser=srv.get("tool_parser", "hermes"),
+            extra_args=srv.get("extra_args", ""),
+            task_description=vllm_service.service_task_description(
+                model_host, list(range(n_gpus))),
+            workflow_id="vllm:launch")
+        addr = (out or "").strip().splitlines()
+        endpoint = "http://" + (addr[-1] if addr else f"{model_host}:{port}")
+        print(f"[LLM] launch task returned {endpoint}; waiting for it to load",
+              flush=True)
+        served = vllm_service.wait_healthy(
+            endpoint, timeout_s=float(srv.get("ready_timeout_s", 1800)),
+            log=lambda m: print(m, flush=True))
+        # vLLM names the model by the id it was given; use what the server
+        # reports so a mismatch cannot turn every request into a 404.
+        profile.base_url = endpoint + "/v1"
+        profile.model = served
+        stop_server = (flow.executable_task(capture_stdio=True)(_vllm_stop),
+                       port, model_host, n_gpus)
 
     gpus = _node_gpus()
 
@@ -184,6 +251,7 @@ async def impress_agentic_smb() -> None:
                 # conversation, and they must not share mutable state.
                 "max_llm_turns":             MAX_LLM_TURNS,
                 "llm_client":                build_client(profile),
+                "pin_host":                  pin_host,
             },
         )
         for i in range(1, cfg.n_pipelines + 1)
@@ -192,6 +260,20 @@ async def impress_agentic_smb() -> None:
     try:
         await manager.start(pipeline_setups=pipeline_setups)
     finally:
+        if stop_server is not None:
+            stop_fn, port, model_host, n_gpus = stop_server
+            try:
+                # Before flow.shutdown(): it tears every backend down
+                # concurrently and reaps nothing, so a server left running
+                # would hold the node until Slurm kills the job.
+                await stop_fn(
+                    port=port,
+                    task_description=vllm_service.service_task_description(
+                        model_host, list(range(n_gpus))),
+                    workflow_id="vllm:stop")
+                print("[LLM] vLLM server stopped", flush=True)
+            except Exception as exc:
+                print(f"[LLM] could not stop the vLLM server: {exc!r}")
         if manager.telemetry:
             try:
                 await manager.telemetry.stop()

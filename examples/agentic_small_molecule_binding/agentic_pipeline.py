@@ -48,6 +48,10 @@ class AgenticSMBPipeline(SmallMoleculeBindingPipeline):
         self.max_llm_turns = kwargs.pop("max_llm_turns", 200)
         self.transcript_dir = kwargs.pop("transcript_dir", None)
         self.llm_client = kwargs.pop("llm_client", None)
+        # Set only when the model is hosted inside the allocation, to keep the
+        # tool tasks off the node serving it. Must be read before super(),
+        # which registers the tasks.
+        self.pin_host = kwargs.pop("pin_host", None)
         super().__init__(**kwargs)
 
         self.messages: list[dict] = []
@@ -57,6 +61,40 @@ class AgenticSMBPipeline(SmallMoleculeBindingPipeline):
         self.llm_degraded = False
         self._transcript_path = None
         self._summarised_through = 0
+
+    # ── Task placement ─────────────────────────────────────────────────────
+
+    def _tool_task_description(self, threads: int, gpu: bool = False) -> dict:
+        """The reference's descriptor, optionally pinned to one node.
+
+        This is the only method other than run() that this class overrides, and
+        it is deliberately additive: with `pin_host` unset it returns exactly
+        what the reference returns, byte for byte, which the offline test
+        asserts. The comparability of every measurement rests on that.
+
+        The override exists because `DragonExecutionBackend` takes `num_nodes`
+        but no node offset (rhapsody/.../execution/dragon.py:68-86), so when a
+        vLLM server owns one node of the allocation, nothing otherwise stops
+        Dragon Batch from scheduling tool tasks onto it and contending for the
+        GPUs the model is using.
+        """
+        td = super()._tool_task_description(threads, gpu)
+        if not self.pin_host:
+            return td
+        template = td.get("process_template")
+        if template is None:          # concurrent backend: single node anyway
+            return td
+
+        from dragon.infrastructure.policy import Policy
+        existing = template.get("policy")
+        # Rebuild rather than mutate: keep the reference's GPU affinity exactly
+        # as it set it, and add host placement on top.
+        template["policy"] = Policy(
+            placement=Policy.Placement.HOST_NAME,
+            host_name=self.pin_host,
+            gpu_affinity=list(getattr(existing, "gpu_affinity", []) or []),
+        )
+        return td
 
     # ── Transcript ─────────────────────────────────────────────────────────
 

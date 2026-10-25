@@ -39,6 +39,50 @@ profiles:
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 4096
 
+  # Served inside the allocation itself: `vllm serve` launched as an asyncflow
+  # task on the rhapsody Dragon backend, on a node of its own. base_url is left
+  # unset deliberately -- the runner discovers it once the server is healthy,
+  # and build_client() refuses to construct a client before then.
+  #
+  # Not rhapsody's DragonVllmInferenceBackend: that one's /v1/chat/completions
+  # flattens the message list into a single string and has no tool-calling path
+  # (rhapsody/src/rhapsody/backends/ai/vllm.py:519-549), and this example runs
+  # entirely on native tool calls. vLLM's own server speaks the full protocol,
+  # so the ordinary OpenAI-compatible client is reused unchanged.
+  #
+  # Needs >= 2 nodes: the model takes one, the pipelines keep the other.
+  local-qwen:
+    kind: dragon_vllm
+    model: Qwen/Qwen2.5-7B-Instruct
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1          # last node of the allocation
+      gpus: 4
+      tp_size: 1              # 7B in bf16 fits one A40; raise with the model
+      port: 8000
+      gpu_fraction: 0.90
+      tool_parser: hermes     # the Qwen2.5 instruct family's parser
+      ready_timeout_s: 1800
+
+  # The same, with a tiny model: proves placement, transport and tool-call
+  # parsing in minutes. Useless for the science.
+  local-qwen-smoke:
+    kind: dragon_vllm
+    model: Qwen/Qwen2.5-0.5B-Instruct
+    api_key_env: null
+    max_tokens: 2048
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 1
+      tp_size: 1
+      port: 8000
+      gpu_fraction: 0.60
+      tool_parser: hermes
+      ready_timeout_s: 900
+
   # A model served on or near the cluster. Point base_url at the server; if it
   # runs inside the allocation it takes a GPU away from the tool pool, which
   # changes the comparison against the reference -- size the allocation for it.

@@ -93,10 +93,10 @@ class _RecordingFlow:
 _STAGES = ("rfd3", "mpnn", "packmin", "fastrelax", "filter_shape", "boltz")
 
 
-def _descriptors(cls, backend) -> dict[str, dict]:
+def _descriptors(cls, backend, **extra) -> dict[str, dict]:
     flow = _RecordingFlow(backend)
     cls(name="d1", flow=flow, base_path="/tmp/none",
-        scripts_path="/tmp/none", input_dir="/tmp/none", gpu_index=2)
+        scripts_path="/tmp/none", input_dir="/tmp/none", gpu_index=2, **extra)
     return {s: d for s, d in flow.descriptors.items() if s in _STAGES}
 
 
@@ -138,6 +138,42 @@ def test_descriptors() -> None:
     for stage in ("packmin", "fastrelax", "filter_shape"):
         env = (ref.get(stage) or {}).get("env", {})
         check(f"{stage} takes no GPU", "CUDA_VISIBLE_DEVICES" not in env)
+
+
+def test_pin_host() -> None:
+    print("\n[8] pin_host adds host placement and changes nothing else")
+    # Unset: the agentic descriptors must stay byte-identical to the
+    # reference's. This is the invariant every comparison rests on, so it is
+    # checked again here with the option present but off.
+    ref = _descriptors(SmallMoleculeBindingPipeline, _DragonishBackend())
+    off = _descriptors(AgenticSMBPipeline, _DragonishBackend(), pin_host=None)
+    for stage in sorted(ref):
+        check(f"pin_host unset: {stage} unchanged", ref[stage] == off[stage],
+              f"{ref.get(stage)} vs {off.get(stage)}")
+
+    try:
+        from dragon.infrastructure.policy import Policy  # noqa: F401
+    except Exception as exc:
+        check("dragon policy importable", False, repr(exc))
+        return
+    on = _descriptors(AgenticSMBPipeline, _DragonishBackend(),
+                      pin_host="gpub999")
+    for stage in sorted(ref):
+        rt = (ref[stage] or {}).get("process_template", {})
+        ot = (on[stage] or {}).get("process_template", {})
+        check(f"pin_host set: {stage} env unchanged",
+              rt.get("env") == ot.get("env"),
+              f"{rt.get('env')} vs {ot.get('env')}")
+        pol = ot.get("policy")
+        check(f"pin_host set: {stage} placed on the named host",
+              getattr(pol, "host_name", None) == "gpub999",
+              getattr(pol, "host_name", None))
+        # The GPU pin is the reference's, carried over untouched -- losing it
+        # would silently hand every tool every GPU on the node.
+        ref_gpu = list(getattr(rt.get("policy"), "gpu_affinity", []) or [])
+        own_gpu = list(getattr(pol, "gpu_affinity", []) or [])
+        check(f"pin_host set: {stage} keeps the reference GPU affinity",
+              ref_gpu == own_gpu, f"{ref_gpu} vs {own_gpu}")
 
 
 # ── 2-4. The loop, over mock tools ─────────────────────────────────────────
@@ -401,6 +437,7 @@ if __name__ == "__main__":
     test_turn_budget()
     test_no_tool_calls()
     test_compaction()
+    test_pin_host()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} check(s) failed: {FAILURES}")

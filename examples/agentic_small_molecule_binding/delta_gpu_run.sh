@@ -254,7 +254,36 @@ export IMPRESS_MAX_LLM_TURNS="${IMPRESS_MAX_LLM_TURNS:-200}"
 echo "MODEL_PROFILE:     ${IMPRESS_MODEL_PROFILE}"
 echo "MAX_LLM_TURNS:     ${IMPRESS_MAX_LLM_TURNS}"
 
-if [ "${IMPRESS_MODEL_PROFILE}" != "scripted" ]; then
+# A dragon_vllm profile has nothing to reach yet -- the server is started by
+# the runner, inside this allocation, and the runner's own wait_healthy() is
+# the gate. Probing here would always fail.
+_PROFILE_KIND=$(python3 - "${WORKDIR}/models.yaml" "${IMPRESS_MODEL_PROFILE}" <<'PYKIND' 2>/dev/null || echo unknown
+import sys, yaml
+cfg = (yaml.safe_load(open(sys.argv[1])) or {}).get("profiles", {}).get(sys.argv[2]) or {}
+print(cfg.get("kind", "openai_compat"))
+PYKIND
+)
+echo "PROFILE_KIND:      ${_PROFILE_KIND}"
+
+if [ "${_PROFILE_KIND}" = "dragon_vllm" ]; then
+    # Weights come from the shared cache; never download from a compute node
+    # with four pipelines racing. Pre-stage on a login node.
+    export HF_HOME="${HF_HOME:-${WORK_DIR}/.cache/huggingface}"
+    export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+    export VLLM_VENV="${VLLM_VENV:-${WORK_DIR}/ve/vllm_srv}"
+    echo "HF_HOME:           ${HF_HOME} (offline=${HF_HUB_OFFLINE})"
+    echo "VLLM_VENV:         ${VLLM_VENV}"
+    if [ ! -x "${VLLM_VENV}/bin/vllm" ]; then
+        echo "ERROR: no vllm in ${VLLM_VENV}. Build it first (separate venv:"
+        echo "       vLLM's torch must not be installed over ve/small_mol)."
+        exit 1
+    fi
+    if [ "${SLURM_NNODES:-1}" -lt 2 ]; then
+        echo "ERROR: ${IMPRESS_MODEL_PROFILE} hosts the model in-allocation and"
+        echo "       needs --nodes=2 so it does not share GPUs with the pipelines."
+        exit 1
+    fi
+elif [ "${IMPRESS_MODEL_PROFILE}" != "scripted" ]; then
     _probe=$(python3 - "${WORKDIR}/models.yaml" "${IMPRESS_MODEL_PROFILE}" <<'PYPROBE'
 import os, sys, urllib.request, yaml
 cfg = (yaml.safe_load(open(sys.argv[1])) or {}).get("profiles", {}).get(sys.argv[2])
