@@ -98,9 +98,19 @@ def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
 
 
 def stop_command(port: int) -> str:
-    """Shell command that stops the server. Harmless if it is already gone."""
+    """Shell command that stops the server. Harmless if it is already gone.
+
+    The `[v]` is not a typo. `pkill -f` matches the pattern against every
+    process's full command line -- including the shell that carries the
+    pattern, whose own command line contains the literal text `vllm
+    serve.*--port N`. A plain pattern therefore makes this task SIGTERM
+    itself: on job 23180011 teardown reported `RuntimeError('-15')` and the
+    runner logged a failed stop task. Bracketing the first character leaves
+    the regex matching `vllm` while the command line spells `[v]llm`, which
+    the regex does not match -- so only the server is hit.
+    """
     return (
-        "bash -c 'pkill -f \"vllm serve.*--port "
+        "bash -c 'pkill -f \"[v]llm serve.*--port "
         f"{port}\" || true; echo stopped'"
     )
 

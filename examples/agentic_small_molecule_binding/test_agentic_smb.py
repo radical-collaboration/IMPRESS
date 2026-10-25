@@ -18,6 +18,7 @@ Run it with the reference example's venv:
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -448,6 +449,16 @@ def test_service_task_signatures() -> None:
           cmd[:160])
     check("stop command targets the right port",
           "--port 1" in v.stop_command(1), v.stop_command(1))
+    # The pattern is matched against every command line, this task's shell
+    # included. An unbracketed pattern makes the stop task kill itself before
+    # pkill finishes (job 23180011: RuntimeError('-15'), failed stop task).
+    _stop = v.stop_command(8000)
+    _pat = re.search(r'pkill -f "([^"]+)"', _stop).group(1)
+    check("stop pattern does not match the command carrying it",
+          re.search(_pat, _stop) is None, f"{_pat!r} vs {_stop!r}")
+    check("stop pattern still matches a real server command line",
+          re.search(_pat, "/v/bin/vllm serve Q --host 0.0.0.0 --port 8000")
+          is not None, _pat)
     # The endpoint must come from the host/port we chose. An executable task's
     # future resolves to the PATH of its stdout file under capture_stdio, so
     # parsing the address out of the task result yields a filename (job
