@@ -268,8 +268,19 @@ echo "PROFILE_KIND:      ${_PROFILE_KIND}"
 if [ "${_PROFILE_KIND}" = "dragon_vllm" ]; then
     # Weights come from the shared cache; never download from a compute node
     # with four pipelines racing. Pre-stage on a login node.
-    export HF_HOME="${HF_HOME:-${WORK_DIR}/.cache/huggingface}"
+    # Set, not defaulted. ~/.bashrc exports HF_HOME to a path that does not
+    # exist on this system, and with HF_HUB_OFFLINE=1 an inherited wrong value
+    # means the server can never find the weights and the job burns its whole
+    # allocation waiting for a health check that will never pass. Override
+    # deliberately with IMPRESS_HF_HOME if you really mean a different cache.
+    export HF_HOME="${IMPRESS_HF_HOME:-${WORK_DIR}/.cache/huggingface}"
     export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+    if [ ! -d "${HF_HOME}/hub" ]; then
+        echo "ERROR: no HF cache at ${HF_HOME}/hub. Pre-stage the weights on a"
+        echo "       login node first; a compute node with HF_HUB_OFFLINE=1"
+        echo "       cannot fetch them."
+        exit 1
+    fi
     export VLLM_VENV="${VLLM_VENV:-${WORK_DIR}/ve/vllm_srv}"
     echo "HF_HOME:           ${HF_HOME} (offline=${HF_HUB_OFFLINE})"
     echo "VLLM_VENV:         ${VLLM_VENV}"
