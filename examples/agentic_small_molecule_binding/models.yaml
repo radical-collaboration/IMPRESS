@@ -39,6 +39,34 @@ profiles:
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 4096
 
+  # Reflection AI's Beam, through its OpenAI-compatible endpoint. Beta access.
+  #
+  # The model id is VERIFIED against GET /openai/v1/models, which returns
+  # "Beam-501B-A23B". developers.reflection.ai/models documents it as
+  # "Beam-1.0-501B-A23B"; that id is not what the endpoint serves. Check the
+  # live list again before blaming a 404 on the key.
+  #
+  # max_tokens is 32768 rather than the 4096 every other profile uses, and that
+  # is load-bearing. Beam's reasoning is always on -- no effort level disables
+  # it -- and reasoning tokens are charged against the same budget as the
+  # answer. At 4096 the model can spend the whole budget thinking and return a
+  # turn with NO tool call, which run() counts as "no tool call"; twice in a row
+  # stops the pipeline. That failure is indistinguishable in the log from the
+  # 7B's lack of stamina (23201195) while having nothing to do with it.
+  #
+  # Beam is itself a 501B open-weight MoE, so it could in principle be served
+  # in-allocation -- but not on a 192 GB node. It runs as an API arm, and any
+  # cost comparison against a dragon_vllm arm must say so: this bills tokens on
+  # one node, those bill two node-hours with the model's node charged in.
+  beam:
+    kind: openai_compat
+    base_url: https://api.reflection.ai/openai/v1
+    model: Beam-501B-A23B
+    api_key_env: REFLECTION_API_KEY
+    max_tokens: 32768
+    extra_body:
+      reasoning_effort: medium   # low | medium | high | xhigh | max
+
   # Served inside the allocation itself: `vllm serve` launched as an asyncflow
   # task on the rhapsody Dragon backend, on a node of its own. base_url is left
   # unset deliberately -- the runner discovers it once the server is healthy,
@@ -92,6 +120,45 @@ profiles:
       gpu_fraction: 0.93
       tool_parser: hermes   # the whole Qwen2.5 instruct family
       ready_timeout_s: 2400 # 10x the 7B's weights; 7B was ready in 160 s
+
+  # Qwen3.5-122B-A10B, FP8, across the model node's four A40s. The open-weight
+  # arm against Beam. 10B active params, so decode stays fast despite 122B
+  # total; vendor-reported BFCL-V4 72.2 / TAU2-Bench 79.5.
+  #
+  # vLLM 0.32.0 already registers Qwen3_5MoeForCausalLM and the qwen3_coder
+  # parser the model card calls for, so this needs NO vllm upgrade -- worth
+  # keeping that way, since ve/vllm_srv is the environment four jobs have
+  # validated.
+  #
+  # FP8 ON AMPERE IS THE RISK. Fp8Config.get_min_capability() returns 75 and the
+  # A40s are SM 8.6, so the weight-only Marlin path accepts them. But this
+  # checkpoint is *block* FP8 (block size 128) and block-scaled fused-MoE
+  # kernels generally want SM 90. Whether vLLM falls back cleanly cannot be
+  # settled by reading the code -- smoke it for 30 min before any long run. If
+  # it fails: an AWQ/GPTQ INT4 quant (Marlin INT4 is solid on Ampere), then
+  # Qwen3-32B bf16.
+  #
+  # Weights live under /work/hdd/bdyk (IMPRESS_HF_HOME), not nvme: 122 GB does
+  # not fit nvme/bdyk's ~104 GB of headroom, and not bblj, which is another
+  # project's allocation.
+  local-qwen35:
+    kind: dragon_vllm
+    model: Qwen/Qwen3.5-122B-A10B-FP8
+    api_key_env: null
+    max_tokens: 8192
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 4              # ~122 GB of FP8 weights needs all four
+      port: 8000
+      gpu_fraction: 0.90      # leaves ~51 GB of KV; the prompt plateaus near 10k
+      tool_parser: qwen3_coder
+      ready_timeout_s: 2400   # hdd-backed weights load slower than the 72B's 360 s
+      # --reasoning-parser keeps the think block out of content, where it would
+      # otherwise reach the tool extractor. --max-model-len against the native
+      # 262k, which would reserve most of the node as KV for no benefit.
+      extra_args: "--reasoning-parser qwen3 --max-model-len 32768"
 
   # The same, with a tiny model: proves placement, transport and tool-call
   # parsing in minutes. Useless for the science.

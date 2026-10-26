@@ -474,6 +474,51 @@ def test_service_task_signatures() -> None:
           "export PATH=/v/bin:$PATH" in cmd, cmd[:200])
     check("serve command sets CUDA_HOME", "CUDA_HOME=" in cmd, cmd[:200])
 
+    # The comparison arms are profile-only: no code changes, so the profiles
+    # themselves are what the tests have to hold.
+    from llm import load_profiles
+    profiles = load_profiles(os.path.join(os.path.dirname(__file__), "models.yaml"))
+
+    beam = profiles.get("beam")
+    check("beam profile exists and is openai_compat",
+          beam is not None and beam.kind == "openai_compat", beam)
+    # Verified against GET /openai/v1/models. The developer docs say
+    # "Beam-1.0-501B-A23B"; the endpoint serves this.
+    check("beam uses the id the endpoint actually serves",
+          beam is not None and beam.model == "Beam-501B-A23B",
+          getattr(beam, "model", None))
+    # Beam always reasons and charges reasoning against max_tokens, so the
+    # 4096 the other profiles use can be spent entirely on thinking, returning
+    # a turn with no tool call -- which stops the pipeline after two in a row.
+    check("beam has headroom for reasoning plus a tool call",
+          beam is not None and beam.max_tokens >= 16384,
+          getattr(beam, "max_tokens", None))
+    check("beam requests a reasoning effort",
+          beam is not None and "reasoning_effort" in (beam.extra_body or {}),
+          getattr(beam, "extra_body", None))
+
+    q35 = profiles.get("local-qwen35")
+    check("local-qwen35 profile is served in-allocation",
+          q35 is not None and q35.kind == "dragon_vllm", q35)
+    q35_cmd = v.serve_command(
+        venv=q35.serve["venv"], model=q35.model, host="h", port=8000,
+        log_file="/l/x.log", tp_size=int(q35.serve["tp_size"]),
+        gpu_fraction=float(q35.serve["gpu_fraction"]),
+        tool_parser=q35.serve["tool_parser"],
+        extra_args=q35.serve.get("extra_args", ""))
+    # qwen3_coder is what the model card calls for, and it is registered in the
+    # installed vLLM; hermes would silently return the tool syntax as text.
+    check("local-qwen35 serves with the qwen3_coder parser",
+          "--tool-call-parser qwen3_coder" in q35_cmd, q35_cmd[:240])
+    # Without this the think block lands in content and reaches the extractor.
+    check("local-qwen35 passes a reasoning parser through extra_args",
+          "--reasoning-parser" in q35_cmd, q35_cmd[:240])
+    check("local-qwen35 bounds the context it reserves KV for",
+          "--max-model-len" in q35_cmd, q35_cmd[:240])
+    # 122 GB of FP8 weights need every GPU on the node.
+    check("local-qwen35 uses all four GPUs",
+          "--tensor-parallel-size 4" in q35_cmd, q35_cmd[:240])
+
 
 def test_schemas() -> None:
     print("\n[6] schemas and handlers agree")
