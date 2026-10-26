@@ -219,6 +219,30 @@ mkdir -p logs
 # inherited 73 stale dirs from 22466127 in p1+p2 alone).
 export IMPRESS_WORK_DIR="${IMPRESS_WORK_DIR:-${WORKDIR}/logs/${SLURM_JOB_ID:-manual}}"
 mkdir -p "${IMPRESS_WORK_DIR}"
+# The work dir MUST live under WORK_DIR, because scripts/rfd3.sh binds only
+# that one path into the apptainer container:
+#   apptainer exec --nv --writable-tmpfs ${WORK_DIR:+--bind "${WORK_DIR}:${WORK_DIR}"}
+# A work dir outside it is unbound, so rfd3 writes into the container's
+# --writable-tmpfs overlay instead. Those writes SUCCEED and the files vanish
+# when the container exits: rfd3 logs "Outputs ... written to <path>", the host
+# sees an empty out/, analysis reports pass=false with no metrics, and the
+# model correctly concludes its backbones all failed. Job 23206285 burned 15
+# minutes and three pipelines that way after IMPRESS_WORK_DIR was pointed at a
+# different allocation to dodge a quota. Fail here instead -- the silent
+# version costs an allocation and looks like a model failure.
+case "$(readlink -m "${IMPRESS_WORK_DIR}")/" in
+    "$(readlink -m "${WORK_DIR}")"/*) ;;
+    *)
+        echo "ERROR: IMPRESS_WORK_DIR is not under WORK_DIR."
+        echo "       IMPRESS_WORK_DIR: ${IMPRESS_WORK_DIR}"
+        echo "       WORK_DIR:         ${WORK_DIR}"
+        echo "       scripts/rfd3.sh binds only WORK_DIR into the container, so"
+        echo "       rfd3 output would be silently discarded to its tmpfs overlay."
+        echo "       Either keep the work dir under WORK_DIR, or set WORK_DIR to"
+        echo "       an allocation that contains both."
+        exit 1
+        ;;
+esac
 echo "IMPRESS_WORK_DIR:  ${IMPRESS_WORK_DIR}"
 
 # asyncflow writes its session dir (runinfo, captured task stdout/stderr) under
