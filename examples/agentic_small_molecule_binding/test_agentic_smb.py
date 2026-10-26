@@ -549,8 +549,9 @@ def test_service_task_signatures() -> None:
         usage = None
 
     comp = _completion_from_response(_Resp())
+    _want = "I should start with a backbone."
     check("reasoning_content survives into the assistant message",
-          comp.raw_message.get("reasoning_content") == "I should start with a backbone.",
+          comp.raw_message.get("reasoning_content") == _want,
           comp.raw_message)
     check("the tool call survives alongside it",
           [c.name for c in comp.tool_calls] == ["design_backbone"], comp.tool_calls)
