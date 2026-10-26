@@ -51,7 +51,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "type": ["string", "null"],
                         "description": (
                             "Path to a folded complex from a previous "
-                            "fold_complex result, or null for unguided."
+                            "fold_complex result, or null for unguided. "
+                            "Send JSON null, not the string \"None\"."
                         ),
                     }
                 },
@@ -208,9 +209,25 @@ def _result(pipeline, stage: str, **extra) -> dict:
     return payload
 
 
+# A model that means "no value" sometimes sends the word instead of the JSON
+# null the schema asks for: "None", "null", "" -- and every one of those is a
+# truthy Python string, so a bare `if guide_model:` accepts it and the path
+# check then fails with `no such file: None`.  That cost 10 of 255 turns across
+# all four pipelines in job 23229812, i.e. it is systematic, not one pipeline's
+# quirk.  Spend a string comparison here rather than a GPU task on a typo.
+_ABSENT = {"", "none", "null", "nil", "nan", "undefined", "no", "n/a"}
+
+
+def _absent_if_sentinel(value):
+    if isinstance(value, str) and value.strip().lower() in _ABSENT:
+        return None
+    return value
+
+
 # ── Handlers ───────────────────────────────────────────────────────────────
 
 async def design_backbone(pipeline, guide_model: str | None = None, **_) -> dict:
+    guide_model = _absent_if_sentinel(guide_model)
     if guide_model:
         if not os.path.isfile(guide_model):
             return _error("backbone", f"no such file: {guide_model}")

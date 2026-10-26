@@ -574,6 +574,27 @@ def test_service_task_signatures() -> None:
           "reasoning_content" not in plain.raw_message, plain.raw_message)
 
 
+def test_absent_sentinels() -> None:
+    print("\n[10] a sentinel string is read as an absent argument")
+    from tools import TOOL_SCHEMAS, _absent_if_sentinel
+
+    # Job 23229812 sent guide_model="None" on 10 of 255 turns, across all four
+    # pipelines, and every one came back `no such file: None`.
+    for word in ("None", "none", "null", "NULL", " none ", "", "N/A"):
+        check(f"{word!r} reads as absent", _absent_if_sentinel(word) is None,
+              _absent_if_sentinel(word))
+    for keep in ("/path/to/model.pdb", "none_of_your_business.pdb"):
+        check(f"{keep!r} is kept", _absent_if_sentinel(keep) == keep,
+              _absent_if_sentinel(keep))
+    check("non-strings pass through", _absent_if_sentinel(None) is None)
+
+    schema = next(t for t in TOOL_SCHEMAS
+                  if t["function"]["name"] == "design_backbone")
+    desc = schema["function"]["parameters"]["properties"]["guide_model"][
+        "description"]
+    check("schema tells the model to send JSON null", "null" in desc, desc)
+
+
 def test_schemas() -> None:
     print("\n[6] schemas and handlers agree")
     from tools import HANDLERS
@@ -591,6 +612,7 @@ if __name__ == "__main__":
     test_compaction()
     test_pin_host()
     test_service_task_signatures()
+    test_absent_sentinels()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} check(s) failed: {FAILURES}")
