@@ -182,6 +182,23 @@ def _completion_from_response(resp) -> Completion:
         calls.append(ToolCall(id=tc.id, name=tc.function.name, arguments=args))
 
     raw: dict[str, Any] = {"role": "assistant", "content": msg.content or ""}
+    # Carry the model's own reasoning back into the assistant message.
+    #
+    # A reasoning model may REQUIRE this on the next request. Reflection's Beam
+    # rejects any follow-up whose earlier assistant messages lack it:
+    #   400 missing_required_parameter: Missing required parameter:
+    #   'messages[2].reasoning_content'. This model needs the reasoning of every
+    #   earlier assistant message.
+    # Turn one succeeds and turn two does not, so a single-turn check of the
+    # endpoint passes and the run still degrades to the scripted route on its
+    # second decision (job 23219379, all four pipelines, 144 degraded turns).
+    # Providers that do not return the field simply do not get it back.
+    reasoning = getattr(msg, "reasoning_content", None)
+    if reasoning is None:
+        extra = getattr(msg, "model_extra", None) or {}
+        reasoning = extra.get("reasoning_content")
+    if reasoning is not None:
+        raw["reasoning_content"] = reasoning
     if msg.tool_calls:
         raw["tool_calls"] = [
             {

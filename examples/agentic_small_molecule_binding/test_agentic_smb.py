@@ -519,6 +519,59 @@ def test_service_task_signatures() -> None:
     check("local-qwen35 uses all four GPUs",
           "--tensor-parallel-size 4" in q35_cmd, q35_cmd[:240])
 
+    # A reasoning model's own reasoning has to survive into the message we send
+    # back. Beam rejects a follow-up whose earlier assistant messages lack
+    # reasoning_content, and because turn ONE still succeeds, a single-turn
+    # endpoint check passes while the run degrades to the scripted route on its
+    # second decision -- which is exactly what happened on job 23219379.
+    from llm import _completion_from_response
+
+    class _Fn:
+        name = "design_backbone"
+        arguments = "{}"
+
+    class _TC:
+        id = "call-1"
+        type = "function"
+        function = _Fn()
+
+    class _Msg:
+        content = ""
+        tool_calls = [_TC()]
+        reasoning_content = "I should start with a backbone."
+        model_extra = {"reasoning_content": "I should start with a backbone."}
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = None
+
+    comp = _completion_from_response(_Resp())
+    check("reasoning_content survives into the assistant message",
+          comp.raw_message.get("reasoning_content") == "I should start with a backbone.",
+          comp.raw_message)
+    check("the tool call survives alongside it",
+          [c.name for c in comp.tool_calls] == ["design_backbone"], comp.tool_calls)
+
+    class _PlainMsg:
+        content = "hi"
+        tool_calls = None
+        model_extra = {}
+
+    class _PlainChoice:
+        message = _PlainMsg()
+
+    class _PlainResp:
+        choices = [_PlainChoice()]
+        usage = None
+
+    plain = _completion_from_response(_PlainResp())
+    # Providers that never return the field must not have it invented for them.
+    check("a non-reasoning reply gains no reasoning_content key",
+          "reasoning_content" not in plain.raw_message, plain.raw_message)
+
 
 def test_schemas() -> None:
     print("\n[6] schemas and handlers agree")
