@@ -34,7 +34,7 @@ const HEAD = `${K.branch} @ ${K.head}`;
 // the only transcribed figures in this deck, and every slide showing one names the source.
 if (!R.live) throw new Error(
   "run.json has no `live` section - re-run run_model.py from a checkout that still has "
-  + "examples/agentic_small_molecule_binding, or drop slides 21 and 22");
+  + "examples/agentic_small_molecule_binding, or drop slides 23 and 24");
 const L = R.live.code, LR = R.live.runs, P4 = LR.paired_4h;
 
 // Timings derived from the mined timeline, so that no slide types a latency literal: the
@@ -323,7 +323,7 @@ decides when the campaign is over, and the reasoner finds out by being raised in
 // ============================================================ 5. the six surfaces
 {
   const s = slide();
-  title(s, "Six surfaces, six audiences", "the map for the next twenty minutes");
+  title(s, "Six surfaces, six audiences", "the map for the rest of the deck");
 
   tbl(s, ["Surface", "Who writes against it", "What they write", "Size", "Where"],
     [["1 · CLI", "an operator", `3 subcommands, ${S.n_cli_models} control models`,
@@ -338,8 +338,8 @@ decides when the campaign is over, and the reasoner finds out by being raised in
       `${S.n_plane_ops} ops · ${S.n_routes} routes`, "control/plane.py:23"],
      ["6 · ToolSpec + TaskAgent", "a tool author", "a spec file, and four phases of adapter",
       `${S.n_tool_spec_fields} fields · 4 phases`, "tools/spec.py:75"]],
-    M, 1.5, [2.5, 2.9, 4.0, 1.8, 2.13],
-    { mono: [3, 4], fs: 11, mfs: 9, rowH: 0.52 });
+    M, 1.5, [2.4, 2.75, 3.75, 1.6, 1.83],   // sums to W - 2M; 13.33 ran off the slide
+    { mono: [3, 4], fs: 11, mfs: 8.5, rowH: 0.52 });
 
   card(s, M, 5.35, 6.1, 1.35, "What is shared, and is the point",
     ["All six reach one executor, one design tree, one append-only provenance log.",
@@ -348,7 +348,7 @@ decides when the campaign is over, and the reasoner finds out by being raised in
   card(s, M + 6.33, 5.35, 6.1, 1.35, "What is enforced, not merely intended",
     [`${S.n_layers} layers in an allow-list walked by \`ast\`: \`policy\` may import only `
      + `${S.policy_imports.join(", ")}, and \`core\` imports nothing internal.`,
-     "A new cross-layer import fails the suite by default — slide 25."],
+     "A new cross-layer import fails the suite by default — slide 27."],
     { fill: C.panel, hc: C.ink, fs: 11 });
 
   s.addNotes(`
@@ -373,7 +373,188 @@ Act one is surfaces one, two, three and six. Act two is four. Act three is five.
   footer(s, `mined from the declarations themselves: run_model.py::surfaces() · ${HEAD}`);
 }
 
-// ============================================================ 6. ACT 1 divider
+// ============================================================ 6. the caller's side
+// The two mediation slides. Everything in the deck so far is a part; these two are the
+// whole shape: what a caller states, and what the system turns it into. Six is the inbound
+// half, seven the outbound half, and they are deliberately adjacent.
+{
+  const s = slide();
+  title(s, "One side: what the caller states, and what comes back",
+    "framing · the system as a mediator");
+
+  const LX = M, LW = 4.9, CX = 5.55, CW = 2.25, RX = 8.0, RW = W - M - 8.0;
+
+  const inbound = [
+    ["What “better” means", C.accent,
+     `\`goal\` and \`objectives\` — name, direction, min/max. The only statement of success in the system, and what the front is ranked against`],
+    ["What may run", C.d,
+     `the toolkit inventory, discovered at runtime from a directory: ${S.n_tools} tools in ${K.n_toolkits} toolkits here. \`stages\` names which of them this campaign may use`],
+    ["What it may spend, and where", C.b,
+     `\`budget\`, \`site\` caps, \`concurrency\`, the \`replicas\` CAP, \`backend\` + config, three timeouts — of ${S.n_campaign_spec_fields} \`CampaignSpec\` fields`],
+    ["Who decides", C.a,
+     `\`--model\` picks one of ${S.n_cli_models}, fixed at launch (ADR 0005) — or your own \`ControlPolicy\`, which is ${S.policy_ops.length} methods`],
+  ];
+  inbound.forEach(([h, col, b], i) => {
+    const y = 1.5 + i * 1.11;
+    s.addShape(pres.shapes.RECTANGLE, { x: LX, y, w: LW, h: 1.0,
+      fill: { color: C.white }, line: { color: C.rule } });
+    s.addShape(pres.shapes.RECTANGLE, { x: LX, y, w: 0.06, h: 1.0,
+      fill: { color: col }, line: { color: col } });
+    text(s, h, LX + 0.18, y + 0.07, LW - 0.3, 0.26, { fontSize: 12, bold: true, color: C.ink });
+    text(s, b, LX + 0.18, y + 0.35, LW - 0.3, 0.6, { fontSize: 10, color: C.text });
+    line(s, LX + LW + 0.02, y + 0.5, CX - 0.02, y + 0.5, { color: col, w: 1.25 });
+  });
+
+  box(s, CX, 1.5, CW, 4.44, {
+    title: "IMPRESS-A",
+    sub: "\nadmits\ncomposes\nrefuses\ndispatches\nrecords\n\nand decides\nwhen to stop",
+    fs: 15, sfs: 11, fill: C.ink, tc: C.white, sc: "A9BCC8", line: C.ink });
+
+  card(s, RX, 1.5, RW, 2.1, "What it tells you while it runs",
+    [`\`observe()\` returns the SAME object the policy's \`decide\` is handed — one truth, not a dashboard view of it.`,
+     `An event stream, cursor-paged or tailed; provenance (${Q.provenance_records} records across ${Object.keys(Q.provenance_kinds).length} kinds in the run behind this deck); a durable ledger; \`artifacts(selector)\`; a heartbeat.`],
+    { fill: C.bTint, hc: C.b, fs: 10.5 });
+  card(s, RX, 3.84, RW, 2.1, "What you can say back, mid-flight",
+    [`\`steer\`, \`pause\`, \`resume\`, \`stop\`, \`backtrack\`, \`request_human\`, \`ingest_measurement\` — ${S.n_plane_ops} control-plane operations in all.`,
+     "A measurement SUPERSEDES a prediction and never deletes it, which is why the front is not monotonic."],
+    { fill: C.aTint, hc: C.a, fs: 10.5 });
+  line(s, CX + CW + 0.02, 2.4, RX - 0.02, 2.4, { color: C.b, w: 1.5 });
+  line(s, RX - 0.02, 4.7, CX + CW + 0.02, 4.7, { color: C.a, w: 1.5 });
+
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 6.1, w: W - 2 * M, h: 0.82,
+    fill: { color: C.cTint }, line: { color: C.c, width: 1.5 } });
+  text(s, [
+    { text: "The asymmetry is the whole design:  ", options: { bold: true, color: C.c } },
+    { text: "the caller never names a task, a node, or a tool parameter — and the engine "
+      + "never invents an objective or a budget. Intent and constraints go in; tasks, and "
+      + "evidence about them, come out. Everything on the next slide is what the system does "
+      + "with that gap." },
+  ], M + 0.16, 6.22, W - 2 * M - 0.32, 0.62, { fontSize: 12, color: C.text });
+
+  s.addNotes(`
+Two slides to put both ends in one picture, because so far I have shown you parts.
+
+Everything a caller states is on the left, and it is four things. What better means — the
+objectives, which are the only definition of success anywhere in the system. What may run —
+an inventory discovered from a directory, not a hard-coded pipeline. What it may spend, and
+on what machine. And who decides: one of ${S.n_cli_models} shipped control models, or ${S.policy_ops.length} methods of your own.
+
+On the right is what comes back while it is running, and the first line is the one I would
+defend hardest: observe returns the same object the policy's decide is handed. There is one
+account of the campaign, not a dashboard view and a real view.
+
+And you can talk back mid-flight — steer it, pause it, hand it a measurement from an assay
+that finished yesterday. That measurement supersedes the prediction and never deletes it,
+which is exactly why the front can move backwards.
+
+The line at the bottom is the contract. The caller never names a task or a tool parameter.
+The engine never invents an objective or a budget.
+  `);
+  footer(s, `every count on this slide is mined · ${HEAD}`);
+}
+
+// ============================================================ 7. the realized side
+{
+  const s = slide();
+  title(s, "The other side: how that becomes processes on nodes",
+    "framing · the system as a mediator");
+
+  const stages = [
+    ["INTENT", C.a, `${S.intent_fields.length} fields, abstract`,
+     "campaign params merge BENEATH the policy's; `replicas` is a cap, not a default",
+     "executor.py:419"],
+    ["COMPOSE", C.c, "stages → typed nodes",
+     "ports are `ArtifactType`, so a mismatch is a compose-time error; P6 tools are inlined, never scheduled",
+     "composer.py:36"],
+    ["ADMIT", C.c, `${S.n_gates_implemented} gates, then trust`,
+     "five gates, the interlock's cost cap, and a forced dry run for a shape nobody has reviewed",
+     "validate.py:30"],
+    ["PARAMETERIZE", C.d, "per node, in order",
+     "spec defaults ← campaign params ← policy params, and `frozen_parameters` beat all three",
+     "resources.py:14"],
+    ["DEPLOY", C.b, "one factory, every node",
+     "`_run.__name__ = node_id`, because asyncflow names a task from `fn.__name__`",
+     "dispatch.py:144"],
+    ["ENGINE", C.b, "asyncflow + a backend",
+     "`WorkflowEngine` with a work_dir; the backend resolves BY NAME from site config",
+     "backend.py:97"],
+    ["TASKS", C.accent, "processes, on nodes",
+     `${Q.n_results} nodes over ${Q.lineages_absorbed.length} lineages in the mock run; on Delta, six stages pinned to GPUs`,
+     "agent.py:120"],
+  ];
+  const bw = (W - 2 * M - 6 * 0.12) / 7;
+  stages.forEach(([name, col, sub, body, anchor], i) => {
+    const x = M + i * (bw + 0.12);
+    s.addShape(pres.shapes.RECTANGLE, { x, y: 1.5, w: bw, h: 2.05,
+      fill: { color: C.panel }, line: { color: col, width: 1.25 } });
+    s.addShape(pres.shapes.RECTANGLE, { x, y: 1.5, w: bw, h: 0.3,
+      fill: { color: col }, line: { color: col } });
+    text(s, name, x, 1.5, bw, 0.3, { fontSize: 9.5, bold: true, color: C.white,
+      align: "center", valign: "middle", charSpacing: 0.5 });
+    text(s, sub, x + 0.07, 1.84, bw - 0.14, 0.24,
+      { fontSize: 8.5, italic: true, color: C.muted, align: "center" });
+    text(s, body, x + 0.07, 2.12, bw - 0.14, 1.1, { fontSize: 8.5, color: C.text });
+    text(s, anchor, x + 0.07, 3.26, bw - 0.14, 0.22,
+      { fontFace: MF, fontSize: 7, color: C.muted, align: "center" });
+    if (i < 6) line(s, x + bw + 0.005, 2.5, x + bw + 0.115, 2.5, { color: C.muted, w: 1 });
+  });
+
+  box(s, M, 3.72, W - 2 * M, 0.72, {
+    title: "←  and back up the same path: a typed TaskResult (ArtifactRefs, metrics, a QCReport, cost) → to_outcome() → executor._absorb, the single await-free writer → tree, front, provenance, ledger",
+    sub: "dispatch.py:91 · the gates run on the way OUT of a node, so a tool that exits 0 and lies is still failed here",
+    fs: 11, sfs: 9.5, fill: C.cTint, line: C.c, tc: C.c });
+
+  card(s, M, 4.62, 6.1, 1.5, "The harness nobody sees",
+    ["Resource shapes are NOT portable, so translating them is ours: RADICAL takes "
+     + "`ranks`/`gpus_per_rank`, Dragon takes process templates, the concurrent backend takes "
+     + "nothing at all. One `ResourceShape` in the spec, three descriptions out.",
+     "No backend class is named outside `exec/backend.py` — site config picks one by name."],
+    { fill: C.panel, hc: C.ink, fs: 10 });
+  card(s, M + 6.33, 4.62, 6.1, 1.5, "Two asyncflow idioms, not interchangeable",
+    ["An UNAWAITED future passed as an argument IS a DAG edge — `dispatch.py:182`, walking "
+     + "`topo_order()`. That is how a stage list becomes a dependency graph with no scheduler "
+     + "of ours.",
+     "`asyncio.gather(..., return_exceptions=True)` awaits INDEPENDENT work — replica "
+     + "fan-out — and one bad task must not cancel its siblings."],
+    { fill: C.bTint, hc: C.b, fs: 10 });
+
+  text(s, [
+    { text: "What this picture does not show:  ", options: { bold: true, color: C.fail } },
+    { text: "every realized task in the run behind this deck is a mock, and on the real "
+      + "six-stage chain this path has only ever run one lineage wide." },
+  ], M, 6.3, W - 2 * M, 0.5, { fontSize: 11.5 });
+
+  s.addNotes(`
+And this is the other side: what the system does with the gap between what you asked for
+and processes running on nodes.
+
+Seven stages. The intent arrives abstract — a goal, stages, parameters — and the first
+thing that happens is the campaign's own parameters are merged BENEATH the policy's, so a
+policy never has to learn a tool's parameter names. Replicas is a cap, not a default.
+
+Compose turns the stage list into typed nodes. Admit is the five gates, the cost cap and a
+dry run. Parameterize is where the layering earns itself: spec defaults, then campaign
+params, then policy params, and frozen parameters beat all three.
+
+Deploy is one generic factory for every node in every graph, and the detail I like is that
+asyncflow reads a task's name from fn dunder name, so the factory sets it to the node id.
+
+Then the engine, with the backend resolved by name from site config, and then real
+processes.
+
+Two things in the cards. Resource shapes are not portable — RADICAL wants ranks, Dragon
+wants process templates — so that translation is ours to own. And the two asyncflow
+idioms: an unawaited future passed as an argument is a DAG edge; gather is for independent
+work. Those are not interchangeable, and mixing them up is how you get a graph that runs in
+the wrong order.
+
+The return path is the band in the middle, and the thing to notice is that the gates run on
+the way OUT of a node.
+  `);
+  footer(s, "the engine side of six surfaces — the sibling deck argues this seam, this one cites it");
+}
+
+// ============================================================ 8. ACT 1 divider
 {
   const s = slide();
   divider(s, {
@@ -405,7 +586,7 @@ of the interface and not about anyone's experience.
   `);
 }
 
-// ============================================================ 7. surfaces 1 and 2
+// ============================================================ 9. surfaces 1 and 2
 {
   const s = slide();
   title(s, "Surfaces 1 and 2: the operator's and the scientist's", "act 1 · functionality");
@@ -431,7 +612,7 @@ of the interface and not about anyone's experience.
   tbl(s, ["impress-a", "what it does"],
     [["run <spec>", `--model ${S.cli_models.join(" | ")}; the model is fixed at launch`],
      ["tools", `lists the ${S.n_tools} registered tools with pattern and gate count`],
-     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 23"]],
+     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 25"]],
     M + 8.1, 1.5, [1.75, 2.48], { mono: [0], fs: 10.5, mfs: 9.5, rowH: 0.62, hfill: C.accent });
 
   card(s, M + 8.1, 3.75, 4.23, 1.35, "One objective, two sources",
@@ -466,7 +647,7 @@ money.
   footer(s, "the objectives on this slide are the four the Delta campaign declares; the mock campaign declares its own");
 }
 
-// ============================================================ 8. surface 3
+// ============================================================ 10. surface 3
 {
   const s = slide();
   title(s, "Surface 3: a reasoner is three methods and four answers", "act 1 · functionality");
@@ -547,7 +728,7 @@ corrections guard by default, which is why the run in this deck reported its pol
   footer(s, "ADR 0005: the control model is fixed at launch · ADR 0007: one observation, two consumers");
 }
 
-// ============================================================ 9. intent, not a DAG
+// ============================================================ 11. intent, not a DAG
 {
   const s = slide();
   title(s, "The seam that keeps policies swappable: intent, not a graph", "act 1 · functionality");
@@ -582,7 +763,7 @@ corrections guard by default, which is why the run in this deck reported its pol
 
   card(s, M, 4.65, 6.1, 2.0, "What this buys",
     ["A policy that cannot name a tool parameter cannot quietly become a pipeline.",
-     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 25.",
+     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 27.",
      "Swapping A for D changes the reasoner and nothing below it."],
     { fill: C.panel, hc: C.ink, fs: 11 });
   card(s, M + 6.33, 4.65, 6.1, 2.0, "What it costs",
@@ -615,7 +796,7 @@ and every graph in this deck's run was the same four-tool chain at two different
   footer(s, "runtime/executor.py:419 — the merge, and the comment that explains why it lives there");
 }
 
-// ============================================================ 10. surface 6, the spec
+// ============================================================ 12. surface 6, the spec
 {
   const s = slide();
   title(s, "Surface 6: a tool is a file a scientist can review", "act 1 · functionality");
@@ -696,7 +877,7 @@ metric that no integrity gate promises to report.
   footer(s, `${S.n_tools} tools load clean at ${HEAD}; registry errors: ${S.registry_errors.length}`);
 }
 
-// ============================================================ 11. the task agent
+// ============================================================ 13. the task agent
 {
   const s = slide();
   title(s, "Four phases, and the one you may not override", "act 1 · functionality");
@@ -712,7 +893,10 @@ metric that no integrity gate promises to report.
     box(s, x, 1.5, 2.0, 1.15, { title: t, sub, fs: 11.5, sfs: 9, fill: C.white, line: col, tc: col });
     if (i < 3) line(s, x + 2.02, 2.07, x + 2.18, 2.07, { color: C.muted, w: 1.25 });
   });
-  box(s, M + 8.95, 1.5, 3.88, 1.15, { title: "execute()", sub: "NOT overridable:\npattern dispatch belongs\nto the execution layer",
+  // The phases are orchestrated by __call__ (agent.py:120). The module docstring and
+  // CLAUDE.md both still call this `execute()`, which is a method the file does not have -
+  // the behaviour is right, the name is not, so the slide uses the one you can grep.
+  box(s, M + 8.95, 1.5, 3.88, 1.15, { title: "__call__()", sub: "the four phases, in order:\nNOT overridable, and pattern\ndispatch belongs to exec/",
     fs: 11.5, sfs: 9, fill: C.failTint, line: C.fail, tc: C.fail });
 
   code(s, [
@@ -757,7 +941,9 @@ And post_process extracts the metrics and enforces the gates. That docstring say
 skippable" and it means it: there is no path from a tool's output into campaign state that
 does not go through the spec's gates.
 
-The box on the right in red is execute, and it is deliberately not overridable. Pattern
+The box on the right in red is __call__, which runs those four in order and is deliberately
+not overridable — and note the name: the module docstring still says execute, and
+the file has no such method. Pattern
 dispatch belongs to the execution layer. An adapter that scheduled its own work would
 bypass the rule that P6 is inlined and P4 gets a durable ledger entry, which is exactly
 the kind of thing that works fine until it doesn't.
@@ -771,7 +957,7 @@ rankable, whatever its scores say.
   footer(s, "gates are registered by name with a decorator: tools/gates.py — adding one is a function and a spec entry");
 }
 
-// ============================================================ 12. gates and refusal
+// ============================================================ 14. gates and refusal
 {
   const s = slide();
   title(s, "Five gates, a dry run, and a refusal from the real run", "act 1 · functionality");
@@ -854,7 +1040,7 @@ mechanism that backlog A10 says will bite on the real chain. More on that in act
   footer(s, `mined: run.json · mock.refusals[0] · ${Q.n_composed} graphs composed, ${Q.n_refused} refused, ${Q.n_admitted} admitted`);
 }
 
-// ============================================================ 13. ACT 2 divider
+// ============================================================ 15. ACT 2 divider
 {
   const s = slide();
   divider(s, {
@@ -889,7 +1075,7 @@ timed is the engine — compose, validate, dispatch, absorb — and never the sc
   `);
 }
 
-// ============================================================ 14. surface 4, the inversion
+// ============================================================ 16. surface 4, the inversion
 {
   const s = slide();
   title(s, "Surface 4: the reasoner calls the campaign", "act 2 · performance");
@@ -962,7 +1148,7 @@ have rotted on the first commit.
   footer(s, "there is no Await or Cancel decision: waiting is a call, not a request to the loop");
 }
 
-// ============================================================ 15. the measured run
+// ============================================================ 17. the measured run
 {
   const s = slide();
   title(s, "One campaign, timed by its own provenance", "act 2 · performance");
@@ -1052,7 +1238,7 @@ throughput result and it is not a scaling result, and I have neither.
   footer(s, `mined: run.json · mock.timeline · ${HEAD} · one laptop, mock stages, no allocation`);
 }
 
-// ============================================================ 16. measured and not measured
+// ============================================================ 18. measured and not measured
 {
   const s = slide();
   title(s, "What I measured, and what I therefore do not claim", "act 2 · performance");
@@ -1127,7 +1313,7 @@ for, and it is the next slide.
   footer(s, "the 31% acceptance figure is from the project's Delta run archive (backlog A1), not from this checkout");
 }
 
-// ============================================================ 17. the interlock
+// ============================================================ 19. the interlock
 {
   const s = slide();
   title(s, "Where the API refuses breadth — and a seam in it", "act 2 · performance",
@@ -1198,7 +1384,7 @@ quietly.
   footer(s, `mined: run.json · mock.widths_per_signature · trust: ${Q.trust_seen} seen, ${Q.trust_clean} clean, ${Q.trust_promoted} promoted`);
 }
 
-// ============================================================ 18. ACT 3 divider
+// ============================================================ 20. ACT 3 divider
 {
   const s = slide();
   divider(s, {
@@ -1239,7 +1425,7 @@ the log.
   `);
 }
 
-// ============================================================ 19. a campaign, from the user's chair
+// ============================================================ 21. a campaign, from the user's chair
 // The first of four user-directed slides: what the thing is like to run, rather than what
 // it is made of. No protocol, no types, one command. Everything on it is mined from the
 // campaign this deck ran, so the narrative cannot drift from the evidence.
@@ -1317,7 +1503,7 @@ the checkout was dirty when it started.
   footer(s, `mined from the campaign this deck ran · ${HEAD}`);
 }
 
-// ============================================================ 20. when it refuses you
+// ============================================================ 22. when it refuses you
 {
   const s = slide();
   title(s, "When it says no, it says what to change", "act 3 · usability");
@@ -1385,7 +1571,7 @@ hardware. It warns now. A warning is not a gate.
   footer(s, "the dangerous refusal is the one phrased as a smaller plan");
 }
 
-// ============================================================ 21. live next door
+// ============================================================ 23. live next door
 {
   const s = slide();
   title(s, "Next door, a model drove the real toolkit for four hours",
@@ -1450,7 +1636,7 @@ And the thing to hold on to: none of this ran through IMPRESS-A.
   footer(s, `TRANSCRIBED · ${LR.source} · the tool list is mined, from examples/agentic_small_molecule_binding/tools.py:35`);
 }
 
-// ============================================================ 22. what that says about these surfaces
+// ============================================================ 24. what that says about these surfaces
 {
   const s = slide();
   title(s, "What those four hours say about these surfaces", "act 3 · usability");
@@ -1505,7 +1691,7 @@ IMPRESS-A.
   footer(s, `the live figures are TRANSCRIBED · ${LR.source}`);
 }
 
-// ============================================================ 23. as an application
+// ============================================================ 25. as an application
 {
   const s = slide();
   title(s, "As an application: one command, one honest gate", "act 3 · usability");
@@ -1575,7 +1761,7 @@ whether the checkout was dirty.
   footer(s, "the output above is the shape of real preflight output, with paths replaced by placeholders — see CODE_FOR_DECK.md");
 }
 
-// ============================================================ 24. surface 5, the control plane
+// ============================================================ 26. surface 5, the control plane
 {
   const s = slide();
   title(s, "Surface 5: one protocol, two transports", "act 3 · usability");
@@ -1641,7 +1827,7 @@ it, and it is the first thing that has to change when something does.
   footer(s, "control/plane.py:23 is the protocol · control/http.py:183 is the whole route table · control/session.py:48 is RemoteSession");
 }
 
-// ============================================================ 25. the layering contract
+// ============================================================ 27. the layering contract
 {
   const s = slide();
   title(s, "Why the surfaces stay separate: an allow-list in a test",
@@ -1719,7 +1905,7 @@ invisible to it.
   footer(s, `${S.n_layers} layers, ${K.tests_collected} tests, ${K.test_files} test files · the table mirrors docs/reference/architecture.md`);
 }
 
-// ============================================================ 26. status by dimension
+// ============================================================ 28. status by dimension
 {
   const s = slide();
   title(s, "Status, by dimension", "where this actually is");
@@ -1796,7 +1982,7 @@ this deck.
   footer(s, "if you cut one slide from this deck, do not make it this one");
 }
 
-// ============================================================ 27. asks
+// ============================================================ 29. asks
 {
   const s = slide();
   s.background = { color: C.ink };

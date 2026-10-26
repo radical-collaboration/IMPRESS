@@ -3,19 +3,19 @@
   "agent/src/impress_a/cli/__init__.py",
   31,
   "POLICIES = {",
-  "S5, S27-6 - the control models, and the module-scope import that pulls langgraph"
+  "S5, S29-6 - the control models, and the module-scope import that pulls langgraph"
  ],
  [
   "agent/src/impress_a/cli/__init__.py",
   103,
   "pol = cls(timeout_s=5.0, on_timeout=\"fallback\"",
-  "S18, S26, S27-5 - model C falls back to D"
+  "S20, S28, S29-5 - model C falls back to D"
  ],
  [
   "agent/src/impress_a/cli/__init__.py",
   252,
   "def preflight",
-  "S7, S23 - the login-node check"
+  "S9, S25 - the login-node check"
  ],
  [
   "agent/src/impress_a/runtime/executor.py",
@@ -27,61 +27,61 @@
   "agent/src/impress_a/runtime/executor.py",
   145,
   "class CampaignExecutor",
-  "S14 - the executor lane"
+  "S16 - the executor lane"
  ],
  [
   "agent/src/impress_a/runtime/executor.py",
   419,
   "def _apply_campaign_defaults",
-  "S9 - campaign params merged beneath the policy's"
+  "S11 - campaign params merged beneath the policy's"
  ],
  [
   "agent/src/impress_a/policy/base.py",
   19,
   "class ControlPolicy(Protocol)",
-  "S1, S4, S5, S8 - surface 3"
+  "S1, S4, S5, S10 - surface 3"
  ],
  [
   "agent/src/impress_a/policy/base.py",
   31,
   "async def decide",
-  "S8 - the one required method"
+  "S10 - the one required method"
  ],
  [
   "agent/src/impress_a/policy/base.py",
   54,
   "async def on_rejected",
-  "S27-3 - the default is Stop"
+  "S29-3 - the default is Stop"
  ],
  [
   "agent/src/impress_a/policy/driver.py",
   35,
   "async def conduct",
-  "S4, S14 - decide-style policies driven as self-driving ones"
+  "S4, S16 - decide-style policies driven as self-driving ones"
  ],
  [
   "agent/src/impress_a/core/decision.py",
   21,
   "class ExperimentIntent",
-  "S9 - abstract intent, not a DAG"
+  "S11 - abstract intent, not a DAG"
  ],
  [
   "agent/src/impress_a/core/decision.py",
   56,
   "Decision = Union[ComposeAndRun, Backtrack, RequestHuman, Stop]",
-  "S8 - four answers"
+  "S10 - four answers"
  ],
  [
   "agent/src/impress_a/core/decision.py",
   69,
   "transient: bool = False",
-  "S12 - the field that stops a policy degrading itself"
+  "S14 - the field that stops a policy degrading itself"
  ],
  [
   "agent/src/impress_a/core/session.py",
   56,
   "class CampaignSession(Protocol)",
-  "S1, S5, S14 - surface 4"
+  "S1, S5, S16 - surface 4"
  ],
  [
   "agent/src/impress_a/core/types.py",
@@ -99,67 +99,67 @@
   "agent/src/impress_a/compose/validate.py",
   30,
   "def validate",
-  "S12 - the five gates, in order"
+  "S14 - the five gates, in order"
  ],
  [
   "agent/src/impress_a/compose/graph.py",
   51,
   "def pattern_signature",
-  "S17, S27-1 - shape only, but one entry per node"
+  "S19, S29-1 - shape only, but one entry per node"
  ],
  [
   "agent/src/impress_a/compose/interlock.py",
   112,
   "\"\"\"Returns True if this run promoted the pattern.",
-  "S27-2 - promotion counts integrity failures only"
+  "S29-2 - promotion counts integrity failures only"
  ],
  [
   "agent/src/impress_a/tools/spec.py",
   75,
   "class ToolSpec",
-  "S1, S5, S10 - surface 6"
+  "S1, S5, S12 - surface 6"
  ],
  [
   "agent/src/impress_a/tools/spec.py",
   100,
   "def _defaults_within_range",
-  "S10 - loading is validating"
+  "S12 - loading is validating"
  ],
  [
   "agent/src/impress_a/tools/agent.py",
   48,
   "class TaskAgent",
-  "S11 - the four phases"
+  "S13 - the four phases"
  ],
  [
   "agent/src/impress_a/tools/agent.py",
   110,
   "async def post_process",
-  "S11 - gates enforced, never skippable"
+  "S13 - gates enforced, never skippable"
  ],
  [
   "agent/src/impress_a/control/plane.py",
   23,
   "class CampaignControlPlane(Protocol)",
-  "S1, S5, S24 - surface 5"
+  "S1, S5, S26 - surface 5"
  ],
  [
   "agent/src/impress_a/control/http.py",
   26,
   "one event stream, on loopback, for a single trusted client. It is NOT a public-facing",
-  "S24, S27-4 - no auth, no TLS, by design"
+  "S26, S29-4 - no auth, no TLS, by design"
  ],
  [
   "agent/src/impress_a/control/http.py",
   183,
   "async def _route",
-  "S24 - the whole route table"
+  "S26 - the whole route table"
  ],
  [
   "agent/src/impress_a/control/session.py",
   48,
   "class RemoteSession",
-  "S24 - the reasoner's protocol over a socket"
+  "S26 - the reasoner's protocol over a socket"
  ],
  [
   "agent/src/impress_a/manager.py",
@@ -171,30 +171,72 @@
   "agent/tests/test_layering.py",
   43,
   "ALLOWED = {",
-  "S5, S25 - the import contract, as a table in a test"
+  "S5, S27 - the import contract, as a table in a test"
  ],
  [
   "agent/campaigns/delta-small-molecule.yaml",
   30,
   "stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]",
-  "S7 - surface 2, a real campaign file"
+  "S9 - surface 2, a real campaign file"
  ],
  [
   "agent/toolkits/rfd3/tools/rfd3_design/spec.yaml",
   1,
   "id: rfd3_design",
-  "S10 - a tool as a declaration"
+  "S12 - a tool as a declaration"
  ],
  [
   "agent/src/impress_a/runtime/executor.py",
   391,
   "def _objectives_without_a_producer",
-  "S20 - the refusal that is phrased as a smaller plan, and warns rather than gates"
+  "S22 - the refusal that is phrased as a smaller plan, and warns rather than gates"
  ],
  [
   "examples/agentic_small_molecule_binding/tools.py",
   35,
   "TOOL_SCHEMAS: list[dict[str, Any]] = [",
-  "S21 - the tools the model next door is given, mined for the live slides"
+  "S23 - the tools the model next door is given, mined for the live slides"
+ ],
+ [
+  "agent/src/impress_a/compose/composer.py",
+  36,
+  "def compose",
+  "S7 - the stage list becomes typed nodes"
+ ],
+ [
+  "agent/src/impress_a/exec/resources.py",
+  14,
+  "def to_backend_description",
+  "S7 - one ResourceShape, three per-backend descriptions"
+ ],
+ [
+  "agent/src/impress_a/exec/dispatch.py",
+  91,
+  "def to_outcome",
+  "S7 - the return path, typed"
+ ],
+ [
+  "agent/src/impress_a/exec/dispatch.py",
+  144,
+  "def _make_task",
+  "S7 - one generic factory for every node in every graph"
+ ],
+ [
+  "agent/src/impress_a/exec/dispatch.py",
+  182,
+  "for tid in g.topo_order():",
+  "S7 - unawaited futures as arguments ARE the DAG edges"
+ ],
+ [
+  "agent/src/impress_a/exec/backend.py",
+  97,
+  "async def make_engine",
+  "S7 - the WorkflowEngine, and the backend resolved by name"
+ ],
+ [
+  "agent/src/impress_a/tools/agent.py",
+  120,
+  "async def __call__",
+  "S7, S13 - the four phases in order; there is no execute()"
  ]
 ]

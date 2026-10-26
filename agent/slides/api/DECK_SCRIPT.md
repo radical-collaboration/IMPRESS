@@ -13,39 +13,40 @@ realistic rate for technical material delivered with pauses.
 
 | Slide | Spoken | | Slide | Spoken |
 |---|---|---|---|---|
-| 1. title | 1.1 min | | 15. the measured run | 1.3 |
-| 2. what it is / is not | 1.5 | | 16. measured and not measured | 1.5 |
-| 3. the framing slide | 1.2 | | 17. the interlock | 1.6 |
-| 4. the loop and who drives it | 1.5 | | 18. ACT 3 divider | 1.1 |
-| 5. the six surfaces | 1.3 | | 19. a campaign, from the user's chair | 1.1 |
-| 6. ACT 1 divider | 0.7 | | 20. when it refuses you | 1.2 |
-| 7. surfaces 1 and 2 | 1.4 | | 21. live next door | 1.2 |
-| 8. surface 3 | 1.5 | | 22. what that says about these surfaces | 1.3 |
-| 9. intent, not a DAG | 1.5 | | 23. as an application | 1.4 |
-| 10. surface 6, the spec | 1.4 | | 24. surface 5, the control plane | 1.6 |
-| 11. the task agent | 1.5 | | 25. the layering contract | 1.4 |
-| 12. gates and refusal | 1.5 | | 26. status by dimension | 1.1 |
-| 13. ACT 2 divider | 0.8 | | 27. asks | 1.5 |
-| 14. surface 4, the inversion | 1.4 | | | |
+| 1. title | 1.1 min | | 16. surface 4, the inversion | 1.4 |
+| 2. what it is / is not | 1.5 | | 17. the measured run | 1.3 |
+| 3. the framing slide | 1.2 | | 18. measured and not measured | 1.5 |
+| 4. the loop and who drives it | 1.5 | | 19. the interlock | 1.6 |
+| 5. the six surfaces | 1.3 | | 20. ACT 3 divider | 1.1 |
+| 6. the caller's side | 1.3 | | 21. a campaign, from the user's chair | 1.1 |
+| 7. the realized side | 1.6 | | 22. when it refuses you | 1.2 |
+| 8. ACT 1 divider | 0.7 | | 23. live next door | 1.2 |
+| 9. surfaces 1 and 2 | 1.4 | | 24. what that says about these surfaces | 1.3 |
+| 10. surface 3 | 1.5 | | 25. as an application | 1.4 |
+| 11. intent, not a DAG | 1.5 | | 26. surface 5, the control plane | 1.6 |
+| 12. surface 6, the spec | 1.4 | | 27. the layering contract | 1.4 |
+| 13. the task agent | 1.6 | | 28. status by dimension | 1.1 |
+| 14. gates and refusal | 1.5 | | 29. asks | 1.5 |
+| 15. ACT 2 divider | 0.8 | | | |
 
-**Main path: 5532 words = 35.7 minutes of speech.** Backups add 1.3 min if used.
+**Main path: 5999 words = 38.7 minutes of speech.** Backups add 1.3 min if used.
 
 | Act | The question it answers | Slides | What it concedes |
 |---|---|---|---|
-| **Functionality** | what can you write against this that you cannot write against a pipeline? | 6-12 | every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy |
-| **Performance** | what does the loop cost, and where does it serialise? | 13-17 | no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science |
-| **Usability** | application, platform, or component? | 18-25 | nothing outside this package has ever driven a campaign; the live four-hour run on 21-22 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing |
+| **Functionality** | what can you write against this that you cannot write against a pipeline? | 8-14 | every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy |
+| **Performance** | what does the loop cost, and where does it serialise? | 15-19 | no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science |
+| **Usability** | application, platform, or component? | 20-27 | nothing outside this package has ever driven a campaign; the live four-hour run on 23-24 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing |
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **35.7** | a 40-minute slot, or a working session where questions land inline |
-| **B · default** | drop 4, 9, 11, 17, 25 | **28.3** | a 35-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5 still carries the map |
-| **C · hard twenty** | drop 4, 5, 7, 9, 10, 11, 14, 16, 20, 23, 24, 25 | **18.6** | a hard 20 that leaves room for discussion: the framing, the three dividers, one surface per act, the measured run, the interlock finding, the live evidence from next door, status and asks |
-| **D · for users** | drop 4, 7, 8, 9, 11, 14, 16, 17, 23, 24, 25 | **19.4** | a room that will RUN this rather than write against it: the framing, what a tool and a refusal are, the measured run, then the four user-directed slides (19-22) and the asks. No protocols, no layering, no type lattice |
+| **A · full** | every main slide | **38.7** | a 45-minute slot, or a working session where questions land inline |
+| **B · default** | drop 4, 11, 13, 19, 27 | **31.1** | a 40-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5-7 still carry the map |
+| **C · hard twenty** | drop 4, 5, 7, 9, 11, 12, 13, 16, 18, 22, 25, 26, 27 | **19.8** | a hard 20 that leaves room for discussion: the framing with the caller's side of the mediation (6), the three dividers, one surface per act, the measured run, the interlock finding, the live evidence from next door, status and asks |
+| **D · for users** | drop 4, 5, 7, 9, 10, 11, 13, 16, 18, 19, 25, 26, 27 | **19.4** | a room that will RUN this rather than write against it: 6 carries the map for that room, so the six-surface table goes; then what a tool and a refusal are, the measured run, the four user-directed slides (21-24) and the asks. No dispatcher, no protocols, no layering, no type lattice |
 
-**Protect 2, 3, 12, 15, 16, 17, 21, 22, 26 and 27.** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 12, 15 and 17 are the only slides carrying evidence from a run this deck performed; 16 is what keeps the performance act honest; 21 and 22 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 26 is status and 27 is the asks. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.
+**Protect 2, 3, 6, 14, 17, 18, 19, 23, 24, 28 and 29.** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 6 is the shape of the whole system in one slide, and cutting it leaves 7 orphaned; 14, 17 and 19 are the only slides carrying evidence from a run this deck performed; 18 is what keeps the performance act honest; 23 and 24 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 28 is status and 29 is the asks. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.
 
-**Say these out loud even if nothing prompts them:** that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here; that the four-hour comparison on slide 21 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that its reference arm came in about 2x worse than its own record, so the 3.3x is an upper bound and nobody should quote it; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science.
+**Say these out loud even if nothing prompts them:** that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here; that the four-hour comparison on slide 23 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that its reference arm came in about 2x worse than its own record, so the 3.3x is an upper bound and nobody should quote it; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science.
 
 ---
 
@@ -150,9 +151,57 @@ else. Core imports nothing internal at all.
 
 Act one is surfaces one, two, three and six. Act two is four. Act three is five.
 
+## 6. the caller's side — *1.3 min*
+
+Two slides to put both ends in one picture, because so far I have shown you parts.
+
+Everything a caller states is on the left, and it is four things. What better means — the
+objectives, which are the only definition of success anywhere in the system. What may run —
+an inventory discovered from a directory, not a hard-coded pipeline. What it may spend, and
+on what machine. And who decides: one of ${S.n_cli_models} shipped control models, or ${S.policy_ops.length} methods of your own.
+
+On the right is what comes back while it is running, and the first line is the one I would
+defend hardest: observe returns the same object the policy's decide is handed. There is one
+account of the campaign, not a dashboard view and a real view.
+
+And you can talk back mid-flight — steer it, pause it, hand it a measurement from an assay
+that finished yesterday. That measurement supersedes the prediction and never deletes it,
+which is exactly why the front can move backwards.
+
+The line at the bottom is the contract. The caller never names a task or a tool parameter.
+The engine never invents an objective or a budget.
+
+## 7. the realized side — *1.6 min*
+
+And this is the other side: what the system does with the gap between what you asked for
+and processes running on nodes.
+
+Seven stages. The intent arrives abstract — a goal, stages, parameters — and the first
+thing that happens is the campaign's own parameters are merged BENEATH the policy's, so a
+policy never has to learn a tool's parameter names. Replicas is a cap, not a default.
+
+Compose turns the stage list into typed nodes. Admit is the five gates, the cost cap and a
+dry run. Parameterize is where the layering earns itself: spec defaults, then campaign
+params, then policy params, and frozen parameters beat all three.
+
+Deploy is one generic factory for every node in every graph, and the detail I like is that
+asyncflow reads a task's name from fn dunder name, so the factory sets it to the node id.
+
+Then the engine, with the backend resolved by name from site config, and then real
+processes.
+
+Two things in the cards. Resource shapes are not portable — RADICAL wants ranks, Dragon
+wants process templates — so that translation is ours to own. And the two asyncflow
+idioms: an unawaited future passed as an argument is a DAG edge; gather is for independent
+work. Those are not interchangeable, and mixing them up is how you get a graph that runs in
+the wrong order.
+
+The return path is the band in the middle, and the thing to notice is that the gates run on
+the way OUT of a node.
+
 # Act 1 — Functionality
 
-## 6. ACT 1 divider — *0.7 min*
+## 8. ACT 1 divider — *0.7 min*
 
 Act one: functionality. Not features — tasks. What can you write against this that you
 could not write against a pipeline?
@@ -165,7 +214,7 @@ ${K.n_real_toolkits} real stages of a single chain, plus the mocks. Nobody outsi
 written either a toolkit or a policy, so "it is easy to add one" is a claim about the shape
 of the interface and not about anyone's experience.
 
-## 7. surfaces 1 and 2 — *1.4 min*
+## 9. surfaces 1 and 2 — *1.4 min*
 
 Surfaces one and two are the ones a human touches, and the interesting thing about them is
 what they refuse to contain.
@@ -189,7 +238,7 @@ On the right: three subcommands. And the one worth noticing is preflight, which 
 come back to in act three, because it is the surface that respects that an allocation costs
 money.
 
-## 8. surface 3 — *1.5 min*
+## 10. surface 3 — *1.5 min*
 
 Surface three. If you want to write a reasoner, this is the whole contract: three methods
 and four possible answers.
@@ -214,7 +263,7 @@ and implement one method. They also compose — the CLI wraps whatever you chose
 corrections guard by default, which is why the run in this deck reported its policy as
 "rulecorrectionspolicy of threshold".
 
-## 9. intent, not a DAG — *1.5 min*
+## 11. intent, not a DAG — *1.5 min*
 
 This is the seam I would defend hardest, so it gets its own slide.
 
@@ -236,7 +285,7 @@ The cost, on the right in red: a policy can only ask for things the composer can
 of an ordered stage list. So "free graph composition" is free within one topology family,
 and every graph in this deck's run was the same four-tool chain at two different widths.
 
-## 10. surface 6, the spec — *1.4 min*
+## 12. surface 6, the spec — *1.4 min*
 
 Surface six, and this is the one I would most like someone in this room to use in anger.
 
@@ -259,7 +308,7 @@ never be the only thing that notices a value is missing. That is how a fabricate
 passes for a measurement. So the spec will refuse to load if you put a threshold on a
 metric that no integrity gate promises to report.
 
-## 11. the task agent — *1.5 min*
+## 13. the task agent — *1.6 min*
 
 The other half of surface six is the adapter, and it has four phases.
 
@@ -272,7 +321,9 @@ And post_process extracts the metrics and enforces the gates. That docstring say
 skippable" and it means it: there is no path from a tool's output into campaign state that
 does not go through the spec's gates.
 
-The box on the right in red is execute, and it is deliberately not overridable. Pattern
+The box on the right in red is __call__, which runs those four in order and is deliberately
+not overridable — and note the name: the module docstring still says execute, and
+the file has no such method. Pattern
 dispatch belongs to the execution layer. An adapter that scheduled its own work would
 bypass the rule that P6 is inlined and P4 gets a durable ledger entry, which is exactly
 the kind of thing that works fine until it doesn't.
@@ -283,7 +334,7 @@ relax that diverged — all of those exit zero. ${K.gate_fixtures} fixtures ship
 ${K.gate_fixtures_bad} of them are recorded failures kept as tests. A node that fails a gate is never
 rankable, whatever its scores say.
 
-## 12. gates and refusal — *1.5 min*
+## 14. gates and refusal — *1.5 min*
 
 Composition is free; this is what makes it affordable.
 
@@ -309,7 +360,7 @@ mechanism that backlog A10 says will bite on the real chain. More on that in act
 
 # Act 2 — Performance
 
-## 13. ACT 2 divider — *0.8 min*
+## 15. ACT 2 divider — *0.8 min*
 
 Act two: performance. And I want to be careful here, because systems vocabulary makes
 everything sound measured.
@@ -324,7 +375,7 @@ The caveat, up front: there is no concurrent run in this deck and no serial base
 none of those numbers divides into a speedup. And every stage was a mock, so what I have
 timed is the engine — compose, validate, dispatch, absorb — and never the science.
 
-## 14. surface 4, the inversion — *1.4 min*
+## 16. surface 4, the inversion — *1.4 min*
 
 Surface four, and this is the one the architecture turns on.
 
@@ -346,7 +397,7 @@ batch allocation possible at all. And the whole thing is typed in core, because 
 import core and nothing else, so if the session had been typed anywhere else the seam would
 have rotted on the first commit.
 
-## 15. the measured run — *1.3 min*
+## 17. the measured run — *1.3 min*
 
 This is the one real measurement in the deck, and it is small on purpose: one variable,
 which cycle.
@@ -369,7 +420,7 @@ And the denominators, on the right: one host, one experiment in flight, two line
 mock tasks each. I varied nothing. This is a latency figure for the engine. It is not a
 throughput result and it is not a scaling result, and I have neither.
 
-## 16. measured and not measured — *1.5 min*
+## 18. measured and not measured — *1.5 min*
 
 This is the slide that makes the act honest, and it is two lists.
 
@@ -392,7 +443,7 @@ Which means the interesting figure is not tasks per hour. It is how few GPU-hour
 to learn that a workflow shape is not worth running again. That is what the interlock is
 for, and it is the next slide.
 
-## 17. the interlock — *1.6 min*
+## 19. the interlock — *1.6 min*
 
 This is my favourite mechanism in the project and it has a seam in it, so you get both.
 
@@ -418,7 +469,7 @@ quietly.
 
 # Act 3 — Usability
 
-## 18. ACT 3 divider — *1.1 min*
+## 20. ACT 3 divider — *1.1 min*
 
 Act three: usability. Not the user interface — the use cases. Is this an application, a
 platform, or a component?
@@ -439,7 +490,7 @@ it does not block and does not fail. It falls back to model D after five seconds
 headless mode can silently become the explicit-policy mode, and the only sign is a line in
 the log.
 
-## 19. a campaign, from the user's chair — *1.1 min*
+## 21. a campaign, from the user's chair — *1.1 min*
 
 This is the whole thing from where a user sits, and it is deliberately the least technical
 slide in the deck.
@@ -459,7 +510,7 @@ because it reached the front size it was told to reach, and it says so in those 
 And what lands on disk is one directory you can hand to somebody else — including whether
 the checkout was dirty when it started.
 
-## 20. when it refuses you — *1.2 min*
+## 22. when it refuses you — *1.2 min*
 
 A system that refuses you is only pleasant to use if the refusal tells you what to change,
 and there are three places this one can refuse.
@@ -479,7 +530,7 @@ inflated cost estimates make a graph too expensive, the policy can quietly hand 
 smaller graph that no longer produces the objective you launched for. That ran on real
 hardware. It warns now. A warning is not a gate.
 
-## 21. live next door — *1.2 min*
+## 23. live next door — *1.2 min*
 
 This is the one slide in the deck with figures I did not mine from this checkout, and I
 want to be exact about where it came from and what it is.
@@ -500,7 +551,7 @@ forty-nine percent pass rate on the same relax tool — is unexplained.
 
 And the thing to hold on to: none of this ran through IMPRESS-A.
 
-## 22. what that says about these surfaces — *1.3 min*
+## 24. what that says about these surfaces — *1.3 min*
 
 So what does a four-hour run of somebody else's code tell you about these six surfaces?
 
@@ -523,7 +574,7 @@ model C's endpoint could be — if model C stopped silently falling back.
 And then the red line, which I would rather say than have asked: none of this ran through
 IMPRESS-A.
 
-## 23. as an application — *1.4 min*
+## 25. as an application — *1.4 min*
 
 As an application, the thing I would point at is not the run command — it is preflight.
 
@@ -547,7 +598,7 @@ eight times slower, and shows up inside an allocation as an unexplained task tim
 And every job writes one directory you can hand to someone else — including the git sha and
 whether the checkout was dirty.
 
-## 24. surface 5, the control plane — *1.6 min*
+## 26. surface 5, the control plane — *1.6 min*
 
 Surface five is the one an external caller sees, and it is the one I would most like
 someone to attack.
@@ -572,7 +623,7 @@ And the honest box at the bottom right: this is not a public-facing server. No a
 The module's own docstring says bind it to loopback. That is fine today because nothing uses
 it, and it is the first thing that has to change when something does.
 
-## 25. the layering contract — *1.4 min*
+## 27. the layering contract — *1.4 min*
 
 Last content slide, and it is the one that makes everything I have claimed checkable.
 
@@ -594,7 +645,7 @@ cross-layer import fails by default: the contract cannot rot by addition.
 One honest blind spot, which the test's own docstring names: a dynamic importlib call is
 invisible to it.
 
-## 26. status by dimension — *1.1 min*
+## 28. status by dimension — *1.1 min*
 
 Status, three columns, and the format is the argument: three things that run and three that
 do not, per dimension, deliberately the same length.
@@ -617,7 +668,7 @@ there is no serve command.
 The red column is not a to-do list. It is the list of things you should not believe from
 this deck.
 
-## 27. asks — *1.5 min*
+## 29. asks — *1.5 min*
 
 I would rather end on the questions than on a summary, and they are grouped by what each one
 costs. The left column costs a wrong answer or real time. The right column costs whoever
