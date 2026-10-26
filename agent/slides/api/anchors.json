@@ -1,33 +1,200 @@
 [
- ["src/impress_a/cli/__init__.py", 31, "POLICIES = {", "S5, S23-6 - the control models, and the module-scope import that pulls langgraph"],
- ["src/impress_a/cli/__init__.py", 103, "pol = cls(timeout_s=5.0, on_timeout=\"fallback\"", "S18, S22, S23-5 - model C falls back to D"],
- ["src/impress_a/cli/__init__.py", 252, "def preflight", "S7, S19 - the login-node check"],
- ["src/impress_a/runtime/executor.py", 58, "class CampaignSpec", "S1, S5 - surface 2, the campaign spec"],
- ["src/impress_a/runtime/executor.py", 145, "class CampaignExecutor", "S14 - the executor lane"],
- ["src/impress_a/runtime/executor.py", 419, "def _apply_campaign_defaults", "S9 - campaign params merged beneath the policy's"],
- ["src/impress_a/policy/base.py", 19, "class ControlPolicy(Protocol)", "S1, S4, S5, S8 - surface 3"],
- ["src/impress_a/policy/base.py", 31, "async def decide", "S8 - the one required method"],
- ["src/impress_a/policy/base.py", 54, "async def on_rejected", "S23-3 - the default is Stop"],
- ["src/impress_a/policy/driver.py", 35, "async def conduct", "S4, S14 - decide-style policies driven as self-driving ones"],
- ["src/impress_a/core/decision.py", 21, "class ExperimentIntent", "S9 - abstract intent, not a DAG"],
- ["src/impress_a/core/decision.py", 56, "Decision = Union[ComposeAndRun, Backtrack, RequestHuman, Stop]", "S8 - four answers"],
- ["src/impress_a/core/decision.py", 69, "transient: bool = False", "S12 - the field that stops a policy degrading itself"],
- ["src/impress_a/core/session.py", 56, "class CampaignSession(Protocol)", "S1, S5, S14 - surface 4"],
- ["src/impress_a/core/types.py", 12, "class Pattern", "B1 - the compute patterns"],
- ["src/impress_a/core/types.py", 35, "class ArtifactType", "B2 - the type lattice"],
- ["src/impress_a/compose/validate.py", 30, "def validate", "S12 - the five gates, in order"],
- ["src/impress_a/compose/graph.py", 51, "def pattern_signature", "S17, S23-1 - shape only, but one entry per node"],
- ["src/impress_a/compose/interlock.py", 112, "\"\"\"Returns True if this run promoted the pattern.", "S23-2 - promotion counts integrity failures only"],
- ["src/impress_a/tools/spec.py", 75, "class ToolSpec", "S1, S5, S10 - surface 6"],
- ["src/impress_a/tools/spec.py", 100, "def _defaults_within_range", "S10 - loading is validating"],
- ["src/impress_a/tools/agent.py", 48, "class TaskAgent", "S11 - the four phases"],
- ["src/impress_a/tools/agent.py", 110, "async def post_process", "S11 - gates enforced, never skippable"],
- ["src/impress_a/control/plane.py", 23, "class CampaignControlPlane(Protocol)", "S1, S5, S20 - surface 5"],
- ["src/impress_a/control/http.py", 26, "one event stream, on loopback, for a single trusted client. It is NOT a public-facing", "S20, S23-4 - no auth, no TLS, by design"],
- ["src/impress_a/control/http.py", 183, "async def _route", "S20 - the whole route table"],
- ["src/impress_a/control/session.py", 48, "class RemoteSession", "S20 - the reasoner's protocol over a socket"],
- ["src/impress_a/manager.py", 82, "async def run", "S4 - whichever coroutine finishes first ends the campaign"],
- ["tests/test_layering.py", 43, "ALLOWED = {", "S5, S21 - the import contract, as a table in a test"],
- ["campaigns/delta-small-molecule.yaml", 30, "stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]", "S7 - surface 2, a real campaign file"],
- ["toolkits/rfd3/tools/rfd3_design/spec.yaml", 1, "id: rfd3_design", "S10 - a tool as a declaration"]
+ [
+  "agent/src/impress_a/cli/__init__.py",
+  31,
+  "POLICIES = {",
+  "S5, S27-6 - the control models, and the module-scope import that pulls langgraph"
+ ],
+ [
+  "agent/src/impress_a/cli/__init__.py",
+  103,
+  "pol = cls(timeout_s=5.0, on_timeout=\"fallback\"",
+  "S18, S26, S27-5 - model C falls back to D"
+ ],
+ [
+  "agent/src/impress_a/cli/__init__.py",
+  252,
+  "def preflight",
+  "S7, S23 - the login-node check"
+ ],
+ [
+  "agent/src/impress_a/runtime/executor.py",
+  58,
+  "class CampaignSpec",
+  "S1, S5 - surface 2, the campaign spec"
+ ],
+ [
+  "agent/src/impress_a/runtime/executor.py",
+  145,
+  "class CampaignExecutor",
+  "S14 - the executor lane"
+ ],
+ [
+  "agent/src/impress_a/runtime/executor.py",
+  419,
+  "def _apply_campaign_defaults",
+  "S9 - campaign params merged beneath the policy's"
+ ],
+ [
+  "agent/src/impress_a/policy/base.py",
+  19,
+  "class ControlPolicy(Protocol)",
+  "S1, S4, S5, S8 - surface 3"
+ ],
+ [
+  "agent/src/impress_a/policy/base.py",
+  31,
+  "async def decide",
+  "S8 - the one required method"
+ ],
+ [
+  "agent/src/impress_a/policy/base.py",
+  54,
+  "async def on_rejected",
+  "S27-3 - the default is Stop"
+ ],
+ [
+  "agent/src/impress_a/policy/driver.py",
+  35,
+  "async def conduct",
+  "S4, S14 - decide-style policies driven as self-driving ones"
+ ],
+ [
+  "agent/src/impress_a/core/decision.py",
+  21,
+  "class ExperimentIntent",
+  "S9 - abstract intent, not a DAG"
+ ],
+ [
+  "agent/src/impress_a/core/decision.py",
+  56,
+  "Decision = Union[ComposeAndRun, Backtrack, RequestHuman, Stop]",
+  "S8 - four answers"
+ ],
+ [
+  "agent/src/impress_a/core/decision.py",
+  69,
+  "transient: bool = False",
+  "S12 - the field that stops a policy degrading itself"
+ ],
+ [
+  "agent/src/impress_a/core/session.py",
+  56,
+  "class CampaignSession(Protocol)",
+  "S1, S5, S14 - surface 4"
+ ],
+ [
+  "agent/src/impress_a/core/types.py",
+  12,
+  "class Pattern",
+  "B1 - the compute patterns"
+ ],
+ [
+  "agent/src/impress_a/core/types.py",
+  35,
+  "class ArtifactType",
+  "B2 - the type lattice"
+ ],
+ [
+  "agent/src/impress_a/compose/validate.py",
+  30,
+  "def validate",
+  "S12 - the five gates, in order"
+ ],
+ [
+  "agent/src/impress_a/compose/graph.py",
+  51,
+  "def pattern_signature",
+  "S17, S27-1 - shape only, but one entry per node"
+ ],
+ [
+  "agent/src/impress_a/compose/interlock.py",
+  112,
+  "\"\"\"Returns True if this run promoted the pattern.",
+  "S27-2 - promotion counts integrity failures only"
+ ],
+ [
+  "agent/src/impress_a/tools/spec.py",
+  75,
+  "class ToolSpec",
+  "S1, S5, S10 - surface 6"
+ ],
+ [
+  "agent/src/impress_a/tools/spec.py",
+  100,
+  "def _defaults_within_range",
+  "S10 - loading is validating"
+ ],
+ [
+  "agent/src/impress_a/tools/agent.py",
+  48,
+  "class TaskAgent",
+  "S11 - the four phases"
+ ],
+ [
+  "agent/src/impress_a/tools/agent.py",
+  110,
+  "async def post_process",
+  "S11 - gates enforced, never skippable"
+ ],
+ [
+  "agent/src/impress_a/control/plane.py",
+  23,
+  "class CampaignControlPlane(Protocol)",
+  "S1, S5, S24 - surface 5"
+ ],
+ [
+  "agent/src/impress_a/control/http.py",
+  26,
+  "one event stream, on loopback, for a single trusted client. It is NOT a public-facing",
+  "S24, S27-4 - no auth, no TLS, by design"
+ ],
+ [
+  "agent/src/impress_a/control/http.py",
+  183,
+  "async def _route",
+  "S24 - the whole route table"
+ ],
+ [
+  "agent/src/impress_a/control/session.py",
+  48,
+  "class RemoteSession",
+  "S24 - the reasoner's protocol over a socket"
+ ],
+ [
+  "agent/src/impress_a/manager.py",
+  82,
+  "async def run",
+  "S4 - whichever coroutine finishes first ends the campaign"
+ ],
+ [
+  "agent/tests/test_layering.py",
+  43,
+  "ALLOWED = {",
+  "S5, S25 - the import contract, as a table in a test"
+ ],
+ [
+  "agent/campaigns/delta-small-molecule.yaml",
+  30,
+  "stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]",
+  "S7 - surface 2, a real campaign file"
+ ],
+ [
+  "agent/toolkits/rfd3/tools/rfd3_design/spec.yaml",
+  1,
+  "id: rfd3_design",
+  "S10 - a tool as a declaration"
+ ],
+ [
+  "agent/src/impress_a/runtime/executor.py",
+  391,
+  "def _objectives_without_a_producer",
+  "S20 - the refusal that is phrased as a smaller plan, and warns rather than gates"
+ ],
+ [
+  "examples/agentic_small_molecule_binding/tools.py",
+  35,
+  "TOOL_SCHEMAS: list[dict[str, Any]] = [",
+  "S21 - the tools the model next door is given, mined for the live slides"
+ ]
 ]

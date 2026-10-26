@@ -19,12 +19,21 @@ Three sources, each labelled in the output so a slide can say where its number c
              `campaigns/_runs` lands in the repo, then mined from its own provenance,
              ledger and trust files.
 
-There is deliberately NO transcribed section. Every figure in this deck comes from this
-checkout or from a run this script performs, because the deck is about the API rather than
-about a campaign on Delta - and the one claim that would need a cluster (what the loop
-costs at `replicas > 1`) is the claim the deck concedes instead of making. If a Delta
-figure is ever added here it goes in its own section with a `source` field, and the slide
-that shows it repeats the source in its footer.
+  live       the agentic small-molecule example next door - the reference IMPRESS pipeline
+             with its state machine removed and an LLM calling the tools directly. Its
+             `code` half is MINED from examples/agentic_small_molecule_binding; its `runs`
+             half is TRANSCRIBED from that example's own CLAUDE.md, which records each
+             Delta job. It is the only place in this repository where a model has driven
+             real tools on real hardware, and it is NOT IMPRESS-A: no shared code, no
+             campaign engine, no gates. The deck shows it because the idea IMPRESS-A is
+             built on stopped being hypothetical on 2026-10-22, and because what that
+             model did badly is what the engine's gates exist to catch.
+
+Every other figure comes from this checkout or from a run this script performs, because
+the deck is about the API rather than about a campaign on Delta - and the one claim that
+would need a cluster (what the loop costs at `replicas > 1`) is the claim the deck
+concedes instead of making. Transcribed figures live in `live.runs` with a `source` field,
+and every slide that shows one repeats the source in its footer.
 """
 
 from __future__ import annotations
@@ -341,6 +350,142 @@ def mock_campaign() -> dict:
     }
 
 
+
+# --------------------------------------------------------------------------- live
+# The only section mined from outside agent/, and the only one carrying figures a checkout
+# cannot reproduce.
+#
+# examples/agentic_small_molecule_binding is the reference IMPRESS pipeline with its state
+# machine removed: one LLM, the same eight tools, the same asyncflow/Dragon execution. It
+# shares no code with IMPRESS-A and has no campaign engine, no gates and no interlock - which
+# is exactly why the deck shows it. It is the only place in this repository where a model has
+# driven real tools on real hardware.
+#
+#   live["code"]  MINED from the example on every build. If it grows a ninth tool or stops
+#                 overriding exactly one inherited method, these numbers say so.
+#   live["runs"]  TRANSCRIBED from that example's CLAUDE.md revision history, which is where
+#                 each Delta job is recorded. The raw outputs live under $WORK_DIR on Delta,
+#                 not here. Any slide showing one of these repeats the source in its footer.
+AGENTIC = ROOT.parent / "examples" / "agentic_small_molecule_binding"
+REFERENCE_PIPELINE = ROOT.parent / "examples" / "small_molecule_binding"
+
+
+def _class_methods(path: Path, name: str) -> list[str]:
+    """Every method a class defines, in declaration order."""
+    tree = ast.parse(path.read_text(errors="replace"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return [n.name for n in node.body
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    return []
+
+
+def live_next_door() -> dict | None:
+    """Mine the agentic example, then attach the runs nobody can re-derive here."""
+    if not (AGENTIC / "tools.py").exists():
+        return None
+    schemas: list = []
+    for node in ast.parse((AGENTIC / "tools.py").read_text()).body:
+        target = getattr(node, "target", None)
+        if isinstance(target, ast.Name) and target.id == "TOOL_SCHEMAS":
+            schemas = ast.literal_eval(node.value)
+    import yaml
+    profiles = sorted(yaml.safe_load((AGENTIC / "models.yaml").read_text())["profiles"])
+
+    # The example's whole claim is that only the DECISION layer changed. That is one
+    # overridden method, and it is worth mining rather than repeating: a second override
+    # would mean the two arms no longer place the same demands on an allocation.
+    mine = _class_methods(AGENTIC / "agentic_pipeline.py", "AgenticSMBPipeline")
+    theirs = _class_methods(REFERENCE_PIPELINE / "small_molecule_binding.py",
+                            "SmallMoleculeBindingPipeline")
+    overrides = [m for m in mine if m in theirs and not m.startswith("__")]
+
+    files = {p.name: _lines(p) for p in sorted(AGENTIC.glob("*.py"))}
+    return {
+        "code": {
+            "tools": [s["function"]["name"] for s in schemas],
+            "n_tools": len(schemas),
+            "profiles": profiles,
+            "n_profiles": len(profiles),
+            "overrides": overrides,
+            "n_overrides": len(overrides),
+            "files": files,
+            "total_lines": sum(files.values()),
+        },
+        "runs": LIVE_RUNS,
+    }
+
+
+# TRANSCRIBED, every figure below, from the revision history in
+# examples/agentic_small_molecule_binding/CLAUDE.md. Kept as one labelled block rather than
+# scattered through the slides so that a slide cannot quietly acquire an unsourced number.
+LIVE_RUNS = {
+    "source": "examples/agentic_small_molecule_binding/CLAUDE.md - transcribed from its "
+              "revision history; the run outputs live under $WORK_DIR on Delta, not here",
+    "paired_4h": {
+        "date": "2026-10-22", "hours": 4, "nodes": 1, "pipelines": 4,
+        "partition": "gpuA40x4", "same_inputs": True,
+        "reference": {"job": "23114772", "driver": "adaptive_decision()",
+                      "rfd3_per_pipeline_h": 15.5, "passing_designs": 53,
+                      "designs_per_node_h": 13.25, "gpu_h_per_design": 0.302,
+                      "backbones_yielding": [53, 248], "fastrelax": [87, 176],
+                      "mpnn_tasks": 858, "median_plddt": 89.6, "usd": None},
+        "agentic": {"job": "23114775", "driver": "claude-sonnet-5-5",
+                    "rfd3_per_pipeline_h": 16.2, "passing_designs": 176,
+                    "designs_per_node_h": 44.0, "gpu_h_per_design": 0.083,
+                    "backbones_yielding": [192, 260], "fastrelax": [213, 242],
+                    "mpnn_tasks": 349, "median_plddt": 94.2, "usd": 25.40,
+                    "usd_per_design": 0.14, "turns": 1462},
+        "both": "ran the full 4 h to TIMEOUT, 0 task failures, 0 degraded turns",
+        "caveats": [
+            "The reference arm came in about 2x worse than its own record (22701168: "
+            "0.160 GPU-h per passing fold), so an unknown part of the gap is a weak "
+            "baseline rather than agent skill. Do not quote the 3.3x.",
+            "The fastrelax gap - 88% against 49% on the same tool with the same "
+            "thresholds - is unexplained, and it is where the funnel difference "
+            "actually originates.",
+        ],
+    },
+    "first_live_1h": {
+        "date": "2026-10-22", "job": "23112484", "model": "claude-sonnet-5-5",
+        "turns": 137, "invalid_tool_calls": 0, "degraded": 0,
+        "ended": "by itself at 37:54, runner_status ok", "folds": [10, 16],
+        "usd": 2.21,
+        "chose_to_stop": "3 of 4 pipelines called finish deliberately, with an accurate "
+                         "account of what they had produced",
+        "unprompted": "one pipeline diagnosed the fa_rep relax bottleneck unprompted",
+        "weaknesses": ["score_interface called 13x against 27 relaxes - the cheap CPU gate "
+                       "before an expensive fold is being skipped",
+                       "inspect_ensemble called once in 137 turns"],
+    },
+    "hosted_in_allocation": {
+        "date": "2026-10-26", "why": "vllm serve runs as an asyncflow task on a node of its "
+                                     "own, so the model costs allocation rather than API",
+        "qwen_7b": {"job": "23201195", "ready_s": 160,
+                    "stamina": "all four pipelines self-terminated after 6/8/10/17 turns, "
+                               "spending 2-6 of a 300-entry ensemble budget",
+                    "folds": [3, 3]},
+        "qwen_72b": {"job": "23207314", "nodes": 2, "ready_s": 360, "turns": 259,
+                     "turns_per_pipeline": [67, 62, 62, 68], "invalid_tool_calls": 2,
+                     "degraded": 0, "folds": [33, 33], "median_plddt": 92.0,
+                     "fastrelax": [34, 45], "usd": 0.0,
+                     "still_active": "all four pipelines still working at the final second",
+                     "caveat": "two nodes to Sonnet's one, so per billed GPU-hour the "
+                               "advantage roughly halves - and 33/33 folds is gating "
+                               "discipline, not structure quality"},
+        "invalid_run": {"job": "23206285",
+                        "what": "its work dir was moved outside $WORK_DIR to dodge a quota, "
+                                "and the rfd3 container binds only $WORK_DIR - so every "
+                                "write landed in the container overlay and vanished",
+                        "why_it_matters": "rfd3 logged success, out/ was empty, analysis "
+                                          "returned pass=false, and the model correctly "
+                                          "concluded its backbones kept failing. A silent "
+                                          "environmental failure that reads exactly like a "
+                                          "model failure"},
+    },
+}
+
+
 def main() -> None:
     doc = {
         "_note": "Generated by slides/api/run_model.py. Do not edit by hand.",
@@ -348,6 +493,7 @@ def main() -> None:
         "code": code_stats(),
         "surfaces": surfaces(),
         "mock": mock_campaign(),
+        "live": live_next_door(),
     }
     OUT.write_text(json.dumps(doc, indent=1, sort_keys=False) + "\n")
     print(f"wrote {OUT.relative_to(ROOT)}")
@@ -360,6 +506,10 @@ def main() -> None:
     print(f"  session ops     {doc['surfaces']['n_session_ops']}")
     print(f"  plane ops       {doc['surfaces']['n_plane_ops']}, "
           f"{doc['surfaces']['n_routes']} route heads")
+    L = doc["live"]
+    print(f"  live next door  {L['code']['n_tools']} tools, {L['code']['n_profiles']} profiles, "
+          f"overrides {L['code']['overrides']} - runs TRANSCRIBED"
+          if L else "  live next door  absent from this checkout")
     print(f"  mock campaign   {doc['mock']['cycles']} cycles, "
           f"front {doc['mock']['front_size']}, {doc['mock']['elapsed_s']}s, "
           f"{doc['mock']['provenance_records']} provenance records")

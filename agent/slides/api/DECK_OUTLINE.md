@@ -1,15 +1,18 @@
 # IMPRESS-A — the API and the campaign loop
 
-**Format:** three acts, target ~20 min of speech (≈2,500 words) · **Audience:** the lab, plus
-anyone who has to write against this — a policy author, a toolkit author, or something driving a
-campaign from outside the allocation.
+**Format:** three acts, four running orders — the full path runs ~36 min of speech, and **D · for
+users** is a 19-minute path that keeps the experiential slides and drops the protocols ·
+**Audience:** the lab, plus anyone who has to write against this (a policy author, a toolkit
+author, something driving a campaign from outside the allocation) — and, on order D, anyone who
+only has to *run* it.
 
 **This is not the comparison deck.** `../build_deck.js` is the argument against the reference
-IMPRESS pipeline, derived against `main` @ `ffac4b0`, and it stays as it is. This deck answers a
+IMPRESS pipeline and it stays as it is; it carries its own `run.json` and its own derivation. This deck answers a
 different question: *what are the surfaces, and what does the loop do between them?* Where the two
 overlap (dispatch seam, gates), this one cites and does not re-argue.
 
-**Derived against `merge-impress-a` @ `c163fe2`.** Companion files in this directory, same roles as
+**Derived against `examples/agentic-small-molecule-binding` @ `b5a3b2d`.** `agent/` has not changed since `c163fe2`; the branch has, which is
+where the live evidence on slides 21-22 comes from. Companion files in this directory, same roles as
 the skill describes: `build_deck.js`, `run_model.py` → `run.json`, `anchors.json`, `deck.json`,
 `CODE_FOR_DECK.md`, and the generated `DECK_SCRIPT.md`.
 
@@ -35,12 +38,20 @@ allow-list, so `policy` cannot reach `tools`, and `compose` cannot reach `exec`.
 | Act | The question | The evidence | What it concedes |
 |---|---|---|---|
 | 1 · Functionality | What can you *write* against this that you cannot write against a pipeline? | a tool is a `spec.yaml` + a `TaskAgent`; a reasoner is one method; both admitted through the same five gates | the only toolkits that exist are the six stages of one chain, and no third party has authored either |
-| 2 · Performance | What does the loop cost, and where does it serialise? | one `conduct` reasoner submitting many experiments; `as_completed` in finish order; the executor as sole writer of campaign state; a 2.9 s mock campaign that refuses a graph and shrinks it | **no serial baseline and no concurrent run**: every mock run here is one experiment in flight, and on the real chain `replicas > 1` has never executed (backlog A10) |
-| 3 · Usability | Application, platform, or component? | one YAML + one command; runtime-discovered toolkits; the same protocol in two transports | **the component claim is empty** — nothing external has ever driven a campaign; `RemoteSession` is tested, not used |
+| 2 · Performance | What does the loop cost, and where does it serialise? | one `conduct` reasoner submitting many experiments; `as_completed` in finish order; the executor as sole writer of campaign state; a ~3 s mock campaign that refuses a graph and shrinks it | **no serial baseline and no concurrent run**: every mock run here is one experiment in flight, and on the real chain `replicas > 1` has never executed (backlog A10) |
+| 3 · Usability | Application, platform, or component? | one YAML + one command; runtime-discovered toolkits; the same protocol in two transports; and four user-directed slides, including the live 4 h run next door | **the component claim is empty** — nothing external has ever driven a campaign; `RemoteSession` is tested, not used; and the live run is somebody else's code |
 
 **Say the weak dimension out loud in the first three minutes.** It is usability-as-a-component: the
 control plane and `RemoteSession` are the most carefully designed surfaces here and the least
 exercised. Nothing outside this package has ever driven a campaign.
+
+**And say what the live slides are not.** Slides 21-22 show an LLM driving the *reference* IMPRESS
+pipeline's toolkit for four hours on Delta — the closest thing in this repository to what this
+engine is for, and it is not this engine: different code, no campaign engine, no gates, no
+interlock, no trust. It is evidence that the idea pays on this hardware. It is not evidence that
+this implementation does. Its own caveats travel with it: the reference arm came in about 2x worse
+than its own record, so the 3.3x is an upper bound nobody should quote, and the `fastrelax` gap it
+turns on is unexplained.
 
 **One claim to state precisely rather than loosely.** `replicas > 1` *does* execute — the mock
 campaign mined for this deck composed three lineages, had them refused at the interlock's cost cap,
@@ -66,30 +77,55 @@ contention by mutilating its own intent.
 reasoner, now the reasoner calls the campaign. Two-lane coroutine diagram: `pump` vs `conduct`,
 whichever finishes first ends the campaign. Then the mined run, in full: three graphs composed, one
 refused at the interlock as `transient`, two admitted at width 2, four nodes absorbed, all four
-`suspect`, front of 3, in 2.9 s. Then measured-and-not-measured. Then the interlock as the one place
+`suspect`, front of 3, in about 3 s. Then measured-and-not-measured. Then the interlock as the one place
 the API *refuses* breadth — and `pattern_signature` as shape-only-but-not-quite: it excludes
 parameter values deliberately and includes replica multiplicity by accident, so the width-3 graph
 and the width-2 graph are two patterns (mined: two signatures, two cleans, `promote_after = 3`,
 nothing promoted).
 
-**Act 3 · Usability (18-21)** — one YAML, one command, `preflight` as the login-node contract
-(tri-state, and why a timeout is never a pass). Then the control plane: synchronous admission
-(202/409), waiting as a long poll (200/204/410), and `observe()` returning the *same* object a
-policy sees. Then the layering test as the thing that keeps all six surfaces honest.
+**Act 3 · Usability (18-25)** — the act opens **user-directed**, with four slides that carry no
+protocol and almost no code:
 
-**Close (22-23)** — status by dimension, red column the same length as the green one; then asks,
+- **19 · what running one is actually like.** Five steps from the user's chair: write about twenty
+  lines, run `preflight` on the login node, submit, stop watching, read the reason it stopped. The
+  narrative is mined from this deck's own campaign, so it cannot drift from the evidence — it asked
+  for 3 lineages, was refused on cost, came back with 2, and nobody was woken up.
+- **20 · when it says no, it says what to change.** The three places it can refuse (preflight, the
+  gates and interlock, QC on the way out) — and in red the one place it does *not* refuse loudly:
+  inflated cost models once let a policy hand back a graph that could no longer produce the
+  objective. It warns now; a warning is not a gate.
+- **21 · the live evidence from next door.** The 4 h paired comparison between the reference
+  pipeline's state machine and an LLM holding the same eight tools: equal throughput, a very
+  unequal funnel, and two load-bearing caveats in red. **TRANSCRIBED** — the only figures in this
+  deck that are.
+- **22 · what that says about these surfaces.** Four observations mapped onto the surface that
+  answers each, ending in red: none of it ran through IMPRESS-A.
+
+Then the technical half of the act: `preflight` as the login-node contract (tri-state, and why a
+timeout is never a pass); the control plane — synchronous admission (202/409), waiting as a long
+poll (200/204/410), `observe()` returning the *same* object a policy sees; and the layering test as
+the thing that keeps all six surfaces honest.
+
+**Close (26-27)** — status by dimension, red column the same length as the green one; then asks,
 grouped by the dimension each one damages.
 
 ## Numbers `run_model.py` must mine
 
 Surface counts (tools registered, gates implemented, toolkits, control-plane operations, HTTP
 routes), the `ALLOWED` layering table's row count, test count, and a real `impress-a run
-campaigns/mock-stabilize.yaml --model D` in a temp directory for the live loop figures. Anything
-from a Delta archive goes in the transcribed section with its job id, and the slide repeats it.
+campaigns/mock-stabilize.yaml --model D` in a temp directory for the live loop figures. Every
+latency the deck prints is derived from `mock.timeline` at build time rather than typed, so a
+slower host moves the number instead of making the slide wrong.
+
+**The one transcribed section is `live.runs`**, from
+`examples/agentic_small_molecule_binding/CLAUDE.md`, with the job ids it names. Its `live.code`
+half is mined on every build (the tools that example gives its model, its profiles, and the methods
+it overrides). Slides 21 and 22 repeat the source in their footers; nothing else in this deck is
+transcribed.
 
 ---
 
-## Mined, at `c163fe2` (`run.json`)
+## Mined, at `b5a3b2d` (`run.json`)
 
 6,621 lines of `src/` across 10 packages · 168 tests in 9 files · 20 gate fixtures, 11 of them
 `.bad` · 11 tools in 5 toolkits, 4 real · 5 QC gates implemented · `CampaignSpec` 22 fields ·
@@ -98,7 +134,7 @@ from a Delta archive goes in the transcribed section with its job id, and the sl
 `ToolSpec` 15 fields · 8 compute patterns, 2 of them used · 12 artifact types · 10 layers in the
 allow-list, `core` importing none of them.
 
-**The run:** `mock-stabilize.yaml --model D`, 2.9 s, 2 cycles, 3 graphs composed, 1 refused
+**The run:** `mock-stabilize.yaml --model D`, about 3 s (it moves with the host), 2 cycles, 3 graphs composed, 1 refused
 (interlock, `transient: true`, "provisional pattern capped at 10% of available cpu_hours"),
 2 admitted at 2 lineages each, 4 design nodes absorbed, all 4 `suspect`, Pareto front of 3,
 14 provenance records across 5 kinds, 7 ledger records, 2 pattern signatures, 2 clean runs,

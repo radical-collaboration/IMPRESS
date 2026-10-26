@@ -29,6 +29,21 @@ const { pres, C, W, H, M, HF, BF, MF, text, title, divider, box, line, label, le
 
 const S = R.surfaces, K = R.code, Q = R.mock;
 const HEAD = `${K.branch} @ ${K.head}`;
+
+// The live example next door. Its `code` half is mined on every build; its `runs` half is
+// the only transcribed figures in this deck, and every slide showing one names the source.
+if (!R.live) throw new Error(
+  "run.json has no `live` section - re-run run_model.py from a checkout that still has "
+  + "examples/agentic_small_molecule_binding, or drop slides 21 and 22");
+const L = R.live.code, LR = R.live.runs, P4 = LR.paired_4h;
+
+// Timings derived from the mined timeline, so that no slide types a latency literal: the
+// first cycle pays for engine construction, the second does not, and the gap between the
+// campaign's own span and the process is interpreter startup.
+const at = (ev, nth) => Q.timeline.filter(e => e.event === ev)[nth].at_s;
+const CYCLE1_S = (at("dispatched", 0) - at("composed", 0)).toFixed(2);
+const CYCLE2_MS = Math.round((at("dispatched", 1) - at("composed", 1)) * 1000);
+const STARTUP_S = (Q.elapsed_s - Q.span_s).toFixed(1);
 const slide = () => pres.addSlide();
 
 // The six surfaces, in the order the deck walks them. `who` is the role that writes
@@ -64,7 +79,8 @@ const SURFACES = [
     { text: "   ·   " },
     { text: `${K.tests_collected} tests`, options: { bold: true, color: "F0C898" } },
   ], M, 4.1, 6.6, 0.4, { fontSize: 13, color: "C8D4DD" });
-  text(s, `Derived against ${HEAD} · every figure mined by slides/api/run_model.py`,
+  text(s, `Derived against ${HEAD} · every figure mined by slides/api/run_model.py, except the `
+    + `live runs on 21-22, which are transcribed and say so`,
     M, 4.6, 6.6, 0.3, { fontSize: 11, color: C.muted, italic: true });
 
   // Motif: the six surfaces as a ring of callers around the one engine they all reach.
@@ -332,7 +348,7 @@ decides when the campaign is over, and the reasoner finds out by being raised in
   card(s, M + 6.33, 5.35, 6.1, 1.35, "What is enforced, not merely intended",
     [`${S.n_layers} layers in an allow-list walked by \`ast\`: \`policy\` may import only `
      + `${S.policy_imports.join(", ")}, and \`core\` imports nothing internal.`,
-     "A new cross-layer import fails the suite by default — slide 21."],
+     "A new cross-layer import fails the suite by default — slide 25."],
     { fill: C.panel, hc: C.ink, fs: 11 });
 
   s.addNotes(`
@@ -415,7 +431,7 @@ of the interface and not about anyone's experience.
   tbl(s, ["impress-a", "what it does"],
     [["run <spec>", `--model ${S.cli_models.join(" | ")}; the model is fixed at launch`],
      ["tools", `lists the ${S.n_tools} registered tools with pattern and gate count`],
-     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 19"]],
+     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 23"]],
     M + 8.1, 1.5, [1.75, 2.48], { mono: [0], fs: 10.5, mfs: 9.5, rowH: 0.62, hfill: C.accent });
 
   card(s, M + 8.1, 3.75, 4.23, 1.35, "One objective, two sources",
@@ -566,7 +582,7 @@ corrections guard by default, which is why the run in this deck reported its pol
 
   card(s, M, 4.65, 6.1, 2.0, "What this buys",
     ["A policy that cannot name a tool parameter cannot quietly become a pipeline.",
-     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 21.",
+     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 25.",
      "Swapping A for D changes the reasoner and nothing below it."],
     { fill: C.panel, hc: C.ink, fs: 11 });
   card(s, M + 6.33, 4.65, 6.1, 2.0, "What it costs",
@@ -851,7 +867,7 @@ mechanism that backlog A10 says will bite on the real chain. More on that in act
       ["Refusal is measurably cheap",
        `the refused graph and its replacement were composed inside the same millisecond of the run`],
       ["Steady-state cycle cost is small and measured",
-       `cycle 2 cost 71 ms against cycle 1's 1.09 s — the difference is engine construction, once`],
+       `cycle 2 cost ${CYCLE2_MS} ms against cycle 1's ${CYCLE1_S} s — the difference is engine construction, once`],
     ],
     caveat: "there is no concurrent run and no serial baseline anywhere in this deck, so "
       + "nothing here divides into a speedup — and the stages were mocks, so this times the "
@@ -1022,10 +1038,10 @@ building the execution engine, which happens once.
 
 So the steady-state cost of going round this loop — compose a graph, type-check it, run it
 through five gates and a dry run, dispatch four mock tasks across two lineages, absorb the
-results, re-rank the Pareto front, write the provenance — is about seventy milliseconds.
+results, re-rank the Pareto front, write the provenance — is about ${CYCLE2_MS} milliseconds.
 
 Now the units, because this is where overclaiming is easy. The campaign's own span is
-${span} seconds. The process took ${Q.elapsed_s}. So about a second and a half is Python interpreter
+${span} seconds. The process took ${Q.elapsed_s}. So about ${STARTUP_S} seconds is Python interpreter
 startup and imports, outside the loop entirely — which, if you care about cycle latency on
 a cluster, is the number that will annoy you first.
 
@@ -1043,7 +1059,7 @@ throughput result and it is not a scaling result, and I have neither.
 
   tbl(s, ["Measured", "Value", "From"],
     [["campaign span", `${Q.span_s} s`, "provenance ts"],
-     ["steady-state cycle", "71 ms", "timeline"],
+     ["steady-state cycle", `${CYCLE2_MS} ms`, "timeline"],
      ["refuse + recompose", "< 1 ms", "timeline"],
      ["provenance written", `${Q.provenance_records} records`, "5 jsonl files"],
      ["ledger records", `${Q.n_ledger}`, "jobs/ledger.jsonl"],
@@ -1197,8 +1213,9 @@ quietly.
       ["As a component: empty",
        `${S.n_plane_ops} control-plane operations and a RemoteSession that implements the reasoner's own protocol — and no caller`],
     ],
-    caveat: "nothing outside this package has ever driven a campaign, and `--model C` with "
-      + "no caller attached does not block or fail — it falls back to model D after 5 s",
+    caveat: "nothing outside this package has ever driven a campaign — the four-hour live "
+      + "run two slides from now is the reference pipeline's toolkit with an LLM on it, not "
+      + "this engine — and `--model C` with no caller falls back to model D after 5 s",
   });
   s.addNotes(`
 Act three: usability. Not the user interface — the use cases. Is this an application, a
@@ -1222,7 +1239,273 @@ the log.
   `);
 }
 
-// ============================================================ 19. as an application
+// ============================================================ 19. a campaign, from the user's chair
+// The first of four user-directed slides: what the thing is like to run, rather than what
+// it is made of. No protocol, no types, one command. Everything on it is mined from the
+// campaign this deck ran, so the narrative cannot drift from the evidence.
+{
+  const s = slide();
+  title(s, "What running one is actually like", "act 3 · usability");
+
+  const steps = [
+    ["You write the file",
+     `${S.n_campaign_spec_fields} keys exist. A real campaign uses about twenty lines: the goal, the budget, the objectives, and the stages you trust`,
+     C.accent],
+    ["You run preflight",
+     "On the login node, before the queue, where repairing anything is free. ok / FAIL / undetermined — and undetermined never reads as a pass",
+     C.accent],
+    ["You stop watching",
+     "There is no step list to babysit. It observes, decides, composes a graph, type-checks it, gates it, and dispatches",
+     C.a],
+    ["It argues with itself",
+     `It asked for ${Q.refusals[0].lineages} lineages. The interlock refused on cost. It came back with ${Q.lineages_absorbed.length} and was admitted — nobody woken up`,
+     C.c],
+    ["It stops, and says why",
+     `"${Q.stop_reason}". ${Q.front_size} designs on the front, ${Q.n_results} nodes, every one marked suspect until a human has looked`,
+     C.b],
+  ];
+  const sw = (W - 2 * M - 4 * 0.14) / 5;
+  steps.forEach(([h, b, col], i) => {
+    const x = M + i * (sw + 0.14);
+    s.addShape(pres.shapes.RECTANGLE, { x, y: 1.5, w: sw, h: 2.15,
+      fill: { color: C.panel }, line: { color: C.rule } });
+    s.addShape(pres.shapes.RECTANGLE, { x, y: 1.5, w: sw, h: 0.06,
+      fill: { color: col }, line: { color: col } });
+    text(s, String(i + 1), x + 0.12, 1.62, 0.4, 0.26,
+      { fontFace: HF, fontSize: 15, bold: true, color: col });
+    text(s, h, x + 0.12, 1.92, sw - 0.24, 0.3, { fontSize: 12, bold: true, color: C.ink });
+    text(s, b, x + 0.12, 2.26, sw - 0.24, 1.3, { fontSize: 10, color: C.text });
+  });
+
+  code(s, [`$ impress-a run campaigns/delta-small-molecule.yaml --model D`], M, 3.85, 7.3, 0.52,
+    { fs: 12 });
+  card(s, M + 7.55, 3.78, 4.78, 1.05, "What you never write",
+    ["No DAG, no step list, no retry loop, and no per-experiment edit to a batch script — "
+     + "the shape of the work is composed each cycle from the stages you named."],
+    { fill: C.aTint, hc: C.a, fs: 10.5 });
+
+  box(s, M, 5.05, W - 2 * M, 0.92, {
+    title: `What comes back: one directory per job — manifest.json (campaign, model, git sha and whether the checkout was dirty), campaign.log, provenance/*.jsonl (${Q.provenance_records} records across ${Object.keys(Q.provenance_kinds).length} kinds), jobs/ledger.jsonl (${Q.n_ledger})`,
+    sub: "you can hand the directory to someone else and they can reconstruct every decision, including the one that was refused",
+    fs: 11.5, sfs: 10, fill: C.bTint, line: C.b, tc: C.b });
+
+  text(s, [
+    { text: "The experience it is trying to buy:  ", options: { bold: true, color: C.ink } },
+    { text: "you spend your attention on what you want, not on what order to ask for it in — "
+      + "and the first thing you read when it finishes is the reason it stopped." },
+  ], M, 6.2, W - 2 * M, 0.5, { fontSize: 12.5 });
+
+  s.addNotes(`
+This is the whole thing from where a user sits, and it is deliberately the least technical
+slide in the deck.
+
+You write one file. About twenty lines: what you want, what you are willing to spend, how
+you will know it worked, and which tools you trust. Then you run preflight on the login
+node, because finding out that an environment variable is missing is free there and costs
+you an allocation inside the queue.
+
+Then you submit it and stop watching. That is the part that is different. There is no step
+list to babysit.
+
+While you were not watching, this run asked for ${Q.refusals[0].lineages} lineages, had that refused on cost by
+its own interlock, came back with ${Q.lineages_absorbed.length}, and was admitted. Nobody was woken up. It stopped
+because it reached the front size it was told to reach, and it says so in those words.
+
+And what lands on disk is one directory you can hand to somebody else — including whether
+the checkout was dirty when it started.
+  `);
+  footer(s, `mined from the campaign this deck ran · ${HEAD}`);
+}
+
+// ============================================================ 20. when it refuses you
+{
+  const s = slide();
+  title(s, "When it says no, it says what to change", "act 3 · usability");
+
+  const refusals = [
+    ["Before the queue", C.accent,
+     "preflight, on the login node",
+     "`$MPNN_DIR has no model_params/ — run its get_model_params.sh`. Seconds to fix, "
+     + "no allocation spent. A timeout reports as undetermined, never as a pass."],
+    ["Before anything runs", C.c,
+     "five gates, then the interlock",
+     `"${Q.refusals[0].reason}" — marked transient, so the policy shrinks the request and `
+     + "tries again instead of stopping. Cost of the refusal: one composition, no GPU."],
+    ["After a tool succeeds", C.d,
+     "QC, on the way out of the node",
+     "A tool can exit 0, report 0.91 designability, and have produced a noodle. The "
+     + "integrity gate fails the node anyway, and a failed node never reaches the front."],
+  ];
+  const cw = (W - 2 * M - 2 * 0.2) / 3;
+  refusals.forEach(([when, col, where, what], i) => {
+    const x = M + i * (cw + 0.2);
+    s.addShape(pres.shapes.RECTANGLE, { x, y: 1.5, w: cw, h: 2.35,
+      fill: { color: C.white }, line: { color: col, width: 1.5 } });
+    pill(s, when, x + 0.14, 1.66, cw - 0.28, col, { fs: 10 });
+    text(s, where, x + 0.14, 2.12, cw - 0.28, 0.26,
+      { fontSize: 10.5, italic: true, color: C.muted });
+    text(s, what, x + 0.14, 2.44, cw - 0.28, 1.3, { fontSize: 11, color: C.text });
+  });
+
+  card(s, M, 4.1, W - 2 * M, 1.22,
+    "The one place it does NOT say no loudly — and it is the one that cost a real run",
+    ["Cost-model figures sat 6–69× over measurement, so gate 5 summed past the cap and the "
+     + "policy quietly truncated `boltz_predict` off the end of the chain. The campaign ran. "
+     + "It just could not produce the objective it was launched for.",
+     "It warns now — `_objectives_without_a_producer` — and a warning is not a gate. "
+     + "If you take one thing from this slide: a refusal you can read is a feature, and the "
+     + "dangerous refusals are the ones phrased as a smaller plan."],
+    { fill: C.failTint, hc: C.fail, fs: 10.5 });
+
+  code(s, [
+    `interlock  ${Q.refusals[0].reason}`,
+    `           transient=${Q.refusals[0].transient}  →  policy recomposed at ${Q.lineages_absorbed.length} lineages, admitted`,
+  ], M, 5.6, W - 2 * M, 0.78,
+    { anchor: "runtime/executor.py:391 · run.json mock.refusals[0] · MINED", fs: 10.5 });
+
+  s.addNotes(`
+A system that refuses you is only pleasant to use if the refusal tells you what to change,
+and there are three places this one can refuse.
+
+Before the queue: preflight, on the login node, where fixing it is free.
+
+Before anything runs: five gates and then the interlock, which is what happened in this
+deck's own campaign. The message names the cap, the number and the unit, and it is marked
+transient — which is the part that matters, because transient means "ask me for less",
+not "give up". The policy recomposed and was admitted.
+
+After a tool succeeds: QC. These tools fail silently. A tool can exit zero, report
+confident numbers, and have produced a noodle, so exit code is never the evidence.
+
+And then the honest one, in red. There is a place where it does not refuse loudly: when
+inflated cost estimates make a graph too expensive, the policy can quietly hand back a
+smaller graph that no longer produces the objective you launched for. That ran on real
+hardware. It warns now. A warning is not a gate.
+  `);
+  footer(s, "the dangerous refusal is the one phrased as a smaller plan");
+}
+
+// ============================================================ 21. live next door
+{
+  const s = slide();
+  title(s, "Next door, a model drove the real toolkit for four hours",
+    "act 3 · usability · evidence from outside this package");
+
+  const pct = (p) => `${Math.round(100 * p[0] / p[1])}%`;
+  tbl(s, ["4 h, 1 node, 4 pipelines, same inputs", "state machine",
+         `an LLM, calling ${L.n_tools} tools`],
+    [["who decided what ran next", P4.reference.driver, P4.agentic.driver],
+     ["rfd3 per pipeline-hour", P4.reference.rfd3_per_pipeline_h, P4.agentic.rfd3_per_pipeline_h],
+     ["distinct passing designs", P4.reference.passing_designs, P4.agentic.passing_designs],
+     ["GPU-hours per passing design", P4.reference.gpu_h_per_design, P4.agentic.gpu_h_per_design],
+     ["backbones that yielded a fold", pct(P4.reference.backbones_yielding), pct(P4.agentic.backbones_yielding)],
+     ["fastrelax pass rate", pct(P4.reference.fastrelax), pct(P4.agentic.fastrelax)],
+     ["mpnn tasks spent", P4.reference.mpnn_tasks, P4.agentic.mpnn_tasks],
+     ["model cost", "—", `$${P4.agentic.usd.toFixed(2)} ($${P4.agentic.usd_per_design}/design)`]],
+    M, 1.62, [3.45, 2.1, 2.45], { mono: [1, 2], fs: 10.5, mfs: 9.5, rowH: 0.3, hfill: C.a });
+
+  card(s, M + 8.25, 1.62, 4.08, 2.4, "What it did unprompted",
+    [`${LR.first_live_1h.chose_to_stop}.`,
+     `And ${LR.first_live_1h.unprompted} — a bottleneck that was already an open backlog item next door.`],
+    { fill: C.aTint, hc: C.a, fs: 10.5 });
+  card(s, M + 8.25, 4.12, 4.08, 1.5, "And what it did badly",
+    LR.first_live_1h.weaknesses,
+    { fill: C.panel, hc: C.ink, fs: 10 });
+
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 4.42, w: 7.9, h: 1.2,
+    fill: { color: C.failTint }, line: { color: C.fail, width: 1.5 } });
+  text(s, [
+    { text: "Two caveats, and they are load-bearing.  ", options: { bold: true, color: C.fail } },
+    { text: P4.caveats.join("  ") },
+  ], M + 0.14, 4.52, 7.62, 1.0, { fontSize: 10, color: C.text });
+
+  text(s, [
+    { text: "Both arms ran the full four hours with zero task failures. ",
+      options: { bold: true, color: C.ink } },
+    { text: "Throughput is equal, so the round trip costs nothing measurable — the difference "
+      + "is entirely in which work the funnel chose to do. This is not IMPRESS-A: no campaign "
+      + "engine, no gates, no interlock, no trust. It is the idea, on hardware, without them." },
+  ], M, 5.85, W - 2 * M, 0.7, { fontSize: 11.5 });
+
+  s.addNotes(`
+This is the one slide in the deck with figures I did not mine from this checkout, and I
+want to be exact about where it came from and what it is.
+
+On the twenty-second, two jobs went in together: four hours, one node, four pipelines, the
+same inputs and the same thresholds. One arm was the reference pipeline's state machine.
+The other was an LLM holding the same eight tools. Everything below the decision layer is
+identical by construction.
+
+Throughput came out equal, which is the result I least expected: the model's round trip
+costs nothing measurable against GPU work. The funnel was not equal — three times the
+passing designs, from fewer sequence tasks.
+
+Now the red box, because this number will get quoted at me otherwise. The reference arm
+came in about twice as bad as its own record, so part of that gap is a weak baseline and
+not agent skill. And the place the difference actually originates — an eighty-eight against
+forty-nine percent pass rate on the same relax tool — is unexplained.
+
+And the thing to hold on to: none of this ran through IMPRESS-A.
+  `);
+  footer(s, `TRANSCRIBED · ${LR.source} · the tool list is mined, from examples/agentic_small_molecule_binding/tools.py:35`);
+}
+
+// ============================================================ 22. what that says about these surfaces
+{
+  const s = slide();
+  title(s, "What those four hours say about these surfaces", "act 3 · usability");
+
+  tbl(s, ["What the live runs showed", "Which surface answers it — and whether it has been exercised"],
+    [[`The round trip is free: ${P4.agentic.rfd3_per_pipeline_h} against ${P4.reference.rfd3_per_pipeline_h} rfd3 per pipeline-hour`,
+      "A reasoner per experiment is affordable, which is the bet surfaces 3 and 4 are built on. "
+      + "Here it is measured against MOCKS only."],
+     ["It skipped the cheap gate before expensive folds, and never looked at its own ensemble",
+      "The engine does not rely on the reasoner's discipline: gate 5 and the interlock refuse on "
+      + "cost BEFORE anything runs, and a policy cannot name a tool parameter at all."],
+     ["A work dir the container could not see read exactly like a model failure",
+      "Exactly the class `impress-a preflight` exists for — and it would NOT have caught this "
+      + "one: it checks the login node, not what a container binds. An honest gap."],
+     [`The model can live inside the allocation: ${LR.hosted_in_allocation.qwen_72b.turns} turns, $0 of API, served as one more task`,
+      "That is what model C's endpoint could be. Today `--model C` with no caller falls back to "
+      + "model D after 5 s rather than failing — ask 5."]],
+    M, 1.6, [4.6, 7.73], { fs: 10.5, rowH: 0.8, hfill: C.a, margin: 0.09 });
+
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.85, w: W - 2 * M, h: 1.0,
+    fill: { color: C.failTint }, line: { color: C.fail, width: 2 } });
+  text(s, [
+    { text: "Say this out loud:  ", options: { bold: true, color: C.fail } },
+    { text: "none of that ran through this package. Different code, no campaign engine, no "
+      + "gates, no trust ledger, one pipeline per GPU. It is evidence that the idea works on "
+      + "this hardware, and it is not evidence that this engine does. The component claim is "
+      + "still empty, and the nearest thing to a user it has is still me." },
+  ], M + 0.16, 5.96, W - 2 * M - 0.32, 0.8, { fontSize: 12, color: C.text });
+
+  s.addNotes(`
+So what does a four-hour run of somebody else's code tell you about these six surfaces?
+
+Four things. The round trip being free is the premise this whole design rests on, and it
+now has a number against it — next door, on real tools, not here.
+
+The second one is the interesting one. The model skipped the cheap gate before the
+expensive fold, repeatedly. That is not a criticism of the model; it is the reason this
+engine refuses on cost before anything runs rather than trusting the reasoner to be
+disciplined. A policy here cannot even name a tool parameter.
+
+Third, the honest one: a work directory the container could not see produced empty outputs,
+and the model correctly concluded its own designs kept failing. An environmental failure
+that reads exactly like a reasoning failure. That is the class of thing preflight exists
+for, and preflight would not have caught this one.
+
+Fourth: the model can be served inside the allocation for no API cost at all, which is what
+model C's endpoint could be — if model C stopped silently falling back.
+
+And then the red line, which I would rather say than have asked: none of this ran through
+IMPRESS-A.
+  `);
+  footer(s, `the live figures are TRANSCRIBED · ${LR.source}`);
+}
+
+// ============================================================ 23. as an application
 {
   const s = slide();
   title(s, "As an application: one command, one honest gate", "act 3 · usability");
@@ -1292,7 +1575,7 @@ whether the checkout was dirty.
   footer(s, "the output above is the shape of real preflight output, with paths replaced by placeholders — see CODE_FOR_DECK.md");
 }
 
-// ============================================================ 20. surface 5, the control plane
+// ============================================================ 24. surface 5, the control plane
 {
   const s = slide();
   title(s, "Surface 5: one protocol, two transports", "act 3 · usability");
@@ -1358,7 +1641,7 @@ it, and it is the first thing that has to change when something does.
   footer(s, "control/plane.py:23 is the protocol · control/http.py:183 is the whole route table · control/session.py:48 is RemoteSession");
 }
 
-// ============================================================ 21. the layering contract
+// ============================================================ 25. the layering contract
 {
   const s = slide();
   title(s, "Why the surfaces stay separate: an allow-list in a test",
@@ -1436,7 +1719,7 @@ invisible to it.
   footer(s, `${S.n_layers} layers, ${K.tests_collected} tests, ${K.test_files} test files · the table mirrors docs/reference/architecture.md`);
 }
 
-// ============================================================ 22. status by dimension
+// ============================================================ 26. status by dimension
 {
   const s = slide();
   title(s, "Status, by dimension", "where this actually is");
@@ -1450,7 +1733,7 @@ invisible to it.
       ["No third-party author", "no toolkit or policy written outside this package"],
       ["Calibration untested", "no measurement has ever superseded a prediction"]]],
     ["PERFORMANCE", C.b,
-     [["Engine latency measured", "71 ms steady-state cycle, mocks, one host"],
+     [["Engine latency measured", `${CYCLE2_MS} ms steady-state cycle, mocks, one host`],
       ["Both ends of the backend bounded", "startup and shutdown timeouts, from real hangs"],
       ["Provenance is complete", "the campaign can be timed from outside it"]],
      [["No concurrency measurement", "`concurrency > 1` never exercised"],
@@ -1513,7 +1796,7 @@ this deck.
   footer(s, "if you cut one slide from this deck, do not make it this one");
 }
 
-// ============================================================ 23. asks
+// ============================================================ 27. asks
 {
   const s = slide();
   s.background = { color: C.ink };
@@ -1589,7 +1872,7 @@ Four. Is loopback-only permanent for the control plane?
 Five. Should model C with no caller refuse to start rather than fall back?
 
 Six. Should the CLI's policy imports be lazy? Listing tools currently pays for langgraph,
-and about a second and a half of this deck's run was startup outside the loop.
+and about ${STARTUP_S} seconds of this deck's run was startup outside the loop.
 
 Thank you — and the fastest way to disagree with any of this is to pull the branch and run
 the mining script.
