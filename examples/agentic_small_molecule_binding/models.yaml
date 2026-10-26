@@ -66,6 +66,33 @@ profiles:
       tool_parser: hermes     # the Qwen2.5 instruct family's parser
       ready_timeout_s: 1800
 
+  # Qwen2.5-72B across the model node's four A40s. The 7B smoke (23201195)
+  # proved the infrastructure and the 7B's tool calls -- 3 error payloads in
+  # 41 turns, 3/3 folds passed, correct stage ordering -- but all four
+  # pipelines self-terminated after one or two cycles, using 2-6 of a 300
+  # ensemble budget, and three called finish claiming a spent budget at 4/300.
+  # The prompt already says to finish only when the budget is spent, so that
+  # is agentic stamina, not wording. This profile spends GPUs that were
+  # already allocated and idle (the model node has four; the 7B used one).
+  #
+  # Memory: 72B in bf16 is ~145 GB of weights against 4 x 48 GB. At 0.93 that
+  # leaves ~8 GB per GPU for KV and activations, about 100k tokens of KV --
+  # ample, since the Sonnet run's prompt plateaued near 8.5k per turn.
+  local-qwen-72b:
+    kind: dragon_vllm
+    model: Qwen/Qwen2.5-72B-Instruct
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 4            # 145 GB of weights does not fit fewer
+      port: 8000
+      gpu_fraction: 0.93
+      tool_parser: hermes   # the whole Qwen2.5 instruct family
+      ready_timeout_s: 2400 # 10x the 7B's weights; 7B was ready in 160 s
+
   # The same, with a tiny model: proves placement, transport and tool-call
   # parsing in minutes. Useless for the science.
   local-qwen-smoke:
