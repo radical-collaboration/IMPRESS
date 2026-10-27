@@ -4,7 +4,7 @@ Every code block that appears on a slide, keyed by snippet ID, anchored, and mar
 Companion to [`DECK_OUTLINE.md`](DECK_OUTLINE.md) and `build_deck.js`; slide numbers and snippet IDs
 match across all three.
 
-**Derived against `merge-impress-a` @ `c163fe2`.** Every anchor below is checked mechanically, and the
+**Derived against `slides/impress-a-api-user-slides` @ `bf32d1d`.** Every anchor below is checked mechanically, and the
 script reports the count rather than this file restating it:
 
 ```sh
@@ -18,6 +18,16 @@ comparison with it, its authors are in the room, and a structural claim about th
 as checkable as one about ours. Both subprojects have been in one repository since `0553688`, so
 one root reaches every anchor. (The table carried the old two-checkout prefixes for a while after
 that fold, and reported 0/52 until they were repointed.)
+
+**Four anchors into the reference pipeline moved since `c163fe2` and have been repointed**, all of
+them from that example's own refactors rather than from anything in `agent/`:
+`small_molecule_binding.py` STEP_DONE 36 → 14 and the three-term fastrelax gate 1154 → 1074;
+`run_nonadaptive.py` `routes = {` 32 → 33; and the adaptive callback, which was **renamed** from
+`def _adaptive_decision_sync` to `async def adaptive_decision` in `22a1f82` and now sits at
+`run_small_molecule_binding.py:191`. That rename also broke `run_model.py`, which looked the old
+name up with a bare `next(...)` and died with `StopIteration`; it now matches either spelling and
+fails with the reason and the file to edit. Slide 3 printed `:210` and `:1154` as literals and both
+were corrected with the anchors.
 
 **Fidelity marking, on every block:**
 
@@ -48,6 +58,25 @@ no block says the code does something it does not do.
 | S18-A | 18 | — | **ILLUSTRATIVE** | the two ledger paths, reconstructed as a comment. The paths themselves are the real ones from jobs 22684607 and 22692304 |
 | S18-B | 18 | `compose/graph.py:51–61` | **VERBATIM** + one added comment (`# ONE string per NODE`) |
 | S20-A | 20 | — (shell) | **VERBATIM** | the commands from `CLAUDE.md` |
+
+**Figures that are not code, added 2026-10-27, both TRANSCRIBED and both in `run.json` under
+`baseline.levers` with a `source` field:**
+
+- **S3, the second half of the credit line** — the reference pipeline's own dated fastrelax series
+  (63.6 % → 49.4 % between 2026-10-06 and 2026-10-22, decision layer held fixed at
+  `adaptive_decision()`, 1.3 of 14.2 points explained by binder length). From the sibling analysis
+  project `impress-agentic-performance`, `report.md` §13, verified by its `tools/verify.py`
+  (19 checks). It is on the slide because the figures this deck credits that pipeline with are its
+  **best** period, and an audience that includes its authors should hear that from the speaker
+  rather than discover it. The deck states it and does not use it: no comparison on any slide is
+  recomputed against the weaker arm.
+- **S16, the second paragraph of the dark box** — the packing ladder, five 1-hour runs of one
+  policy held fixed at k = 1, 2, 4, 6, 8 pipelines per GPU: ×5.52 on backbones per node-hour, ×5.11
+  on high-quality folds per GPU-hour, against about ×3 for the best decision layer anybody has run
+  at matched packing, and nobody has had both. `report.md` §12. It belongs on *this* slide because
+  the slide is called "where scale stops buying yield" and this is the measurement of the lever the
+  project does not pull: one lineage on one of four GPUs. This slide sets its own footer at 8.5 pt
+  rather than using `footer()`, because three sources do not fit two lines at 10 pt.
 
 ---
 

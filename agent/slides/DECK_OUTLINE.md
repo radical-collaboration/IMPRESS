@@ -1,6 +1,6 @@
 # IMPRESS-A — code walkthrough
 
-**Format:** three acts, ~29 min of speech on the full path · **Audience:** the lab, including the
+**Format:** three acts, 30.2 min of speech on the full path · **Audience:** the lab, including the
 authors of the reference IMPRESS pipeline, `radical.asyncflow`, `rhapsody`, ORBIT and Flowgentic.
 
 **The baseline is IMPRESS, not nothing.** The previous version of this deck explained what IMPRESS-A
@@ -9,7 +9,7 @@ pipeline that works already exists next door, at a scale this project has not to
 here is therefore framed as *what composing a graph buys over writing one down* — and the slides
 say, in red, where that buys nothing yet.
 
-**Derived against `merge-impress-a` @ `c163fe2`.** Companion files:
+**Derived against `slides/impress-a-api-user-slides` @ `bf32d1d`.** Companion files:
 
 | File | Role |
 |---|---|
@@ -33,7 +33,7 @@ Slide 4 states this and the dividers repeat it per act.
 | Act | The question | The evidence | What it concedes |
 |---|---|---|---|
 | 1 · Functionality | What can you ask for that an adaptive pipeline cannot be asked? | composition per cycle, typed and gated; a tool as a spec file; four control models over one executor | every graph composed so far is the six-stage shape the reference pipeline already had |
-| 2 · Performance | What does composing, validating and scoring a graph cost? | overhead 2.8 s of a ~160 s run, scrutiny 0.0 s [−0.9, 1.2]; both ends of the backend lifecycle bounded; tasks 95% of elapsed | no serial baseline, no head-to-head, one lineage on one of four GPUs |
+| 2 · Performance | What does composing, validating and scoring a graph cost? | overhead 2.8 s of a ~160 s run, scrutiny 0.0 s [−0.9, 1.2]; both ends of the backend lifecycle bounded; tasks 95% of elapsed | no serial baseline, no head-to-head, one lineage on one of four GPUs — and the packing lever that is now measured next door (×5.52) is the one this project does not pull |
 | 3 · Usability | Application, platform, or component? | one YAML and one command; runtime-discovered toolkits and a control plane in two transports | the component claim is empty, and `--model C` fails open |
 
 **Say the weak dimension out loud in the first three minutes.** It is performance at scale, and the
@@ -203,3 +203,48 @@ PYTHONPATH=src python3 -m pytest tests -q                   # the deck must not 
 `build_deck.js` warns at build time if any code block would have to be set below 8.5 pt to fit.
 That warning is the one build failure this deck cannot ship with — an overflowing code block on a
 projector is unreadable from the third row.
+
+
+---
+
+## Changes of 2026-10-27
+
+**Anchors.** Four of the five anchors into `examples/small_molecule_binding` had gone stale through
+that example's own refactors. They are repointed, and the deck's two printed literals on slide 3
+(`:210`, `:1154`) corrected with them. 52/52 now verify from the repo root. The underlying cause is
+worth recording: the reference pipeline's adaptive callback was renamed from
+`_adaptive_decision_sync` to `adaptive_decision` in `22a1f82`, and `run_model.py` looked the old
+name up with a bare `next(...)`, so **the top-level deck could not be rebuilt at all** — it died
+with `StopIteration` before writing `run.json`. It now matches either spelling and raises with the
+file and the name to edit.
+
+Re-mining against `bf32d1d` also moved three figures the slides print: the reference pipeline is
+1,362 lines rather than 1,450, its runner 575 rather than 574, its non-adaptive variant 110 lines
+rather than 102, and its decision function 236 lines rather than 220 (still 19 `next_step` sites
+over 7 `STEP_` constants). Every one of those is mined, so the slides moved with them.
+
+**New evidence, folded into two slides and nowhere else.** The sibling analysis project
+`impress-agentic-performance` re-derived the same run archive this deck already quotes
+(`report.md` §§12–13, verified by its `tools/verify.py`, 19 checks). Two of its results bear on
+this deck; the rest belong to the API deck next door and are not duplicated here.
+
+- **Slide 3, the credit line.** The baseline figures this deck credits are the reference pipeline's
+  *best* period. With the decision layer held fixed, its own fastrelax pass rate fell 63.6 % →
+  49.4 % between 2026-10-06 and 2026-10-22, and standardising for binder length explains only 1.3
+  of those 14.2 points. The authors of that pipeline are in the room; they should hear this from
+  the speaker. **The deck states it and does not use it** — no comparison anywhere is recomputed
+  against the weaker arm, which would make this deck's own numbers look better for free.
+- **Slide 16, the dark box.** The packing lever is now measured at five rungs with one policy held
+  fixed: ×5.52 on backbones per node-hour and ×5.11 on high-quality folds per GPU-hour from k = 1
+  to k = 8, against about ×3 for the best decision layer anybody has run at matched packing, and no
+  run has ever had both. That is the cheap lever, and this project does not pull it: one lineage on
+  one of four GPUs. It makes the act's stated concession heavier, not lighter.
+
+**Running orders re-measured.** The full path is 30.2 min. The hard twenty now also drops slide 21
+(the control plane) to come in at 19.7 min — it is the surface with no caller, so it is the cheapest
+slide in the deck to replace with a sentence.
+
+**Nothing in the colour palette was touched.** `impress_run_archive/ANALYSIS_BRIEF.md` §7 uses
+adaptive = ochre and pass-through = blue; the sibling analysis projects deliberately use blue =
+adaptive and document the divergence. Both are intentional and both are left as they are. This deck
+quotes the new figures as numbers and redraws none of their plots.

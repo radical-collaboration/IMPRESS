@@ -271,15 +271,15 @@
  ],
  [
   "examples/small_molecule_binding/small_molecule_binding.py",
-  36,
+  14,
   "STEP_DONE",
   "S3 - the fixed step set a pipeline's shape is drawn from"
  ],
  [
   "examples/small_molecule_binding/run_small_molecule_binding.py",
-  210,
-  "def _adaptive_decision_sync",
-  "S3 - the hand-written state machine the shape lives in"
+  191,
+  "async def adaptive_decision",
+  "S3 - the hand-written state machine the shape lives in (was `def _adaptive_decision_sync`; renamed and made an asyncflow task in 22a1f82)"
  ],
  [
   "examples/small_molecule_binding/run_small_molecule_binding.py",
@@ -289,13 +289,13 @@
  ],
  [
   "examples/small_molecule_binding/small_molecule_binding.py",
-  1154,
+  1074,
   "interact      is not None and interact",
   "S10 - the three-term fastrelax gate, inside the function that parses the output"
  ],
  [
   "examples/small_molecule_binding/run_nonadaptive.py",
-  32,
+  33,
   "routes = {",
   "S3 - the declarative variant of the same science, 102 lines"
  ],

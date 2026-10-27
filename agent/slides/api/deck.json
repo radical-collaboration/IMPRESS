@@ -1,26 +1,89 @@
 {
  "title": "IMPRESS-A: the API and the loop",
  "acts": [
-  {"n": 1, "name": "Functionality", "from": 8, "slides": "8-14",
+  {
+   "n": 1,
+   "name": "Functionality",
+   "from": 8,
+   "slides": "8-14",
    "question": "what can you write against this that you cannot write against a pipeline?",
-   "gap": "every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy"},
-  {"n": 2, "name": "Performance", "from": 15, "slides": "15-19",
+   "gap": "every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy"
+  },
+  {
+   "n": 2,
+   "name": "Performance",
+   "from": 15,
+   "slides": "15-20",
    "question": "what does the loop cost, and where does it serialise?",
-   "gap": "no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science"},
-  {"n": 3, "name": "Usability", "from": 20, "slides": "20-27",
+   "gap": "no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science. The 2026-10-26 analysis next door does NOT retire this: it measures the two levers (packing x5.52, decision layer ~x3) on OTHER code, which only makes it sharper that this engine has measured neither"
+  },
+  {
+   "n": 3,
+   "name": "Usability",
+   "from": 21,
+   "slides": "21-29",
    "question": "application, platform, or component?",
-   "gap": "nothing outside this package has ever driven a campaign; the live four-hour run on 23-24 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing"}
+   "gap": "nothing outside this package has ever driven a campaign; the live four-hour run on 24-25 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing"
+  }
  ],
  "orders": [
-  {"name": "A · full", "drop": [],
-   "fits": "a 45-minute slot, or a working session where questions land inline"},
-  {"name": "B · default", "drop": ["4", "11", "13", "19", "27"],
-   "fits": "a 40-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5-7 still carry the map"},
-  {"name": "C · hard twenty", "drop": ["4", "5", "7", "9", "11", "12", "13", "16", "18", "22", "25", "26", "27"],
-   "fits": "a hard 20 that leaves room for discussion: the framing with the caller's side of the mediation (6), the three dividers, one surface per act, the measured run, the interlock finding, the live evidence from next door, status and asks"},
-  {"name": "D · for users", "drop": ["4", "5", "7", "9", "10", "11", "13", "16", "18", "19", "25", "26", "27"],
-   "fits": "a room that will RUN this rather than write against it: 6 carries the map for that room, so the six-surface table goes; then what a tool and a refusal are, the measured run, the four user-directed slides (21-24) and the asks. No dispatcher, no protocols, no layering, no type lattice"}
+  {
+   "name": "A · full",
+   "drop": [],
+   "fits": "43.1 min of speech: a 50-minute slot, or a working session where questions land inline. The 2026-10-26 evidence added two slides (19 and 26) and this path grew with them"
+  },
+  {
+   "name": "B · default",
+   "drop": [
+    "4",
+    "11",
+    "13",
+    "20",
+    "29"
+   ],
+   "fits": "35.5 min, for a 45-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5-7 still carry the map"
+  },
+  {
+   "name": "C · the protected core",
+   "drop": [
+    "4",
+    "5",
+    "7",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "16",
+    "20",
+    "22",
+    "23",
+    "27",
+    "28",
+    "29"
+   ],
+   "fits": "21.6 min: the protect list and nothing else. This USED to be a hard twenty; adding the lever slide and the failure-mode slide made the honest core a 25-minute path, and padding the name back down to twenty would mean cutting something the protect list says not to cut. Take a 25-minute slot, or take order C and answer questions from 20 and 25 instead of showing them"
+  },
+  {
+   "name": "D · for users",
+   "drop": [
+    "4",
+    "5",
+    "7",
+    "9",
+    "10",
+    "11",
+    "13",
+    "16",
+    "18",
+    "20",
+    "27",
+    "28",
+    "29"
+   ],
+   "fits": "23.6 min, for a 25-minute slot: a room that will RUN this rather than write against it. 6 carries the map for that room, so the six-surface table goes; then what a tool and a refusal are, the measured run, the lever slide (19), the four user-directed slides (22-25), and how these runs fail on a cluster (26) - which is the slide that room will actually use. No dispatcher, no protocols, no layering, no type lattice"
+  }
  ],
- "protect": "**Protect 2, 3, 6, 14, 17, 18, 19, 23, 24, 28 and 29.** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 6 is the shape of the whole system in one slide, and cutting it leaves 7 orphaned; 14, 17 and 19 are the only slides carrying evidence from a run this deck performed; 18 is what keeps the performance act honest; 23 and 24 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 28 is status and 29 is the asks. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.",
- "say_out_loud": "that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here; that the four-hour comparison on slide 23 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that its reference arm came in about 2x worse than its own record, so the 3.3x is an upper bound and nobody should quote it; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science."
+ "protect": "**Protect 1, 2, 3, 6, 14, 17, 18, 19, 24, 25, 26, 30, 31 and all three dividers (8, 15, 21).** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 6 is the shape of the whole system in one slide, and cutting it leaves 7 orphaned; 14 and 17 are the slides carrying evidence from a run this deck performed; 18 is what keeps the performance act honest, and 19 is the only measurement anywhere of the two levers that act's argument rests on - it is also the slide a hostile room cannot reconstruct for itself; 24, 25 and 26 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 30 is status and 31 is the asks. 20 (the interlock) is the first real content slide to go when the clock is tight - its finding fits in two sentences. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.",
+ "say_out_loud": "that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here - and the 2026-10-26 analysis next door changes NOTHING about that, because every run in it is the reference pipeline or the example next door; that the four-hour comparison on slide 24 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that both of its caveats got WORSE with the newer analysis (the reference arm's own fastrelax pass rate fell 63.6% -> 49.4% with the policy held fixed and only 1.3 of 14.2 points is binder length, and the fastrelax gap is now mostly a harness confound rather than the decision layer, since the scripted route pack-minimises 48 of 48 times and has no model in it), so nobody should quote the 3.3x; that 'agentic' predicts nothing on its own - Qwen3.5-122B gets 2.88 passing folds per GPU-hour where the scripted route gets 12.12; that packing is worth x5.52 and the decision layer about x3 and no run has ever had both, and this engine has measured NEITHER, because `replicas` IS the packing lever and has never exceeded 1 on the real chain; that of the three cluster failure modes on slide 26 this package would catch exactly one, and the one it misses is the one that looks healthiest; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science."
 }

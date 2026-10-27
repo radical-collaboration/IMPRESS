@@ -13,40 +13,41 @@ realistic rate for technical material delivered with pauses.
 
 | Slide | Spoken | | Slide | Spoken |
 |---|---|---|---|---|
-| 1. title | 1.1 min | | 16. surface 4, the inversion | 1.4 |
-| 2. what it is / is not | 1.5 | | 17. the measured run | 1.3 |
-| 3. the framing slide | 1.2 | | 18. measured and not measured | 1.5 |
-| 4. the loop and who drives it | 1.5 | | 19. the interlock | 1.6 |
-| 5. the six surfaces | 1.3 | | 20. ACT 3 divider | 1.1 |
-| 6. the caller's side | 1.3 | | 21. a campaign, from the user's chair | 1.1 |
-| 7. the realized side | 1.6 | | 22. when it refuses you | 1.2 |
-| 8. ACT 1 divider | 0.7 | | 23. live next door | 1.2 |
-| 9. surfaces 1 and 2 | 1.4 | | 24. what that says about these surfaces | 1.3 |
-| 10. surface 3 | 1.5 | | 25. as an application | 1.4 |
-| 11. intent, not a DAG | 1.5 | | 26. surface 5, the control plane | 1.6 |
-| 12. surface 6, the spec | 1.4 | | 27. the layering contract | 1.4 |
-| 13. the task agent | 1.6 | | 28. status by dimension | 1.1 |
-| 14. gates and refusal | 1.5 | | 29. asks | 1.5 |
-| 15. ACT 2 divider | 0.8 | | | |
+| 1. title | 1.1 min | | 17. the measured run | 1.3 |
+| 2. what it is / is not | 1.5 | | 18. measured and not measured | 1.7 |
+| 3. the framing slide | 1.2 | | 19. the two levers, next door | 1.3 |
+| 4. the loop and who drives it | 1.5 | | 20. the interlock | 1.6 |
+| 5. the six surfaces | 1.3 | | 21. ACT 3 divider | 1.1 |
+| 6. the caller's side | 1.3 | | 22. a campaign, from the user's chair | 1.1 |
+| 7. the realized side | 1.6 | | 23. when it refuses you | 1.2 |
+| 8. ACT 1 divider | 0.7 | | 24. live next door | 1.9 |
+| 9. surfaces 1 and 2 | 1.4 | | 25. what that says about these surfaces | 1.7 |
+| 10. surface 3 | 1.5 | | 26. how these runs fail | 1.5 |
+| 11. intent, not a DAG | 1.5 | | 27. as an application | 1.4 |
+| 12. surface 6, the spec | 1.4 | | 28. surface 5, the control plane | 1.6 |
+| 13. the task agent | 1.6 | | 29. the layering contract | 1.4 |
+| 14. gates and refusal | 1.5 | | 30. status by dimension | 1.2 |
+| 15. ACT 2 divider | 0.8 | | 31. asks | 1.7 |
+| 16. surface 4, the inversion | 1.4 | | | |
 
-**Main path: 5999 words = 38.7 minutes of speech.** Backups add 1.3 min if used.
+**Main path: 6677 words = 43.1 minutes of speech.** Backups add 1.3 min if used.
 
 | Act | The question it answers | Slides | What it concedes |
 |---|---|---|---|
 | **Functionality** | what can you write against this that you cannot write against a pipeline? | 8-14 | every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy |
-| **Performance** | what does the loop cost, and where does it serialise? | 15-19 | no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science |
-| **Usability** | application, platform, or component? | 20-27 | nothing outside this package has ever driven a campaign; the live four-hour run on 23-24 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing |
+| **Performance** | what does the loop cost, and where does it serialise? | 15-20 | no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science. The 2026-10-26 analysis next door does NOT retire this: it measures the two levers (packing x5.52, decision layer ~x3) on OTHER code, which only makes it sharper that this engine has measured neither |
+| **Usability** | application, platform, or component? | 21-29 | nothing outside this package has ever driven a campaign; the live four-hour run on 24-25 is the reference pipeline's toolkit with an LLM on it, NOT this engine - and `--model C` with no caller falls back to model D after 5 s instead of failing |
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **38.7** | a 45-minute slot, or a working session where questions land inline |
-| **B · default** | drop 4, 11, 13, 19, 27 | **31.1** | a 40-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5-7 still carry the map |
-| **C · hard twenty** | drop 4, 5, 7, 9, 11, 12, 13, 16, 18, 22, 25, 26, 27 | **19.8** | a hard 20 that leaves room for discussion: the framing with the caller's side of the mediation (6), the three dividers, one surface per act, the measured run, the interlock finding, the live evidence from next door, status and asks |
-| **D · for users** | drop 4, 5, 7, 9, 10, 11, 13, 16, 18, 19, 25, 26, 27 | **19.4** | a room that will RUN this rather than write against it: 6 carries the map for that room, so the six-surface table goes; then what a tool and a refusal are, the measured run, the four user-directed slides (21-24) and the asks. No dispatcher, no protocols, no layering, no type lattice |
+| **A · full** | every main slide | **43.1** | 43.1 min of speech: a 50-minute slot, or a working session where questions land inline. The 2026-10-26 evidence added two slides (19 and 26) and this path grew with them |
+| **B · default** | drop 4, 11, 13, 20, 29 | **35.5** | 35.5 min, for a 45-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases, the signature finding and the layering test. Each is recoverable in a sentence, and 5-7 still carry the map |
+| **C · the protected core** | drop 4, 5, 7, 9, 10, 11, 12, 13, 16, 20, 22, 23, 27, 28, 29 | **21.6** | 21.6 min: the protect list and nothing else. This USED to be a hard twenty; adding the lever slide and the failure-mode slide made the honest core a 25-minute path, and padding the name back down to twenty would mean cutting something the protect list says not to cut. Take a 25-minute slot, or take order C and answer questions from 20 and 25 instead of showing them |
+| **D · for users** | drop 4, 5, 7, 9, 10, 11, 13, 16, 18, 20, 27, 28, 29 | **23.5** | 23.6 min, for a 25-minute slot: a room that will RUN this rather than write against it. 6 carries the map for that room, so the six-surface table goes; then what a tool and a refusal are, the measured run, the lever slide (19), the four user-directed slides (22-25), and how these runs fail on a cluster (26) - which is the slide that room will actually use. No dispatcher, no protocols, no layering, no type lattice |
 
-**Protect 2, 3, 6, 14, 17, 18, 19, 23, 24, 28 and 29.** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 6 is the shape of the whole system in one slide, and cutting it leaves 7 orphaned; 14, 17 and 19 are the only slides carrying evidence from a run this deck performed; 18 is what keeps the performance act honest; 23 and 24 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 28 is status and 29 is the asks. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.
+**Protect 1, 2, 3, 6, 14, 17, 18, 19, 24, 25, 26, 30, 31 and all three dividers (8, 15, 21).** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 6 is the shape of the whole system in one slide, and cutting it leaves 7 orphaned; 14 and 17 are the slides carrying evidence from a run this deck performed; 18 is what keeps the performance act honest, and 19 is the only measurement anywhere of the two levers that act's argument rests on - it is also the slide a hostile room cannot reconstruct for itself; 24, 25 and 26 carry the only evidence from real hardware and the only transcribed figures, so their red caveats travel with them or they do not travel at all; 30 is status and 31 is the asks. 20 (the interlock) is the first real content slide to go when the clock is tight - its finding fits in two sentences. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.
 
-**Say these out loud even if nothing prompts them:** that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here; that the four-hour comparison on slide 23 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that its reference arm came in about 2x worse than its own record, so the 3.3x is an upper bound and nobody should quote it; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science.
+**Say these out loud even if nothing prompts them:** that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here - and the 2026-10-26 analysis next door changes NOTHING about that, because every run in it is the reference pipeline or the example next door; that the four-hour comparison on slide 24 is the REFERENCE pipeline's toolkit driven by an LLM - different code, no campaign engine, no gates, no interlock - so it is evidence about the idea and not about this engine; that both of its caveats got WORSE with the newer analysis (the reference arm's own fastrelax pass rate fell 63.6% -> 49.4% with the policy held fixed and only 1.3 of 14.2 points is binder length, and the fastrelax gap is now mostly a harness confound rather than the decision layer, since the scripted route pack-minimises 48 of 48 times and has no model in it), so nobody should quote the 3.3x; that 'agentic' predicts nothing on its own - Qwen3.5-122B gets 2.88 passing folds per GPU-hour where the scripted route gets 12.12; that packing is worth x5.52 and the decision layer about x3 and no run has ever had both, and this engine has measured NEITHER, because `replicas` IS the packing lever and has never exceeded 1 on the real chain; that of the three cluster failure modes on slide 26 this package would catch exactly one, and the one it misses is the one that looks healthiest; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); and that every stage in the measured run was a mock, so the timings are the engine and never the science.
 
 ---
 
@@ -420,7 +421,7 @@ And the denominators, on the right: one host, one experiment in flight, two line
 mock tasks each. I varied nothing. This is a latency figure for the engine. It is not a
 throughput result and it is not a scaling result, and I have neither.
 
-## 18. measured and not measured — *1.5 min*
+## 18. measured and not measured — *1.7 min*
 
 This is the slide that makes the act honest, and it is two lists.
 
@@ -431,8 +432,9 @@ cheap half of the independence invariant.
 On the right in red, written as refusals rather than apologies. I have no concurrent run,
 so the single thing the session API exists for is unmeasured. I have no serial baseline, so
 nothing on the left divides into a speedup. Every stage was a mock, so there is no
-science-per-GPU-hour number here of any kind. One backend. And on the real chain, more than
-one replica has never run.
+science-per-GPU-hour number here of any kind. One backend. On the real chain, more than
+one replica has never run. And the last bullet is the one I would lead with if I had to pick:
+neither of the two levers that actually move the science has been measured on this engine.
 
 The dark box is the part I would actually argue about over coffee. Four lineages do not buy
 four times the chance of a good design. The acceptance rate across this project's real runs
@@ -441,9 +443,31 @@ is how many draws you can afford, and whether you can tell a bad draw from a bro
 
 Which means the interesting figure is not tasks per hour. It is how few GPU-hours it takes
 to learn that a workflow shape is not worth running again. That is what the interlock is
-for, and it is the next slide.
+for, and it is two slides from now.
 
-## 19. the interlock — *1.6 min*
+## 19. the two levers, next door — *1.3 min*
+
+This is the slide the performance act does not otherwise have, and every number on it was
+measured by somebody else's code — which is the point.
+
+Top table: one policy, held fixed, five runs at one, two, four, six and eight pipelines per
+GPU. Packing alone is worth five and a half times on backbones per node-hour. No
+decision-making changed.
+
+Bottom table: four decision layers at one hour, all at one pipeline per GPU. The best
+reaches 6.35 high-quality folds per GPU-hour, where that same router reaches 2.13 at k=1 and
+10.88 at k=8. So the decision layer is worth about three times at matched packing, packing
+about five times at a matched decision layer, and nobody has run both.
+
+Then the red box, which is the finding I would defend hardest. Qwen3.5-122B gets 2.88
+passing folds per GPU-hour; the scripted route, with no model in it, gets 12.12. The spread
+across four models is bigger than the gap between having a model and not having one. So
+"agentic" predicts nothing — model identity does.
+
+And this engine has measured neither lever. Replicas IS the packing lever, and it has never
+exceeded one on the real chain.
+
+## 20. the interlock — *1.6 min*
 
 This is my favourite mechanism in the project and it has a seam in it, so you get both.
 
@@ -469,7 +493,7 @@ quietly.
 
 # Act 3 — Usability
 
-## 20. ACT 3 divider — *1.1 min*
+## 21. ACT 3 divider — *1.1 min*
 
 Act three: usability. Not the user interface — the use cases. Is this an application, a
 platform, or a component?
@@ -490,7 +514,7 @@ it does not block and does not fail. It falls back to model D after five seconds
 headless mode can silently become the explicit-policy mode, and the only sign is a line in
 the log.
 
-## 21. a campaign, from the user's chair — *1.1 min*
+## 22. a campaign, from the user's chair — *1.1 min*
 
 This is the whole thing from where a user sits, and it is deliberately the least technical
 slide in the deck.
@@ -510,7 +534,7 @@ because it reached the front size it was told to reach, and it says so in those 
 And what lands on disk is one directory you can hand to somebody else — including whether
 the checkout was dirty when it started.
 
-## 22. when it refuses you — *1.2 min*
+## 23. when it refuses you — *1.2 min*
 
 A system that refuses you is only pleasant to use if the refusal tells you what to change,
 and there are three places this one can refuse.
@@ -530,7 +554,7 @@ inflated cost estimates make a graph too expensive, the policy can quietly hand 
 smaller graph that no longer produces the objective you launched for. That ran on real
 hardware. It warns now. A warning is not a gate.
 
-## 23. live next door — *1.2 min*
+## 24. live next door — *1.9 min*
 
 This is the one slide in the deck with figures I did not mine from this checkout, and I
 want to be exact about where it came from and what it is.
@@ -544,14 +568,24 @@ Throughput came out equal, which is the result I least expected: the model's rou
 costs nothing measurable against GPU work. The funnel was not equal — three times the
 passing designs, from fewer sequence tasks.
 
-Now the red box, because this number will get quoted at me otherwise. The reference arm
-came in about twice as bad as its own record, so part of that gap is a weak baseline and
-not agent skill. And the place the difference actually originates — an eighty-eight against
-forty-nine percent pass rate on the same relax tool — is unexplained.
+Now the red box, and both of these caveats got worse with the newer analysis, not better.
+
+The first used to say the reference arm looked weak. It is now measured: with the decision
+layer held fixed, the reference pipeline's own fastrelax pass rate fell from sixty-three
+point six percent to forty-nine point four over sixteen days, and standardising for binder
+length explains only one point three of those fourteen points. So the baseline this arm is
+three times better than was itself degrading. Do not quote the three-point-three.
+
+The second used to say the fastrelax gap was unexplained. It is now partly explained, and
+not in the model's favour. The agentic harness pack-minimises before relaxing and the
+reference harness never does — zero of five thousand and two decoys across fourteen runs,
+while the scripted route pack-minimises forty-eight times out of forty-eight and has no
+model in it at all. That gap belongs to the two examples' tooling, not to the decision
+layer.
 
 And the thing to hold on to: none of this ran through IMPRESS-A.
 
-## 24. what that says about these surfaces — *1.3 min*
+## 25. what that says about these surfaces — *1.7 min*
 
 So what does a four-hour run of somebody else's code tell you about these six surfaces?
 
@@ -568,13 +602,42 @@ and the model correctly concluded its own designs kept failing. An environmental
 that reads exactly like a reasoning failure. That is the class of thing preflight exists
 for, and preflight would not have caught this one.
 
-Fourth: the model can be served inside the allocation for no API cost at all, which is what
-model C's endpoint could be — if model C stopped silently falling back.
+Fourth, and I have had to correct this one: the model CAN be served inside the allocation,
+and it is not free. A second node that runs no pipeline, and twenty-seven percent of a
+one-hour allocation gone before the first task event while a seventy-two-billion-parameter
+model comes up. Charged honestly that is 0.243 GPU-hours per passing fold, not 0.121 — an
+argument for in-allocation serving on long campaigns and against it on short ones. Still
+what model C's endpoint could be, if model C stopped silently falling back.
 
 And then the red line, which I would rather say than have asked: none of this ran through
 IMPRESS-A.
 
-## 25. as an application — *1.4 min*
+## 26. how these runs fail — *1.5 min*
+
+Three runs next door are kept as evidence rather than as measurements, and each asks a
+different surface of this package a question.
+
+The first should worry you. The client dropped a field the endpoint requires, so all four
+pipelines fell back to the scripted route on turn two and ran the rest of the hour with no
+model in them — forty-six relaxes, thirty-five passing folds, and a transcript that reads
+completely healthy, because that is what the scripted route looks like. What would IMPRESS-A
+catch? Nothing. The gates check artifacts, not who chose them.
+
+The second: every backbone write went into a container overlay and vanished. Gate one
+catches the empty result — as a science failure. The interlock then counts that against the
+pattern's trust, so a broken container bind quietly demotes a perfectly good workflow shape.
+That is a real finding about this code, and it is on the slide rather than fixed, because a
+fix is its own change.
+
+The third cost nine seconds: a pre-flight found a missing API key and aborted before
+claiming the GPUs. That is the one class preflight here covers.
+
+One of three. And the lesson generalises: a harness that degrades into a WORKING fallback
+produces plausible output at full rate, and nothing but an explicit flag distinguishes it.
+This engine records which policy ran and every artifact it produced, and nowhere records
+that the policy stopped being the policy.
+
+## 27. as an application — *1.4 min*
 
 As an application, the thing I would point at is not the run command — it is preflight.
 
@@ -598,7 +661,7 @@ eight times slower, and shows up inside an allocation as an unexplained task tim
 And every job writes one directory you can hand to someone else — including the git sha and
 whether the checkout was dirty.
 
-## 26. surface 5, the control plane — *1.6 min*
+## 28. surface 5, the control plane — *1.6 min*
 
 Surface five is the one an external caller sees, and it is the one I would most like
 someone to attack.
@@ -623,7 +686,7 @@ And the honest box at the bottom right: this is not a public-facing server. No a
 The module's own docstring says bind it to loopback. That is fine today because nothing uses
 it, and it is the first thing that has to change when something does.
 
-## 27. the layering contract — *1.4 min*
+## 29. the layering contract — *1.4 min*
 
 Last content slide, and it is the one that makes everything I have claimed checkable.
 
@@ -645,7 +708,7 @@ cross-layer import fails by default: the contract cannot rot by addition.
 One honest blind spot, which the test's own docstring names: a dynamic importlib call is
 invisible to it.
 
-## 28. status by dimension — *1.1 min*
+## 30. status by dimension — *1.2 min*
 
 Status, three columns, and the format is the argument: three things that run and three that
 do not, per dimension, deliberately the same length.
@@ -658,17 +721,18 @@ never been exercised.
 
 Performance runs: engine latency is measured, both ends of the backend lifecycle are
 bounded, and the provenance log is complete enough to time the campaign from outside.
-Performance does not: no concurrency measurement, no baseline, and the real chain has only
-ever run one lineage.
+Performance does not: no concurrency measurement, no baseline, the real chain has only ever
+run one lineage, and neither of the two levers that move the science has been measured on
+this engine.
 
 Usability runs: one YAML and one command, runtime toolkit discovery, two transports tested
-against each other. Usability does not: nothing external drives it, model C fails open, and
-there is no serve command.
+against each other. Usability does not: nothing external drives it, a fallback leaves no
+record anywhere, and there is no serve command.
 
 The red column is not a to-do list. It is the list of things you should not believe from
 this deck.
 
-## 29. asks — *1.5 min*
+## 31. asks — *1.7 min*
 
 I would rather end on the questions than on a summary, and they are grouped by what each one
 costs. The left column costs a wrong answer or real time. The right column costs whoever
@@ -689,7 +753,9 @@ check quietly becomes a three-lineage one.
 
 Four. Is loopback-only permanent for the control plane?
 
-Five. Should model C with no caller refuse to start rather than fall back?
+Five. Should a fallback be a first-class flag rather than a log line? Model C with no
+caller falls back to D after five seconds. Next door, the same shape ran two hundred and
+eighty-four of two hundred and eighty-eight turns with no model in it and looked healthy.
 
 Six. Should the CLI's policy imports be lazy? Listing tools currently pays for langgraph,
 and about ${STARTUP_S} seconds of this deck's run was startup outside the loop.

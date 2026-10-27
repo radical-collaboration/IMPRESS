@@ -34,8 +34,18 @@ const HEAD = `${K.branch} @ ${K.head}`;
 // the only transcribed figures in this deck, and every slide showing one names the source.
 if (!R.live) throw new Error(
   "run.json has no `live` section - re-run run_model.py from a checkout that still has "
-  + "examples/agentic_small_molecule_binding, or drop slides 23 and 24");
+  + "examples/agentic_small_molecule_binding, or drop slides 24 and 25");
 const L = R.live.code, LR = R.live.runs, P4 = LR.paired_4h;
+
+// The sibling analysis project's figures. TRANSCRIBED, every one, and labelled as such
+// on the two slides that print them. Nothing in it is IMPRESS-A: it is the reference
+// pipeline and the example next door, measured on Delta by code this checkout does not
+// contain. It is in the deck because it is the only measurement of the two levers this
+// engine's performance argument rests on - and the deck has neither.
+if (!R.live.analysis) throw new Error(
+  "run.json has no `live.analysis` section - re-run run_model.py, or drop slides 19 and 26");
+const AN = R.live.analysis;
+const AC = AN.in_allocation_cost;
 
 // Timings derived from the mined timeline, so that no slide types a latency literal: the
 // first cycle pays for engine construction, the second does not, and the gap between the
@@ -348,7 +358,7 @@ decides when the campaign is over, and the reasoner finds out by being raised in
   card(s, M + 6.33, 5.35, 6.1, 1.35, "What is enforced, not merely intended",
     [`${S.n_layers} layers in an allow-list walked by \`ast\`: \`policy\` may import only `
      + `${S.policy_imports.join(", ")}, and \`core\` imports nothing internal.`,
-     "A new cross-layer import fails the suite by default — slide 27."],
+     "A new cross-layer import fails the suite by default — slide 29."],
     { fill: C.panel, hc: C.ink, fs: 11 });
 
   s.addNotes(`
@@ -612,7 +622,7 @@ of the interface and not about anyone's experience.
   tbl(s, ["impress-a", "what it does"],
     [["run <spec>", `--model ${S.cli_models.join(" | ")}; the model is fixed at launch`],
      ["tools", `lists the ${S.n_tools} registered tools with pattern and gate count`],
-     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 25"]],
+     ["preflight [spec]", "checks the real-toolkit environment BEFORE the queue — slide 27"]],
     M + 8.1, 1.5, [1.75, 2.48], { mono: [0], fs: 10.5, mfs: 9.5, rowH: 0.62, hfill: C.accent });
 
   card(s, M + 8.1, 3.75, 4.23, 1.35, "One objective, two sources",
@@ -763,7 +773,7 @@ corrections guard by default, which is why the run in this deck reported its pol
 
   card(s, M, 4.65, 6.1, 2.0, "What this buys",
     ["A policy that cannot name a tool parameter cannot quietly become a pipeline.",
-     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 27.",
+     "`policy/` may import `core` and nothing else — enforced by `ast`, slide 29.",
      "Swapping A for D changes the reasoner and nothing below it."],
     { fill: C.panel, hc: C.ink, fs: 11 });
   card(s, M + 6.33, 4.65, 6.1, 2.0, "What it costs",
@@ -1260,7 +1270,7 @@ throughput result and it is not a scaling result, and I have neither.
      "That 2 lineages absorb as 2 distinct nodes with distinct metrics."],
     { fill: C.panel, hc: C.ink, fs: 10.5 });
 
-  card(s, M + 6.2, 4.0, 6.23, 2.65, "Not measured — so not claimed",
+  card(s, M + 6.2, 4.0, 6.23, 2.9, "Not measured — so not claimed",
     ["No concurrent run: `concurrency > 1` never exercised here, so the one thing the "
      + "session API exists for is unmeasured.",
      "No serial baseline, so nothing above divides into a speedup.",
@@ -1268,8 +1278,10 @@ throughput result and it is not a scaling result, and I have neither.
      + "any kind.",
      "No multi-node, no backend comparison: `concurrent` only. Dragon and radical are "
      + "selected by name and untouched here.",
-     `On the real chain, \`replicas > 1\` has never run at all (backlog A10).`],
-    { fill: C.failTint, hc: C.fail, fs: 10.5 });
+     `On the real chain, \`replicas > 1\` has never run at all (backlog A10).`,
+     "Neither lever that moves the science — packing, or the decision layer — has been "
+     + "measured on this engine. Both are measured next door, by other code, next slide."],
+    { fill: C.failTint, hc: C.fail, fs: 9.8 });
 
   s.addShape(pres.shapes.RECTANGLE, { x: M, y: 4.7, w: 5.95, h: 1.95,
     fill: { color: C.ink }, line: { color: C.ink } });
@@ -1284,7 +1296,8 @@ throughput result and it is not a scaling result, and I have neither.
       options: { color: "C8D4DD", breakLine: true } },
     { text: "So the figure that matters is not tasks per hour. It is how few GPU-hours it "
       + "takes to learn that a workflow shape is not worth running again — which is what "
-      + "the trust interlock is for, and that is the next slide.",
+      + "the trust interlock is for. Next slide: what the two levers are actually worth, "
+      + "measured next door and never here.",
       options: { color: "9FD9A8" } },
   ], M + 0.16, 5.15, 5.6, 1.42, { fontSize: 10 });
 
@@ -1298,8 +1311,9 @@ cheap half of the independence invariant.
 On the right in red, written as refusals rather than apologies. I have no concurrent run,
 so the single thing the session API exists for is unmeasured. I have no serial baseline, so
 nothing on the left divides into a speedup. Every stage was a mock, so there is no
-science-per-GPU-hour number here of any kind. One backend. And on the real chain, more than
-one replica has never run.
+science-per-GPU-hour number here of any kind. One backend. On the real chain, more than
+one replica has never run. And the last bullet is the one I would lead with if I had to pick:
+neither of the two levers that actually move the science has been measured on this engine.
 
 The dark box is the part I would actually argue about over coffee. Four lineages do not buy
 four times the chance of a good design. The acceptance rate across this project's real runs
@@ -1308,12 +1322,96 @@ is how many draws you can afford, and whether you can tell a bad draw from a bro
 
 Which means the interesting figure is not tasks per hour. It is how few GPU-hours it takes
 to learn that a workflow shape is not worth running again. That is what the interlock is
-for, and it is the next slide.
+for, and it is two slides from now.
   `);
   footer(s, "the 31% acceptance figure is from the project's Delta run archive (backlog A1), not from this checkout");
 }
 
-// ============================================================ 19. the interlock
+// ============================================================ 19. the two levers, next door
+// The skill's "scale and scientific yield are not linear in each other" slide. Every figure
+// is TRANSCRIBED from the sibling analysis project; none of it is IMPRESS-A, and the point
+// of putting it in the performance act is that it is the measurement this act does not have.
+{
+  const s = slide();
+  title(s, "The two levers that move the science — and nobody has pulled both",
+    "act 2 · performance · measured next door, by other code", { fs: 23 });
+
+  const PK = AN.packing_lever, SV = AN.survey_1h;
+  tbl(s, ["one policy, held fixed", ...PK.k.map(k => `k=${k}`)],
+    [["backbones / node-hour", ...PK.backbones_per_node_h.map(String)],
+     ["passing folds / GPU-hour", ...PK.passing_per_gpu_h.map(v => v.toFixed(2))],
+     ["high-quality folds / GPU-hour", ...PK.hq_per_gpu_h.map(v => v.toFixed(2))]],
+    M, 1.52, [3.3, 1.2, 1.2, 1.2, 1.2, 1.2], { mono: [1, 2, 3, 4, 5], fs: 10, mfs: 9.5,
+      rowH: 0.34, hfill: C.b });
+
+  text(s, [
+    { text: `PACKING, decision layer fixed:  ×${PK.gain_backbones} backbones per node-hour, `
+        + `×${PK.gain_hq} high-quality folds per GPU-hour, from k=1 to k=8.`,
+      options: { bold: true, color: C.ink } },
+  ], M, 3.02, 9.4, 0.26, { fontSize: 11 });
+
+  tbl(s, ["four decision layers, one hour, k=1", "pass/GPU-h", "HQ/GPU-h", "pLDDT"],
+    SV.arms.map(([label, job, nodes, pass, hq, pl]) =>
+      [`${label}  ·  ${job}${nodes > 1 ? `  (${nodes} nodes)` : ""}`,
+       pass.toFixed(2), hq.toFixed(2), String(pl)]),
+    M, 3.42, [5.2, 1.35, 1.35, 1.2], { mono: [1, 2, 3], fs: 9.5, mfs: 9.5, rowH: 0.3,
+      hfill: C.a });
+
+  card(s, M + 9.6, 1.52, 2.73, 2.14, "The arithmetic",
+    [`Packing: about ×${PK.gain_backbones} at a fixed policy.`,
+     `Decision layer: about ×${PK.decision_layer_gain} at matched packing — the best `
+     + `agentic arm reaches ${SV.arms[1][4]} HQ/GPU-h at k=1, where this same router `
+     + `reaches ${PK.hq_per_gpu_h[0].toFixed(2)} at k=1 and ${PK.hq_per_gpu_h[4].toFixed(2)} at k=8.`,
+     "No run has ever had both."],
+    { fill: C.panel, hc: C.ink, fs: 9.5 });
+
+  card(s, M + 9.6, 3.8, 2.73, 1.75, "What one hour cannot say",
+    [`${SV.arms.map(a => a[7]).reduce((a, b) => Math.min(a, b))}–`
+     + `${SV.arms.map(a => a[7]).reduce((a, b) => Math.max(a, b))} folds per arm in the `
+     + `window, so the order WITHIN the agentic group is not a ranking.`],
+    { fill: C.panel, hc: C.muted, fs: 9.5, hfs: 11 });
+
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.62, w: W - 2 * M, h: 1.32,
+    fill: { color: C.failTint }, line: { color: C.fail, width: 2 } });
+  text(s, [
+    { text: "“Agentic” is not a property that predicts anything.  ",
+      options: { bold: true, color: C.fail } },
+    { text: `Qwen3.5-122B reaches ${SV.arms[4][3]} passing folds per GPU-hour where the `
+      + `scripted route — which has no model in it at all — reaches ${SV.arms[0][3]}. The `
+      + `spread across four models (${SV.arms[4][3]} to ${SV.arms[1][3]}, pLDDT `
+      + `${SV.arms[4][5]} to ${SV.arms[1][5]}) is larger than the gap between “model” and `
+      + `“no model”.\n`, options: { color: C.text, breakLine: true } },
+    { text: "And none of this ran through IMPRESS-A. This engine has measured neither "
+      + "lever: `replicas` IS the packing lever and has never exceeded 1 on the real "
+      + "chain, and every stage it has ever timed was a mock.",
+      options: { bold: true, color: C.ink } },
+  ], M + 0.16, 5.72, W - 2 * M - 0.32, 1.14, { fontSize: 10 });
+
+  s.addNotes(`
+This is the slide the performance act does not otherwise have, and every number on it was
+measured by somebody else's code — which is the point.
+
+Top table: one policy, held fixed, five runs at one, two, four, six and eight pipelines per
+GPU. Packing alone is worth five and a half times on backbones per node-hour. No
+decision-making changed.
+
+Bottom table: four decision layers at one hour, all at one pipeline per GPU. The best
+reaches 6.35 high-quality folds per GPU-hour, where that same router reaches 2.13 at k=1 and
+10.88 at k=8. So the decision layer is worth about three times at matched packing, packing
+about five times at a matched decision layer, and nobody has run both.
+
+Then the red box, which is the finding I would defend hardest. Qwen3.5-122B gets 2.88
+passing folds per GPU-hour; the scripted route, with no model in it, gets 12.12. The spread
+across four models is bigger than the gap between having a model and not having one. So
+"agentic" predicts nothing — model identity does.
+
+And this engine has measured neither lever. Replicas IS the packing lever, and it has never
+exceeded one on the real chain.
+  `);
+  footer(s, `TRANSCRIBED, from impress-agentic-performance report.md §§10-12 (verified, 19 checks) · ${PK.caveat}`);
+}
+
+// ============================================================ 20. the interlock
 {
   const s = slide();
   title(s, "Where the API refuses breadth — and a seam in it", "act 2 · performance",
@@ -1384,7 +1482,7 @@ quietly.
   footer(s, `mined: run.json · mock.widths_per_signature · trust: ${Q.trust_seen} seen, ${Q.trust_clean} clean, ${Q.trust_promoted} promoted`);
 }
 
-// ============================================================ 20. ACT 3 divider
+// ============================================================ 21. ACT 3 divider
 {
   const s = slide();
   divider(s, {
@@ -1400,7 +1498,7 @@ quietly.
        `${S.n_plane_ops} control-plane operations and a RemoteSession that implements the reasoner's own protocol — and no caller`],
     ],
     caveat: "nothing outside this package has ever driven a campaign — the four-hour live "
-      + "run two slides from now is the reference pipeline's toolkit with an LLM on it, not "
+      + "run three slides from now is the reference pipeline's toolkit with an LLM on it, not "
       + "this engine — and `--model C` with no caller falls back to model D after 5 s",
   });
   s.addNotes(`
@@ -1425,7 +1523,7 @@ the log.
   `);
 }
 
-// ============================================================ 21. a campaign, from the user's chair
+// ============================================================ 22. a campaign, from the user's chair
 // The first of four user-directed slides: what the thing is like to run, rather than what
 // it is made of. No protocol, no types, one command. Everything on it is mined from the
 // campaign this deck ran, so the narrative cannot drift from the evidence.
@@ -1503,7 +1601,7 @@ the checkout was dirty when it started.
   footer(s, `mined from the campaign this deck ran · ${HEAD}`);
 }
 
-// ============================================================ 22. when it refuses you
+// ============================================================ 23. when it refuses you
 {
   const s = slide();
   title(s, "When it says no, it says what to change", "act 3 · usability");
@@ -1571,7 +1669,7 @@ hardware. It warns now. A warning is not a gate.
   footer(s, "the dangerous refusal is the one phrased as a smaller plan");
 }
 
-// ============================================================ 23. live next door
+// ============================================================ 24. live next door
 {
   const s = slide();
   title(s, "Next door, a model drove the real toolkit for four hours",
@@ -1598,20 +1696,22 @@ hardware. It warns now. A warning is not a gate.
     LR.first_live_1h.weaknesses,
     { fill: C.panel, hc: C.ink, fs: 10 });
 
-  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 4.42, w: 7.9, h: 1.2,
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 4.48, w: 7.9, h: 1.36,
     fill: { color: C.failTint }, line: { color: C.fail, width: 1.5 } });
   text(s, [
-    { text: "Two caveats, and they are load-bearing.  ", options: { bold: true, color: C.fail } },
+    { text: "Two caveats, load-bearing — and both got WORSE with the 2026-10-26 analysis.  ",
+      options: { bold: true, color: C.fail } },
     { text: P4.caveats.join("  ") },
-  ], M + 0.14, 4.52, 7.62, 1.0, { fontSize: 10, color: C.text });
+  ], M + 0.14, 4.55, 7.62, 1.24, { fontSize: 8.6, color: C.text });
 
   text(s, [
     { text: "Both arms ran the full four hours with zero task failures. ",
       options: { bold: true, color: C.ink } },
     { text: "Throughput is equal, so the round trip costs nothing measurable — the difference "
-      + "is entirely in which work the funnel chose to do. This is not IMPRESS-A: no campaign "
-      + "engine, no gates, no interlock, no trust. It is the idea, on hardware, without them." },
-  ], M, 5.85, W - 2 * M, 0.7, { fontSize: 11.5 });
+      + "is entirely in which work the funnel chose to do, and most of THAT is now the harness "
+      + "rather than the model. This is not IMPRESS-A: no campaign engine, no gates, no "
+      + "interlock, no trust." },
+  ], M, 5.94, W - 2 * M, 0.7, { fontSize: 11 });
 
   s.addNotes(`
 This is the one slide in the deck with figures I did not mine from this checkout, and I
@@ -1626,17 +1726,27 @@ Throughput came out equal, which is the result I least expected: the model's rou
 costs nothing measurable against GPU work. The funnel was not equal — three times the
 passing designs, from fewer sequence tasks.
 
-Now the red box, because this number will get quoted at me otherwise. The reference arm
-came in about twice as bad as its own record, so part of that gap is a weak baseline and
-not agent skill. And the place the difference actually originates — an eighty-eight against
-forty-nine percent pass rate on the same relax tool — is unexplained.
+Now the red box, and both of these caveats got worse with the newer analysis, not better.
+
+The first used to say the reference arm looked weak. It is now measured: with the decision
+layer held fixed, the reference pipeline's own fastrelax pass rate fell from sixty-three
+point six percent to forty-nine point four over sixteen days, and standardising for binder
+length explains only one point three of those fourteen points. So the baseline this arm is
+three times better than was itself degrading. Do not quote the three-point-three.
+
+The second used to say the fastrelax gap was unexplained. It is now partly explained, and
+not in the model's favour. The agentic harness pack-minimises before relaxing and the
+reference harness never does — zero of five thousand and two decoys across fourteen runs,
+while the scripted route pack-minimises forty-eight times out of forty-eight and has no
+model in it at all. That gap belongs to the two examples' tooling, not to the decision
+layer.
 
 And the thing to hold on to: none of this ran through IMPRESS-A.
   `);
   footer(s, `TRANSCRIBED · ${LR.source} · the tool list is mined, from examples/agentic_small_molecule_binding/tools.py:35`);
 }
 
-// ============================================================ 24. what that says about these surfaces
+// ============================================================ 25. what that says about these surfaces
 {
   const s = slide();
   title(s, "What those four hours say about these surfaces", "act 3 · usability");
@@ -1651,12 +1761,15 @@ And the thing to hold on to: none of this ran through IMPRESS-A.
      ["A work dir the container could not see read exactly like a model failure",
       "Exactly the class `impress-a preflight` exists for — and it would NOT have caught this "
       + "one: it checks the login node, not what a container binds. An honest gap."],
-     [`The model can live inside the allocation: ${LR.hosted_in_allocation.qwen_72b.turns} turns, $0 of API, served as one more task`,
-      "That is what model C's endpoint could be. Today `--model C` with no caller falls back to "
-      + "model D after 5 s rather than failing — ask 5."]],
-    M, 1.6, [4.6, 7.73], { fs: 10.5, rowH: 0.8, hfill: C.a, margin: 0.09 });
+     [`The model can live inside the allocation, and it is NOT free: a second billed node plus `
+      + `${Math.round(100 * AC.startup_share)}% of the allocation before the first task event `
+      + `(${AC.gpu_h_per_passing} GPU-h/passing fold, not ${(AC.gpu_h_per_passing / 2).toFixed(3)})`,
+      "That is what model C's endpoint could be, and the startup tax argues for LONG campaigns "
+      + "rather than short ones. Today `--model C` with no caller falls back to model D after "
+      + "5 s rather than failing — ask 5."]],
+    M, 1.6, [4.6, 7.73], { fs: 9.5, rowH: 0.8, hfill: C.a, margin: 0.09 });
 
-  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.85, w: W - 2 * M, h: 1.0,
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.72, w: W - 2 * M, h: 1.08,
     fill: { color: C.failTint }, line: { color: C.fail, width: 2 } });
   text(s, [
     { text: "Say this out loud:  ", options: { bold: true, color: C.fail } },
@@ -1664,7 +1777,7 @@ And the thing to hold on to: none of this ran through IMPRESS-A.
       + "gates, no trust ledger, one pipeline per GPU. It is evidence that the idea works on "
       + "this hardware, and it is not evidence that this engine does. The component claim is "
       + "still empty, and the nearest thing to a user it has is still me." },
-  ], M + 0.16, 5.96, W - 2 * M - 0.32, 0.8, { fontSize: 12, color: C.text });
+  ], M + 0.16, 5.82, W - 2 * M - 0.32, 0.9, { fontSize: 11.5, color: C.text });
 
   s.addNotes(`
 So what does a four-hour run of somebody else's code tell you about these six surfaces?
@@ -1682,8 +1795,12 @@ and the model correctly concluded its own designs kept failing. An environmental
 that reads exactly like a reasoning failure. That is the class of thing preflight exists
 for, and preflight would not have caught this one.
 
-Fourth: the model can be served inside the allocation for no API cost at all, which is what
-model C's endpoint could be — if model C stopped silently falling back.
+Fourth, and I have had to correct this one: the model CAN be served inside the allocation,
+and it is not free. A second node that runs no pipeline, and twenty-seven percent of a
+one-hour allocation gone before the first task event while a seventy-two-billion-parameter
+model comes up. Charged honestly that is 0.243 GPU-hours per passing fold, not 0.121 — an
+argument for in-allocation serving on long campaigns and against it on short ones. Still
+what model C's endpoint could be, if model C stopped silently falling back.
 
 And then the red line, which I would rather say than have asked: none of this ran through
 IMPRESS-A.
@@ -1691,7 +1808,78 @@ IMPRESS-A.
   footer(s, `the live figures are TRANSCRIBED · ${LR.source}`);
 }
 
-// ============================================================ 25. as an application
+// ============================================================ 26. how these runs fail
+// The three failure modes from the 2026-10-26 analysis next door, each against the surface
+// in THIS package that would or would not catch it. The honest answer is one of three, and
+// the one it misses is the one that looks healthiest - which is why the slide is here and
+// not in a backlog.
+{
+  const s = slide();
+  title(s, "How an agentic run fails on a cluster — and what here would catch it",
+    "act 3 · usability · three runs kept as evidence", { fs: 22 });
+
+  const FM = AN.failure_modes;
+  tbl(s, ["The failure", "How it looked", "What in IMPRESS-A would catch it"],
+    [[`${FM.modes[0].name} · ${FM.modes[0].job}`,
+      "Four pipelines fell back to the scripted route on turn two and ran the hour without "
+      + "a model. 46 relaxes, 35 passing folds, a transcript that reads entirely healthy.",
+      "NOTHING. Gates check artifacts, not who chose them; a scripted route emits "
+      + "well-formed work that passes every one. There is no degraded flag on a Decision "
+      + "and none in the ledger — ask 5."],
+     [`${FM.modes[1].name} · ${FM.modes[1].job}`,
+      "Every rfd3 write landed in the container's tmpfs overlay and vanished. rfd3 logged "
+      + "success, out/ was empty, and the model correctly concluded its backbones failed.",
+      "Gate 1 (count_matches_request) catches the empty result — as a SCIENCE failure. The "
+      + "interlock then counts it against the pattern's trust, so a broken bind demotes a "
+      + "good workflow shape."],
+     [`${FM.modes[2].name} · ${FM.modes[2].job}`,
+      "The launcher's pre-flight found the model's API key missing in the submitting "
+      + "environment and aborted in 9 s, before claiming the GPUs. No run tree at all.",
+      "`impress-a preflight` — this is exactly the class it exists for, and the only one of "
+      + "the three it covers. Tri-state, and a timeout is never a pass."]],
+    M, 1.56, [2.6, 5.0, 4.73], { fs: 9, rowH: 0.9, hfill: C.a, margin: 0.08 });
+
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.38, w: W - 2 * M, h: 1.46,
+    fill: { color: C.failTint }, line: { color: C.fail, width: 2 } });
+  text(s, [
+    { text: "One of three, and it is the cheap one.  ", options: { bold: true, color: C.fail } },
+    { text: FM.lesson + ". The two detectors that separate it are both outside this package: "
+      + "a degraded-turn count, and prompt tokens repeating the previous turn on 98.6% of "
+      + "turns against 0–5.9% on every healthy arm. ",
+      options: { color: C.text } },
+    { text: "IMPRESS-A records which policy ran and every artifact it produced, and nowhere "
+      + "records that the policy stopped being the policy.",
+      options: { bold: true, color: C.ink } },
+  ], M + 0.16, 5.46, W - 2 * M - 0.32, 1.3, { fontSize: 10 });
+
+  s.addNotes(`
+Three runs next door are kept as evidence rather than as measurements, and each asks a
+different surface of this package a question.
+
+The first should worry you. The client dropped a field the endpoint requires, so all four
+pipelines fell back to the scripted route on turn two and ran the rest of the hour with no
+model in them — forty-six relaxes, thirty-five passing folds, and a transcript that reads
+completely healthy, because that is what the scripted route looks like. What would IMPRESS-A
+catch? Nothing. The gates check artifacts, not who chose them.
+
+The second: every backbone write went into a container overlay and vanished. Gate one
+catches the empty result — as a science failure. The interlock then counts that against the
+pattern's trust, so a broken container bind quietly demotes a perfectly good workflow shape.
+That is a real finding about this code, and it is on the slide rather than fixed, because a
+fix is its own change.
+
+The third cost nine seconds: a pre-flight found a missing API key and aborted before
+claiming the GPUs. That is the one class preflight here covers.
+
+One of three. And the lesson generalises: a harness that degrades into a WORKING fallback
+produces plausible output at full rate, and nothing but an explicit flag distinguishes it.
+This engine records which policy ran and every artifact it produced, and nowhere records
+that the policy stopped being the policy.
+  `);
+  footer(s, `the three runs are TRANSCRIBED, from impress-agentic-performance report.md §14 · the degraded path and the work-dir guard are MINED, from ${FM.modes[0].anchor} and ${FM.modes[1].anchor}`);
+}
+
+// ============================================================ 27. as an application
 {
   const s = slide();
   title(s, "As an application: one command, one honest gate", "act 3 · usability");
@@ -1761,7 +1949,7 @@ whether the checkout was dirty.
   footer(s, "the output above is the shape of real preflight output, with paths replaced by placeholders — see CODE_FOR_DECK.md");
 }
 
-// ============================================================ 26. surface 5, the control plane
+// ============================================================ 28. surface 5, the control plane
 {
   const s = slide();
   title(s, "Surface 5: one protocol, two transports", "act 3 · usability");
@@ -1827,7 +2015,7 @@ it, and it is the first thing that has to change when something does.
   footer(s, "control/plane.py:23 is the protocol · control/http.py:183 is the whole route table · control/session.py:48 is RemoteSession");
 }
 
-// ============================================================ 27. the layering contract
+// ============================================================ 29. the layering contract
 {
   const s = slide();
   title(s, "Why the surfaces stay separate: an allow-list in a test",
@@ -1905,7 +2093,7 @@ invisible to it.
   footer(s, `${S.n_layers} layers, ${K.tests_collected} tests, ${K.test_files} test files · the table mirrors docs/reference/architecture.md`);
 }
 
-// ============================================================ 28. status by dimension
+// ============================================================ 30. status by dimension
 {
   const s = slide();
   title(s, "Status, by dimension", "where this actually is");
@@ -1923,14 +2111,14 @@ invisible to it.
       ["Both ends of the backend bounded", "startup and shutdown timeouts, from real hangs"],
       ["Provenance is complete", "the campaign can be timed from outside it"]],
      [["No concurrency measurement", "`concurrency > 1` never exercised"],
-      ["No baseline, no scaling", "nothing here divides into a speedup"],
+      ["No baseline, and neither lever", "packing ×5.52 and policy ×3 are measured next door"],
       ["Real chain at width 1 only", "`replicas > 1` has never run on it (A10)"]]],
     ["USABILITY", C.a,
      [["One YAML, one command", "and a preflight that runs before the queue"],
       ["Toolkits discovered at runtime", "$IMPRESS_A_TOOLKITS, no package change"],
       ["Two transports, one protocol", "in-process and HTTP, tested against each other"]],
      [["Nothing external drives it", "the component claim is empty"],
-      ["`--model C` fails open", "no caller → falls back to D after 5 s"],
+      ["Fallbacks are invisible", "no caller → D after 5 s, and nothing records it"],
       ["No serve/reason command", "model C is reachable only by embedding"]]],
   ];
   cols.forEach(([name, col, green, red], i) => {
@@ -1969,12 +2157,13 @@ never been exercised.
 
 Performance runs: engine latency is measured, both ends of the backend lifecycle are
 bounded, and the provenance log is complete enough to time the campaign from outside.
-Performance does not: no concurrency measurement, no baseline, and the real chain has only
-ever run one lineage.
+Performance does not: no concurrency measurement, no baseline, the real chain has only ever
+run one lineage, and neither of the two levers that move the science has been measured on
+this engine.
 
 Usability runs: one YAML and one command, runtime toolkit discovery, two transports tested
-against each other. Usability does not: nothing external drives it, model C fails open, and
-there is no serve command.
+against each other. Usability does not: nothing external drives it, a fallback leaves no
+record anywhere, and there is no serve command.
 
 The red column is not a to-do list. It is the list of things you should not believe from
 this deck.
@@ -1982,7 +2171,7 @@ this deck.
   footer(s, "if you cut one slide from this deck, do not make it this one");
 }
 
-// ============================================================ 29. asks
+// ============================================================ 31. asks
 {
   const s = slide();
   s.background = { color: C.ink };
@@ -2011,10 +2200,10 @@ this deck.
     [4, "Is loopback-only the permanent answer for the control plane?", C.accent, "USABILITY",
      "No auth, no TLS, by design and documented. Before anything external drives a campaign, "
      + "does this need a token, or does it stay in-allocation forever?  control/http.py:26"],
-    [5, "Should `--model C` with no caller refuse to start?", C.accent, "USABILITY",
-     "It falls back to model D after 5 s, so a headless campaign silently becomes an "
-     + "explicit-policy one. Fail fast, block forever, or keep the fallback and log louder?  "
-     + "cli/__init__.py:103"],
+    [5, "Should a fallback be a first-class flag, not a log line?", C.accent, "USABILITY",
+     "`--model C` with no caller falls back to D after 5 s, so a headless campaign silently "
+     + "becomes an explicit-policy one. Next door the same shape ran 284 of 288 turns with no "
+     + "model and looked healthy.  cli/__init__.py:103"],
     [6, "Should model A's imports be lazy?", C.accent, "PERFORMANCE",
      `The CLI imports every policy at module scope, so \`impress-a tools\` pays for langgraph. `
      + `About ${(Q.elapsed_s - Q.span_s).toFixed(1)} s of this deck's ${Q.elapsed_s} s run was startup, outside the loop.  `
@@ -2055,7 +2244,9 @@ check quietly becomes a three-lineage one.
 
 Four. Is loopback-only permanent for the control plane?
 
-Five. Should model C with no caller refuse to start rather than fall back?
+Five. Should a fallback be a first-class flag rather than a log line? Model C with no
+caller falls back to D after five seconds. Next door, the same shape ran two hundred and
+eighty-four of two hundred and eighty-eight turns with no model in it and looked healthy.
 
 Six. Should the CLI's policy imports be lazy? Listing tools currently pays for langgraph,
 and about ${STARTUP_S} seconds of this deck's run was startup outside the loop.

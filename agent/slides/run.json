@@ -1,7 +1,7 @@
 {
  "code": {
-  "head": "c163fe2",
-  "branch": "merge-impress-a",
+  "head": "bf32d1d",
+  "branch": "slides/impress-a-api-user-slides",
   "packages": {
    "tools": 1547,
    "runtime": 1027,
@@ -50,9 +50,9 @@
    "  cycles   : 2",
    "  stop     : target front size 3 reached",
    "  nodes    : 4  front: 3",
-   "    n000001-2719 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
-   "    n000003-2719 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
-   "    n000004-2719 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
+   "    n000001-1886 qc=suspect  sc_rmsd=2.382 iptm=0.681 ddg=-2.027 clashscore=3.38",
+   "    n000003-1886 qc=suspect  sc_rmsd=2.3 iptm=0.7 ddg=-1.079 clashscore=5.61",
+   "    n000004-1886 qc=suspect  sc_rmsd=2.439 iptm=0.645 ddg=-2.462 clashscore=4.2"
   ],
   "admissions": [
    {
@@ -97,7 +97,7 @@
   ],
   "nodes": [
    {
-    "node": "n000001-2719",
+    "node": "n000001-1886",
     "run": "r0002",
     "lineage": 0,
     "qc": "suspect",
@@ -113,7 +113,7 @@
     }
    },
    {
-    "node": "n000002-2719",
+    "node": "n000002-1886",
     "run": "r0002",
     "lineage": 1,
     "qc": "suspect",
@@ -129,7 +129,7 @@
     }
    },
    {
-    "node": "n000003-2719",
+    "node": "n000003-1886",
     "run": "r0003",
     "lineage": 0,
     "qc": "suspect",
@@ -145,7 +145,7 @@
     }
    },
    {
-    "node": "n000004-2719",
+    "node": "n000004-1886",
     "run": "r0003",
     "lineage": 1,
     "qc": "suspect",
@@ -162,9 +162,9 @@
    }
   ],
   "front": [
-   "n000001-2719",
-   "n000003-2719",
-   "n000004-2719"
+   "n000001-1886",
+   "n000003-1886",
+   "n000004-1886"
   ],
   "stop": "target front size 3 reached",
   "cycles": 2,
@@ -709,11 +709,11 @@
  "baseline": {
   "code": {
    "lines": {
-    "pipeline": 1450,
-    "runner": 574,
-    "nonadaptive": 102
+    "pipeline": 1362,
+    "runner": 575,
+    "nonadaptive": 110
    },
-   "decision_fn_lines": 220,
+   "decision_fn_lines": 236,
    "next_step_sites": 19,
    "steps": [
     "DONE",
@@ -757,7 +757,7 @@
     "mpnn_ensemble_size": 10.0,
     "rfd3_partial_t": 10.0
    },
-   "head": "c163fe2"
+   "head": "bf32d1d"
   },
   "measured": {
    "source": "IMPRESS small-molecule performance report (impress-smallmol-performance/report.md), over impress_runs_export_nvme_2026-10-08.tar.gz",
@@ -867,6 +867,83 @@
     "gpu_h": 64,
     "share_of_billed": 0.37,
     "source": "docs/limitations.md"
+   }
+  },
+  "levers": {
+   "source": "sibling analysis project impress-agentic-performance, report.md SS12-13; verified by its tools/verify.py (19 checks), over the same run archive",
+   "packing": {
+    "what": "five 1-hour runs of ONE policy (adaptive_decision, held fixed) at k = 1, 2, 4, 6 and 8 pipelines per GPU",
+    "k": [
+     1,
+     2,
+     4,
+     6,
+     8
+    ],
+    "rfd3_per_node_h": [
+     57.8,
+     105.6,
+     179.7,
+     258.2,
+     319.1
+    ],
+    "passing_per_gpu_h": [
+     3.96,
+     6.3,
+     9.95,
+     12.06,
+     20.55
+    ],
+    "hq_per_gpu_h": [
+     2.13,
+     2.4,
+     4.83,
+     5.43,
+     10.88
+    ],
+    "gain_rfd3": 5.52,
+    "gain_hq": 5.11,
+    "decision_layer_gain": 3.0,
+    "best_agentic_hq_per_gpu_h": 6.35,
+    "finding": "packing alone is worth x5.52 on backbones per node-hour and x5.11 on high-quality folds per GPU-hour with the decision layer held fixed; the best decision layer anyone has run is worth about x3 at matched packing; and no run has ever had both",
+    "caveat": "single runs, one hour each, one policy, one storage partition, and k=8 is the largest rung anybody ran rather than a measured maximum"
+   },
+   "regression": {
+    "what": "the reference pipeline's own fastrelax pass rate, decision layer held fixed at adaptive_decision() throughout",
+    "series": [
+     [
+      "22701168",
+      "2026-10-06",
+      0.636,
+      6.77,
+      119
+     ],
+     [
+      "23029475",
+      "2026-10-20",
+      0.588,
+      7.5,
+      119
+     ],
+     [
+      "23065238",
+      "2026-10-20",
+      0.484,
+      9.45,
+      125
+     ],
+     [
+      "23114772",
+      "2026-10-22",
+      0.494,
+      12.81,
+      127
+     ]
+    ],
+    "explained_by_length": 0.013,
+    "residual": 0.129,
+    "finding": "63.6% -> 49.4% with the policy unchanged; standardising the early run onto the late run's binder-length distribution moves it only to 62.3%, so 1.3 of the 14.2 points lost is length and 12.9 points are not",
+    "caveat": "observational - allocation, wall clock and ensemble budget all move along the series, every point is a single run, and settling it needs a rerun at commit e2aa00d. It is CONSISTENT WITH a regression and does not establish one"
    }
   },
   "our_rosetta_gates": {

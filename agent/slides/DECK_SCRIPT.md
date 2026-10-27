@@ -15,8 +15,8 @@ realistic rate for technical material delivered with pauses.
 |---|---|---|---|---|
 | 1. Title | 1.1 min | | 13. The seam: the engine | 1.5 |
 | 2. What it does | 1.3 | | 14. What the loop costs | 1.5 |
-| 3. The baseline | 1.9 | | 15. Seven jobs (F3) | 1.5 |
-| 4. Three dimensions | 0.9 | | 16. Scale and yield | 1.6 |
+| 3. The baseline | 2.3 | | 15. Seven jobs (F3) | 1.5 |
+| 4. Three dimensions | 0.9 | | 16. Scale and yield | 2.1 |
 | 5. The constraint | 1.3 | | 17. Four defects | 1.3 |
 | 6. ACT 1 - Functionality | 0.5 | | 18. The trust ledger | 1.5 |
 | 7. The loop (F1) | 1.2 | | 19. ACT 3 - Usability | 0.5 |
@@ -26,7 +26,7 @@ realistic rate for technical material delivered with pauses.
 | 11. ACT 2 - Performance | 0.5 | | 23. Asks | 1.9 |
 | 12. The seam: dispatch | 1.4 | | | |
 
-**Main path: 4548 words = 29.3 minutes of speech.** Backups add 4.3 min if used.
+**Main path: 4680 words = 30.2 minutes of speech.** Backups add 4.3 min if used.
 
 | Act | The question it answers | Slides | What it concedes |
 |---|---|---|---|
@@ -36,13 +36,13 @@ realistic rate for technical material delivered with pauses.
 
 | Order | What's in | Speech | Fits |
 |---|---|---|---|
-| **A · full** | every main slide | **29.3** | a 35-minute slot, or a working session where questions land inline |
-| **B · default** | drop 17, 18, 20 | **25.6** | a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence |
-| **C · hard twenty** | drop 8, 9, 13, 15, 17, 18, 20 | **20.4** | a hard 20 that leaves real room for discussion - the baseline, the three dividers, the dispatch seam, both measured performance slides, status and asks |
+| **A · full** | every main slide | **30.2** | 30.2 min of speech: a 35-minute slot, or a working session where questions land inline |
+| **B · default** | drop 17, 18, 20 | **26.5** | 26.5 min, for a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence |
+| **C · hard twenty** | drop 8, 9, 13, 15, 17, 18, 20, 21 | **19.7** | 19.7 min, for a hard 20 that leaves real room for discussion - the baseline (now carrying the reference pipeline's own dated fastrelax series), the three dividers, the dispatch seam, both measured performance slides, status and asks. The control plane (21) joined the drops when slides 3 and 16 grew to carry the 2026-10-26 evidence: it is the surface with no caller, so it is the cheapest thing in the deck to describe in a sentence |
 
 **Protect 3, 4, 14, 16, 22 and 23.** Three and four are what make this a comparison rather than a tour; 14 and 16 are the only measured performance claims in the deck; 22 is status and 23 is the asks. Never cut a divider: a cut deck without them is a list of slides. Backups B1 (typed hops) and B2 (compute patterns) are already out of every order - do not put them back to fill time.
 
-**Say these out loud even if nothing prompts them:** that every REAL run so far is a single lineage, and `replicas > 1` has only ever executed against the mock toolkit - the deck's own mock run in run.json does two lineages per run - never on the six-stage chain; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer.
+**Say these out loud even if nothing prompts them:** that every REAL run so far is a single lineage, and `replicas > 1` has only ever executed against the mock toolkit - the deck's own mock run in run.json does two lineages per run - never on the six-stage chain; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer; that the baseline figures credited on slides 3 and 15 are the reference pipeline's BEST period and not its current one - with the same decision function its own fastrelax pass rate fell 63.6% -> 49.4% between 2026-10-06 and 2026-10-22, and only 1.3 of those 14.2 points is binder length, which this deck states rather than uses; and that the lever this deck does NOT pull is now measured - one policy held fixed at k=1 to k=8 pipelines per GPU is worth x5.52 on backbones per node-hour and x5.11 on high-quality folds per GPU-hour, against about x3 for the best decision layer anybody has run at matched packing, and we are running one lineage on one of four GPUs.
 
 ---
 
@@ -66,7 +66,7 @@ Right card, because you would ask and I would rather say it first. Every run we 
 
 Read it as a floor. What it proves is that the plumbing survives contact with real tools.
 
-## 3. The baseline — *1.9 min*
+## 3. The baseline — *2.3 min*
 
 [1:35] What this is compared against. Not a blank page.
 
@@ -76,7 +76,7 @@ So the question is not whether an adaptive pipeline works. It does. The question
 
 The bottom cards are why I think composition is worth the trouble, and they are their numbers. Their guided feedback, against its own parent fold, is flat — plus nought point nought one one pLDDT, p of nought point eight five. A cheap re-sampler, not a ratchet — and still worth having at four times cheaper per fold. And eight hundred passing folds are five hundred and ninety-six clusters: width buys independent searches, depth refines one.
 
-The last line is owed rather than implied — that pipeline paid for lessons we inherited for free, including the storage fix in act two.
+The last line is owed rather than implied — that pipeline paid for lessons we inherited for free, including the storage fix in act two. And the half of it in their colour is owed too: these are their best figures, not their current ones. With the same decision function their own fastrelax rate fell sixty-four to forty-nine percent by October twenty-second, and binder length explains one point of fourteen. I am crediting the healthy period on purpose, and I am not using the rest against them.
 
 ## 4. Three dimensions — *0.9 min*
 
@@ -202,7 +202,7 @@ Bottom right, the caveat for anyone reading our cost models: diffusion took 146 
 
 The table underneath is three later jobs that changed nothing about the science and asked one question — does the shape earn trust. The first ran thirty tasks out of thirty cleanly and promoted nothing, because we were counting design quality as evidence about the workflow. With only integrity gates counting, the same chain promoted after its second run in both later jobs.
 
-## 16. Scale and yield — *1.6 min*
+## 16. Scale and yield — *2.1 min*
 
 [1:30] The slide worth the most in this act, and almost none of it is our data.
 
@@ -213,6 +213,8 @@ Bottom left is the pair worth staring at. Their eight hundred and four passing f
 Right side is what this project does about it, and the dotted borders are doing the work. Replicas-N means N independent lineages, one node each, and the executor never funnels them back into one candidate. The front is deliberately not monotonic, so a node promoted on an optimistic prediction gets demoted by its own assay. Trust is scored on shape, so breadth has an identity of its own.
 
 All of it dotted — written, typed, unit-tested, and never executed on real tools; the only lineages that have run are mock ones. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.
+
+And the second half of that box is newer than the rest of this deck. The same archive, re-derived at five packing rungs with one policy held fixed: packing alone is worth five and a half times on backbones per node-hour, against about three times for the best decision layer anybody has run. Nobody has had both. We run one lineage on one of four GPUs — the cheap lever, un-pulled.
 
 ## 17. Four defects — *1.3 min*
 

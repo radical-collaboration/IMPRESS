@@ -413,6 +413,7 @@ def live_next_door() -> dict | None:
             "total_lines": sum(files.values()),
         },
         "runs": LIVE_RUNS,
+        "analysis": NEXT_DOOR_ANALYSIS,
     }
 
 
@@ -438,12 +439,15 @@ LIVE_RUNS = {
                     "usd_per_design": 0.14, "turns": 1462},
         "both": "ran the full 4 h to TIMEOUT, 0 task failures, 0 degraded turns",
         "caveats": [
-            "The reference arm came in about 2x worse than its own record (22701168: "
-            "0.160 GPU-h per passing fold), so an unknown part of the gap is a weak "
-            "baseline rather than agent skill. Do not quote the 3.3x.",
-            "The fastrelax gap - 88% against 49% on the same tool with the same "
-            "thresholds - is unexplained, and it is where the funnel difference "
-            "actually originates.",
+            "The weak baseline is now MEASURED, not suspected: with the decision layer "
+            "held fixed at adaptive_decision(), the reference pipeline's own fastrelax "
+            "pass rate fell 63.6% -> 49.4% between 22701168 and this run, and only 1.3 "
+            "of those 14.2 points is explained by binder length. Do not quote the 3.3x.",
+            "And the fastrelax gap is no longer the decision layer's to claim: the "
+            "agentic HARNESS pack-minimises before relaxing and the reference harness "
+            "never does (0 of 5,002 decoys across 14 runs) - including the scripted "
+            "route at 48 of 48, which has no model in it. It is a confound between the "
+            "two examples.",
         ],
     },
     "first_live_1h": {
@@ -486,6 +490,132 @@ LIVE_RUNS = {
 }
 
 
+# TRANSCRIBED, every figure below, from the sibling analysis project
+# `impress-agentic-performance` (report.md SS10-14), whose tools/verify.py passes 19 checks
+# including reproduction of three independently published scorers. Its own tidy tables are
+# named per block so a figure can be traced to the file it was computed in rather than to a
+# paragraph. Nothing here is derivable from this checkout, and nothing here is IMPRESS-A:
+# every run below is the reference pipeline or the agentic example next door, on Delta.
+#
+# Two of the survey arms (beam-reflection) ran a NEWER revision of that example than this
+# checkout carries - models.yaml here has no beam profile - so the survey is evidence about
+# the idea at a commit this deck cannot cite.
+NEXT_DOOR_ANALYSIS = {
+    "source": "sibling analysis project impress-agentic-performance, report.md SS10-14; "
+              "verified by its tools/verify.py (19 checks). Not derivable from this "
+              "checkout, and none of it ran through IMPRESS-A",
+    "survey_1h": {
+        "from": "data/tidy/results_survey.json",
+        "what": "four decision layers at one hour, 4 pipelines on 4 GPUs, windowed to "
+                "minutes 10-36 (the last whole minute every arm was still working)",
+        "window_min": [10, 36],
+        # label, job, nodes, passing folds/GPU-h, high-quality folds/GPU-h, median pLDDT,
+        # fastrelax pass rate, folds inside the window
+        "arms": [
+            ["scripted route", "23110801", 1, 12.12, 5.77, 88.2, 0.604, 25],
+            ["Beam (reflection)", "23225651", 1, 8.08, 6.35, 94.4, 0.622, 15],
+            ["Qwen2.5-72B, in-allocation", "23207314", 2, 6.35, 3.17, 92.2, 0.756, 22],
+            ["claude-sonnet-5-5 pilot", "23112484", 1, 5.77, 3.46, 86.2, 0.482, 14],
+            ["Qwen3.5-122B, in-allocation", "23229812", 2, 2.88, 0.58, 83.8, 0.500, 12],
+        ],
+        "finding": "across four models at the same allocation the spread is 2.88 -> 8.08 "
+                   "passing folds per GPU-hour and 83.8 -> 94.4 median pLDDT. Qwen3.5-122B "
+                   "is WORSE than the scripted route, which has no model in it at all, so "
+                   "'agentic' predicts nothing on its own - the model identity does",
+        "caveat": "12 to 25 folds per arm inside the window, so the ordering WITHIN the "
+                  "agentic group is not a ranking and is not quoted as one; one hour "
+                  "measures a policy during its worst hour",
+    },
+    "in_allocation_cost": {
+        "from": "data/tidy/results_cost.json",
+        "job": "23207314", "model": "Qwen2.5-72B", "nodes": 2,
+        "gpu_h_billed": 8.02, "gpu_h_per_passing": 0.243,
+        "startup_share": 0.273, "gpu_h_lost_to_startup": 2.19,
+        "fastrelax": 0.756, "folds": [33, 33],
+        "what": "serving the model inside the allocation works and costs: a second billed "
+                "node that runs no pipeline, plus 27% of the allocation spent before the "
+                "first task event while a 72B comes up. Charging it one node understated "
+                "it by exactly 2x - 0.243 GPU-h per passing fold, not 0.121",
+        "caveat": "76% fastrelax is the best of any arm and 33 of 33 folds passed, but it "
+                  "folded only what had already cleared score_interface (11 calls against "
+                  "11 relaxes). That measures GATING DISCIPLINE, not structure quality",
+    },
+    "packing_lever": {
+        "from": "data/tidy/results_packing.json",
+        "what": "five 1-hour runs of ONE policy (adaptive_decision, held fixed) at k = 1, "
+                "2, 4, 6 and 8 pipelines per GPU",
+        "k": [1, 2, 4, 6, 8],
+        "backbones_per_node_h": [57.8, 105.6, 179.7, 258.2, 319.1],
+        "passing_per_gpu_h": [3.96, 6.30, 9.95, 12.06, 20.55],
+        "hq_per_gpu_h": [2.13, 2.40, 4.83, 5.43, 10.88],
+        "gain_backbones": 5.52, "gain_hq": 5.11,
+        "decision_layer_gain": 3.0,
+        "finding": "k=1 -> k=8 is worth x5.52 on backbones per node-hour and x5.11 on "
+                   "high-quality folds per GPU-hour with the decision layer held fixed. "
+                   "The best agentic arm reaches 6.35 high-quality folds per GPU-hour at "
+                   "k=1, where this same router reaches 2.13 at k=1 and 10.88 at k=8 - so "
+                   "the decision layer is worth about 3x at matched packing, packing is "
+                   "worth about 5x at a matched decision layer, and NO RUN HAS EVER HAD "
+                   "BOTH",
+        "caveat": "single runs, one hour each, one policy, one storage partition, and k=8 "
+                  "is the largest rung anybody ran rather than a measured maximum",
+    },
+    "reference_regression": {
+        "from": "data/tidy/results_regression.json",
+        "what": "the reference pipeline's own fastrelax pass rate, decision layer held "
+                "fixed at adaptive_decision() throughout",
+        "series": [["22701168", "2026-10-06", 0.636, 6.77, 119],
+                   ["23029475", "2026-10-20", 0.588, 7.50, 119],
+                   ["23065238", "2026-10-20", 0.484, 9.45, 125],
+                   ["23114772", "2026-10-22", 0.494, 12.81, 127]],
+        "explained_by_length": 0.013, "residual": 0.129,
+        "finding": "63.6% -> 49.4% with the policy unchanged. Standardising the early run "
+                   "onto the late run's binder-length distribution moves it only to 62.3%, "
+                   "so 1.3 of the 14.2 points lost is length and 12.9 points are not",
+        "caveat": "observational - allocation, wall clock and ensemble budget all move "
+                  "along the series, every point is a single run, and settling it needs a "
+                  "rerun at commit e2aa00d, which is a cluster job. It is CONSISTENT WITH "
+                  "a regression and does not establish one",
+    },
+    "failure_modes": {
+        "from": "data/tidy/results_failures.json",
+        "modes": [
+            {"job": "23219379", "name": "the silent fallback",
+             "what": "the client dropped a field the endpoint requires, so all four "
+                     "pipelines fell back to the SCRIPTED ROUTE on turn two and ran the "
+                     "rest of the hour without a model",
+             "loud": "no - it produced 46 relaxes and 35 passing folds and a transcript "
+                     "that reads entirely healthy, because that is what the scripted "
+                     "route looks like",
+             "detector": "degraded_turns = 284 of 288, against 0 on every healthy arm; "
+                         "and prompt tokens repeat the previous turn on 98.6% of turns, "
+                         "against 0.0-5.9% on every healthy model arm",
+             "anchor": "examples/agentic_small_molecule_binding/agentic_pipeline.py:136"},
+            {"job": "23206285", "name": "writes that vanished",
+             "what": "IMPRESS_WORK_DIR sat on a second allocation that the rfd3 launcher "
+                     "does not bind into apptainer, so every write went to the container's "
+                     "--writable-tmpfs overlay and disappeared",
+             "loud": "half - rfd3 logged success and out/ was empty, and the model "
+                     "correctly concluded its backbones kept failing",
+             "detector": "100% of its rfd3 tasks selected no model, against 0% everywhere "
+                         "else",
+             "anchor": "examples/agentic_small_molecule_binding/delta_gpu_run.sh:233"},
+            {"job": "23231485", "name": "the run that cost nine seconds",
+             "what": "the launcher's pre-flight found the model's API key missing in the "
+                     "submitting environment and aborted before claiming the GPUs, rather "
+                     "than spending a four-hour allocation discovering it",
+             "loud": "yes, and cheaply - there is no run tree at all, which is the point "
+                     "of keeping the row",
+             "detector": "0 pipelines with a job stdout on disk",
+             "anchor": None},
+        ],
+        "lesson": "of the three, only the third was cheap and only the second was loud. A "
+                  "harness that degrades into a WORKING fallback produces plausible output "
+                  "at full rate, and nothing but an explicit flag distinguishes it",
+    },
+}
+
+
 def main() -> None:
     doc = {
         "_note": "Generated by slides/api/run_model.py. Do not edit by hand.",
@@ -510,6 +640,11 @@ def main() -> None:
     print(f"  live next door  {L['code']['n_tools']} tools, {L['code']['n_profiles']} profiles, "
           f"overrides {L['code']['overrides']} - runs TRANSCRIBED"
           if L else "  live next door  absent from this checkout")
+    if L:
+        A = L["analysis"]
+        print(f"  next door       {len(A['survey_1h']['arms'])} survey arms, "
+              f"{len(A['packing_lever']['k'])} packing rungs, "
+              f"{len(A['failure_modes']['modes'])} failure modes - all TRANSCRIBED")
     print(f"  mock campaign   {doc['mock']['cycles']} cycles, "
           f"front {doc['mock']['front_size']}, {doc['mock']['elapsed_s']}s, "
           f"{doc['mock']['provenance_records']} provenance records")

@@ -56,6 +56,11 @@ const BC = R.baseline.code;                // the reference pipeline, mined (nul
 const OURG = R.baseline.our_rosetta_gates; // our side of the shared-stage gate comparison
 const A_SRC = "source: " + A.source;
 const BL_SRC = "source: " + BL.source;
+// The 2026-10-26 re-derivation of the same archive: the packing ladder at five rungs, and
+// the reference pipeline's own dated fastrelax series. TRANSCRIBED, and every slide that
+// prints one of its figures names it in the footer.
+const LV = R.baseline.levers;
+const LV_SRC = "source: " + LV.source;
 // Rows are [run, admitted, tasks, qc, failed_gates, ledger]. The deck never restates a
 // count the table itself carries.
 const TRUSTED_NODES = ["22726105", "22728140"]
@@ -258,12 +263,12 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
   const where = BC ? [
     ["the stage graph", `${BC.next_step_sites} next_step assignments in one ` +
       `${BC.decision_fn_lines}-line decision function, over ${BC.steps.length} STEP_ constants`,
-     "run_small_molecule_binding.py:210"],
+     "run_small_molecule_binding.py:191"],
     ["the thresholds", `a PROD dataclass in the runner — fa_rep < ${BC.prod.fastrelax_max_fa_rep}` +
       `, total_score < ${BC.prod.fastrelax_max_score}, interaction_energy < ` +
       `${BC.prod.fastrelax_max_interact}`, "…:63"],
     ["the QC verdict", "computed inside the coroutine that parses the output, then read back " +
-      "out of pipeline.state", "small_molecule_binding.py:1154"],
+      "out of pipeline.state", "small_molecule_binding.py:1074"],
     ["the adaptive hook", "a plain Python closure with full object access, defined in the " +
       "runner script", "briefs/impress.md:112"],
   ] : [["the reference example is not in this tree",
@@ -302,9 +307,17 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
   text(s, [
     { text: "Said plainly, because it is owed: ", options: { bold: true, color: C.ink } },
     { text: "it paid for lessons we inherited for free, including the NVMe fix this project " +
-      "ported out of its PR #67. Nothing here divides its numbers by ours." },
-  ], M, 6.62, 12.33, 0.3, { fontSize: 11.5 });
-  footer(s, `${BL_SRC}; structural counts mined from examples/small_molecule_binding in this repo at ${BC ? BC.head : "absent"}.`);
+      "ported out of its PR #67. Nothing here divides its numbers by ours. ",
+      options: { color: C.text } },
+    { text: `And these are its BEST figures: same decision function, its own fastrelax rate ` +
+      `fell ${pct(LV.regression.series[0][2])}\u2192${pct(LV.regression.series[3][2])} by ` +
+      `${LV.regression.series[3][1]}, only ` +
+      `${(100 * LV.regression.explained_by_length).toFixed(1)} of ` +
+      `${(100 * (LV.regression.series[0][2] - LV.regression.series[3][2])).toFixed(1)} points ` +
+      `from binder length. I credit the healthy period on purpose.`,
+      options: { bold: true, color: C.base } },
+  ], M, 6.52, 12.33, 0.4, { fontSize: 10.5 });
+  footer(s, `${BL_SRC}; fastrelax series TRANSCRIBED, impress-agentic-performance report.md \u00a713; structural counts mined from examples/small_molecule_binding at ${BC ? BC.head : "absent"}.`);
   s.addNotes(
 `[1:35] What this is compared against. Not a blank page.
 
@@ -314,7 +327,7 @@ So the question is not whether an adaptive pipeline works. It does. The question
 
 The bottom cards are why I think composition is worth the trouble, and they are their numbers. Their guided feedback, against its own parent fold, is flat — plus nought point nought one one pLDDT, p of nought point eight five. A cheap re-sampler, not a ratchet — and still worth having at four times cheaper per fold. And eight hundred passing folds are five hundred and ninety-six clusters: width buys independent searches, depth refines one.
 
-The last line is owed rather than implied — that pipeline paid for lessons we inherited for free, including the storage fix in act two.`);
+The last line is owed rather than implied — that pipeline paid for lessons we inherited for free, including the storage fix in act two. And the half of it in their colour is owed too: these are their best figures, not their current ones. With the same decision function their own fastrelax rate fell sixty-four to forty-nine percent by October twenty-second, and binder length explains one point of fourteen. I am crediting the healthy period on purpose, and I am not using the rest against them.`);
 }
 
 // ================================================================ 4. Three dimensions
@@ -1295,18 +1308,25 @@ The table underneath is three later jobs that changed nothing about the science 
     "and reproducibility are the same unexercised question.",
     M + 6.33, 6.08, 6.0, 0.6, { fontSize: 9.5, color: C.muted });
 
-  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.44, w: 6.0, h: 1.3,
+  s.addShape(pres.shapes.RECTANGLE, { x: M, y: 5.24, w: 6.0, h: 1.68,
     fill: { color: C.ink }, line: { color: C.ink } });
   text(s, [
     { text: "The honest state of this slide:  ", options: { bold: true, color: "F09A8C" } },
     { text: "the machinery for width is written, typed and unit-tested, and " +
       "replicas > 1 has run against mocks only, never on the real chain. Worse, the cheap " +
-      "route to it is closed: the pattern " +
-      "signature includes replica multiplicity, so the trust earned at one lineage does not " +
-      "transfer to four — a four-lineage graph starts untrusted, under a cap it already " +
-      "exceeds. That is backlog A10 and it is ask 5.", options: { color: "DCE5EC" } },
-  ], M + 0.18, 5.52, 5.66, 1.16, { fontSize: 10.5 });
-  footer(s, `${BL_SRC}  ·  ${A_SRC}`);
+      "route is closed: the pattern signature includes replica multiplicity, so trust earned " +
+      "at one lineage does not transfer to four — a four-lineage graph starts untrusted, " +
+      "under a cap it already exceeds. Backlog A10, ask 5.\n",
+      options: { color: "DCE5EC", breakLine: true } },
+    { text: `And the lever this deck does NOT pull is now measured: one policy held fixed, ` +
+      `k=1\u2192${LV.packing.k[4]} per GPU, is worth \u00d7${LV.packing.gain_rfd3} on backbones per ` +
+      `node-hour and \u00d7${LV.packing.gain_hq} on high-quality folds per GPU-hour; the best ` +
+      `decision layer anybody has run is worth about \u00d7${LV.packing.decision_layer_gain} at ` +
+      `matched packing. Nobody has had both. We run one lineage on one of four GPUs.`,
+      options: { color: "F09A8C" } },
+  ], M + 0.18, 5.31, 5.66, 1.54, { fontSize: 8.6 });
+  text(s, `${BL_SRC}  ·  ${A_SRC}  ·  packing ladder TRANSCRIBED, impress-agentic-performance report.md \u00a712`,
+    M, H - 0.52, W - 2 * M, 0.42, { fontSize: 8.5, color: C.muted, italic: true });
   s.addNotes(
 `[1:30] The slide worth the most in this act, and almost none of it is our data.
 
@@ -1316,7 +1336,9 @@ Bottom left is the pair worth staring at. Their eight hundred and four passing f
 
 Right side is what this project does about it, and the dotted borders are doing the work. Replicas-N means N independent lineages, one node each, and the executor never funnels them back into one candidate. The front is deliberately not monotonic, so a node promoted on an optimistic prediction gets demoted by its own assay. Trust is scored on shape, so breadth has an identity of its own.
 
-All of it dotted — written, typed, unit-tested, and never executed on real tools; the only lineages that have run are mock ones. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.`);
+All of it dotted — written, typed, unit-tested, and never executed on real tools; the only lineages that have run are mock ones. And the cheap route is closed: the signature includes replica multiplicity, so trust earned at one lineage does not transfer to four. A four-lineage graph arrives untrusted, under a cap it already exceeds. That is ask five.
+
+And the second half of that box is newer than the rest of this deck. The same archive, re-derived at five packing rungs with one policy held fixed: packing alone is worth five and a half times on backbones per node-hour, against about three times for the best decision layer anybody has run. Nobody has had both. We run one lineage on one of four GPUs — the cheap lever, un-pulled.`);
 }
 
 // ================================================================ 17. Four defects

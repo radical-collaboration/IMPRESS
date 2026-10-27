@@ -27,13 +27,35 @@
   }
  ],
  "orders": [
-  {"name": "A · full", "drop": [],
-   "fits": "a 35-minute slot, or a working session where questions land inline"},
-  {"name": "B · default", "drop": ["17", "18", "20"],
-   "fits": "a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence"},
-  {"name": "C · hard twenty", "drop": ["8", "9", "13", "15", "17", "18", "20"],
-   "fits": "a hard 20 that leaves real room for discussion - the baseline, the three dividers, the dispatch seam, both measured performance slides, status and asks"}
+  {
+   "name": "A · full",
+   "drop": [],
+   "fits": "30.2 min of speech: a 35-minute slot, or a working session where questions land inline"
+  },
+  {
+   "name": "B · default",
+   "drop": [
+    "17",
+    "18",
+    "20"
+   ],
+   "fits": "26.5 min, for a 30-minute slot: drops the defect ledger, the trust-ledger findings and how-to-run-it, each recoverable in a sentence"
+  },
+  {
+   "name": "C · hard twenty",
+   "drop": [
+    "8",
+    "9",
+    "13",
+    "15",
+    "17",
+    "18",
+    "20",
+    "21"
+   ],
+   "fits": "19.7 min, for a hard 20 that leaves real room for discussion - the baseline (now carrying the reference pipeline's own dated fastrelax series), the three dividers, the dispatch seam, both measured performance slides, status and asks. The control plane (21) joined the drops when slides 3 and 16 grew to carry the 2026-10-26 evidence: it is the surface with no caller, so it is the cheapest thing in the deck to describe in a sentence"
+  }
  ],
  "protect": "**Protect 3, 4, 14, 16, 22 and 23.** Three and four are what make this a comparison rather than a tour; 14 and 16 are the only measured performance claims in the deck; 22 is status and 23 is the asks. Never cut a divider: a cut deck without them is a list of slides. Backups B1 (typed hops) and B2 (compute patterns) are already out of every order - do not put them back to fill time.",
- "say_out_loud": "that every REAL run so far is a single lineage, and `replicas > 1` has only ever executed against the mock toolkit - the deck's own mock run in run.json does two lineages per run - never on the six-stage chain; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer."
+ "say_out_loud": "that every REAL run so far is a single lineage, and `replicas > 1` has only ever executed against the mock toolkit - the deck's own mock run in run.json does two lineages per run - never on the six-stage chain; that on the two Rosetta stages we share, our thresholds are **weaker** than the reference pipeline's PROD gates (backlog G4/G5), so the claim is about where the verdict lives and not about strictness; and that every Delta and baseline figure on these slides is transcribed from run archives outside this checkout, named in each slide's footer; that the baseline figures credited on slides 3 and 15 are the reference pipeline's BEST period and not its current one - with the same decision function its own fastrelax pass rate fell 63.6% -> 49.4% between 2026-10-06 and 2026-10-22, and only 1.3 of those 14.2 points is binder length, which this deck states rather than uses; and that the lever this deck does NOT pull is now measured - one policy held fixed at k=1 to k=8 pipelines per GPU is worth x5.52 on backbones per node-hour and x5.11 on high-quality folds per GPU-hour, against about x3 for the best decision layer anybody has run at matched packing, and we are running one lineage on one of four GPUs."
 }

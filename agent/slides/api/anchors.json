@@ -3,19 +3,19 @@
   "agent/src/impress_a/cli/__init__.py",
   31,
   "POLICIES = {",
-  "S5, S29-6 - the control models, and the module-scope import that pulls langgraph"
+  "S5, S31-6 - the control models, and the module-scope import that pulls langgraph"
  ],
  [
   "agent/src/impress_a/cli/__init__.py",
   103,
   "pol = cls(timeout_s=5.0, on_timeout=\"fallback\"",
-  "S20, S28, S29-5 - model C falls back to D"
+  "S21, S30, S31-5 - model C falls back to D"
  ],
  [
   "agent/src/impress_a/cli/__init__.py",
   252,
   "def preflight",
-  "S9, S25 - the login-node check"
+  "S9, S27 - the login-node check"
  ],
  [
   "agent/src/impress_a/runtime/executor.py",
@@ -51,7 +51,7 @@
   "agent/src/impress_a/policy/base.py",
   54,
   "async def on_rejected",
-  "S29-3 - the default is Stop"
+  "S31-3 - the default is Stop"
  ],
  [
   "agent/src/impress_a/policy/driver.py",
@@ -105,13 +105,13 @@
   "agent/src/impress_a/compose/graph.py",
   51,
   "def pattern_signature",
-  "S19, S29-1 - shape only, but one entry per node"
+  "S20, S31-1 - shape only, but one entry per node"
  ],
  [
   "agent/src/impress_a/compose/interlock.py",
   112,
   "\"\"\"Returns True if this run promoted the pattern.",
-  "S29-2 - promotion counts integrity failures only"
+  "S31-2 - promotion counts integrity failures only"
  ],
  [
   "agent/src/impress_a/tools/spec.py",
@@ -141,25 +141,25 @@
   "agent/src/impress_a/control/plane.py",
   23,
   "class CampaignControlPlane(Protocol)",
-  "S1, S5, S26 - surface 5"
+  "S1, S5, S28 - surface 5"
  ],
  [
   "agent/src/impress_a/control/http.py",
   26,
   "one event stream, on loopback, for a single trusted client. It is NOT a public-facing",
-  "S26, S29-4 - no auth, no TLS, by design"
+  "S28, S31-4 - no auth, no TLS, by design"
  ],
  [
   "agent/src/impress_a/control/http.py",
   183,
   "async def _route",
-  "S26 - the whole route table"
+  "S28 - the whole route table"
  ],
  [
   "agent/src/impress_a/control/session.py",
   48,
   "class RemoteSession",
-  "S26 - the reasoner's protocol over a socket"
+  "S28 - the reasoner's protocol over a socket"
  ],
  [
   "agent/src/impress_a/manager.py",
@@ -171,7 +171,7 @@
   "agent/tests/test_layering.py",
   43,
   "ALLOWED = {",
-  "S5, S27 - the import contract, as a table in a test"
+  "S5, S29 - the import contract, as a table in a test"
  ],
  [
   "agent/campaigns/delta-small-molecule.yaml",
@@ -189,13 +189,13 @@
   "agent/src/impress_a/runtime/executor.py",
   391,
   "def _objectives_without_a_producer",
-  "S22 - the refusal that is phrased as a smaller plan, and warns rather than gates"
+  "S23 - the refusal that is phrased as a smaller plan, and warns rather than gates"
  ],
  [
   "examples/agentic_small_molecule_binding/tools.py",
   35,
   "TOOL_SCHEMAS: list[dict[str, Any]] = [",
-  "S23 - the tools the model next door is given, mined for the live slides"
+  "S24 - the tools the model next door is given, mined for the live slides"
  ],
  [
   "agent/src/impress_a/compose/composer.py",
@@ -238,5 +238,17 @@
   120,
   "async def __call__",
   "S7, S13 - the four phases in order; there is no execute()"
+ ],
+ [
+  "examples/agentic_small_molecule_binding/agentic_pipeline.py",
+  136,
+  "self._transcript({\"event\": \"degraded\"",
+  "S26 - the only in-band signal that a pipeline stopped using its model; 23219379 fired it on 284 of 288 turns"
+ ],
+ [
+  "examples/agentic_small_molecule_binding/delta_gpu_run.sh",
+  233,
+  "case \"$(readlink -m",
+  "S26 - the launcher guard added after 23206285 lost every rfd3 write to the container overlay (commit 2641836)"
  ]
 ]

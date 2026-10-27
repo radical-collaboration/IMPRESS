@@ -302,9 +302,23 @@ def baseline_code() -> dict | None:
     if not pipeline.exists() or not runner.exists():
         return None
     body = runner.read_text(errors="replace").splitlines()
-    start = next(i for i, l in enumerate(body) if l.startswith("def _adaptive_decision_sync"))
-    end = next(i for i, l in enumerate(body[start + 1:], start + 1)
-               if l.startswith(("def ", "async def ", "@")))
+    # The adaptive callback has been renamed once already: it was `_adaptive_decision_sync`
+    # until 22a1f82 declared it as an asyncflow task and made it `async def
+    # adaptive_decision`. Match on the suffix rather than the exact spelling, and fail with
+    # the reason rather than a bare StopIteration - a deck whose mining script dies on a
+    # rename is a deck that stops being rebuilt.
+    DECISION_FN = ("adaptive_decision", "_adaptive_decision_sync")
+    starts = [i for i, l in enumerate(body)
+              if re.match(r"^(async\s+)?def\s+(%s)\b" % "|".join(DECISION_FN), l)]
+    if not starts:
+        raise SystemExit(
+            f"{runner}: no adaptive decision callback found. Looked for "
+            f"{' / '.join(DECISION_FN)} at module scope. If it has been renamed again, add "
+            "the new name to DECISION_FN in baseline_code() and re-check "
+            "slides/anchors.json, which cites its line.")
+    start = starts[0]
+    end = next((i for i, l in enumerate(body[start + 1:], start + 1)
+                if re.match(r"^(async\s+)?def\s|^@", l)), len(body))
     decision = body[start:end]
     text = pipeline.read_text(errors="replace")
     prod = {}
@@ -389,6 +403,57 @@ BASELINE_MEASURED = {
                  "share_of_billed": 0.37, "source": "docs/limitations.md"},
 }
 
+# TRANSCRIBED from the sibling analysis project `impress-agentic-performance` (report.md
+# SS12-13), which re-derives the same archive this deck already quotes and adds two things the
+# 2026-10-08 report could not: the packing ladder at five rungs with one policy held fixed, and
+# a dated series showing the reference pipeline's OWN fastrelax rate falling with its decision
+# layer unchanged. Its tools/verify.py passes 19 checks, including reproduction of three
+# independently published scorers.
+#
+# Both belong in THIS deck rather than only in the API deck, for opposite reasons: the ladder
+# is the lever this project does not pull (one lineage on one of four GPUs), and the series is
+# the reason to say out loud that the baseline credited on slides 3 and 15 is the reference
+# pipeline's BEST period, not its current one.
+LEVERS = {
+    "source": "sibling analysis project impress-agentic-performance, report.md SS12-13; "
+              "verified by its tools/verify.py (19 checks), over the same run archive",
+    "packing": {
+        "what": "five 1-hour runs of ONE policy (adaptive_decision, held fixed) at k = 1, 2, "
+                "4, 6 and 8 pipelines per GPU",
+        "k": [1, 2, 4, 6, 8],
+        "rfd3_per_node_h": [57.8, 105.6, 179.7, 258.2, 319.1],
+        "passing_per_gpu_h": [3.96, 6.30, 9.95, 12.06, 20.55],
+        "hq_per_gpu_h": [2.13, 2.40, 4.83, 5.43, 10.88],
+        "gain_rfd3": 5.52, "gain_hq": 5.11,
+        "decision_layer_gain": 3.0,
+        "best_agentic_hq_per_gpu_h": 6.35,
+        "finding": "packing alone is worth x5.52 on backbones per node-hour and x5.11 on "
+                   "high-quality folds per GPU-hour with the decision layer held fixed; the "
+                   "best decision layer anyone has run is worth about x3 at matched packing; "
+                   "and no run has ever had both",
+        "caveat": "single runs, one hour each, one policy, one storage partition, and k=8 is "
+                  "the largest rung anybody ran rather than a measured maximum",
+    },
+    "regression": {
+        "what": "the reference pipeline's own fastrelax pass rate, decision layer held fixed "
+                "at adaptive_decision() throughout",
+        # job, date, fastrelax pass rate, mpnn tasks per fold attempted, median binder length
+        "series": [["22701168", "2026-10-06", 0.636, 6.77, 119],
+                   ["23029475", "2026-10-20", 0.588, 7.50, 119],
+                   ["23065238", "2026-10-20", 0.484, 9.45, 125],
+                   ["23114772", "2026-10-22", 0.494, 12.81, 127]],
+        "explained_by_length": 0.013, "residual": 0.129,
+        "finding": "63.6% -> 49.4% with the policy unchanged; standardising the early run "
+                   "onto the late run's binder-length distribution moves it only to 62.3%, so "
+                   "1.3 of the 14.2 points lost is length and 12.9 points are not",
+        "caveat": "observational - allocation, wall clock and ensemble budget all move along "
+                  "the series, every point is a single run, and settling it needs a rerun at "
+                  "commit e2aa00d. It is CONSISTENT WITH a regression and does not establish "
+                  "one",
+    },
+}
+
+
 # Transcribed from the off-cluster reproduction of performance_analysis/ (twelve sections) over
 # impress_a_runs_2026-10-08.tar.gz. Recomputable - but only from the archive, not the checkout,
 # so it is labelled like DELTA rather than mined like `code`.
@@ -427,6 +492,7 @@ def main() -> int:
     run = {"code": code_stats(), "mock": mock_campaign(), "patterns": pattern_census(),
            "shape": shape_signatures(), "delta": DELTA, "analysis": ANALYSIS,
            "baseline": {"code": baseline_code(), "measured": BASELINE_MEASURED,
+                        "levers": LEVERS,
                         "our_rosetta_gates": our_rosetta_gates()}}
     OUT.write_text(json.dumps(run, indent=1) + "\n")
     m = run["mock"]
