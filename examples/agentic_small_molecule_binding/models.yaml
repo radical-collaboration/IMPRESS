@@ -212,7 +212,25 @@ profiles:
   # reference's quirks too -- the inert backbone similarity gate and the
   # hardcoded `pass: True` on sequence -- which is correct, not a defect.
   #
-  # UNMEASURED: no job has run this arm yet.
+  # MEASURED 2026-10-29, smoke 23321447 (1 node, 4 pipelines, 1 h, TIMEOUT at the
+  # wall as the reference arm also ends). The arm routes: degraded=false on all
+  # four pipelines, control_model="D" in every start record, 401 tool calls, and
+  # the full seven-stage cycle B-s-p-k-R-I-F on real artifacts -- including the
+  # second design_sequence pass that _SCRIPTED_ROUTE drops, which is the one
+  # piece of logic not inherited from the reference. All four reference
+  # escalations fired: 3x seq-retry from backbone and from packed, fastrelax
+  # failure, and interface failure re-entering the refine cycle.
+  #
+  # Throughput: 84-109 turns per pipeline per hour, so MAX_LLM_TURNS=1000 is NOT
+  # the binding constraint on a 4 h run (~440 turns expected). Wall clock is.
+  #
+  # NOT a science result -- 1 h truncates cycles mid-flight and the yield figures
+  # below are biased by it. Of 61 backbone attempts only 10 reached a fold, with
+  # 24 dying at the sequence gate and 17 at fastrelax; design_sequence per fold
+  # was ~21 against the reference's 6.8 (2026-10-06) and 13.0 (2026-10-22). If
+  # that survives the 4 h run it is evidence about the REFERENCE RULES at today's
+  # HEAD, not about this harness -- which is the second probe into the suspected
+  # regression that this arm was expected to provide. Do not quote it yet.
   rules-d:
     kind: rules
 
