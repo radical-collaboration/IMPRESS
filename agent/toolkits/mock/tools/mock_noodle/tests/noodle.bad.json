@@ -1,0 +1,10 @@
+{
+  "why": "The reference example of this format, and the only fixture that can be cross-checked against the code that produces it: copied verbatim from `NoodleAgent.run` (src/impress_a/tools/mock_agents.py:81-84). The tool completes, reports a confident designability of 0.91, and hands back a structure with essentially no secondary structure. Nothing about its exit status, its `result`, or its own headline metric says anything is wrong. Only `has_secondary_structure` catches it. This is the Part A failure mode the whole QC layer exists for, manufactured on purpose so the layer is tested at campaign scale.",
+  "failing_gates": ["has_secondary_structure"],
+  "output": {
+    "result": "backbone",
+    "count": 2,
+    "outputs": {},
+    "metrics": {"ss_fraction": 0.02, "designability": 0.91}
+  }
+}

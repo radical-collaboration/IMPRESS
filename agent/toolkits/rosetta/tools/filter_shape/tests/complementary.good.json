@@ -1,0 +1,10 @@
+{
+  "why": "A well-packed interface, comfortably over the floor. Subject to the same G5 caveat as poor_interface.bad.json: this value is trusted only as far as jump=\"1\" is the right jump.",
+  "failing_gates": [],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"shape_complementarity": 0.68}
+  }
+}

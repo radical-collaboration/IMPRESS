@@ -1,0 +1,24 @@
+{
+ "title": "IMPRESS-A: the API and the loop",
+ "acts": [
+  {"n": 1, "name": "Functionality", "from": 6, "slides": "6-12",
+   "question": "what can you write against this that you cannot write against a pipeline?",
+   "gap": "every toolkit that exists is one of the four real stages of a single chain, plus mocks, and nobody outside this package has authored either a toolkit or a policy"},
+  {"n": 2, "name": "Performance", "from": 13, "slides": "13-17",
+   "question": "what does the loop cost, and where does it serialise?",
+   "gap": "no concurrent run and no serial baseline anywhere in the deck, so nothing divides into a speedup - and the stages were mocks, so this times the ENGINE and never the science"},
+  {"n": 3, "name": "Usability", "from": 18, "slides": "18-21",
+   "question": "application, platform, or component?",
+   "gap": "nothing outside this package has ever driven a campaign, and `--model C` with no caller falls back to model D after 5 s instead of failing"}
+ ],
+ "orders": [
+  {"name": "A · full", "drop": [],
+   "fits": "a 35-minute slot, or a working session where questions land inline"},
+  {"name": "B · default", "drop": ["4", "9", "11", "21"],
+   "fits": "a 30-minute slot: drops the loop/driver slide, the intent seam, the task-agent phases and the layering test. Each is recoverable in a sentence, and 5 still carries the map"},
+  {"name": "C · hard twenty", "drop": ["4", "5", "7", "9", "10", "11", "19", "21"],
+   "fits": "a hard 20 that leaves room for discussion: the framing, the three dividers, one surface per act, both measured slides, the interlock finding, status and asks"}
+ ],
+ "protect": "**Protect 2, 3, 12, 15, 16, 17, 22 and 23.** Two and three are what buy the rest of the deck (the caveats at minute two and the named weak dimension); 12, 15 and 17 are the only slides carrying evidence from a real run; 16 is what keeps the performance act honest; 22 is status and 23 is the asks. Never cut a divider - a cut deck without them is a list of slides. Backups B1 (compute patterns) and B2 (the type lattice) are out of every order; do not put them back to fill time.",
+ "say_out_loud": "that nothing outside this package has ever driven a campaign, so the component claim is empty and the control plane is the most carefully built unused thing in here; that `replicas > 1` DOES run - the mock campaign in this deck ran two lineages - and what has never run is `replicas > 1` on the real six-stage chain (backlog A10); that every stage in the measured run was a mock, so the timings are the engine and never the science; and that the 31% acceptance figure on slide 16 is transcribed from the project's Delta run archive, not mined from this checkout."
+}

@@ -1,0 +1,183 @@
+# Authoring Tools and Toolkits
+
+## Layout
+
+Tools are declarative data plus a behaviour class. A toolkit is a directory:
+
+```
+toolkits/<toolkit>/
+├── SKILL.md                     # agent-facing guidance for the whole toolkit
+└── tools/<tool_id>/
+    ├── spec.yaml                # the ToolSpec  (data)
+    └── tests/                   # fixtures, including known-BAD outputs
+```
+
+The behaviour class lives wherever `entry:` points. In practice every shipped tool points into the
+package (`src/impress_a/tools/<toolkit>_agents.py`) rather than co-locating an `agent.py` here, because
+several tools in a toolkit share helpers and a subprocess worker.
+
+Toolkits are discovered from, in precedence order: an explicit path, `$IMPRESS_A_TOOLKITS`, installed
+`impress_a.toolkits` entry points, then the bundled `toolkits/` directory. A site or third party can add
+a toolkit without forking the package.
+
+## Adding a tool
+
+1. Write `spec.yaml`.
+2. Write a `TaskAgent` subclass; set `entry:` to its dotted path.
+3. Mention the tool in the toolkit's `SKILL.md`.
+
+**If you find yourself editing the composer, validator or manager to add a tool, the layering is wrong.**
+
+## `spec.yaml`
+
+```yaml
+id: example_fold
+toolkit: prediction
+version: "0.1"
+pattern: P1                                  # see reference/compute-patterns.md
+entry: mypkg.agents.FoldAgent
+resources: {gpus: 1, cores: 4, walltime_s: 60}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  sequences: {type: ProteinSequence}
+outputs:
+  complex: {type: Complex}
+parameters:
+  recycles: {type: int, default: 3, min: 1, max: 12, trades: "accuracy vs wall-clock"}
+frozen_parameters:
+  checkpoint: "Mixing checkpoints within a campaign makes designs non-comparable."
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.25}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.03}}
+```
+
+### `frozen_parameters` matters as much as `parameters`
+
+Settings an agent must never touch — a scorefunction's reference weights, a checkpoint identity, a retry
+backoff floor. Freezing them declaratively means the composer cannot propose them and gate 3 rejects any
+graph that tries. Each entry carries its reason, which is surfaced in the rejection.
+
+### Loading is validating
+
+A malformed spec, a default outside its own declared range, an unknown QC gate id, a `P1` tool declaring
+no GPU, or a `SKILL.md` missing a required section is a **load-time error**. A toolkit that fails anywhere
+registers **nothing** — never a partial set.
+
+## QC gates
+
+Gates are shared by id from `impress_a.tools.gates`, not reimplemented per tool, so there are not fifty
+subtly different versions of the same check:
+
+```python
+from impress_a.tools import gates
+from impress_a.core.qc import GateOutcome, GateResult
+
+@gates.gate("my_check")
+def _my_check(out: dict, params: dict) -> GateResult:
+    v = (out.get("metrics") or {}).get("thing")
+    ok = v is not None and v >= params.get("min", 0)
+    return GateResult(gate="my_check",
+                      outcome=GateOutcome.PASS if ok else GateOutcome.FAIL,
+                      observed=v, threshold=params.get("min"))
+```
+
+**Gates are mandatory for non-P6 tools** — gate 2 refuses a tool composed without them. They are the
+boundary at which a tool's output enters campaign state, and the only defence against silent failure.
+
+**Each gate has a `role`** — `integrity` (the default) or `acceptance`:
+
+```yaml
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [complex_plddt]}}                 # integrity
+  - {id: metric_in_range, role: acceptance, params: {metric: complex_plddt, min: 0.5}}
+```
+
+An **integrity** failure means the tool or pipeline broke, and it demotes the composition pattern. An
+**acceptance** failure means the tool worked and the design is not good enough: the node still FAILs, and
+is never rankable, but the trust ledger ignores it (decision 0013). Use acceptance only for a quality
+threshold; anything that detects a *malfunction* stays integrity. Load-time validation enforces one rule
+here: every acceptance `metric_in_range` must have its metric named in an integrity `metrics_reported`
+gate. That rule exists because a value the adapter never read must be an integrity failure, never a low
+score. Adapters therefore **omit** a metric they could not read rather than reporting 0.0.
+
+Write gates against the failure you have actually seen. A gate that has never seen the output it was
+written to catch is an assertion, not a test — so every non-mock tool carries known-bad fixtures under
+`tests/`, and `tests/test_gate_fixtures.py` fails if a new one does not. A `.bad.json` must fail at least
+one integrity gate; one that records a genuinely weak design, caught only by acceptance, says so with
+`"acceptance_only": true`.
+
+```
+toolkits/<tk>/tools/<id>/tests/
+├── <name>.bad.json     # a raw run() payload this tool's OWN gates must FAIL
+├── <name>.good.json    # a raw run() payload they must PASS
+└── raw/                # tool-native artifacts (a real FASTA, a real out_dir listing);
+                        # never collected as fixtures
+```
+
+The **filename suffix is authoritative**, never a field inside the file: a typo'd `"expect": "pass"`
+would be silently wrong, a wrong suffix cannot be. Each file has three keys:
+
+```json
+{
+  "why": "the failure this records, and where it was observed",
+  "failing_gates": ["output_present", "metric_in_range[ligand_iptm]"],
+  "output": {"result": null, "count": 0, "outputs": {}, "metrics": {}}
+}
+```
+
+`output` is verbatim what the agent's `run()` returns, and `outputs` is always `{}` — these fixtures
+cover the **QC** contract; the artifact contract is `_as_artifacts`, covered in `test_real_toolkits.py`.
+`failing_gates` is an exact set of *rendered* `GateResult.gate` labels, so `metric_in_range` entries take
+the `metric_in_range[<name>]` form. A fixture cannot claim to demonstrate one gate while tripping another.
+
+`toolkits/mock/tools/mock_noodle/tests/` is the worked example, and the one fixture pinned directly to
+the code that produces it.
+
+## Task agents
+
+```python
+class FoldAgent(TaskAgent):
+    async def pre_process(self, req): ...        # stage inputs, check preconditions
+    def parameterize(self, req): ...             # usually inherited: defaults + range + frozen checks
+    async def run(self, req, params): ...        # the only required override
+    async def post_process(self, req, raw): ...  # usually inherited: metric extraction + gate execution
+```
+
+`run()` returns a plain dict with `outputs`, `metrics`, and whatever keys the gates inspect. Do not
+override `execute()`.
+
+### Outputs are typed handles, not strings
+
+Return a **`pathlib.Path`** for anything written to disk, and a plain value for anything small enough
+to carry inline. `post_process` turns both into `ArtifactRef`s, taking the **type from the spec's
+declared output port** — so a handle can never disagree with the contract the composer type-checked
+the graph against, and an adapter never has to repeat itself.
+
+```python
+return {"result": "backbone",                       # what `output_present` looks for
+        "outputs": {"backbone": work / "design.pdb"},   # a Path: a file
+        "metrics": {"ss_fraction": 0.62}}
+```
+
+Returning a `Path` is how an adapter *declares* a file; returning `str(path)` makes it an inline
+value instead. Files get their size and a content digest recorded, which is what lets a reasoner in
+another process tell whether the bytes behind a path are still the ones the campaign reasoned about.
+
+An output your spec does not declare is a **load-bearing error**, not something to drop quietly:
+nothing downstream could consume it and the composer never type-checked it, so `post_process` raises
+rather than let a spec bug surface later as a missing input.
+
+To consume an upstream artifact, `_subprocess.first_dep_output(req.inputs, port)` returns the thing
+to open. Write files under `_subprocess.workdir_for(req, prefix)` — which defaults to the process
+CWD, where the launcher has already put you — never `tempfile.mkdtemp()`, whose result is local to
+one node and unreachable from wherever the next task runs.
+
+## Skill documents
+
+`SKILL.md` is agent-facing guidance, not an API reference — the spec is the reference. Required sections:
+**Purpose** (and when *not* to use the toolkit), **Canonical sequences**, **Cost posture**, **Pitfalls**.
+
+Every tool in the toolkit must be mentioned, and every tool mentioned must exist; the registry checks
+both. Co-location is what keeps docs and specs in step: one pull request touches both.
