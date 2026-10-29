@@ -117,6 +117,12 @@ plumbing on real hardware.
 matter of changing `--model-profile`; nothing else in the example knows which
 model is in play.
 
+Which models may be compared is constrained: `~/.claude/CLAUDE.md` bars models
+developed by Chinese organisations, by any route — weights staged on project
+storage, a server inside the allocation, or a hosted API arm. The provenance
+guard in `test_agentic_smb.py` enforces it, so a barred profile fails the
+offline suite rather than waiting on review.
+
 Anthropic's OpenAI-compatibility endpoint takes this request shape but does not
 expose Claude's own controls — adaptive thinking, effort, server-side
 fallbacks. That is a deliberate trade: one request shape across every model

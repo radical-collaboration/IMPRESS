@@ -441,7 +441,8 @@ def test_service_task_signatures() -> None:
 
     import vllm_service as v
     cmd = v.serve_command(venv="/v", model="m", host="h", port=1,
-                          log_file="/l/x.log", tp_size=1)
+                          log_file="/l/x.log", tool_parser="llama3_json",
+                          tp_size=1)
     check("serve command detaches and echoes its address",
           "setsid" in cmd and "echo h:1" in cmd, cmd[:120])
     check("serve command enables tool calling",
@@ -497,27 +498,67 @@ def test_service_task_signatures() -> None:
           beam is not None and "reasoning_effort" in (beam.extra_body or {}),
           getattr(beam, "extra_body", None))
 
-    q35 = profiles.get("local-qwen35")
-    check("local-qwen35 profile is served in-allocation",
-          q35 is not None and q35.kind == "dragon_vllm", q35)
-    q35_cmd = v.serve_command(
-        venv=q35.serve["venv"], model=q35.model, host="h", port=8000,
-        log_file="/l/x.log", tp_size=int(q35.serve["tp_size"]),
-        gpu_fraction=float(q35.serve["gpu_fraction"]),
-        tool_parser=q35.serve["tool_parser"],
-        extra_args=q35.serve.get("extra_args", ""))
-    # qwen3_coder is what the model card calls for, and it is registered in the
-    # installed vLLM; hermes would silently return the tool syntax as text.
-    check("local-qwen35 serves with the qwen3_coder parser",
-          "--tool-call-parser qwen3_coder" in q35_cmd, q35_cmd[:240])
-    # Without this the think block lands in content and reaches the extractor.
-    check("local-qwen35 passes a reasoning parser through extra_args",
-          "--reasoning-parser" in q35_cmd, q35_cmd[:240])
-    check("local-qwen35 bounds the context it reserves KV for",
-          "--max-model-len" in q35_cmd, q35_cmd[:240])
-    # 122 GB of FP8 weights need every GPU on the node.
-    check("local-qwen35 uses all four GPUs",
-          "--tensor-parallel-size 4" in q35_cmd, q35_cmd[:240])
+    served = profiles.get("local-llama-8b")
+    check("local-llama-8b profile is served in-allocation",
+          served is not None and served.kind == "dragon_vllm", served)
+    served_cmd = v.serve_command(
+        venv=served.serve["venv"], model=served.model, host="h", port=8000,
+        log_file="/l/x.log", tool_parser=served.serve["tool_parser"],
+        tp_size=int(served.serve["tp_size"]),
+        gpu_fraction=float(served.serve["gpu_fraction"]),
+        extra_args=served.serve.get("extra_args", ""))
+    # The parser belongs to the checkpoint, not to the serving code. Llama 3.x
+    # returns tool calls as JSON and its own chat template carries `tools` and
+    # `tool_calls`, so vLLM's separate jinja -- which pip does not install --
+    # is not needed; a mismatched parser would hand that syntax back as text.
+    check("local-llama-8b serves with the parser its model card calls for",
+          "--tool-call-parser llama3_json" in served_cmd, served_cmd[:240])
+    # Native context is 131k; reserving KV for all of it holds the GPU for
+    # nothing, since the prompt plateaus near 10k.
+    check("local-llama-8b bounds the context it reserves KV for",
+          "--max-model-len" in served_cmd, served_cmd[:240])
+    # 16 GB of bf16 weights fit one 48 GB A40. tp is a per-checkpoint fact and
+    # the profile has to state it, so assert the profile's value reaches vLLM.
+    check("local-llama-8b passes its tensor-parallel size through",
+          f"--tensor-parallel-size {int(served.serve['tp_size'])}" in served_cmd,
+          served_cmd[:240])
+
+    # The serving path is model-agnostic, which only holds if every profile
+    # carries its own parser: serve_command() has no vendor default left, so an
+    # omission is a TypeError at submit time rather than a server that quietly
+    # reports no tool calls. REPLACE-ME is the template profile's placeholder
+    # and the runner rejects it by name.
+    for _name, _p in profiles.items():
+        if _p.kind != "dragon_vllm":
+            continue
+        _parser = (_p.serve or {}).get("tool_parser")
+        check(f"{_name} names its own tool parser", bool(_parser), _p.serve)
+
+    # Model provenance is settled machine-wide in ~/.claude/CLAUDE.md: no model
+    # developed by a Chinese organisation, by any route -- staged weights, a
+    # server in the allocation, or a hosted API arm. This is the enforcement
+    # point. Roughly 405 GB of Qwen checkpoints were removed on 2026-10-27 and
+    # four `local-qwen*` profiles deleted; the guard is what stops them coming
+    # back by way of a convenient profile. If it fails, the fix is the profile.
+    _barred = (
+        "qwen", "tongyi", "qwq", "qvq", "deepseek", "chatglm", "glm-", "thudm",
+        "zhipu", "kimi", "moonshot", "01-ai", "yi-", "internlm", "baichuan",
+        "minicpm", "openbmb", "minimax", "abab", "hunyuan", "tencent", "ernie",
+        "baidu", "doubao", "bytedance", "skywork", "stepfun", "pangu",
+    )
+    _barred_found = []
+    for _name, _p in profiles.items():
+        _hits = [b for b in _barred if b in (_p.model or "").lower()]
+        check(f"{_name} names a model of permitted provenance",
+              not _hits, f"{_p.model} matches {_hits}")
+        if _hits:
+            _barred_found.append(f"{_name}={_p.model}")
+    # check() only sets the exit status of the script entry point. This one
+    # assertion as well, so the guard also fails a pytest run: a policy that
+    # binds only when the suite is invoked one particular way does not bind.
+    assert not _barred_found, (
+        f"models.yaml names models of barred provenance: {_barred_found}. "
+        f"See ~/.claude/CLAUDE.md -- the fix is the profile, not the test.")
 
     # A reasoning model's own reasoning has to survive into the message we send
     # back. Beam rejects a follow-up whose earlier assistant messages lack

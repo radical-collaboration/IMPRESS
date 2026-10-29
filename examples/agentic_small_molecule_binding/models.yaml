@@ -79,103 +79,110 @@ profiles:
   # so the ordinary OpenAI-compatible client is reused unchanged.
   #
   # Needs >= 2 nodes: the model takes one, the pipelines keep the other.
-  local-qwen:
-    kind: dragon_vllm
-    model: Qwen/Qwen2.5-7B-Instruct
-    api_key_env: null
-    max_tokens: 4096
-    serve:
-      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
-      node_index: -1          # last node of the allocation
-      gpus: 4
-      tp_size: 1              # 7B in bf16 fits one A40; raise with the model
-      port: 8000
-      gpu_fraction: 0.90
-      tool_parser: hermes     # the Qwen2.5 instruct family's parser
-      ready_timeout_s: 1800
+  #
+  # THIS PATH IS MODEL-AGNOSTIC AND MUST STAY THAT WAY. Everything a particular
+  # checkpoint needs -- its tool-call parser, its reasoning parser, its context
+  # length, how many GPUs the weights take -- is a field of the profile, read
+  # off the model card. `serve_command()` has no vendor default to fall back on
+  # and will not launch without `tool_parser`, so a new arm states its own or
+  # fails loudly at submit time rather than silently serving with the wrong
+  # extractor. What four jobs proved here is not vendor-specific: the node
+  # partition holds (23201195), tp=4 across the model node's A40s works
+  # (23207314), and block-FP8 falls back cleanly on SM 8.6 (23219406).
+  #
+  # Which models may be served at all is settled in ~/.claude/CLAUDE.md, and
+  # test_agentic_smb.py enforces it -- a barred vendor fails the suite instead
+  # of waiting on review.
 
-  # Qwen2.5-72B across the model node's four A40s. The 7B smoke (23201195)
-  # proved the infrastructure and the 7B's tool calls -- 3 error payloads in
-  # 41 turns, 3/3 folds passed, correct stage ordering -- but all four
-  # pipelines self-terminated after one or two cycles, using 2-6 of a 300
-  # ensemble budget, and three called finish claiming a spent budget at 4/300.
-  # The prompt already says to finish only when the budget is spent, so that
-  # is agentic stamina, not wording. This profile spends GPUs that were
-  # already allocated and idle (the model node has four; the 7B used one).
+  # Plumbing proof: placement, transport and tool-call parsing in minutes.
+  # Useless for the science, and that is the point -- it is the cheapest thing
+  # that distinguishes a broken node partition from a model that will not call
+  # tools. 1B in bf16 is ~2.5 GB, so one GPU at 0.60 is already generous.
   #
-  # Memory: 72B in bf16 is ~145 GB of weights against 4 x 48 GB. At 0.93 that
-  # leaves ~8 GB per GPU for KV and activations, about 100k tokens of KV --
-  # ample, since the Sonnet run's prompt plateaued near 8.5k per turn.
-  local-qwen-72b:
+  # Llama 3.2's own chat template carries `tools` and `tool_calls` (verified in
+  # the cached tokenizer_config.json), so vLLM's separate
+  # tool_chat_template_llama.jinja -- which pip does not install -- is not
+  # needed. It does lack `<|python_tag|>`, the llama3_json parser's bot_token;
+  # the parser also scans for a bare JSON object, which is the 1B's format.
+  local-smoke:
     kind: dragon_vllm
-    model: Qwen/Qwen2.5-72B-Instruct
-    api_key_env: null
-    max_tokens: 4096
-    serve:
-      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
-      node_index: -1
-      gpus: 4
-      tp_size: 4            # 145 GB of weights does not fit fewer
-      port: 8000
-      gpu_fraction: 0.93
-      tool_parser: hermes   # the whole Qwen2.5 instruct family
-      ready_timeout_s: 2400 # 10x the 7B's weights; 7B was ready in 160 s
-
-  # Qwen3.5-122B-A10B, FP8, across the model node's four A40s. The open-weight
-  # arm against Beam. 10B active params, so decode stays fast despite 122B
-  # total; vendor-reported BFCL-V4 72.2 / TAU2-Bench 79.5.
-  #
-  # vLLM 0.32.0 already registers Qwen3_5MoeForCausalLM and the qwen3_coder
-  # parser the model card calls for, so this needs NO vllm upgrade -- worth
-  # keeping that way, since ve/vllm_srv is the environment four jobs have
-  # validated.
-  #
-  # FP8 ON AMPERE IS THE RISK. Fp8Config.get_min_capability() returns 75 and the
-  # A40s are SM 8.6, so the weight-only Marlin path accepts them. But this
-  # checkpoint is *block* FP8 (block size 128) and block-scaled fused-MoE
-  # kernels generally want SM 90. Whether vLLM falls back cleanly cannot be
-  # settled by reading the code -- smoke it for 30 min before any long run. If
-  # it fails: an AWQ/GPTQ INT4 quant (Marlin INT4 is solid on Ampere), then
-  # Qwen3-32B bf16.
-  #
-  # Weights live under /work/hdd/bdyk (IMPRESS_HF_HOME), not nvme: 122 GB does
-  # not fit nvme/bdyk's ~104 GB of headroom, and not bblj, which is another
-  # project's allocation.
-  local-qwen35:
-    kind: dragon_vllm
-    model: Qwen/Qwen3.5-122B-A10B-FP8
-    api_key_env: null
-    max_tokens: 8192
-    serve:
-      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
-      node_index: -1
-      gpus: 4
-      tp_size: 4              # ~122 GB of FP8 weights needs all four
-      port: 8000
-      gpu_fraction: 0.90      # leaves ~51 GB of KV; the prompt plateaus near 10k
-      tool_parser: qwen3_coder
-      ready_timeout_s: 2400   # hdd-backed weights load slower than the 72B's 360 s
-      # --reasoning-parser keeps the think block out of content, where it would
-      # otherwise reach the tool extractor. --max-model-len against the native
-      # 262k, which would reserve most of the node as KV for no benefit.
-      extra_args: "--reasoning-parser qwen3 --max-model-len 32768"
-
-  # The same, with a tiny model: proves placement, transport and tool-call
-  # parsing in minutes. Useless for the science.
-  local-qwen-smoke:
-    kind: dragon_vllm
-    model: Qwen/Qwen2.5-0.5B-Instruct
+    model: meta-llama/Llama-3.2-1B-Instruct
     api_key_env: null
     max_tokens: 2048
     serve:
       venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
-      node_index: -1
+      node_index: -1          # last node of the allocation
       gpus: 1
       tp_size: 1
       port: 8000
       gpu_fraction: 0.60
-      tool_parser: hermes
+      tool_parser: llama3_json
       ready_timeout_s: 900
+      # Native context is 131k. Reserving KV for it would hold most of the GPU
+      # for no benefit -- the prompt plateaus near 10k.
+      extra_args: "--max-model-len 32768"
+
+  # The open-weight arm. 8B in bf16 is ~16 GB and fits one A40, so the model
+  # node's other three GPUs stay idle -- raise tp_size only for a checkpoint
+  # whose weights do not fit one card.
+  #
+  # Weights are already staged under IMPRESS_HF_HOME, so this runs with
+  # HF_HUB_OFFLINE=1 and needs no download from a compute node.
+  #
+  # UNMEASURED. No job has driven the agent loop with this profile yet. The
+  # retired Qwen arms are the only open-weight data on file and they will not
+  # be rerun, so until this one runs there is no open-weight arm to set against
+  # Beam -- do not quote one.
+  local-llama-8b:
+    kind: dragon_vllm
+    model: meta-llama/Llama-3.1-8B-Instruct
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 1              # 16 GB of weights fits one 48 GB A40
+      port: 8000
+      gpu_fraction: 0.90
+      tool_parser: llama3_json
+      ready_timeout_s: 1800   # the 7B arm was ready in 160 s; 11x headroom
+      extra_args: "--max-model-len 32768"
+
+  # The slot for the next open-weight arm. Copy it, set `model`, and read the
+  # rest off the model card -- none of these values transfer between models:
+  #
+  #   tool_parser      the extractor for THIS model's tool-call syntax. Must
+  #                    name a parser vLLM registers (vllm/tool_parsers/
+  #                    __init__.py); a wrong one yields zero tool calls and
+  #                    looks exactly like a model with no tool training.
+  #   tp_size          weights in bytes / 48 GB per A40, rounded up.
+  #   gpu_fraction     weights plus the KV the turn count needs.
+  #   extra_args       --max-model-len against a long native context, and
+  #                    --reasoning-parser if the model thinks, which keeps the
+  #                    think block out of `content` where the tool extractor
+  #                    would otherwise reach it.
+  #   ready_timeout_s  engine start and CUDA-graph capture dominate, not I/O:
+  #                    145 GB loaded in 360 s where 15 GB took 160 s.
+  #
+  # Beam is the arm this was meant for and cannot be served here: 501B does not
+  # fit a 192 GB node even at A23B active, which is why `beam` above is an API
+  # profile. It stays that way until the weights fit the hardware.
+  local-open-weights:
+    kind: dragon_vllm
+    model: REPLACE-ME
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 1
+      port: 8000
+      gpu_fraction: 0.90
+      tool_parser: REPLACE-ME
+      ready_timeout_s: 2400
+      extra_args: ""
 
   # A model served on or near the cluster. Point base_url at the server; if it
   # runs inside the allocation it takes a GPU away from the tool pool, which

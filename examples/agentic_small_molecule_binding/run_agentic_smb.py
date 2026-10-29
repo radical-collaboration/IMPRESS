@@ -175,6 +175,15 @@ async def impress_agentic_smb() -> None:
                 f"GPUs; this allocation has {len(hosts)}. "
                 f"Submit with --nodes=2.")
         srv = dict(profile.serve or {})
+        # No vendor default: the parser belongs to the checkpoint, and guessing
+        # one serves the model with an extractor that silently reports no tool
+        # calls. Fail at submit time instead, where it costs nothing.
+        tool_parser = srv.get("tool_parser")
+        if not tool_parser or tool_parser == "REPLACE-ME":
+            raise SystemExit(
+                f"profile {profile.name!r} serves {profile.model!r} but names "
+                f"no serve.tool_parser; set the parser its model card calls "
+                f"for (vLLM registers them in vllm/tool_parsers/__init__.py).")
         model_host = hosts[int(srv.get("node_index", -1))]
         pin_host = hosts[0] if model_host != hosts[0] else hosts[-1]
         port = int(srv.get("port", 8000))
@@ -190,7 +199,7 @@ async def impress_agentic_smb() -> None:
             model=profile.model, host=model_host, port=port,
             log_file=log_file, tp_size=int(srv.get("tp_size", 1)),
             gpu_fraction=float(srv.get("gpu_fraction", 0.90)),
-            tool_parser=srv.get("tool_parser", "hermes"),
+            tool_parser=tool_parser,
             extra_args=srv.get("extra_args", ""),
             task_description=vllm_service.service_task_description(
                 model_host, list(range(n_gpus))),

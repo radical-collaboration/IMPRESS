@@ -57,14 +57,20 @@ def endpoint_for(host: str, port: int) -> str:
 
 
 def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
-                  tp_size: int = 1, gpu_fraction: float = 0.90,
-                  tool_parser: str = "hermes", extra_args: str = "") -> str:
+                  tool_parser: str, tp_size: int = 1,
+                  gpu_fraction: float = 0.90, extra_args: str = "") -> str:
     """Shell command that starts the server detached and prints its address.
 
     `--enable-auto-tool-choice` with a parser matching the model family is what
     makes the server emit real `tool_calls`; without it the model's tool syntax
-    comes back as ordinary text and the agent sees no calls at all. `hermes` is
-    the parser for the Qwen2.5 instruct family.
+    comes back as ordinary text and the agent sees no calls at all.
+
+    `tool_parser` is deliberately required and has no default. It is a property
+    of the checkpoint being served, not of this module, and the wrong parser
+    fails the way a model with no tool training fails -- zero `tool_calls`,
+    ordinary prose in `content`, nothing in the log to say which of the two it
+    was. A profile states its own (see `models.yaml`); vLLM's registered names
+    are in `vllm/tool_parsers/__init__.py`.
     """
     # Bind every interface and advertise the node's own name: binding to a
     # specific FQDN can fail outright if it does not resolve to a local
