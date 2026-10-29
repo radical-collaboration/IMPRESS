@@ -194,8 +194,35 @@ profiles:
     api_key_env: null
     max_tokens: 4096
 
+  # Control model D: the reference's own `adaptive_decision()` drives the loop.
+  # No network, no key, no model.
+  #
+  # This is the comparison's missing control. Every LLM arm changes two things
+  # against the reference at once -- the rules become a model AND the state
+  # machine becomes a tool-calling harness -- so none of the figures on file
+  # says which change is responsible. This arm changes only the harness. If it
+  # lands on the reference's numbers (0.159 GPU-h per passing fold, 92 % fold
+  # pass, fastrelax 64 %, median pLDDT 94.4) the harness is neutral and the LLM
+  # arms' advantage is the decision-maker; if it does not, part of every arm's
+  # result is the harness and the comparison needs restating.
+  #
+  # rules_client.py imports adaptive_decision rather than reimplementing it,
+  # for the reason this file imports PROD: a restatement drifts silently, and
+  # rule-identity is the entire point of the arm. It therefore reproduces the
+  # reference's quirks too -- the inert backbone similarity gate and the
+  # hardcoded `pass: True` on sequence -- which is correct, not a defect.
+  #
+  # UNMEASURED: no job has run this arm yet.
+  rules-d:
+    kind: rules
+
   # No network, no key: replays the reference non-adaptive route as tool calls.
   # Used by the offline test, and as the degraded mode when an endpoint fails
   # mid-run.
+  #
+  # NOT a faithful replay of run_nonadaptive: its route sends packmin -> relax,
+  # where the reference's refine cycle runs a second design_sequence first. It
+  # is the degraded path and a plumbing fixture, not a control arm; `rules-d`
+  # is the control.
   scripted:
     kind: scripted

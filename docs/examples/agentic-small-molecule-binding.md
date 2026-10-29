@@ -56,8 +56,14 @@ throughput.
 Every model is reached through an OpenAI-compatible `/chat/completions`
 endpoint with tool calling, configured by a profile in `models.yaml`, so
 comparing models means changing `--model-profile` and nothing else. A
-`scripted` profile replays the reference non-adaptive route with no model at
-all, and also serves as the degraded mode if an endpoint fails mid-run.
+`scripted` profile replays a fixed route with no model at all, and also serves
+as the degraded mode if an endpoint fails mid-run.
+
+The `rules-d` profile is the comparison's control. It runs the loop from the
+reference example's own `adaptive_decision()` rather than a model, so the
+decision rules are held fixed while the execution path varies — which is what
+separates the harness's contribution from the decision-maker's. Every other arm
+changes both at once.
 
 Each pipeline writes `llm_transcript.jsonl` — every turn, tool call, result and
 token count — which is both the comparison data and what makes a run

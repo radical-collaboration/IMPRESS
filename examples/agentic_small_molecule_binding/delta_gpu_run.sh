@@ -318,7 +318,10 @@ if [ "${_PROFILE_KIND}" = "dragon_vllm" ]; then
         echo "       needs --nodes=2 so it does not share GPUs with the pipelines."
         exit 1
     fi
-elif [ "${IMPRESS_MODEL_PROFILE}" != "scripted" ]; then
+# Key off the KIND, not the profile name: a profile that reaches no endpoint
+# has nothing to probe, and probing it builds url = "/models", which raises
+# without a .code and exits 1 before the job is ever submitted.
+elif [ "${_PROFILE_KIND}" != "scripted" ] && [ "${_PROFILE_KIND}" != "rules" ]; then
     _probe=$(python3 - "${WORKDIR}/models.yaml" "${IMPRESS_MODEL_PROFILE}" <<'PYPROBE'
 import os, sys, urllib.request, yaml
 cfg = (yaml.safe_load(open(sys.argv[1])) or {}).get("profiles", {}).get(sys.argv[2])

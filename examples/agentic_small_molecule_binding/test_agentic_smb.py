@@ -38,6 +38,9 @@ os.environ.setdefault("BOLTZ_CACHE", "/nonexistent/boltz")
 from agentic_pipeline import AgenticSMBPipeline  # noqa: E402
 from llm import Completion, ScriptedClient, ToolCall  # noqa: E402
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine  # noqa: E402
+from run_small_molecule_binding import (  # noqa: E402
+    adaptive_decision as _reference_adaptive_decision,
+)
 from small_molecule_binding import SmallMoleculeBindingPipeline  # noqa: E402
 from tools import TOOL_NAMES  # noqa: E402
 
@@ -269,6 +272,165 @@ def test_scripted_route() -> None:
             events = [json.loads(line)["event"] for line in fh]
         check("transcript has start and end",
               events[0] == "start" and events[-1] == "end", str(events[:2]))
+
+
+def test_rules_route() -> None:
+    print("\n[2b] control model D reproduces the reference's refine cycle")
+    from rules_client import RulesClient
+    pipeline, base = asyncio.run(_run_pipeline(RulesClient(), max_tasks=14))
+    stages = _stages(pipeline)
+
+    # The reference's cycle, which is NOT the scripted route's. run() dispatches
+    # STEP_MPNN into _run_refine_cycle(), and with num_refine_cycles=2 that is
+    # mpnn -> packmin -> mpnn before relax. The scripted table sends packmin
+    # straight to relax and so emits six stages here, not seven.
+    expected_cycle = ["backbone", "sequence", "packmin", "sequence",
+                      "fastrelax", "interface", "fold"]
+    check("first cycle matches the reference's refine structure",
+          stages[:7] == expected_cycle, f"{stages[:7]}")
+    check("the refine cycle is not the scripted route's",
+          stages[:7] != ["backbone", "sequence", "packmin", "fastrelax",
+                         "interface", "fold"], f"{stages[:6]}")
+
+    # A RulesClient that raises is caught by llm_turn() and the pipeline
+    # finishes on the scripted route, which would silently publish
+    # reference-route results as model D's. That is job 23219379's trap, so the
+    # arm asserts it never happened.
+    check("model D never degraded to the scripted route",
+          pipeline.llm_degraded is False, f"degraded={pipeline.llm_degraded}")
+
+    # score_interface reads the fastrelax output dir at the current taskcount,
+    # so the rules must never emit it anywhere else. The handler would refuse,
+    # but a control arm that needed refusing is already wrong.
+    for i, stage in enumerate(stages):
+        if stage == "interface":
+            check(f"interface at {i} follows a relax",
+                  i > 0 and stages[i - 1] == "fastrelax",
+                  f"preceded by {stages[i - 1] if i else None!r}")
+
+    # cycle 0 resequences from the backbone, later cycles from the packed
+    # structure -- the handler sets _current_cycle_i from `source`, which is the
+    # reference's own selector.
+    sources = [tc["function"]["arguments"]
+               for m in pipeline.messages if m.get("role") == "assistant"
+               for tc in (m.get("tool_calls") or [])
+               if tc["function"]["name"] == "design_sequence"]
+    first_source = json.loads(sources[0])["source"] if sources else None
+    check("the first sequence of a cycle reads the backbone",
+          first_source == "backbone", f"{first_source!r}")
+    after_packmin = stages.index("packmin") if "packmin" in stages else -1
+    check("the sequence after packmin reads the packed structure",
+          after_packmin > 0 and stages[after_packmin + 1] == "sequence"
+          and json.loads(sources[1])["source"] == "packed",
+          f"{sources[1] if len(sources) > 1 else None!r}")
+
+    # Zero tokens is also the degraded signature, so the start record has to say
+    # which decision-maker this was.
+    transcript = os.path.join(base, pipeline.name, "llm_transcript.jsonl")
+    with open(transcript) as fh:
+        start = json.loads(fh.readline())
+    check("the transcript labels the control model",
+          start.get("control_model") == "D", str(start)[:160])
+    check("model D spends no tokens",
+          pipeline.llm_prompt_tokens == 0 and pipeline.llm_completion_tokens == 0,
+          f"{pipeline.llm_prompt_tokens}+{pipeline.llm_completion_tokens}")
+
+
+def test_rules_are_the_reference_s() -> None:
+    print("\n[2c] model D calls the reference's own rules, unmodified")
+    import rules_client
+    from run_small_molecule_binding import adaptive_decision
+
+    # Imported, not restated. If this ever becomes a local reimplementation the
+    # arm stops being a control, so the identity is asserted rather than
+    # trusted.
+    check("rules_client uses the reference's adaptive_decision",
+          rules_client.adaptive_decision is adaptive_decision)
+
+    # _apply_rules relies on the body being synchronous; it raises rather than
+    # degrade if that stops holding. Check it runs and routes.
+    class _Log:
+        def pipeline_log(self, _m): pass
+
+    class _P:
+        logger = _Log()
+        max_tasks = 10
+        num_refine_cycles = 2
+
+        def __init__(self):
+            self.next_step = None
+            self.state = {"last_analysis_step": "fold", "ensemble": [],
+                          "rfd3_input_pdb": None}
+
+    probe = _P()
+    rules_client._apply_rules(probe)
+    # fold always ends a cycle: the reference sets STEP_RFD3 unconditionally.
+    check("the rules run synchronously and route",
+          probe.next_step == rules_client.STEP_RFD3, f"{probe.next_step!r}")
+
+
+async def _reference_stages(max_tasks: int) -> list[str]:
+    """The REFERENCE pipeline's own stage sequence on the same mock inputs."""
+    base = tempfile.mkdtemp(prefix="ref-smb-")
+    in_dir = _setup_mock_inputs(base, "p1")
+    # The reference reads two inputs the agentic harness does not need.
+    for extra in ("fixed_residues.txt", "common_filenames.txt"):
+        with open(os.path.join(in_dir, extra), "w") as fh:
+            fh.write("\n")
+
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
+    manager = ImpressManager(flow)
+    seen: list[str] = []
+
+    async def adaptive_fn(pipeline):
+        seen.append(pipeline.state.get('last_analysis_step'))
+        await _reference_adaptive_decision(pipeline)
+
+    setup = PipelineSetup(
+        name="p1", type=SmallMoleculeBindingPipeline,
+        adaptive_fn=flow.function_task(adaptive_fn),
+        kwargs={"base_path": base,
+                "scripts_path": os.path.join(_REF_DIR, "scripts"),
+                "input_dir": in_dir, "mock": True, "max_tasks": max_tasks,
+                "num_refine_cycles": 2, "mpnn_ensemble_size": 2},
+    )
+    try:
+        await manager.start(pipeline_setups=[setup])
+    finally:
+        await flow.shutdown()
+    return seen
+
+
+def test_rules_match_the_reference_loop() -> None:
+    print("\n[2d] model D routes exactly as the reference's own state machine")
+    from rules_client import RulesClient
+
+    # This is the arm's whole claim. Model D exists to hold the rules fixed
+    # while the harness changes, so if the two loops route differently on
+    # identical inputs the arm is not a control and its numbers mean nothing.
+    # The shim in rules_client is the only logic not inherited from the
+    # reference, and it is exactly where a divergence would hide: STEP_MPNN is
+    # not one tool call, it is a position inside _run_refine_cycle().
+    ref = asyncio.run(_reference_stages(14))
+    pipeline, _ = asyncio.run(
+        _run_pipeline(RulesClient(), max_tasks=14, max_llm_turns=200))
+    mod = _stages(pipeline)
+
+    n = min(len(ref), len(mod))
+    check("both loops actually ran", n >= 12,
+          f"ref={len(ref)} modelD={len(mod)}")
+    div = next((i for i in range(n) if ref[i] != mod[i]), None)
+    lo, hi = max(0, (div or 0) - 2), (div or 0) + 3
+    check("model D's stage sequence is the reference's", div is None,
+          f"diverges at {div}: ref={ref[lo:hi]} modelD={mod[lo:hi]}")
+    # check() only sets the exit status of the script entry point. Assert too:
+    # an arm that silently stopped matching the reference is not a control, and
+    # that must fail a pytest run as well.
+    assert div is None, (
+        f"model D diverges from the reference at stage {div}: "
+        f"ref={ref[lo:hi]} modelD={mod[lo:hi]}. The shim in rules_client.py is "
+        f"the only logic not inherited from the reference -- fix it there.")
 
 
 class _BadCallClient:
@@ -647,6 +809,9 @@ if __name__ == "__main__":
     test_schemas()
     test_descriptors()
     test_scripted_route()
+    test_rules_route()
+    test_rules_are_the_reference_s()
+    test_rules_match_the_reference_loop()
     test_bad_calls()
     test_turn_budget()
     test_no_tool_calls()

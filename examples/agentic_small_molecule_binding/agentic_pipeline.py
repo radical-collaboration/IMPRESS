@@ -228,8 +228,21 @@ class AgenticSMBPipeline(SmallMoleculeBindingPipeline):
             {"role": "system", "content": prompts.SYSTEM_PROMPT},
             {"role": "user", "content": prompts.opening_message(self)},
         ]
+        # A decision-maker that reads pipeline state rather than the message
+        # history takes the pipeline here: build_client() ran while this was
+        # still a PipelineSetup config dict. Duck-typed so no other client and
+        # no Protocol changes.
+        bind = getattr(self.llm_client, "bind_pipeline", None)
+        if bind is not None:
+            bind(self)
+
         model_name = getattr(self.llm_client, "name", "?")
+        # control_model distinguishes a deliberate rules arm from a degraded
+        # one: both report zero tokens, and that is the documented signature of
+        # the scripted fallback (job 23219379).
         self._transcript({"event": "start", "model": model_name,
+                          "control_model": getattr(
+                              self.llm_client, "control_model", None),
                           "max_llm_turns": self.max_llm_turns,
                           "max_tasks": self.max_tasks})
         self.logger.pipeline_log(

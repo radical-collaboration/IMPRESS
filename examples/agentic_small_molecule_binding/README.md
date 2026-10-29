@@ -117,6 +117,24 @@ plumbing on real hardware.
 matter of changing `--model-profile`; nothing else in the example knows which
 model is in play.
 
+### The control arm
+
+`--model-profile rules-d` runs the loop from the reference's own
+`adaptive_decision()` instead of a model. It is the comparison's control: every
+LLM arm changes the decision rules *and* swaps the fixed state machine for this
+harness, so on its own no arm says which of the two produced the difference.
+Model D changes only the harness.
+
+It imports the reference's rules rather than restating them, so it reproduces
+their quirks too -- that is the point, not a defect. On identical mock inputs it
+emits the same stage sequence as the reference's own state machine, which
+`test_agentic_smb.py` asserts.
+
+Do not confuse it with `scripted`. That profile is the degraded path and a
+plumbing fixture, and its route table is not a faithful `run_nonadaptive` replay
+(it sends `packmin` straight to `relax`, where the reference's refine cycle runs
+a second `design_sequence` first).
+
 Which models may be compared is constrained: `~/.claude/CLAUDE.md` bars models
 developed by Chinese organisations, by any route — weights staged on project
 storage, a server inside the allocation, or a hosted API arm. The provenance
@@ -179,6 +197,7 @@ A model can stall, loop, or call nonsense, and an allocation is expensive:
 | `agentic_pipeline.py` | `AgenticSMBPipeline`: the agent loop, in place of `run()` |
 | `tools.py` | The tool schemas the model sees, and their handlers |
 | `llm.py` | The endpoint client, the profile loader, and the scripted stand-in |
+| `rules_client.py` | Control model D: the reference's `adaptive_decision()` driving the loop instead of a model |
 | `prompts.py` | The system prompt and the opening observation |
 | `models.yaml` | One profile per model under comparison |
 | `run_agentic_smb.py` | Runner: engine, backends, GPU assignment, pipeline setups |

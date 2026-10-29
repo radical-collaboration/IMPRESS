@@ -6,12 +6,15 @@ pipeline. A profile in models.yaml names the base_url, the model id and the
 environment variable holding the key; nothing else in the example knows which
 model is in play.
 
-Two clients implement the same `complete()` contract:
+Three clients implement the same `complete()` contract:
 
   OpenAICompatClient -- the real thing.
   ScriptedClient     -- an offline stand-in that replays a fixed route table
                         as tool calls, so the loop can be tested with no
                         network and no key.
+  RulesClient        -- control model D (rules_client.py): the reference's own
+                        adaptive_decision() drives the loop, so the rules are
+                        held fixed while the harness varies.
 
 complete() is synchronous on purpose. It is called from the pipeline's
 adaptive_fn, which runs on the `local` thread-pool backend precisely so that a
@@ -95,6 +98,11 @@ def load_profiles(path: str) -> dict[str, ModelProfile]:
 def build_client(profile: ModelProfile) -> LLMClient:
     if profile.kind == "scripted":
         return ScriptedClient()
+    if profile.kind == "rules":
+        # Imported here, not at module scope: rules_client imports Completion
+        # and ToolCall from this module, so a top-level import is a cycle.
+        from rules_client import RulesClient
+        return RulesClient()
     if profile.kind == "dragon_vllm" and not profile.base_url:
         raise LLMError(
             f"profile {profile.name!r} is served inside the allocation; its "
