@@ -131,7 +131,7 @@ def _http_routes() -> list[dict]:
 
 
 def surfaces() -> dict:
-    from impress_a.cli import POLICIES
+    from impress_a.cli import POLICIES, SUBCOMMANDS
     from impress_a.control.http import MAX_BODY_BYTES, MAX_WAIT_S, _STATUS
     from impress_a.control.plane import CampaignControlPlane
     from impress_a.core.decision import Decision, ExperimentIntent
@@ -175,7 +175,7 @@ def surfaces() -> dict:
     routes = _http_routes()
 
     return {
-        "cli_subcommands": ["run", "tools", "preflight"],
+        "cli_subcommands": list(SUBCOMMANDS),
         "cli_models": sorted(POLICIES),
         "n_cli_models": len(POLICIES),
 

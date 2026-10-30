@@ -16,11 +16,8 @@ import yaml
 from ..compose.validate import SiteCaps
 from ..core.pareto import Objective
 from ..manager import CampaignManager, CampaignSpec
-from ..policy.agentic import FourNodePolicy
-from ..policy.explicit import ReplayPolicy, ThresholdPolicy
-from ..policy.external import ExternalPolicy
-from ..policy.oracle import OraclePolicy
-from ..policy.wrappers import LoggingPolicy, NullPolicy, RuleCorrectionsPolicy
+from ..policy import registry as reasoners
+from ..policy.wrappers import RuleCorrectionsPolicy
 from ..tools.registry import Registry
 
 # Module logger, never configured here: a library that calls basicConfig steals the
@@ -28,8 +25,16 @@ from ..tools.registry import Registry
 # and everything below is silent by default - including under pytest.
 log = logging.getLogger(__name__)
 
-POLICIES = {"D": ThresholdPolicy, "B": OraclePolicy, "A": FourNodePolicy,
-            "C": ExternalPolicy, "null": NullPolicy, "replay": ReplayPolicy}
+# Derived, not restated. The taxonomy lives in `policy/registry.py` so that it is not a
+# CLI detail; this name is kept because `slides/api/run_model.py` reads it to generate the
+# deck's model count, and a deck that disagrees with the code is the drift this avoids.
+POLICIES = reasoners.CLASSES
+
+#: The subcommands `main` registers. Declared once because `slides/api/run_model.py` reads
+#: it to generate the deck, and had the list hardcoded - so adding `models` here would
+#: otherwise have left the deck claiming three subcommands against the code's four.
+#: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
+SUBCOMMANDS = ("run", "tools", "models", "preflight")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -90,29 +95,74 @@ def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
             "Boltz will silently model no ligand. Set it to the real target's SMILES.")
 
 
-def build_policy(model: str, spec: CampaignSpec, guard: bool = True):
-    """Construct the campaign's control model, pointed at the campaign's own chain.
+def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
+                 records: list[dict[str, Any]] | None = None):
+    """Adapt a `CampaignSpec` into the registry's options, and construct the reasoner.
+
+    This function is the adapter and nothing more. `policy/registry.py` owns which models
+    exist and how each is built; it cannot do this part itself, because `CampaignSpec`
+    lives in `runtime/` and `policy` may import `core` only (ADR 0010, asserted by
+    `tests/test_layering.py`). Putting the spec on the other side of that line is what
+    would make control models stop being swappable.
 
     `stages` has to reach the policy or every model falls back to its built-in default,
     which is the mock chain - so a real campaign would validate the real toolkits and
     then execute mocks.
     """
-    cls = POLICIES[model]
-    stages = list(spec.stages) or None
-    if model == "C":
-        pol = cls(timeout_s=5.0, on_timeout="fallback",
-                  fallback=ThresholdPolicy(stages=stages))
-    elif model == "B":
-        # A declared fallback is mandatory for the oracle: an API outage must degrade
-        # explicitly, never stall a multi-GPU allocation (Part A risk R7).
-        pol = cls(fallback=ThresholdPolicy(stages=stages))
-    elif model in ("A", "D"):
-        pol = cls(stages=stages)
-    else:
-        pol = cls()
+    # `max_cycles` is deliberately NOT forwarded. `CampaignManager._reasoner` already
+    # bounds the driver with `spec.max_cycles`, and a policy carrying the same number
+    # would bound the same thing twice from two places - which is how an off-by-one
+    # becomes invisible (the driver counted a Backtrack as a cycle for three Delta jobs).
+    # The spec bounds the driver; the policy keeps its own stopping condition.
+    pol = reasoners.build(model, reasoners.ReasonerOptions(
+        stages=list(spec.stages) or None,
+        records=records,
+    ))
     if guard:
         pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
     return pol
+
+
+def print_models() -> int:
+    """Print the control models, their shape and their real status.
+
+    This exists so the status column cannot go stale unnoticed. `docs/` claimed four
+    working control models while two of them had no LLM behind them at all, and nothing
+    in the tool contradicted it. A reader can now ask the code.
+    """
+    rows = reasoners.table()
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    print()
+    for n, row in enumerate(rows):
+        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
+        if n == 0:
+            print("  " + "  ".join("-" * w for w in widths))
+    print()
+    for letter in sorted(reasoners.MODELS):
+        m = reasoners.MODELS[letter]
+        if m.note:
+            print(f"  {m.letter}: {m.note}")
+            if m.spec_ref:
+                print(f"     specified in {m.spec_ref}")
+    print("\n  `llm` is what the specification asks for; `calls` is what runs today.")
+    print("  Reference: docs/reference/frontends.md\n")
+    return 0
+
+
+def _replay_records(path: str) -> list[dict[str, Any]]:
+    """Load a recorded decision sequence from a campaign's provenance directory.
+
+    `provenance/decisions.jsonl` is what `LoggingPolicy` and the models that carry their
+    own sink write. Reading it here rather than in `ReplayPolicy` keeps the policy layer
+    off the filesystem, which is the same reason policies never touch `tools`.
+    """
+    p = Path(path)
+    if p.is_dir():
+        p = p / "provenance" / "decisions.jsonl" if (p / "provenance").is_dir() \
+            else p / "decisions.jsonl"
+    if not p.is_file():
+        raise FileNotFoundError(f"no decisions.jsonl under {path}")
+    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
 
 def _hms(seconds: float) -> str:
@@ -191,7 +241,8 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 
 
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
-                       heartbeat_s: float | None = None) -> int:
+                       heartbeat_s: float | None = None,
+                       replay_from: str | None = None) -> int:
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
@@ -207,7 +258,24 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
         log.info("thread cap %-22s %s%s", var, actual,
                  "" if actual == val else f"  (kept from the environment, not {val})")
     spec.campaign_id = f"{spec.campaign_id}-{model}"
-    policy = build_policy(model, spec, guard)
+    try:
+        records = _replay_records(replay_from) if replay_from else None
+        policy = build_policy(model, spec, guard, records)
+    except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
+        # A model that cannot be constructed is an operator error, not a crash: report it
+        # the way preflight reports a missing binary. `--model replay` used to raise
+        # TypeError from a positional argument nobody had a flag for.
+        log.error("cannot build control model %s: %s", model, exc)
+        return 1
+    # Which reasoner actually ran has to be in the log, not inferable from it. A model-B
+    # campaign that degraded to its fallback and one that deliberately ran the rehearsal
+    # stand-in both report zero LLM calls; on the sibling example's job 23219379 that
+    # ambiguity let 144 degraded turns read as a frontier-model result for a full day.
+    _m = reasoners.MODELS[model]
+    log.info("control model %s (%s): %s, %s llm shape, status=%s",
+             _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
+    if _m.note:
+        log.info("control model %s caveat: %s", _m.letter, _m.note)
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
@@ -419,15 +487,20 @@ def main(argv: list[str] | None = None) -> int:
                    help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
                         "0 disables). Only visible once logging is configured - see "
                         "scripts/delta_run_campaign.py")
+    r.add_argument("--replay-from", default=None, metavar="DIR",
+                   help="provenance directory to replay (--model replay only)")
     t = sub.add_parser("tools", help="list registered tools")
     t.add_argument("--toolkits", default=None)
+    sub.add_parser("models", help="list the control models and their status")
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
-                                        a.heartbeat))
+                                        a.heartbeat, a.replay_from))
+    if a.cmd == "models":
+        return print_models()
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec) if a.spec else None)
     reg = Registry().load(a.toolkits)
