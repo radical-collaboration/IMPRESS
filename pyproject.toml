@@ -57,9 +57,25 @@ doc = [
 ]
 
 [tool.ruff]
-line-length = 88
+# One lint contract for both projects in this repository: `impress` under src/, and
+# `impress_a` under agent/. agent/pyproject.toml deliberately declares no [tool.ruff] of
+# its own - ruff walks up to this table, which is the point.
+#
+# 100, not 88, and the number is measured rather than chosen. agent/ was written to a
+# ~92-column convention and has 404 lines over 88, but only 10 over 100; src/ and tests/
+# have none over either. `ruff format` is no help there, because it reflows code and never
+# comments or docstring prose - it clears barely a quarter of those E501s while rewriting
+# 57 of agent/'s 65 files. So the width moves and the code mostly does not.
+line-length = 100
+# py39 is right for `impress`, whose floor is 3.9, and conservative for `impress_a`, whose
+# floor is 3.10: the UP rules simply modernize less there than they could. One table is
+# worth more than the few extra fixes a split would buy.
 target-version = "py39"
-fix = true
+# NOT true. With `fix = true` the documented `ruff check` command rewrites the working
+# tree instead of reporting on it: running it once here applied 36 fixes across 20 files
+# nobody had touched, and `tox -e lint` was silently fixing before it checked, so the lint
+# env could never fail on anything autofixable. Use `tox -e format` to fix.
+fix = false
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "N", "UP"]
