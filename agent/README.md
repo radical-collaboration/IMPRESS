@@ -195,6 +195,10 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 
 ## Documentation
 
+These pages are **published** as the IMPRESS site's
+[IMPRESS-A section](https://radical-collaboration.github.io/IMPRESS/impress-a/reference/architecture/).
+They used to live at `agent/docs/` and were built by nothing.
+
 | | |
 |---|---|
 | [`docs/impress-a/reference/architecture.md`](../docs/impress-a/reference/architecture.md) | The loop, layers, import contract, invariants |
@@ -206,7 +210,11 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 | [`docs/impress-a/limitations.md`](../docs/impress-a/limitations.md) | Known gaps and residual risks, stated plainly |
 
 `planning/` holds the design record that produced this system. It is process history, not reference
-documentation, and is not part of the published package.
+documentation, and is not published.
+
+From the repository root, `tox` runs this project's suite in an isolated environment -
+`tox -e agent-py311` - alongside `tox -e lint`, which covers both packages, and `tox -e docs`. That
+is what CI runs; see `../.github/workflows/ci.yml`.
 
 ## Status
 

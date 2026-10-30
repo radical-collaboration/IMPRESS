@@ -92,7 +92,10 @@ LigandMPNN + Rosetta + Boltz-2), and
 
 [`agent/`](agent/) holds IMPRESS-A, an autonomous design agent that composes and runs
 workflows per cycle on the same AsyncFlow/rhapsody stack. It is a separate package
-(`impress_a`, Python >= 3.10) with its own install, tests and CI job; see
+(`impress_a`, Python >= 3.10) with its own install and its own dependency set, sharing this
+repository's CI, lint and documentation. Its reference documentation is published under
+[IMPRESS-A](https://radical-collaboration.github.io/IMPRESS/impress-a/reference/architecture/)
+and lives at [`docs/impress-a/`](docs/impress-a/); see also
 [`agent/README.md`](agent/README.md).
 
 
