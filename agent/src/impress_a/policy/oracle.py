@@ -18,8 +18,15 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from ..core.decision import (Backtrack, CampaignObservation, ComposeAndRun, Decision,
-                             ExperimentIntent, Stop, ValidationFailure)
+from ..core.decision import (
+    Backtrack,
+    CampaignObservation,
+    ComposeAndRun,
+    Decision,
+    ExperimentIntent,
+    Stop,
+    ValidationFailure,
+)
 from .base import BasePolicy
 
 DECISION_SCHEMA = {

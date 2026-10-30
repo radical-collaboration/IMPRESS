@@ -9,8 +9,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..core.decision import (Backtrack, CampaignObservation, ComposeAndRun, Decision,
-                             ExperimentIntent, Stop, ValidationFailure)
+from ..core.decision import (
+    Backtrack,
+    CampaignObservation,
+    ComposeAndRun,
+    Decision,
+    ExperimentIntent,
+    Stop,
+    ValidationFailure,
+)
 from .base import BasePolicy
 
 log = logging.getLogger(__name__)

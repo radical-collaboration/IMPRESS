@@ -112,9 +112,7 @@ class ImpressLogger:
         return f"{color}{text}{Colors.RESET}" if self.use_colors else text
 
     def _format_message(self, level, component, message, pipeline_name=None):
-        timestamp = self._colorize(
-            datetime.now().strftime("%H:%M:%S.%f")[:-3], Colors.DIM
-        )
+        timestamp = self._colorize(datetime.now().strftime("%H:%M:%S.%f")[:-3], Colors.DIM)
         level_color = self.level_colors.get(level, Colors.WHITE)
         colored_level = self._colorize(f"[{level.value}]", level_color)
 
@@ -131,9 +129,7 @@ class ImpressLogger:
             pipeline_colored = self._colorize(f"[{pipeline_name}]", Colors.BRIGHT_WHITE)
             pipeline_part = f" {pipeline_colored}"
 
-        return (
-            f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
-        )
+        return f"{timestamp} {colored_level} {colored_component}{pipeline_part} {message}"
 
     def _is_enabled(self, level: LogLevel) -> bool:
         return self._LEVEL_ORDER.index(level) >= self._LEVEL_ORDER.index(self.min_level)
@@ -153,9 +149,7 @@ class ImpressLogger:
         """
         if not self._is_enabled(LogLevel.DEBUG):
             return
-        formatted = self._format_message(
-            LogLevel.DEBUG, component, message, pipeline_name
-        )
+        formatted = self._format_message(LogLevel.DEBUG, component, message, pipeline_name)
         self._write_log(formatted)
 
     def info(self, message, component="manager", pipeline_name=None):
@@ -168,9 +162,7 @@ class ImpressLogger:
         """
         if not self._is_enabled(LogLevel.INFO):
             return
-        formatted = self._format_message(
-            LogLevel.INFO, component, message, pipeline_name
-        )
+        formatted = self._format_message(LogLevel.INFO, component, message, pipeline_name)
         self._write_log(formatted)
 
     def warning(self, message, component="manager", pipeline_name=None):
@@ -183,9 +175,7 @@ class ImpressLogger:
         """
         if not self._is_enabled(LogLevel.WARNING):
             return
-        formatted = self._format_message(
-            LogLevel.WARNING, component, message, pipeline_name
-        )
+        formatted = self._format_message(LogLevel.WARNING, component, message, pipeline_name)
         self._write_log(formatted)
 
     def error(self, message, component="manager", pipeline_name=None):
@@ -198,9 +188,7 @@ class ImpressLogger:
         """
         if not self._is_enabled(LogLevel.ERROR):
             return
-        formatted = self._format_message(
-            LogLevel.ERROR, component, message, pipeline_name
-        )
+        formatted = self._format_message(LogLevel.ERROR, component, message, pipeline_name)
         self._write_log(formatted)
 
     def critical(self, message, component="manager", pipeline_name=None):
@@ -213,9 +201,7 @@ class ImpressLogger:
         """
         if not self._is_enabled(LogLevel.CRITICAL):
             return
-        formatted = self._format_message(
-            LogLevel.CRITICAL, component, message, pipeline_name
-        )
+        formatted = self._format_message(LogLevel.CRITICAL, component, message, pipeline_name)
         self._write_log(formatted)
 
     def pipeline_started(self, pipeline_name):

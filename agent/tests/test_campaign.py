@@ -6,21 +6,19 @@ with ConcurrentExecutionBackend and mock tools. Exercises every layer above the 
 import asyncio
 
 import pytest
-
 from impress_a.compose.interlock import Scrutiny
 from impress_a.compose.validate import SiteCaps
-from impress_a.core.artifacts import (AUTHORITY_ASSAY, Property, PropertySource,
-                                      SourceKind)
+from impress_a.control.plane import InProcessControlPlane
+from impress_a.core.artifacts import AUTHORITY_ASSAY, Property, PropertySource, SourceKind
 from impress_a.core.decision import ExperimentIntent
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
+from impress_a.core.session import CampaignStopped, SubmissionRejected
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
-from impress_a.core.session import CampaignStopped, SubmissionRejected
-from impress_a.control.plane import InProcessControlPlane
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.agentic import FourNodePolicy
-from impress_a.policy.explicit import ReplayPolicy, ThresholdPolicy
+from impress_a.policy.explicit import ThresholdPolicy
 from impress_a.policy.external import ExternalPolicy
 from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy

@@ -1,8 +1,12 @@
 """T1 - unit tests. Pure logic, no I/O."""
-import pytest
 
-from impress_a.core.artifacts import (AUTHORITY_ASSAY, AUTHORITY_ML_PREDICTOR, Property,
-                                      PropertySource, SourceKind)
+from impress_a.core.artifacts import (
+    AUTHORITY_ASSAY,
+    AUTHORITY_ML_PREDICTOR,
+    Property,
+    PropertySource,
+    SourceKind,
+)
 from impress_a.core.budget import BudgetLedger
 from impress_a.core.pareto import Direction, Objective, pareto_front
 from impress_a.core.qc import GateOutcome, GateResult, QCReport, QCVerdict

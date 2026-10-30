@@ -97,7 +97,7 @@ class ToolSpec(BaseModel):
     entry: str | None = None  # dotted path to the task-agent class
 
     @model_validator(mode="after")
-    def _defaults_within_range(self) -> "ToolSpec":
+    def _defaults_within_range(self) -> ToolSpec:
         for pname, p in self.parameters.items():
             if p.default is not None and (err := p.validate_value(p.default)):
                 raise ValueError(f"{self.id}.{pname}: default invalid - {err}")

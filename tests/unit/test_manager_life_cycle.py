@@ -126,9 +126,7 @@ class TestEngineOwnership:
         manager = ImpressManager(flow, use_colors=False)
         manager.logger = Mock()
 
-        await manager.start(
-            [{"name": "p1", "type": MockPipeline, "config": {}, "kwargs": {}}]
-        )
+        await manager.start([{"name": "p1", "type": MockPipeline, "config": {}, "kwargs": {}}])
 
         assert flow.shutdown_calls == 0
 

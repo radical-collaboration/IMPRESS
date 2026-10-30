@@ -27,7 +27,7 @@ class TaskGraph(BaseModel):
     nodes: dict[str, TaskNode] = Field(default_factory=dict)
     intent_goal: str = ""
 
-    def add(self, n: TaskNode) -> "TaskGraph":
+    def add(self, n: TaskNode) -> TaskGraph:
         self.nodes[n.id] = n
         return self
 

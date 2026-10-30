@@ -33,7 +33,6 @@ import json
 import pathlib
 
 import pytest
-
 from impress_a.core.qc import GateOutcome, QCReport, QCVerdict
 from impress_a.tools import gates
 from impress_a.tools.registry import Registry

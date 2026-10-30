@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..core.decision import (CampaignObservation, ComposeAndRun, Decision, Stop,
-                             ValidationFailure)
+from ..core.decision import CampaignObservation, ComposeAndRun, Decision, Stop
 
 
 class PolicyWrapper:

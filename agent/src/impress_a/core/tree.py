@@ -6,9 +6,9 @@ terminated campaign keep receiving assay results (doc 09).
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Iterator
 
 from pydantic import BaseModel, Field
 

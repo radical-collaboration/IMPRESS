@@ -58,9 +58,7 @@ async def test_stdio_captured_labelled_and_failure_explained(tmp_path):
 
     manager = ImpressManager(flow, use_colors=False)
     try:
-        await manager.start(
-            [PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide_task)]
-        )
+        await manager.start([PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide_task)])
     finally:
         await flow.shutdown()
 

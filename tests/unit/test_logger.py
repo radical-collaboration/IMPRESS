@@ -43,33 +43,25 @@ class TestLogLevelFiltering:
 
     def test_debug_suppressed_at_info_level(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, min_level=LogLevel.INFO, use_colors=False
-        )
+        logger = ImpressLogger(output_stream=stream, min_level=LogLevel.INFO, use_colors=False)
         logger.debug("should not appear")
         assert stream.getvalue() == ""
 
     def test_info_written_at_info_level(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, min_level=LogLevel.INFO, use_colors=False
-        )
+        logger = ImpressLogger(output_stream=stream, min_level=LogLevel.INFO, use_colors=False)
         logger.info("should appear")
         assert "should appear" in stream.getvalue()
 
     def test_warning_suppressed_below_min(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, min_level=LogLevel.ERROR, use_colors=False
-        )
+        logger = ImpressLogger(output_stream=stream, min_level=LogLevel.ERROR, use_colors=False)
         logger.warning("should not appear")
         assert stream.getvalue() == ""
 
     def test_all_levels_write_at_debug_min(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, min_level=LogLevel.DEBUG, use_colors=False
-        )
+        logger = ImpressLogger(output_stream=stream, min_level=LogLevel.DEBUG, use_colors=False)
         logger.debug("d")
         logger.info("i")
         logger.warning("w")
@@ -84,9 +76,7 @@ class TestLogLevelFiltering:
 
     def test_critical_only_at_critical_min(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, min_level=LogLevel.CRITICAL, use_colors=False
-        )
+        logger = ImpressLogger(output_stream=stream, min_level=LogLevel.CRITICAL, use_colors=False)
         logger.debug("d")
         logger.info("i")
         logger.warning("w")
@@ -214,17 +204,13 @@ class TestHighLevelMethods:
 
     def test_activity_summary_suppressed_at_info(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, use_colors=False, min_level=LogLevel.INFO
-        )
+        logger = ImpressLogger(output_stream=stream, use_colors=False, min_level=LogLevel.INFO)
         logger.activity_summary(3, 1, 2)
         assert stream.getvalue() == ""  # activity_summary is DEBUG level
 
     def test_activity_summary_written_at_debug(self):
         stream = io.StringIO()
-        logger = ImpressLogger(
-            output_stream=stream, use_colors=False, min_level=LogLevel.DEBUG
-        )
+        logger = ImpressLogger(output_stream=stream, use_colors=False, min_level=LogLevel.DEBUG)
         logger.activity_summary(3, 1, 2)
         out = stream.getvalue()
         assert "3" in out

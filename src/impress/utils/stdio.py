@@ -71,9 +71,7 @@ def _stderr_path(flow: Any, fut: Any, exc: BaseException) -> Optional[str]:
     return os.path.join(work_dir, f"{uid}.stderr")
 
 
-def stderr_tail(
-    flow: Any, fut: Any, exc: BaseException, lines: int = TAIL_LINES
-) -> Optional[str]:
+def stderr_tail(flow: Any, fut: Any, exc: BaseException, lines: int = TAIL_LINES) -> Optional[str]:
     """Last `lines` lines of a failed task's captured stderr, or None."""
     path = _stderr_path(flow, fut, exc)
     if path is None:

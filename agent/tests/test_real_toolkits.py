@@ -14,7 +14,6 @@ import pathlib
 from typing import Any
 
 import pytest
-
 from impress_a.compose.composer import Composer
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger

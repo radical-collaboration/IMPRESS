@@ -22,9 +22,7 @@ from impress.utils.logger import ImpressLogger
 
 
 async def _make_flow(work_dir):
-    compute = await LocalExecutionBackend(
-        ThreadPoolExecutor(max_workers=2), name="compute"
-    )
+    compute = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=2), name="compute")
     # Named threads, so a test can prove which pool a callback ran on.
     local = await LocalExecutionBackend(
         ThreadPoolExecutor(max_workers=2, thread_name_prefix="localpool"),
@@ -60,9 +58,7 @@ class ShellPipeline(ImpressBasePipeline):
 
 
 @pytest.mark.integration
-async def test_failure_explained_and_adaptive_on_declared_backend(
-    tmp_path, monkeypatch
-):
+async def test_failure_explained_and_adaptive_on_declared_backend(tmp_path, monkeypatch):
     logged = []
     monkeypatch.setattr(
         ImpressLogger,
@@ -94,9 +90,7 @@ async def test_failure_explained_and_adaptive_on_declared_backend(
 
     manager = ImpressManager(flow, use_colors=False)
     try:
-        await manager.start(
-            [PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide_task)]
-        )
+        await manager.start([PipelineSetup(name="p1", type=ShellPipeline, adaptive_fn=decide_task)])
     finally:
         await flow.shutdown()
 

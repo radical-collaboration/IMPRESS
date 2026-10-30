@@ -93,7 +93,7 @@ class ControlPlaneServer:
             await self._server.wait_closed()
             self._server = None
 
-    async def __aenter__(self) -> "ControlPlaneServer":  # noqa: PYI034
+    async def __aenter__(self) -> ControlPlaneServer:  # noqa: PYI034
         return await self.start()
 
     async def __aexit__(self, *exc: object) -> None:
@@ -282,7 +282,7 @@ class ControlPlaneClient:
     async def aclose(self) -> None:
         await self._c.aclose()
 
-    async def __aenter__(self) -> "ControlPlaneClient":  # noqa: PYI034
+    async def __aenter__(self) -> ControlPlaneClient:  # noqa: PYI034
         return self
 
     async def __aexit__(self, *exc: object) -> None:

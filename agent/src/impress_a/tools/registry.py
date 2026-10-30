@@ -40,7 +40,7 @@ class Registry:
         out.append(Path(__file__).resolve().parents[3] / "toolkits")
         return [p for p in out if p.is_dir()]
 
-    def load(self, explicit: str | Path | None = None) -> "Registry":
+    def load(self, explicit: str | Path | None = None) -> Registry:
         for root in self.search_paths(explicit):
             for tk_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                 try:
