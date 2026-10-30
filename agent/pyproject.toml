@@ -26,7 +26,11 @@ dependencies = [
 agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.git@dd27bd8b7e6edb2995038c9c1cc9b2fec3b7c7e9"]
 oracle = ["litellm"]
 http = ["httpx"]          # the HTTP control-plane adapter
-dev = ["pytest", "pytest-asyncio", "ruff", "httpx"]
+# cloudpickle is a TEST dependency, not a runtime one: `test_real_toolkits.py` uses it to
+# prove SubprocessError survives being pickled across a process boundary. It was absent
+# from every extra, so `pytest.importorskip("cloudpickle")` silently skipped that
+# assertion in CI while passing on any developer machine that happened to have it.
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx", "cloudpickle"]
 
 [project.scripts]
 impress-a = "impress_a.cli:main"
