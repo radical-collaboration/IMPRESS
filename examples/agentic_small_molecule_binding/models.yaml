@@ -212,25 +212,39 @@ profiles:
   # reference's quirks too -- the inert backbone similarity gate and the
   # hardcoded `pass: True` on sequence -- which is correct, not a defect.
   #
-  # MEASURED 2026-10-29, smoke 23321447 (1 node, 4 pipelines, 1 h, TIMEOUT at the
-  # wall as the reference arm also ends). The arm routes: degraded=false on all
-  # four pipelines, control_model="D" in every start record, 401 tool calls, and
-  # the full seven-stage cycle B-s-p-k-R-I-F on real artifacts -- including the
-  # second design_sequence pass that _SCRIPTED_ROUTE drops, which is the one
-  # piece of logic not inherited from the reference. All four reference
-  # escalations fired: 3x seq-retry from backbone and from packed, fastrelax
-  # failure, and interface failure re-entering the refine cycle.
+  # MEASURED. Smoke 23321447 (1 h) proved the arm routes; 23328372 is the result.
   #
-  # Throughput: 84-109 turns per pipeline per hour, so MAX_LLM_TURNS=1000 is NOT
-  # the binding constraint on a 4 h run (~440 turns expected). Wall clock is.
+  # 23328372: 1 node, 4 pipelines, 4 h, TIMEOUT at 04:00:23 -- the same shape and
+  # ending as ref 23114772 and agentic 23114775, scored by one run of
+  # compare_arms.py over all three. 1626 turns, 0 degraded, 0 task failures, 0
+  # finish calls. 381-446 turns/pipeline, so MAX_LLM_TURNS=1000 was not binding.
   #
-  # NOT a science result -- 1 h truncates cycles mid-flight and the yield figures
-  # below are biased by it. Of 61 backbone attempts only 10 reached a fold, with
-  # 24 dying at the sequence gate and 17 at fastrelax; design_sequence per fold
-  # was ~21 against the reference's 6.8 (2026-10-06) and 13.0 (2026-10-22). If
-  # that survives the 4 h run it is evidence about the REFERENCE RULES at today's
-  # HEAD, not about this harness -- which is the second probe into the suspected
-  # regression that this arm was expected to provide. Do not quote it yet.
+  #                     ref 23114772   agentic 23114775   rulesD 23328372
+  #   GPU-h per fold        0.302           0.083             0.096
+  #   folds passed       53 (80%)        192 (97%)         166 (97%)
+  #   folds / node-h       13.25           48.00             41.50
+  #   fastrelax pass         49%              88%               81%
+  #   median pLDDT          89.6             94.2              96.2
+  #   mpnn per backbone       3.5              1.3               2.5
+  #   folds per backbone     0.27             0.76              0.72
+  #
+  # THE HARNESS IS NOT NEUTRAL, which is the opposite of what this arm was
+  # expected to show. Model D runs the reference's rules (imported), the
+  # reference's stage methods (inherited -- tools.py's `relax` calls
+  # pipeline.fastrelax() and analysis_fastrelax()) and the reference's own
+  # thresholds. Only the sequencing loop differs, and that alone moves GPU-h per
+  # passing fold from 0.302 to 0.096. It lands beside the LLM arm, not beside the
+  # reference.
+  #
+  # Against the HEALTHY baseline (22701168, 0.160) rather than the 23114772 arm,
+  # which CLAUDE.md already flags as suspect: harness ~1.67x, LLM ~1.16x on top.
+  # Either framing gives the same direction -- most of the agentic advantage is
+  # the harness, not the decision-maker -- so the 1.9x must now be split before
+  # it is quoted as a model result.
+  #
+  # UNEXPLAINED, and the thing to settle next: why the same rules fold 0.27 of
+  # backbones in the reference and 0.72 here. fastrelax 49% vs 81% on identical
+  # code and thresholds is the specific gap.
   rules-d:
     kind: rules
 
