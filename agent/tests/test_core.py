@@ -37,7 +37,8 @@ def test_unparameterised_ligand_is_a_type_error():
 def test_qc_fail_is_never_rankable():
     q = QCReport().add(GateResult(gate="g", outcome=GateOutcome.FAIL))
     assert q.verdict is QCVerdict.FAIL and not q.eligible_for_front
-    s = QCReport(); s.mark_suspect("provisional")
+    s = QCReport()
+    s.mark_suspect("provisional")
     assert s.verdict is QCVerdict.SUSPECT and s.eligible_for_front
 
 

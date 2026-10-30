@@ -92,14 +92,14 @@ def test_pattern_signature_ignores_parameter_values(reg):
 
 
 def test_interlock_promotes_then_demotes():
-    L = TrustLedger(promote_after=3)
-    L.record_for("sig", ["x"])
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert not L.on_clean_run("sig") and not L.on_clean_run("sig")
-    assert L.on_clean_run("sig"), "third clean run promotes"
-    assert not Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert L.on_failure("sig"), "failure demotes"
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
+    ledger = TrustLedger(promote_after=3)
+    ledger.record_for("sig", ["x"])
+    assert Scrutiny.for_pattern(ledger, "sig").mark_suspect
+    assert not ledger.on_clean_run("sig") and not ledger.on_clean_run("sig")
+    assert ledger.on_clean_run("sig"), "third clean run promotes"
+    assert not Scrutiny.for_pattern(ledger, "sig").mark_suspect
+    assert ledger.on_failure("sig"), "failure demotes"
+    assert Scrutiny.for_pattern(ledger, "sig").mark_suspect
 
 
 def test_trust_ledger_survives_concurrent_writers(tmp_path):
@@ -135,8 +135,9 @@ def test_trust_survives_a_campaign_running_from_a_different_directory(tmp_path, 
     """Promotion has to accumulate across JOBS, and on HPC every job is a fresh CWD.
 
     `spec.root` defaulted to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into a
-    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger resolved inside
-    each job's own directory and started empty every time. On disk after two real runs:
+    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger
+    resolved inside each job's own directory and started empty every time. On disk after
+    two real runs:
 
         22684607/campaigns/_runs/_trust/cuda.jsonl   0 clean
         22692304/campaigns/_runs/_trust/cuda.jsonl   1 clean
@@ -215,11 +216,11 @@ def test_run_root_comes_from_the_environment_unless_the_yaml_names_one(tmp_path,
 
 def test_trust_ledger_without_a_path_persists_nothing():
     """The in-memory form is what the validation tier uses; it must not touch disk."""
-    L = TrustLedger(promote_after=2)
-    L.record_for("sig", ["x"])
-    assert L.on_clean_run("sig") is False
-    assert L.on_clean_run("sig") is True
-    assert L.path is None
+    ledger = TrustLedger(promote_after=2)
+    ledger.record_for("sig", ["x"])
+    assert ledger.on_clean_run("sig") is False
+    assert ledger.on_clean_run("sig") is True
+    assert ledger.path is None
 
 
 # -- integrity vs acceptance (decision 0013) ------------------------------------------

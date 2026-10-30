@@ -62,7 +62,8 @@ class ExecutionResults:
                 q.verdict = QCVerdict.FAIL
                 q.notes.append(f"{tid}: no result")
                 continue
-            q.gates.extend(r.qc.gates); q.notes.extend(r.qc.notes)
+            q.gates.extend(r.qc.gates)
+            q.notes.extend(r.qc.notes)
             if r.qc.verdict is QCVerdict.FAIL:
                 q.verdict = QCVerdict.FAIL
             elif r.qc.verdict is QCVerdict.SUSPECT and q.verdict is not QCVerdict.FAIL:

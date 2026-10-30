@@ -699,6 +699,18 @@ This belongs to the project-level CI and documentation consolidation, not to a r
 is recorded here because the verification paragraph below currently states a number no configuration
 produces.
 
+  **RESOLVED** by the lint half of that consolidation. One `[tool.ruff]` at the repository root now
+  governs both projects at `line-length = 100` with `fix = false`, and `tox -e lint` checks
+  `src tests agent/src agent/tests`. The width is measured rather than chosen: `agent/` has 404 lines
+  over 88 but only 10 over 100, while `src`/`tests` have none over either. `ruff format` was not the
+  route - it reflows code but never comments or docstring prose, so it cleared barely a quarter of
+  those E501s while wanting to rewrite 57 of `agent/`'s 65 files and 4,711 lines; it therefore stays
+  scoped to `src tests`, and `agent/` is check-only. 55 findings were cleared to reach zero: 35
+  autofixes, 10 hand-rewraps, and the rest judgement calls. `N818` is now ignored with its reason -
+  four exception names deliberately lack an `Error` suffix, and `CampaignStopped` is the plainest
+  case, being a control-flow signal rather than a failure. The verification paragraph at the end of
+  this file is corrected accordingly.
+
 **H7. Hardware: paired 1-hour, 1-node runs of B and D.** After H2. One spec, two arms, differing only
 in `--model`, submitted together - `campaigns/delta-small-molecule-arms.yaml` derived from
 `delta-small-molecule-trust.yaml`, 1 node on `gpuA40x4`, 8 GPU-h total. They test the `ControlPolicy`
@@ -738,9 +750,16 @@ paid for out of the first allocation.
 
 ## Verification that applies to any item
 
-`pytest tests -q` green, no allocation. `ruff check src tests` **must not exceed 41** — the one
-number worth stating, and a budget that drifts upward is the thing you want to notice. The import
-contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
+`pytest tests -q` green, no allocation. Lint is **`tox -e lint` from the repository root**, and the
+budget is now **zero** — not a ceiling. The old number, "`ruff check src tests` must not exceed 41",
+was wrong in three ways at once and is worth recording rather than just deleting: the command was
+run from `agent/` but resolved `src`/`tests` to IMPRESS's own, so it never saw this package; nothing
+in CI ran it either, because `agent-tests.yml` only ran pytest; and 41 was measured against ruff's
+defaults rather than the `select` list in the root `pyproject.toml` that actually applied, which
+reported 449. One contract covers both projects now, at `line-length = 100`, with `fix = false` so
+the command reports instead of rewriting the tree. A budget that drifts upward is still the thing to
+notice — it is just that the only defensible budget was zero, once anything was measuring it.
+The import contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
 `impress-a run campaigns/delta-small-molecule-smoke.yaml --model D` must compose `rfd3_design…`,
 never `mock_generate…`.

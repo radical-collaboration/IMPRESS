@@ -33,7 +33,8 @@ class SubprocessError(RuntimeError):
         return (type(self), (self.cmd, self.returncode, self.stdout, self.stderr))
 
 
-async def run_cmd(cmd: list[str], cwd=None, env=None, timeout_s: float | None = None) -> tuple[str, str]:
+async def run_cmd(cmd: list[str], cwd=None, env=None,
+                  timeout_s: float | None = None) -> tuple[str, str]:
     """Run `cmd`, wait for it, return (stdout, stderr). Raises SubprocessError on nonzero exit."""
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=cwd, env=env,
@@ -77,7 +78,7 @@ async def run_cmd(cmd: list[str], cwd=None, env=None, timeout_s: float | None = 
             cmd, -1, _decode("out"),
             f"timed out after {timeout_s}s"
             + (f"\n--- partial stderr before the kill ---\n{partial_err}"
-               if partial_err else ""))
+               if partial_err else "")) from None
     except BaseException:
         # Including cancellation of the caller: do not leak the child or the readers.
         for r in readers:

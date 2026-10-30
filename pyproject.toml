@@ -79,7 +79,13 @@ fix = false
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "N", "UP"]
-ignore = ["UP007", "UP045"]
+# N818 wants every exception name to end in "Error". Four here deliberately do not:
+# CampaignStopped, SubmissionRejected, CampaignAborted, BackendConstructionTimeout.
+# CampaignStopped is the clearest case - it is a control-flow signal raised into every
+# waiting reasoner when a campaign ends, explicitly not a failure, and calling it
+# CampaignStoppedError would misdescribe it. The other three are public, documented and
+# referenced from docs and plans; renaming them is an API break for a suffix.
+ignore = ["UP007", "UP045", "N818"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -58,7 +58,8 @@ class Registry:
             if missing:
                 raise ToolkitLoadError(f"SKILL.md missing sections {missing}")
             self.skills[d.name] = text
-        for spec_file in sorted((d / "tools").glob("*/spec.yaml")) if (d / "tools").is_dir() else []:
+        for spec_file in (sorted((d / "tools").glob("*/spec.yaml"))
+                          if (d / "tools").is_dir() else []):
             spec = ToolSpec(**yaml.safe_load(spec_file.read_text()))
             for g in spec.qc_gates:
                 gates.get(g.id)  # raises if unimplemented

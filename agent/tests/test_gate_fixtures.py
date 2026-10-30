@@ -107,8 +107,9 @@ async def test_a_known_bad_fixture_fails_qc_through_post_process(reg):
     """The fixtures are checked against the same path a campaign uses, not a parallel one.
 
     `_run_spec_gates` makes the same `gates.evaluate` call `TaskAgent.post_process` does;
-    this runs the real thing once to prove nothing else in post_process changes the verdict. `empty_out_dir.bad.json` is used because its `outputs`
-    is `{}`, so `_as_artifacts` is a no-op and no file has to exist on disk.
+    this runs the real thing once to prove nothing else in post_process changes the
+    verdict. `empty_out_dir.bad.json` is used because its `outputs` is `{}`, so
+    `_as_artifacts` is a no-op and no file has to exist on disk.
     """
     from impress_a.tools.agent import TaskRequest
 

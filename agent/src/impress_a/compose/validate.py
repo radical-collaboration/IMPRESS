@@ -47,8 +47,9 @@ class Validator:
                                              reason=f"{node.tool} has no input port {port!r}")
                 dep_id, _, out_port = ref.partition(".")
                 if dep_id not in g.nodes:
-                    return ValidationFailure(gate="type", node=tid,
-                                             reason=f"input {port!r} references unknown node {dep_id!r}")
+                    return ValidationFailure(
+                        gate="type", node=tid,
+                        reason=f"input {port!r} references unknown node {dep_id!r}")
                 dep_spec = self.reg.get(g.nodes[dep_id].tool)
                 if out_port not in dep_spec.outputs:
                     return ValidationFailure(gate="type", node=tid,

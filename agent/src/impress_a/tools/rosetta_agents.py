@@ -43,7 +43,8 @@ def _init(seed_arg, ligand_params_arg):
     if seed_arg != "none":
         flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
     if ligand_params_arg != "none":
-        flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params_arg
+        flags += (" -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy"
+                  % ligand_params_arg)
     pyrosetta.init(flags)
 
 in_pdb, out_pdb, cycles, seed, ligand_params, result_json = (
@@ -94,7 +95,8 @@ def _init(seed_arg, ligand_params_arg):
     if seed_arg != "none":
         flags += " -run:constant_seed -run:jran %d" % (int(seed_arg) % 2147483647)
     if ligand_params_arg != "none":
-        flags += " -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy" % ligand_params_arg
+        flags += (" -extra_res_fa %s -ignore_unrecognized_res -ignore_zero_occupancy"
+                  % ligand_params_arg)
     pyrosetta.init(flags)
 
 in_pdb, out_pdb, cycles, nstruct, seed, ligand_params, result_json = (
@@ -156,7 +158,8 @@ phase("pyrosetta.init")
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 phase("pose_from_pdb")
-xml = '<SCOREFXNS/><RESIDUE_SELECTORS/><FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>'
+xml = ('<SCOREFXNS/><RESIDUE_SELECTORS/>'
+       '<FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>')
 objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
 sc_filter = objs.get_filter("sc")
 value = sc_filter.report_sm(pose)

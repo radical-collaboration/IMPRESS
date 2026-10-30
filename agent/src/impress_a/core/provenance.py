@@ -30,7 +30,7 @@ class ProvenanceLog:
         p = self._f(kind)
         if not p.exists():
             return iter(())
-        return (json.loads(l) for l in p.read_text().splitlines() if l.strip())
+        return (json.loads(line) for line in p.read_text().splitlines() if line.strip())
 
     def decisions(self) -> list[dict[str, Any]]:
         return list(self.read("decisions"))
