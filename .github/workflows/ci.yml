@@ -1,0 +1,148 @@
+name: ci
+
+# One workflow for the whole repository, replacing tests.yml, agent-tests.yml and a
+# docs.yml that was itself named `ci`. What the split cost:
+#
+#   * agent/ was linted by nothing. agent-tests.yml ran only pytest, and `tox -e lint`
+#     resolved from the root to src/impress and ./tests, so 65 files went unchecked.
+#   * Path filters meant no job could catch a regression that crossed the boundary. A
+#     change to src/impress never ran the agent suite; a change under agent/ never ran
+#     the root suite; and both packages share radical-asyncflow.
+#   * docs.yml had no pull_request trigger and mkdocs had no `strict`, so broken links
+#     and missing nav targets were only discovered after they had already deployed.
+#
+# Hence: no path filters, and docs build on every pull request. If CI minutes ever need
+# trimming, filter the two test jobs and never `lint` or `docs` - those are the cheap
+# ones, and the ones that caught nothing while they were absent.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default. The one job that needs to write says so for itself.
+permissions:
+  contents: read
+
+jobs:
+  # IMPRESS itself. One job for what used to be two near-identical 25-line copies that
+  # differed only in a cache-key prefix and a step name. `toxenv` is spelled out in the
+  # matrix rather than derived from `python`, because deriving it needs a ladder of
+  # nested ternaries in YAML and this is a table either way.
+  root-tests:
+    name: root ${{ matrix.toxenv }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {python: '3.9',  toxenv: py39}
+          - {python: '3.10', toxenv: py310}
+          - {python: '3.11', toxenv: py311}
+          - {python: '3.12', toxenv: py312}
+          - {python: '3.13', toxenv: py313}
+          - {python: '3.9',  toxenv: py39-all}
+          - {python: '3.10', toxenv: py310-all}
+          - {python: '3.11', toxenv: py311-all}
+          - {python: '3.12', toxenv: py312-all}
+          - {python: '3.13', toxenv: py313-all}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e ${{ matrix.toxenv }} -- -vv
+
+  # IMPRESS-A. A separate job and a separate environment, because impress-a declares
+  # >=3.10 and pulls langgraph, rhapsody and biopython: tox keeps the root package and
+  # its radical.pilot out of here. 3.13 is new - the workflow this replaces stopped at
+  # 3.12, so the newest interpreter root supports had never run impress_a.
+  agent-tests:
+    name: agent ${{ matrix.toxenv }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {python: '3.10', toxenv: agent-py310}
+          - {python: '3.11', toxenv: agent-py311}
+          - {python: '3.12', toxenv: agent-py312}
+          - {python: '3.13', toxenv: agent-py313}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e ${{ matrix.toxenv }} -- -vv
+
+  # Both projects, one contract. This job had no cache at all before.
+  lint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e lint
+      # `fix = false` is what makes the step above a check rather than a rewrite. If
+      # someone restores `fix = true`, lint starts passing by editing the checkout
+      # instead of reporting on it - so assert the tree is clean afterwards.
+      - name: Lint must not modify the tree
+        run: git diff --exit-code
+
+  docs:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      # Always, on pull requests too. `tox -e docs` builds the site and then fails on a
+      # broken internal link or a missing nav target - the half of `--strict` this
+      # repository can actually hold today. The old workflow deployed those green.
+      - run: tox -e docs
+
+  # Separate from `docs` so that pull-request builds never request write access, and so
+  # a deploy cannot happen unless the strict build passed first.
+  docs-deploy:
+    needs: docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install .[doc]
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdocs gh-deploy --force
