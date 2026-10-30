@@ -143,7 +143,7 @@ class BoltzPredictAgent(TaskAgent):
         # for it - once the marker exists every later lineage takes the fast path and
         # they proceed in parallel. `to_thread` because flock blocks, and a blocked
         # event loop here would stall the executor's heartbeat exactly the way Dragon's
-        # synchronous `Batch()` did (see docs/limitations.md).
+        # synchronous `Batch()` did (see docs/impress-a/limitations.md).
         cache_lock = await asyncio.to_thread(_claim_cache, Path(cache))
         try:
             await run_cmd(cmd, timeout_s=float(self.spec.resources.walltime_s))

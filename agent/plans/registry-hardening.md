@@ -4,7 +4,7 @@
 
 ## Problem
 
-`docs/reference/authoring-tools.md:58` promises: *"A malformed spec, a default outside its own
+`docs/impress-a/reference/authoring-tools.md:58` promises: *"A malformed spec, a default outside its own
 declared range, an unknown QC gate id, a `P1` tool declaring no GPU, or a `SKILL.md` missing a
 required section is a load-time error. A toolkit that fails anywhere registers nothing — never a
 partial set."*

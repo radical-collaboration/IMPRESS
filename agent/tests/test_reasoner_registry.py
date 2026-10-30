@@ -64,7 +64,7 @@ def test_no_model_claims_an_llm_call_it_cannot_make():
     for letter, m in reasoners.MODELS.items():
         assert m.llm_calls == 0, (
             f"{letter} claims {m.llm_calls} llm calls/cycle; if a live client was wired, "
-            "update this test and docs/reference/control-models.md together")
+            "update this test and docs/impress-a/reference/frontends.md together")
 
 
 def test_cli_policies_is_derived_from_the_registry():

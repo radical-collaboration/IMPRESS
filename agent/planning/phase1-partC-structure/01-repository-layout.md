@@ -117,7 +117,7 @@ Three rules carry real design weight:
 Decision Record*. Naming our decision-record directory `docs/adr/` would create a permanent, low-grade
 ambiguity in a project that uses both.
 
-The layout above uses **`docs/decisions/`** instead. Records are numbered and immutable
+The layout above uses **`docs/impress-a/decisions/`** instead. Records are numbered and immutable
 (`0001-impress-is-a-tool-not-the-control-plane.md`), which matters because Phase 1 has already produced
 several decisions — IMPRESS's demotion, free graph composition, model C as mode 2 — whose rationale should
 outlive this conversation.

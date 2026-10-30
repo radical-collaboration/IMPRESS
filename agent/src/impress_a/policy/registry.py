@@ -163,7 +163,7 @@ MODELS: dict[str, ReasonerModel] = {
         note="the policy is complete and covered end to end over HTTP, but nothing "
              "attaches a control plane under `impress-a run`, so from the CLI it times "
              "out and silently runs D (backlog C6, blocked on C5's entry points)",
-        spec_ref="docs/decisions/0002-model-c-is-control-mode-2.md"),
+        spec_ref="docs/impress-a/decisions/0002-model-c-is-control-mode-2.md"),
     "D": ReasonerModel(
         letter="D", name="explicit policy", mode="autonomous",
         llm_calls=0, llm_shape="none", status="implemented",

@@ -145,7 +145,7 @@ def print_models() -> int:
             if m.spec_ref:
                 print(f"     specified in {m.spec_ref}")
     print("\n  `llm` is what the specification asks for; `calls` is what runs today.")
-    print("  Reference: docs/reference/frontends.md\n")
+    print("  Reference: docs/impress-a/reference/frontends.md\n")
     return 0
 
 

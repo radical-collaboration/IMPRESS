@@ -11,7 +11,7 @@ backend: dragon
 backend_config: {}
 # rhapsody's Dragon backend builds Batch() synchronously with no await points - a stall
 # there blocks the event loop entirely (no heartbeat, no timeout) until the walltime is
-# spent (see docs/limitations.md). 600s is generous for legitimate startup, nowhere near
+# spent (see docs/impress-a/limitations.md). 600s is generous for legitimate startup, nowhere near
 # the allocation's walltime.
 backend_startup_timeout_s: 600
 backend_startup_heartbeat_s: 30

@@ -1,6 +1,6 @@
 """Known-bad fixtures: every real tool's QC gates, run against output that should fail.
 
-`docs/reference/authoring-tools.md` requires each tool to carry known-BAD outputs under
+`docs/impress-a/reference/authoring-tools.md` requires each tool to carry known-BAD outputs under
 `toolkits/<tk>/tools/<id>/tests/`, on the grounds that *a gate that has never seen the
 output it was written to catch is an assertion, not a test*. Until this file existed, no
 toolkit carried any (backlog B2), so every real toolkit's QC was exactly that assertion:

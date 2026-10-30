@@ -828,5 +828,5 @@ class CampaignExecutor:
             log.warning(
                 "engine: %s backend did not shut down within %.0fs - abandoning it. "
                 "The campaign's results are already durable; this leaks backend state in "
-                "an exiting process. See docs/limitations.md.",
+                "an exiting process. See docs/impress-a/limitations.md.",
                 self.spec.backend, timeout_s)

@@ -16,7 +16,7 @@ consolidation plan rather than to this one:
   that actually resolves, 9 under ruff's defaults. Nothing in CI lints `agent/` at all, which is why
   neither was noticed.
 
-Where section 1's `docs/reference/control-models.md` is *published* from will change once that
+Where section 1's `docs/impress-a/reference/control-models.md` is *published* from will change once that
 consolidation lands. What it should say does not.
 
 ## Branch
@@ -41,10 +41,10 @@ Future development will encode these abstractions more deeply. Three problems bl
 
 **`agent/`'s documentation describes all four models as complete, and two are not.** Model A's LLM slot
 is a dead constructor argument and model B's live client is constructed nowhere, yet `README.md`,
-`docs/reference/frontends.md` and `docs/limitations.md` describe both as working LLM reasoners, and
-`docs/limitations.md:50` asserts a non-reproducibility that is false today.
+`docs/impress-a/reference/frontends.md` and `docs/impress-a/limitations.md` describe both as working LLM reasoners, and
+`docs/impress-a/limitations.md:50` asserts a non-reproducibility that is false today.
 
-**The abstraction has no home in either tier.** There is no `docs/reference/control-models.md`; the only
+**The abstraction has no home in either tier.** There is no `docs/impress-a/reference/control-models.md`; the only
 real treatment is `planning/phase1-partB-architecture/02-control-models.md`, which `CLAUDE.md:53`
 declares process history and "superseded in places". In code, `policy/__init__.py` is 0 bytes and the
 letter→class map is a dict in `cli/__init__.py`.
@@ -80,9 +80,9 @@ They share a name and nothing else. Neither tree says what the other is for, whi
 | Nav | Home · Getting Started · Concepts · Examples · API Reference | no nav; `agent/README.md`'s table is the index |
 | Edit boundary | `agent/CLAUDE.md` forbids agent-side work from changing it | IMPRESS-A's own |
 
-So the same word means a different genre in each tree: root `docs/reference/` is machine-generated from
-docstrings, `agent/docs/reference/` is prose. Likewise root `docs/concepts/architecture.md` is the
-framework's architecture and `agent/docs/reference/architecture.md` is the app's — different subjects,
+So the same word means a different genre in each tree: root `docs/impress-a/reference/` is machine-generated from
+docstrings, `docs/impress-a/reference/` is prose. Likewise root `docs/concepts/architecture.md` is the
+framework's architecture and `docs/impress-a/reference/architecture.md` is the app's — different subjects,
 same filename. **Everything this plan writes goes in `agent/docs/`**, except where it says otherwise.
 
 **G14 — the published site documents the agentic example and not the app whose taxonomy it borrows.**
@@ -215,7 +215,7 @@ at commit `e2aa00d` and PRs #71/#72/#76 landed before 23114772 — a candidate r
 ## Findings — where each element lives, and whether it is documented
 
 Specification of record: `planning/phase1-partB-architecture/02-control-models.md` (§2 A, §3 B, §4 C,
-§5 D, §6 comparison matrix). Shipping reference: `docs/reference/frontends.md:21-33`, thirteen lines of
+§5 D, §6 comparison matrix). Shipping reference: `docs/impress-a/reference/frontends.md:21-33`, thirteen lines of
 table. Letter→class map: `cli/__init__.py:31-32`.
 
 | Element | Code | Documented | State |
@@ -254,7 +254,7 @@ brace-slices JSON despite a docstring claiming "structured output", and has none
 LLM provider, client library, prompt-provenance record or retry policy. **The working client exists one
 directory over, with hardware evidence** — see the evidence section.
 
-**G3 — `docs/limitations.md:50` is false today.** "Model A / B policies — **No** — frontier APIs offer no
+**G3 — `docs/impress-a/limitations.md:50` is false today.** "Model A / B policies — **No** — frontier APIs offer no
 usable seed" — both are bit-exact in `impress_a`, because neither reaches an API. That row becomes true
 when G2 closes. Separately, `limitations.md`'s "Not yet implemented" section does not mention B's unmet
 provenance requirements.
@@ -428,7 +428,7 @@ Recorded decisions:
 
 ## The change
 
-### 1. `agent/docs/reference/control-models.md` — a new reference-tier document
+### 1. `docs/impress-a/reference/control-models.md` — a new reference-tier document
 
 Derive it from `planning/.../02-control-models.md`, corrected against the code. House style: `#` title,
 a one-line normative gloss, `##` sections, tables as the primary device, every rule carrying its failure
@@ -448,7 +448,7 @@ the LLM arm has hardware results in the sibling implementation and none here; an
 with the letter mapping for that example's profile kinds, noting that arm is itself unmeasured.
 
 Then `frontends.md:21-33` shrinks to a pointer and keeps the frontend *axes*; `architecture.md:17,22`
-gains the link it lacks; `README.md:70-78` and `docs/decisions/README.md` index it.
+gains the link it lacks; `README.md:70-78` and `docs/impress-a/decisions/index.md` index it.
 
 ### 2. `policy/registry.py` — a home for the abstraction (new file)
 
@@ -559,7 +559,7 @@ to match — they cite jobs by number for exactly this purpose.
 - `cli/__init__.py:93-115`: `build_policy` becomes the `CampaignSpec` → registry-kwargs adapter, with a
   comment on why the registry cannot see `CampaignSpec`.
 
-### 7. `agent/docs/limitations.md`, `agent/plans/backlog.md`, `agent/CLAUDE.md`, `agent/docs/reference/architecture.md`
+### 7. `docs/impress-a/limitations.md`, `agent/plans/backlog.md`, `agent/CLAUDE.md`, `docs/impress-a/reference/architecture.md`
 
 - `limitations.md`: replace the false reproducibility row (G3) with one row per model plus the condition
   under which A/B become non-reproducible. Add a section stating plainly that **no LLM has steered an
@@ -578,10 +578,10 @@ to match — they cite jobs by number for exactly this purpose.
   the labelling rule from 23219379.
 - `architecture.md:143-152`: no toolkit spec sets `agent: llm` and nothing branches on it.
 
-### 8. Decision records — `agent/docs/decisions/`
+### 8. Decision records — `docs/impress-a/decisions/`
 
 Template: `# NNNN — Title` / `**Date:** · **Status:** · **Phase:**` / `## Context` / `## Decision` /
-`## Consequences`, indexed in `agent/docs/decisions/README.md`. Next free number 0014. Note the root
+`## Consequences`, indexed in `docs/impress-a/decisions/index.md`. Next free number 0014. Note the root
 tree has no decision records, so these have no counterpart to keep in sync.
 
 - **0014 — Model B is one structured call per cycle, emitted as a tool call.** Rules G12, resolves I2
@@ -729,7 +729,7 @@ arriving from a new direction and worth catching here.
 ### Afterwards
 
 Record the outcome in `agent/plans/` as a dated run document per `plans/README.md`'s convention, update
-the evidence 2×2 in `agent/docs/reference/control-models.md` and the tiering in
-`agent/docs/limitations.md`, and close the backlog item these runs were filed against. If B's arm
+the evidence 2×2 in `docs/impress-a/reference/control-models.md` and the tiering in
+`docs/impress-a/limitations.md`, and close the backlog item these runs were filed against. If B's arm
 degrades or is refused throughout, that is a result and goes in the same place — the example's own
 records keep invalid runs as evidence, and this should too.

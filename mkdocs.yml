@@ -1,9 +1,9 @@
 site_name: IMPRESS
 site_description: Intelligent Multi-Pipeline Protein Engineering System for HPC
 site_author: IMPRESS Team
-site_url: https://impress-framework.readthedocs.io/
+site_url: https://radical-collaboration.github.io/IMPRESS/
 
-repo_name: impress-framework/impress
+repo_name: radical-collaboration/IMPRESS
 repo_url: https://github.com/radical-collaboration/IMPRESS
 edit_uri: edit/main/docs/
 
@@ -52,6 +52,33 @@ nav:
     - ImpressBasePipeline: reference/pipeline.md
     - PipelineSetup: reference/setup.md
     - ImpressLogger: reference/logger.md
+  # IMPRESS-A (agent/). Note this is hand-written prose, unlike "API Reference"
+  # above, which mkdocstrings generates from src/impress docstrings - the two trees
+  # used to share the name `reference/` and this namespacing is what separates them.
+  - IMPRESS-A:
+    - Architecture: impress-a/reference/architecture.md
+    - Pluggable Frontends: impress-a/reference/frontends.md
+    - Compute Patterns: impress-a/reference/compute-patterns.md
+    - Authoring Tools: impress-a/reference/authoring-tools.md
+    - Middleware Integration: impress-a/reference/middleware-integration.md
+    - Limitations: impress-a/limitations.md
+    - Decisions:
+      - Overview: impress-a/decisions/index.md
+      - 0001 IMPRESS is a tool, not the control plane: impress-a/decisions/0001-impress-is-a-tool-not-the-control-plane.md
+      - 0002 Control model C is control mode 2: impress-a/decisions/0002-model-c-is-control-mode-2.md
+      - 0003 Free graph composition with a self-promoting interlock: impress-a/decisions/0003-free-graph-composition-with-self-promoting-interlock.md
+      - 0004 Population Pareto front with backtracking: impress-a/decisions/0004-population-pareto-front-with-backtracking.md
+      - 0005 The control model is fixed at launch: impress-a/decisions/0005-control-model-fixed-at-launch.md
+      - 0006 Task agents are hybrid, declared per tool: impress-a/decisions/0006-hybrid-task-agents.md
+      - 0007 One transport-agnostic control plane: impress-a/decisions/0007-transport-agnostic-control-plane.md
+      - 0008 Platform priority: impress-a/decisions/0008-platform-priority.md
+      - 0009 Package naming: impress-a/decisions/0009-package-naming.md
+      - 0010 One package with an import contract: impress-a/decisions/0010-single-package-with-import-contract.md
+      - 0011 Toolkits are top-level and declarative: impress-a/decisions/0011-toolkits-are-top-level-and-declarative.md
+      - 0012 One property, two sources: impress-a/decisions/0012-one-property-two-sources.md
+      - 0013 Trust counts integrity, not acceptance: impress-a/decisions/0013-trust-counts-integrity-not-acceptance.md
+    - Roadmap:
+      - Academy for task agents: impress-a/roadmap/academy-for-task-agents.md
 
 plugins:
   - search
@@ -89,6 +116,4 @@ extra:
       link: https://github.com/radical-collaboration/IMPRESS
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/impress-framework/
-  version:
-    provider: mike
 

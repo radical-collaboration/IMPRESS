@@ -85,7 +85,7 @@ log lines - no campaign log, no ledger entry, nothing else, for the whole run. T
 worker pool, telemetry) synchronously with no `await` points, blocking the event loop entirely -
 the codebase's own heartbeat never fired once in 2 hours because of it. Now bounded by
 `backend_startup_timeout_s`/`backend_startup_heartbeat_s` on `CampaignSpec` (see
-`exec/backend.make_engine_bounded`, `docs/limitations.md`): a future stall fails loudly within
+`exec/backend.make_engine_bounded`, `docs/impress-a/limitations.md`): a future stall fails loudly within
 minutes instead of consuming the whole allocation silently. What remains open: *why* `Batch()`/
 `Pool()` didn't complete inside 2 hours in the first place (most likely GPU-affinity worker
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
@@ -339,7 +339,7 @@ prove this failure mode is the dominant one; the real tools have no equivalent.
   (`_pdbtools.py:19-42`, explicitly not DSSP). A `ligand_clashes == 0` gate is a real structural
   check, and unlike `metric_in_range` on a self-reported confidence it is a measurement of the
   output geometry rather than the tool's opinion of itself - so it is not the caveat in
-  `docs/limitations.md`. See G2.
+  `docs/impress-a/limitations.md`. See G2.
 
 **B2. No known-bad fixtures — RESOLVED.** Every non-mock tool now carries `tests/*.bad.json` and
 `tests/*.good.json`, run against its own declared gates by `tests/test_gate_fixtures.py`, which also
@@ -379,16 +379,16 @@ cancellation inside task agents, or a backend that can kill a process.
 exist and are covered end to end, but only `tests/` ever constructs a `ControlPlaneServer` — there is
 no `impress-a serve` (executor side, inside the allocation, holding the plane open) and no
 `impress-a reason` (reasoner side, outside it, driving a `RemoteSession`). The split is reachable
-from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
+from the test suite and not from a shell, which is the state `docs/impress-a/reference/frontends.md:107-111`
 already describes as "implemented".
 
 **C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
 `on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
 every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
-(`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
+(`docs/impress-a/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
 as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
 
-**C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
+**C7. Where the control plane is reachable from is undecided.** `docs/impress-a/reference/frontends.md:110`
 offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
 single trusted client, no auth, no TLS. Planning question M6
 (`planning/phase1-partB-architecture/06-headless-control-protocol.md:115-117`) — where the adapter
@@ -494,7 +494,7 @@ nothing enforces; ADR 0007's per-client cursor. ADR 0007 also now owes the five 
 `CampaignControlPlane` for the remote session (`status`, `inflight`, `backtrack`, `request_human`,
 `await_run_result`) and the two widened signatures (`observe(since=)`, `events(stream=)`).
 
-**F4. `docs/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
+**F4. `docs/impress-a/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
 it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` does not mention that a
 `conduct` policy collecting for itself must now call `interpret` for itself.
 
@@ -669,13 +669,13 @@ item that blocks any claim about decision quality**, and it is why model D canno
 benchmark against the reference's `adaptive_decision()`, which varies the route and the retry.
 
 **H4. Declared-but-inert seams.** `ToolSpec.agent: Literal["deterministic", "llm"]`
-(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/reference/architecture.md:145` and
-`docs/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
+(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/impress-a/reference/architecture.md:145` and
+`docs/impress-a/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
 (`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
 "supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
 `obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
 pitfalls. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
-`docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
+`docs/impress-a/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
 needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
 
 **H5. No `conduct` reasoner ships.** The entry point, `core/session.py`'s ten-operation surface and
