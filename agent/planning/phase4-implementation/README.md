@@ -25,7 +25,7 @@ campaigns/       mock-stabilize.yaml     sites/  local.yaml     tests/  29 tests
 | Decision | Implementation |
 |---|---|
 | LangGraph for the main loop and state | `policy/agentic.py` — `StateGraph` with hypothesize → parameterize; node 3 (run) belongs to the manager, node 4 is `interpret` |
-| Academy deferred to a later phase | [`docs/academy-for-task-agents.md`](../academy-for-task-agents.md) — standing notes, with the three properties that keep the door open |
+| Academy deferred to a later phase | [`docs/impress-a/roadmap/academy-for-task-agents.md`](../../../docs/impress-a/roadmap/academy-for-task-agents.md) — standing notes, with the three properties that keep the door open |
 | flowgentic pinned to a commit | `pyproject.toml` extra `agentbridge`, pinned to `dd27bd8b` on `demo/radical` |
 | All four control models | A, B, C, D — each runs a campaign to termination in the test suite |
 | rhapsody reached by name | `exec/backend.py` resolves via `rhapsody.backends.get_backend()` from site config |

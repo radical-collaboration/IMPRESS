@@ -159,9 +159,7 @@ class TestTelemetryHandle:
         assert p.telemetry is tel
 
 
-@pytest.mark.skipif(
-    impress_telemetry.LocalStage is None, reason="rhapsody telemetry not installed"
-)
+@pytest.mark.skipif(impress_telemetry.LocalStage is None, reason="rhapsody telemetry not installed")
 class TestLocalTaskTelemetry:
     async def test_local_task_emits_one_event_per_call(self):
         p = OneTaskPipeline("p1", local=True)

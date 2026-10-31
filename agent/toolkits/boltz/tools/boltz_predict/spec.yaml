@@ -23,7 +23,7 @@ parameters:
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
 metrics: [complex_plddt, ligand_iptm]
 # Integrity gates say the tool worked; acceptance gates say the design is good enough.
-# Only integrity failures reset trust (docs/decisions/0013). Each acceptance threshold is
+# Only integrity failures reset trust (docs/impress-a/decisions/0013). Each acceptance threshold is
 # backed by `metrics_reported`, so a value the adapter could not read is an integrity
 # failure, never a low score.
 qc_gates:

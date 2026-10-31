@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from impress_a.compose.composer import Composer
 from impress_a.compose.interlock import PatternRecord
 from impress_a.compose.validate import SiteCaps

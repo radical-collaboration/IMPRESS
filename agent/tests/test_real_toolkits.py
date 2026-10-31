@@ -14,7 +14,6 @@ import pathlib
 from typing import Any
 
 import pytest
-
 from impress_a.compose.composer import Composer
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger
@@ -512,8 +511,10 @@ async def test_boltz_agent_passes_no_kernels(reg, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     pdb = tmp_path / "in.pdb"
-    pdb.write_text("ATOM      1  N   ALA A   1      11.104  13.207   2.100  1.00 20.00           N\n"
-                    "END\n")
+    # A PDB ATOM record is fixed-format at 80 columns; it must not be rewrapped.
+    pdb.write_text(
+        "ATOM      1  N   ALA A   1      11.104  13.207   2.100  1.00 20.00           N\n"
+        "END\n")
 
     captured: dict[str, list[str]] = {}
 

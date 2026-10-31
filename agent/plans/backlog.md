@@ -85,7 +85,7 @@ log lines - no campaign log, no ledger entry, nothing else, for the whole run. T
 worker pool, telemetry) synchronously with no `await` points, blocking the event loop entirely -
 the codebase's own heartbeat never fired once in 2 hours because of it. Now bounded by
 `backend_startup_timeout_s`/`backend_startup_heartbeat_s` on `CampaignSpec` (see
-`exec/backend.make_engine_bounded`, `docs/limitations.md`): a future stall fails loudly within
+`exec/backend.make_engine_bounded`, `docs/impress-a/limitations.md`): a future stall fails loudly within
 minutes instead of consuming the whole allocation silently. What remains open: *why* `Batch()`/
 `Pool()` didn't complete inside 2 hours in the first place (most likely GPU-affinity worker
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
@@ -339,7 +339,7 @@ prove this failure mode is the dominant one; the real tools have no equivalent.
   (`_pdbtools.py:19-42`, explicitly not DSSP). A `ligand_clashes == 0` gate is a real structural
   check, and unlike `metric_in_range` on a self-reported confidence it is a measurement of the
   output geometry rather than the tool's opinion of itself - so it is not the caveat in
-  `docs/limitations.md`. See G2.
+  `docs/impress-a/limitations.md`. See G2.
 
 **B2. No known-bad fixtures — RESOLVED.** Every non-mock tool now carries `tests/*.bad.json` and
 `tests/*.good.json`, run against its own declared gates by `tests/test_gate_fixtures.py`, which also
@@ -379,16 +379,16 @@ cancellation inside task agents, or a backend that can kill a process.
 exist and are covered end to end, but only `tests/` ever constructs a `ControlPlaneServer` — there is
 no `impress-a serve` (executor side, inside the allocation, holding the plane open) and no
 `impress-a reason` (reasoner side, outside it, driving a `RemoteSession`). The split is reachable
-from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
+from the test suite and not from a shell, which is the state `docs/impress-a/reference/frontends.md:107-111`
 already describes as "implemented".
 
 **C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
 `on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
 every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
-(`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
+(`docs/impress-a/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
 as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
 
-**C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
+**C7. Where the control plane is reachable from is undecided.** `docs/impress-a/reference/frontends.md:110`
 offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
 single trusted client, no auth, no TLS. Planning question M6
 (`planning/phase1-partB-architecture/06-headless-control-protocol.md:115-117`) — where the adapter
@@ -494,7 +494,7 @@ nothing enforces; ADR 0007's per-client cursor. ADR 0007 also now owes the five 
 `CampaignControlPlane` for the remote session (`status`, `inflight`, `backtrack`, `request_human`,
 `await_run_result`) and the two widened signatures (`observe(since=)`, `events(stream=)`).
 
-**F4. `docs/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
+**F4. `docs/impress-a/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
 it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` does not mention that a
 `conduct` policy collecting for itself must now call `interpret` for itself.
 
@@ -634,6 +634,93 @@ had never run anywhere but Delta's 3.12.
 
 ---
 
+## H. Reasoner models
+
+The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
+and what runs. Full evidence, the harmonization options and the hardware follow-on are in
+[`plans/reasoner-models.md`](reasoner-models.md); the items below are what is outstanding from it.
+`policy/registry.py`, `impress-a models` and the `--model replay` fix are **DONE** (`fa0266f`).
+
+**H1. Model A has no LLM, and the slot for one is dead.** `planning/phase1-partB-architecture/02-control-models.md:59-61`
+specifies "each node is a bounded LLM call with a declared input and output schema", ~3 per cycle,
+parse-retry with corrective feedback, escalation to a degraded policy. In code `_hypothesize`
+(`policy/agentic.py:57`) and `_parameterize` (`:75`) are deterministic threshold cascades, and
+`self.reasoner` (`:51`) is stored and never read. There is no schema, no retry, and no `fallback`
+argument - B and C both have one. `_build()` registers two nodes while the module docstring describes
+four. So `--model A` is a LangGraph-shaped rule cascade, bit-exact and behaviourally a sibling of D,
+and its only test asserts termination (`tests/test_campaign.py:53`), never a node.
+
+**H2. Model B's live path is never constructed.** `OraclePolicy` defaults to `RehearsalOracle`
+(`policy/oracle.py:85`) and nothing passes a model, so `--model B` runs the deterministic stand-in.
+`LangChainOracle` (`:65-77`) is built nowhere, brace-slices JSON out of the reply despite a docstring
+claiming structured output, and has none of what Part B doc 02 sections 3 and 7 require: pinned dated
+model id, sampling parameters, `Retry-After` backoff, 429-vs-529. `pyproject.toml`'s
+`oracle = ["litellm"]` extra is imported by nothing. A working OpenAI-compatible client with
+per-model profiles already exists in `examples/agentic_small_molecule_binding/llm.py` and has
+hardware results behind it; porting it is the plan's step 1.
+
+**H3. No policy can vary a real tool's parameters.** A and D emit `params` keyed to `mock_generate`
+and `mock_design` (`policy/agentic.py:84`, `policy/explicit.py:69`), and B's rehearsal the same
+(`policy/oracle.py:60`), even when `stages` is the real six-stage chain. `compose/composer.py:63`
+reads `intent.params.get(tool_id, {})` per composed stage, so those keys are silently dropped. On a
+real campaign a policy's only levers are stage selection, `parent_node`, `Backtrack` and `Stop` - and
+A9 records that even `replicas` is capped downstream where the policy cannot see it. **This is the
+item that blocks any claim about decision quality**, and it is why model D cannot yet be the
+benchmark against the reference's `adaptive_decision()`, which varies the route and the retry.
+
+**H4. Declared-but-inert seams.** `ToolSpec.agent: Literal["deterministic", "llm"]`
+(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/impress-a/reference/architecture.md:145` and
+`docs/impress-a/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
+(`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
+"supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
+`obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
+pitfalls. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
+`docs/impress-a/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
+needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
+
+**H5. No `conduct` reasoner ships.** The entry point, `core/session.py`'s ten-operation surface and
+`policy/driver.py`'s adapter all exist and are covered, but every `conduct` implementation in the
+repository is a test double (`tests/test_campaign.py:401,467,548,615,789`,
+`tests/test_remote_session.py:68`, `tests/test_http_adapter.py:62`). Free tool-calling over
+`CampaignSession` - a reasoner whose tools are `observe`/`submit`/`result`/`as_completed`/`backtrack`/
+`stop` - is the shape `examples/agentic_small_molecule_binding` actually built, and it is **not**
+model B: Part B doc 02 sections 3 and 6 specify B as one structured call per cycle, and that ruling
+stands. Worth building as its own reasoner, named as such.
+
+**H6. The lint ceiling stated below does not reproduce, and nothing lints `agent/` at all.**
+`.github/workflows/agent-tests.yml` runs only `pytest tests -q`, and `tox -e lint` resolves to
+`ruff check src tests` from the repository root, which is IMPRESS's `src/impress` and its own
+`tests/`. Meanwhile `agent/pyproject.toml` declares no `[tool.ruff]`, so ruff walks up and applies
+IMPRESS's root config - `line-length = 88`, `target-version = "py39"` for a package whose floor is
+3.10, and `fix = true`, which makes the documented `ruff check` command **rewrite the working tree**
+(36 files on first run). Measured under that config: **449 findings**, 404 of them E501, against the
+41 stated below; under ruff's own defaults, 9. The ceiling was evidently recorded against defaults.
+This belongs to the project-level CI and documentation consolidation, not to a reasoner item, but it
+is recorded here because the verification paragraph below currently states a number no configuration
+produces.
+
+  **RESOLVED** by the lint half of that consolidation. One `[tool.ruff]` at the repository root now
+  governs both projects at `line-length = 100` with `fix = false`, and `tox -e lint` checks
+  `src tests agent/src agent/tests`. The width is measured rather than chosen: `agent/` has 404 lines
+  over 88 but only 10 over 100, while `src`/`tests` have none over either. `ruff format` was not the
+  route - it reflows code but never comments or docstring prose, so it cleared barely a quarter of
+  those E501s while wanting to rewrite 57 of `agent/`'s 65 files and 4,711 lines; it therefore stays
+  scoped to `src tests`, and `agent/` is check-only. 55 findings were cleared to reach zero: 35
+  autofixes, 10 hand-rewraps, and the rest judgement calls. `N818` is now ignored with its reason -
+  four exception names deliberately lack an `Error` suffix, and `CampaignStopped` is the plainest
+  case, being a control-flow signal rather than a failure. The verification paragraph at the end of
+  this file is corrected accordingly.
+
+**H7. Hardware: paired 1-hour, 1-node runs of B and D.** After H2. One spec, two arms, differing only
+in `--model`, submitted together - `campaigns/delta-small-molecule-arms.yaml` derived from
+`delta-small-molecule-trust.yaml`, 1 node on `gpuA40x4`, 8 GPU-h total. They test the `ControlPolicy`
+contract under a live LLM: a real `Decision`, an LLM-authored `ExperimentIntent` passing or being
+refused by the five gates, `on_rejected` under a real rejection, the degraded transition and its
+labelling. **They cannot test decision quality** while H3 is open, and must not be reported as if they
+could. Prerequisites with their evidence, and the scoring method, are in the plan.
+
+---
+
 ## Recommended order
 
 This order was written at the stagnation fix, before C8-C10 and G2-G5 existed. Two things it got
@@ -656,12 +743,23 @@ paid for out of the first allocation.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
 9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
    then, and now pinned by two characterization tests that must change when it is decided.
+10. **H6 the lint gate**, before anything else in H — it is the reason H1-H5 went unnoticed, and it
+    is cheap. Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
+    claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
+    after H2, which is what makes it cheap. **H4** and **H5** on demand.
 
 ## Verification that applies to any item
 
-`pytest tests -q` green, no allocation. `ruff check src tests` **must not exceed 41** — the one
-number worth stating, and a budget that drifts upward is the thing you want to notice. The import
-contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
+`pytest tests -q` green, no allocation. Lint is **`tox -e lint` from the repository root**, and the
+budget is now **zero** — not a ceiling. The old number, "`ruff check src tests` must not exceed 41",
+was wrong in three ways at once and is worth recording rather than just deleting: the command was
+run from `agent/` but resolved `src`/`tests` to IMPRESS's own, so it never saw this package; nothing
+in CI ran it either, because `agent-tests.yml` only ran pytest; and 41 was measured against ruff's
+defaults rather than the `select` list in the root `pyproject.toml` that actually applied, which
+reported 449. One contract covers both projects now, at `line-length = 100`, with `fix = false` so
+the command reports instead of rewriting the tree. A budget that drifts upward is still the thing to
+notice — it is just that the only defensible budget was zero, once anything was measuring it.
+The import contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
 `impress-a run campaigns/delta-small-molecule-smoke.yaml --model D` must compose `rfd3_design…`,
 never `mock_generate…`.

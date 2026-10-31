@@ -48,7 +48,7 @@ fail loudly when their environment is absent, but no scientific code has run thr
 4. **Smoke first** — `sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml`.
    One cycle, one lineage. Both Delta campaign YAMLs now also set
    `backend_startup_timeout_s: 600` so a Dragon-backend-construction hang (job 22318678; see
-   `docs/limitations.md`) fails within minutes instead of consuming the whole allocation.
+   `docs/impress-a/limitations.md`) fails within minutes instead of consuming the whole allocation.
 
 ## What to check on the first run
 

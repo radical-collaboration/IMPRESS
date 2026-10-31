@@ -7,9 +7,10 @@ model-D replay policy possible.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 
 class ProvenanceLog:
@@ -29,7 +30,7 @@ class ProvenanceLog:
         p = self._f(kind)
         if not p.exists():
             return iter(())
-        return (json.loads(l) for l in p.read_text().splitlines() if l.strip())
+        return (json.loads(line) for line in p.read_text().splitlines() if line.strip())
 
     def decisions(self) -> list[dict[str, Any]]:
         return list(self.read("decisions"))

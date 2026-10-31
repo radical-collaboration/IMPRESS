@@ -9,7 +9,8 @@ monitoring means parity of evidence, not a progress bar.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
 from ..core.artifacts import Property
 from ..core.decision import CampaignObservation

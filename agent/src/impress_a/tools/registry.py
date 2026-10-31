@@ -40,7 +40,7 @@ class Registry:
         out.append(Path(__file__).resolve().parents[3] / "toolkits")
         return [p for p in out if p.is_dir()]
 
-    def load(self, explicit: str | Path | None = None) -> "Registry":
+    def load(self, explicit: str | Path | None = None) -> Registry:
         for root in self.search_paths(explicit):
             for tk_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                 try:
@@ -58,7 +58,8 @@ class Registry:
             if missing:
                 raise ToolkitLoadError(f"SKILL.md missing sections {missing}")
             self.skills[d.name] = text
-        for spec_file in sorted((d / "tools").glob("*/spec.yaml")) if (d / "tools").is_dir() else []:
+        for spec_file in (sorted((d / "tools").glob("*/spec.yaml"))
+                          if (d / "tools").is_dir() else []):
             spec = ToolSpec(**yaml.safe_load(spec_file.read_text()))
             for g in spec.qc_gates:
                 gates.get(g.id)  # raises if unimplemented

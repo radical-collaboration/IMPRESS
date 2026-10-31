@@ -2,8 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This project lives in the IMPRESS repository under `agent/`; paths below are relative to `agent/`,
-and nothing here may change IMPRESS's own `src/`, `tests/`, `examples/`, `docs/` or root packaging.
+This project lives in the IMPRESS repository under `agent/`. Paths below are relative to `agent/`,
+**except documentation paths**, which are repo-root-relative because this project's prose reference
+now lives at `docs/impress-a/` and is published as part of the IMPRESS site.
+
+What is shared with IMPRESS, and therefore top-level: **CI** (one `.github/workflows/ci.yml`),
+**lint** (one `[tool.ruff]` in the root `pyproject.toml`, at `line-length = 100`, covering both
+packages), **tests** (one `tox.ini`; this project's legs are `tox -e agent-py310..313`), and
+**documentation** (one mkdocs site). Changing those is expected rather than forbidden - an earlier
+version of this rule said "nothing here may change IMPRESS's own `src/`, `tests/`, `examples/`,
+`docs/` or root packaging", which is what kept this project unlinted and its docs unpublished.
+
+What the rule was really protecting, and what still holds:
+
+- **The dependency firewall.** IMPRESS is `>=3.9` and pulls `radical.pilot`; this project is `>=3.10`
+  and pulls langgraph, rhapsody and biopython. They are never installed into one environment -
+  `tox.ini`'s agent envs use `skip_install` with an explicit `deps` for exactly that reason. Do not
+  merge the two `dependencies` lists, and do not add an agent install to the 3.9 leg.
+- **`examples/`** is IMPRESS's, not this project's.
+- **`agent/.gitignore` stays**, and its trailing `!*.pdb` / `!*.fa` lines with it: they undo the root
+  ignore, and three tracked fixtures depend on them. Moving those files out from under `agent/` makes
+  them silently untracked.
+- **The two pytest configurations stay separate.** `toolkits/*/tools/*/tests/` holds gate fixtures
+  rather than collectible tests, so a merged `testpaths` would start trying to collect them.
 
 **Read `README.md` first** for what IMPRESS-A is and how it fits together. This file covers what you need
 to *work on* it: commands, invariants that must not be broken, and behaviours that are easy to get wrong.
@@ -19,6 +40,7 @@ pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
 
+impress-a models                                     # the control models and their real status
 impress-a tools                                      # list registered tools
 impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
 impress-a run campaigns/mock-stabilize.yaml --model D
@@ -26,6 +48,14 @@ impress-a run campaigns/mock-stabilize.yaml --model D
 ```
 
 Without the editable install, prefix with `PYTHONPATH=src` and use `python -m impress_a`.
+
+From the repository root, `tox` is the shared entry point and is what CI runs:
+
+```bash
+tox -e agent-py311        # this project's suite, in an isolated env (310, 312, 313 too)
+tox -e lint               # ruff over BOTH packages; must leave the tree clean
+tox -e docs               # build the site and fail on a broken link
+```
 
 ### Environment
 
@@ -48,13 +78,13 @@ included `$USER`. `impress-a preflight` flags a venv still on HDD.
 | `src/impress_a/` | The package. `runtime/` owns the executor, session and run service; `manager.py` is a facade over them |
 | `toolkits/` | Declarative tool specs + skill docs, discovered at runtime — not package data |
 | `campaigns/`, `sites/` | Campaign specs and per-machine configuration |
-| `docs/` | **Shipping reference.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` |
+| `../docs/impress-a/` | **Shipping reference, and now actually shipped.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` - published in the IMPRESS mkdocs site. It lived at `agent/docs/` and was built by nothing |
 | `plans/` | **Working plans.** `backlog.md` is the live outstanding list; `done/` records completed work *for the rulings it contains*, not the task lists |
-| `planning/` | **Process history, not reference.** The design record; superseded in places. Where it disagrees with `docs/` or the code, the code is right |
+| `planning/` | **Process history, not reference.** The design record; superseded in places. Where it disagrees with `docs/impress-a/` or the code, the code is right |
 
 ## Invariants — do not break these
 
-Each exists because of a specific failure mode. Details in `docs/reference/architecture.md`.
+Each exists because of a specific failure mode. Details in `docs/impress-a/reference/architecture.md`.
 
 | Invariant | Enforced in | Why |
 |---|---|---|
@@ -77,7 +107,7 @@ Each exists because of a specific failure mode. Details in `docs/reference/archi
 
 ## Middleware gotchas
 
-Full notes in `docs/reference/middleware-integration.md`. The ones that cost the most time:
+Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones that cost the most time:
 
 - **Rhapsody backends are awaitable and must be awaited.** `__await__` triggers state registration.
   Constructing synchronously appears to work, then fails later with
@@ -109,7 +139,7 @@ Full notes in `docs/reference/middleware-integration.md`. The ones that cost the
 ## Adding a tool
 
 `toolkits/<toolkit>/tools/<id>/spec.yaml` + a `TaskAgent` subclass (`entry:` points at it) + a mention in
-that toolkit's `SKILL.md`. Full guide: `docs/reference/authoring-tools.md`.
+that toolkit's `SKILL.md`. Full guide: `docs/impress-a/reference/authoring-tools.md`.
 
 **Never edit the composer, validator or manager to add a tool.** If you need to, the layering is wrong.
 
@@ -186,7 +216,7 @@ Four defects reached real hardware before anything caught them, and each was inv
 - **Where the bytes live.** `import pyrosetta` cost **471s** off HDD-backed Lustre, so `packmin`
   could not finish starting inside its 300s budget. On NVMe it is seconds. This one nearly caused a
   second bug: the fix queued up was to raise three walltimes to 1800/3600/1200, which would have
-  hidden the real cost behind timeouts six times too large. See `docs/limitations.md`.
+  hidden the real cost behind timeouts six times too large. See `docs/impress-a/limitations.md`.
 - **An estimate that refuses work.** The `cost_model` figures were literature guesses 6-69x over
   measurement. Gate 5 and the untrusted-pattern cap refuse graphs against them, so the inflated
   gpu side summed past the cap and the policy truncated `boltz_predict` off the chain - silently,
@@ -205,7 +235,7 @@ way). Bounded now by `CampaignSpec.backend_startup_timeout_s`/`backend_startup_h
 (`exec/backend.make_engine_bounded` runs the *synchronous* construction on a daemon thread so the
 bound stays effective, and builds the backend's async init and the engine on the caller's own loop —
 see the loop-ownership gotcha above); 0 disables it, the default for every non-Delta campaign. See
-`docs/limitations.md`.
+`docs/impress-a/limitations.md`.
 
 **Dragon teardown can hang too, and it is the more expensive end.** Measured on the reference
 IMPRESS pipeline (job 22491438): `flow.shutdown()` never returned after every pipeline had finished,
@@ -229,4 +259,4 @@ confidently-wrong tool passes. Since decision 0013 those are *acceptance* gates,
 There are still no structural gates (backlog B1). Known-bad fixtures exist for every real tool, and each
 must fail an integrity gate or declare itself `acceptance_only`.
 
-Full list: `plans/backlog.md`. Shipping-facing summary: `docs/limitations.md`.
+Full list: `plans/backlog.md`. Shipping-facing summary: `docs/impress-a/limitations.md`.

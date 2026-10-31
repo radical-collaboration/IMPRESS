@@ -26,9 +26,7 @@ class TestAdaptiveFunctions:
         await impress_manager._run_adaptive_fn(pipeline)
 
         # Called with the live pipeline, labelled for telemetry
-        adaptive_fn.assert_called_once_with(
-            pipeline, workflow_id="test_pipeline:adaptive"
-        )
+        adaptive_fn.assert_called_once_with(pipeline, workflow_id="test_pipeline:adaptive")
 
         # Check that flags were reset
         assert pipeline.invoke_adaptive_step is False
@@ -63,9 +61,7 @@ class TestAdaptiveFunctions:
         await impress_manager._run_adaptive_fn(pipeline)
 
         # Check that exception was handled
-        adaptive_fn.assert_called_once_with(
-            pipeline, workflow_id="test_pipeline:adaptive"
-        )
+        adaptive_fn.assert_called_once_with(pipeline, workflow_id="test_pipeline:adaptive")
 
         # Check that flags were reset even after exception
         assert pipeline.invoke_adaptive_step is False
@@ -90,9 +86,7 @@ class LocalBackendFlow:
 
             def flow_task(*args, **kwargs):
                 self.calls.append(kwargs)
-                return asyncio.ensure_future(
-                    asyncio.to_thread(asyncio.run, func(*args))
-                )
+                return asyncio.ensure_future(asyncio.to_thread(asyncio.run, func(*args)))
 
             flow_task.__task_description__ = {}
             return flow_task

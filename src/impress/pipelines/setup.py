@@ -30,16 +30,12 @@ class PipelineSetup(BaseModel):
     """Pydantic model for pipeline configuration."""
 
     name: str = Field(..., description="Name of the pipeline")
-    type: Annotated[
-        type[ImpressBasePipeline], Field(..., description="Pipeline class type")
-    ]
+    type: Annotated[type[ImpressBasePipeline], Field(..., description="Pipeline class type")]
     config: dict[str, Any] = Field(
         default_factory=dict,
         description="Pipeline configuration",
     )
-    adaptive_fn: Optional[
-        Callable[[ImpressBasePipeline], Union[Awaitable[None], None]]
-    ] = Field(
+    adaptive_fn: Optional[Callable[[ImpressBasePipeline], Union[Awaitable[None], None]]] = Field(
         default=None,
         description=(
             "Optional adaptive function for the pipeline. Must be an engine "
@@ -103,8 +99,7 @@ class PipelineSetup(BaseModel):
 
         kind = "coroutine function" if inspect.iscoroutinefunction(v) else "callable"
         raise TypeError(
-            f"adaptive_fn for pipeline {name!r} is a plain {kind}, "
-            f"not an engine task. {hint}"
+            f"adaptive_fn for pipeline {name!r} is a plain {kind}, not an engine task. {hint}"
         )
 
     def to_dict(self) -> dict[str, Any]:

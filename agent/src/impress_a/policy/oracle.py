@@ -18,8 +18,15 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from ..core.decision import (Backtrack, CampaignObservation, ComposeAndRun, Decision,
-                             ExperimentIntent, Stop, ValidationFailure)
+from ..core.decision import (
+    Backtrack,
+    CampaignObservation,
+    ComposeAndRun,
+    Decision,
+    ExperimentIntent,
+    Stop,
+    ValidationFailure,
+)
 from .base import BasePolicy
 
 DECISION_SCHEMA = {
@@ -101,7 +108,8 @@ class OraclePolicy(BasePolicy):
             f"{ {d: obs.budget.remaining(d) for d in obs.budget.limits} }\n"
             f"AVAILABLE TOOLS: {obs.available_tools}\n"
             f"{'LAST REJECTION: ' + obs.last_rejection.reason if obs.last_rejection else ''}\n"
-            f"Reply with ONE JSON object matching this schema:\n{json.dumps(DECISION_SCHEMA, indent=2)}"
+            f"Reply with ONE JSON object matching this schema:\n"
+            f"{json.dumps(DECISION_SCHEMA, indent=2)}"
         )
 
     def _to_decision(self, raw: dict[str, Any], obs: CampaignObservation) -> Decision:

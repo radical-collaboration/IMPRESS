@@ -41,7 +41,7 @@ impress-a/
 | 7 | **Campaign state is append-only JSONL; checkpoints are derived** | Crash-safe, `grep`-able on a login node, lock-free for concurrent readers. The log is truth; the checkpoint is an index. |
 | 8 | **P5 cache is shared across campaigns**, not per-campaign | The cheapest available mitigation for the ColabFold single-point-of-failure (R3). |
 | 9 | **Four test tiers, with a full mock campaign runnable on a laptop** | HPC iteration is slow and expensive; the architecture was built so almost everything is verifiable locally. |
-| 10 | **`docs/decisions/`, not `docs/adr/`** | `radical.adr` is a middleware component this project uses; "ADR" would be permanently ambiguous. |
+| 10 | **`docs/impress-a/decisions/`, not `docs/adr/`** | `radical.adr` is a middleware component this project uses; "ADR" would be permanently ambiguous. |
 
 ## Two choices worth highlighting
 

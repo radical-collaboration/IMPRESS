@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from impress_a.compose.validate import SiteCaps
 from impress_a.control.http import ControlPlaneClient, ControlPlaneServer
 from impress_a.control.plane import InProcessControlPlane

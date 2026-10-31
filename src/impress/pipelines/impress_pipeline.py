@@ -136,9 +136,9 @@ class ImpressBasePipeline(ABC):
             if local_task:
                 task = wrap_local_task(self, func)
             else:
-                flow_task = self.flow.executable_task(
-                    capture_stdio=capture_stdio, **task_kwargs
-                )(func)
+                flow_task = self.flow.executable_task(capture_stdio=capture_stdio, **task_kwargs)(
+                    func
+                )
                 task = self._wrap_executable_task(func, flow_task)
             setattr(self, func.__name__, task)
             return task

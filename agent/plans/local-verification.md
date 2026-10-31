@@ -61,7 +61,7 @@ The three layering invariants from `CLAUDE.md`:
 
 **Asserted by `tests/test_layering.py`**, which walks every `.py` under `src/impress_a/` with `ast`
 and checks all three rules plus every other edge against one table mirroring
-`docs/reference/architecture.md`. `ast.walk` rather than a module-level scan, because the adapters
+`docs/impress-a/reference/architecture.md`. `ast.walk` rather than a module-level scan, because the adapters
 defer science imports into `run()` bodies on purpose and a deferred `from ..exec import ...` inside
 `compose` would be exactly as fatal.
 

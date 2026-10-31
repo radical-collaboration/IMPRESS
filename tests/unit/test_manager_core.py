@@ -55,9 +55,7 @@ async def real_flow(tmp_path):
     os.makedirs(f"{work_dir}/{uid}"); the default would scatter session
     dirs through the repo on every test run.
     """
-    flow = await WorkflowEngine.create(
-        backend=NoopExecutionBackend(), work_dir=str(tmp_path)
-    )
+    flow = await WorkflowEngine.create(backend=NoopExecutionBackend(), work_dir=str(tmp_path))
     yield flow
     await flow.shutdown()
 
@@ -113,9 +111,7 @@ class TestImpressManagerCore:
         assert normalized.config == {"key": "value"}
         assert normalized.kwargs == {"kwargs": {"kwarg": "value"}}
 
-    async def test_normalize_pipeline_setup_object(
-        self, impress_manager, sample_pipeline_setup
-    ):
+    async def test_normalize_pipeline_setup_object(self, impress_manager, sample_pipeline_setup):
         """Test normalizing PipelineSetup object (no change)"""
         normalized = impress_manager._normalize_pipeline_setup(sample_pipeline_setup)
 

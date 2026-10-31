@@ -1,6 +1,6 @@
 """Known-bad fixtures: every real tool's QC gates, run against output that should fail.
 
-`docs/reference/authoring-tools.md` requires each tool to carry known-BAD outputs under
+`docs/impress-a/reference/authoring-tools.md` requires each tool to carry known-BAD outputs under
 `toolkits/<tk>/tools/<id>/tests/`, on the grounds that *a gate that has never seen the
 output it was written to catch is an assertion, not a test*. Until this file existed, no
 toolkit carried any (backlog B2), so every real toolkit's QC was exactly that assertion:
@@ -33,7 +33,6 @@ import json
 import pathlib
 
 import pytest
-
 from impress_a.core.qc import GateOutcome, QCReport, QCVerdict
 from impress_a.tools import gates
 from impress_a.tools.registry import Registry
@@ -108,8 +107,9 @@ async def test_a_known_bad_fixture_fails_qc_through_post_process(reg):
     """The fixtures are checked against the same path a campaign uses, not a parallel one.
 
     `_run_spec_gates` makes the same `gates.evaluate` call `TaskAgent.post_process` does;
-    this runs the real thing once to prove nothing else in post_process changes the verdict. `empty_out_dir.bad.json` is used because its `outputs`
-    is `{}`, so `_as_artifacts` is a no-op and no file has to exist on disk.
+    this runs the real thing once to prove nothing else in post_process changes the
+    verdict. `empty_out_dir.bad.json` is used because its `outputs` is `{}`, so
+    `_as_artifacts` is a no-op and no file has to exist on disk.
     """
     from impress_a.tools.agent import TaskRequest
 

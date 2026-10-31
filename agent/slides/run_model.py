@@ -384,9 +384,9 @@ BASELINE_MEASURED = {
                 "fastrelax_escalate": 0.131, "interface": 0.031},
     "quota_failure": {"job": "22726386", "pipelines": 256, "killed": 245, "quota": 174,
                       "oom": 59, "gpu_h_billed": 128.0, "gpu_h_wasted": 108},
-    # This one is transcribed from OUR docs, not theirs: docs/limitations.md:133-136.
+    # This one is transcribed from OUR docs, not theirs: docs/impress-a/limitations.md:133-136.
     "teardown": {"job": "22491438", "pipelines": 16, "minutes": 60, "gpu_h": 64,
-                 "share_of_billed": 0.37, "source": "docs/limitations.md"},
+                 "share_of_billed": 0.37, "source": "docs/impress-a/limitations.md"},
 }
 
 # Transcribed from the off-cluster reproduction of performance_analysis/ (twelve sections) over

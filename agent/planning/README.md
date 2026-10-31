@@ -11,10 +11,10 @@ For anything you need in order to work on or use the system, read `docs/` instea
 
 | You want | Read |
 |---|---|
-| How it works | `docs/reference/architecture.md` |
-| Why it works that way | `docs/decisions/` |
-| How to extend it | `docs/reference/authoring-tools.md` |
-| What it cannot do | `docs/limitations.md` |
+| How it works | `docs/impress-a/reference/architecture.md` |
+| Why it works that way | `docs/impress-a/decisions/` |
+| How to extend it | `docs/impress-a/reference/authoring-tools.md` |
+| What it cannot do | `docs/impress-a/limitations.md` |
 
 Where these documents disagree with `docs/` or with the code, **the code and `docs/` are correct**.
 Several conclusions here were revised by later phases or by building the thing — that is the point of

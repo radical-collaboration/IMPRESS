@@ -48,7 +48,7 @@ a scenario work, so suspect the engine first.
 
 Is exploration *progress*? The executor currently has one measure of progress, a change to the front.
 That is correct for exploitation and blind to exploration by construction. Termination belongs to the
-executor (`CLAUDE.md` invariants; `docs/reference/architecture.md`), so the fix belongs there or in the campaign spec, not
+executor (`CLAUDE.md` invariants; `docs/impress-a/reference/architecture.md`), so the fix belongs there or in the campaign spec, not
 in the reasoner.
 
 ## Candidate approaches (not yet chosen)

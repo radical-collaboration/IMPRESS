@@ -6,21 +6,19 @@ with ConcurrentExecutionBackend and mock tools. Exercises every layer above the 
 import asyncio
 
 import pytest
-
 from impress_a.compose.interlock import Scrutiny
 from impress_a.compose.validate import SiteCaps
-from impress_a.core.artifacts import (AUTHORITY_ASSAY, Property, PropertySource,
-                                      SourceKind)
+from impress_a.control.plane import InProcessControlPlane
+from impress_a.core.artifacts import AUTHORITY_ASSAY, Property, PropertySource, SourceKind
 from impress_a.core.decision import ExperimentIntent
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
+from impress_a.core.session import CampaignStopped, SubmissionRejected
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
-from impress_a.core.session import CampaignStopped, SubmissionRejected
-from impress_a.control.plane import InProcessControlPlane
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.agentic import FourNodePolicy
-from impress_a.policy.explicit import ReplayPolicy, ThresholdPolicy
+from impress_a.policy.explicit import ThresholdPolicy
 from impress_a.policy.external import ExternalPolicy
 from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
@@ -101,7 +99,7 @@ async def test_lying_tool_is_caught_by_qc(reg):
 async def test_guard_corrects_every_decision(reg):
     guarded = RuleCorrectionsPolicy(ThresholdPolicy(base_replicas=99),
                                     max_replicas=2, forbid_tools=("mock_noodle",))
-    res = await CampaignManager(spec("t-guard"), guarded, reg).run()
+    await CampaignManager(spec("t-guard"), guarded, reg).run()
     assert guarded.corrections, "guard must have corrected an over-large request"
 
 
@@ -148,7 +146,7 @@ async def test_external_steering_and_post_termination_measurement(reg):
 
 async def test_provenance_is_written_and_replayable(reg):
     mgr = CampaignManager(spec("t-prov"), ThresholdPolicy(), reg)
-    res = await mgr.run()
+    await mgr.run()
     graphs = list(mgr.prov.read("graphs"))
     results = list(mgr.prov.read("results"))
     trans = list(mgr.prov.read("transitions"))
@@ -161,7 +159,7 @@ async def test_budget_is_charged_and_bounds_the_campaign(reg):
     s = spec("t-budget", max_cycles=10)
     s.budget = {"gpu_hours": 0.35, "cpu_hours": 3.0}
     mgr = CampaignManager(s, ThresholdPolicy(), reg)
-    res = await mgr.run()
+    await mgr.run()
     assert mgr.budget.spent, "cost must be charged"
     assert all(mgr.budget.remaining(d) >= -1e-9 for d in mgr.budget.limits)
 

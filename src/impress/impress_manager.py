@@ -151,9 +151,7 @@ class ImpressManager:
             pipeline.invoke_adaptive_step = False
             pipeline._adaptive_barrier.set()
 
-    async def start(
-        self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]
-    ) -> None:
+    async def start(self, pipeline_setups: list[Union[dict[str, Any], PipelineSetup]]) -> None:
         """
         Start the pipeline manager and execute all pipelines.
 
@@ -277,11 +275,7 @@ class ImpressManager:
                 )
 
             # Exit condition
-            if (
-                not self.pipeline_tasks
-                and not self.new_pipeline_buffer
-                and not self.adaptive_tasks
-            ):
+            if not self.pipeline_tasks and not self.new_pipeline_buffer and not self.adaptive_tasks:
                 self.logger.manager_exiting()
                 self.logger.separator("IMPRESS MANAGER FINISHED")
                 break

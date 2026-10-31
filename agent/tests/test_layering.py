@@ -10,7 +10,7 @@
   * `core` imports nothing internal.
 
 This file walks the source with `ast` and checks all three, plus every other edge, against
-one table that mirrors `docs/reference/architecture.md`. `ast.walk` is used deliberately
+one table that mirrors `docs/impress-a/reference/architecture.md`. `ast.walk` is used deliberately
 rather than a scan of module-level imports: the real adapters defer their science imports
 into `run()` bodies on purpose (see `tools/_pdbtools.py`), and a deferred
 `from ..exec import ...` inside a `compose` function would be exactly as fatal as one at
@@ -28,7 +28,7 @@ import impress_a
 
 SRC = pathlib.Path(impress_a.__file__).resolve().parent
 
-#: layer -> the internal layers it MAY import. Mirrors docs/reference/architecture.md.
+#: layer -> the internal layers it MAY import. Mirrors docs/impress-a/reference/architecture.md.
 #: An allow-list, not a deny-list: a NEW cross-layer import fails by default, which is the
 #: direction that matters. A new layer is one line here, and an unlisted layer fails
 #: `test_every_layer_is_in_the_table`, so this cannot silently fall out of step.

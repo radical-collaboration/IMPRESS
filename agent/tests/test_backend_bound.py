@@ -18,7 +18,6 @@ import asyncio
 import time
 
 import pytest
-
 from impress_a.exec import backend as backend_mod
 from impress_a.exec.backend import BackendConstructionTimeout, make_engine_bounded
 
