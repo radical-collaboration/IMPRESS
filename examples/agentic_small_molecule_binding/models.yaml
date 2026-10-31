@@ -1,0 +1,228 @@
+# Model profiles for the agentic small-molecule binding example.
+#
+# Every profile is an OpenAI-compatible /chat/completions endpoint with tool
+# calling, so comparing models is a matter of changing --model-profile and
+# nothing else. Add one per model under comparison and keep the rest identical.
+#
+# api_key_env must be exported by the launcher, and on a multi-node run it must
+# also survive the `dragon -w ssh` hop -- Dragon forwards only BASE_ENV_VARNAMES,
+# so put it in ~/.bashrc, the same way MPNN_DIR and friends are handled.
+
+profiles:
+
+  # Claude through Anthropic's OpenAI-compatibility endpoint. That endpoint
+  # takes this request shape but does not expose Claude's own controls
+  # (adaptive thinking, effort, server-side fallbacks); one request shape
+  # across every model is the trade this example is making deliberately.
+  #
+  # MEASURED 2026-10-22: claude-opus-5-5 DECLINES this workload. Every request
+  # comes back finish_reason=content_filter with 0 completion tokens -- with
+  # the system prompt and without it, so it is the design task itself and not
+  # the prompt's wording. claude-sonnet-5-5 answers the identical request
+  # normally (tool_calls, the correct opening move). Use claude-sonnet until
+  # that changes; the example's degraded path would otherwise turn an Opus run
+  # into the scripted route on turn one. On the native API the documented
+  # remedy is the server-side `fallbacks` parameter, which the compatibility
+  # endpoint does not expose.
+  claude-opus:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-opus-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  # Works today -- the profile to use for a live run.
+  claude-sonnet:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-sonnet-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  # Reflection AI's Beam, through its OpenAI-compatible endpoint. Beta access.
+  #
+  # The model id is VERIFIED against GET /openai/v1/models, which returns
+  # "Beam-501B-A23B". developers.reflection.ai/models documents it as
+  # "Beam-1.0-501B-A23B"; that id is not what the endpoint serves. Check the
+  # live list again before blaming a 404 on the key.
+  #
+  # max_tokens is 32768 rather than the 4096 every other profile uses, and that
+  # is load-bearing. Beam's reasoning is always on -- no effort level disables
+  # it -- and reasoning tokens are charged against the same budget as the
+  # answer. At 4096 the model can spend the whole budget thinking and return a
+  # turn with NO tool call, which run() counts as "no tool call"; twice in a row
+  # stops the pipeline. That failure is indistinguishable in the log from the
+  # 7B's lack of stamina (23201195) while having nothing to do with it.
+  #
+  # Beam is itself a 501B open-weight MoE, so it could in principle be served
+  # in-allocation -- but not on a 192 GB node. It runs as an API arm, and any
+  # cost comparison against a dragon_vllm arm must say so: this bills tokens on
+  # one node, those bill two node-hours with the model's node charged in.
+  beam:
+    kind: openai_compat
+    base_url: https://api.reflection.ai/openai/v1
+    model: Beam-501B-A23B
+    api_key_env: REFLECTION_API_KEY
+    max_tokens: 32768
+    extra_body:
+      reasoning_effort: medium   # low | medium | high | xhigh | max
+
+  # Served inside the allocation itself: `vllm serve` launched as an asyncflow
+  # task on the rhapsody Dragon backend, on a node of its own. base_url is left
+  # unset deliberately -- the runner discovers it once the server is healthy,
+  # and build_client() refuses to construct a client before then.
+  #
+  # Not rhapsody's DragonVllmInferenceBackend: that one's /v1/chat/completions
+  # flattens the message list into a single string and has no tool-calling path
+  # (rhapsody/src/rhapsody/backends/ai/vllm.py:519-549), and this example runs
+  # entirely on native tool calls. vLLM's own server speaks the full protocol,
+  # so the ordinary OpenAI-compatible client is reused unchanged.
+  #
+  # Needs >= 2 nodes: the model takes one, the pipelines keep the other.
+  #
+  # THIS PATH IS MODEL-AGNOSTIC AND MUST STAY THAT WAY. Everything a particular
+  # checkpoint needs -- its tool-call parser, its reasoning parser, its context
+  # length, how many GPUs the weights take -- is a field of the profile, read
+  # off the model card. `serve_command()` has no vendor default to fall back on
+  # and will not launch without `tool_parser`, so a new arm states its own or
+  # fails loudly at submit time rather than silently serving with the wrong
+  # extractor. What four jobs proved here is not vendor-specific: the node
+  # partition holds (23201195), tp=4 across the model node's A40s works
+  # (23207314), and block-FP8 falls back cleanly on SM 8.6 (23219406).
+  #
+  # Which models may be served at all is settled in ~/.claude/CLAUDE.md, and
+  # test_agentic_smb.py enforces it -- a barred vendor fails the suite instead
+  # of waiting on review.
+
+  # Plumbing proof: placement, transport and tool-call parsing in minutes.
+  # Useless for the science, and that is the point -- it is the cheapest thing
+  # that distinguishes a broken node partition from a model that will not call
+  # tools. 1B in bf16 is ~2.5 GB, so one GPU at 0.60 is already generous.
+  #
+  # Llama 3.2's own chat template carries `tools` and `tool_calls` (verified in
+  # the cached tokenizer_config.json), so vLLM's separate
+  # tool_chat_template_llama.jinja -- which pip does not install -- is not
+  # needed. It does lack `<|python_tag|>`, the llama3_json parser's bot_token;
+  # the parser also scans for a bare JSON object, which is the 1B's format.
+  local-smoke:
+    kind: dragon_vllm
+    model: meta-llama/Llama-3.2-1B-Instruct
+    api_key_env: null
+    max_tokens: 2048
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1          # last node of the allocation
+      gpus: 1
+      tp_size: 1
+      port: 8000
+      gpu_fraction: 0.60
+      tool_parser: llama3_json
+      ready_timeout_s: 900
+      # Native context is 131k. Reserving KV for it would hold most of the GPU
+      # for no benefit -- the prompt plateaus near 10k.
+      extra_args: "--max-model-len 32768"
+
+  # The open-weight arm. 8B in bf16 is ~16 GB and fits one A40, so the model
+  # node's other three GPUs stay idle -- raise tp_size only for a checkpoint
+  # whose weights do not fit one card.
+  #
+  # Weights are already staged under IMPRESS_HF_HOME, so this runs with
+  # HF_HUB_OFFLINE=1 and needs no download from a compute node.
+  #
+  # UNMEASURED. No job has driven the agent loop with this profile yet. The
+  # retired Qwen arms are the only open-weight data on file and they will not
+  # be rerun, so until this one runs there is no open-weight arm to set against
+  # Beam -- do not quote one.
+  local-llama-8b:
+    kind: dragon_vllm
+    model: meta-llama/Llama-3.1-8B-Instruct
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 1              # 16 GB of weights fits one 48 GB A40
+      port: 8000
+      gpu_fraction: 0.90
+      tool_parser: llama3_json
+      ready_timeout_s: 1800   # the 7B arm was ready in 160 s; 11x headroom
+      extra_args: "--max-model-len 32768"
+
+  # The slot for the next open-weight arm. Copy it, set `model`, and read the
+  # rest off the model card -- none of these values transfer between models:
+  #
+  #   tool_parser      the extractor for THIS model's tool-call syntax. Must
+  #                    name a parser vLLM registers (vllm/tool_parsers/
+  #                    __init__.py); a wrong one yields zero tool calls and
+  #                    looks exactly like a model with no tool training.
+  #   tp_size          weights in bytes / 48 GB per A40, rounded up.
+  #   gpu_fraction     weights plus the KV the turn count needs.
+  #   extra_args       --max-model-len against a long native context, and
+  #                    --reasoning-parser if the model thinks, which keeps the
+  #                    think block out of `content` where the tool extractor
+  #                    would otherwise reach it.
+  #   ready_timeout_s  engine start and CUDA-graph capture dominate, not I/O:
+  #                    145 GB loaded in 360 s where 15 GB took 160 s.
+  #
+  # Beam is the arm this was meant for and cannot be served here: 501B does not
+  # fit a 192 GB node even at A23B active, which is why `beam` above is an API
+  # profile. It stays that way until the weights fit the hardware.
+  local-open-weights:
+    kind: dragon_vllm
+    model: REPLACE-ME
+    api_key_env: null
+    max_tokens: 4096
+    serve:
+      venv: /work/nvme/bdyk/hooten1/ve/vllm_srv
+      node_index: -1
+      gpus: 4
+      tp_size: 1
+      port: 8000
+      gpu_fraction: 0.90
+      tool_parser: REPLACE-ME
+      ready_timeout_s: 2400
+      extra_args: ""
+
+  # A model served on or near the cluster. Point base_url at the server; if it
+  # runs inside the allocation it takes a GPU away from the tool pool, which
+  # changes the comparison against the reference -- size the allocation for it.
+  local-vllm:
+    kind: openai_compat
+    base_url: http://localhost:8000/v1
+    model: REPLACE-ME
+    api_key_env: null
+    max_tokens: 4096
+
+  # Control model D: the reference's own `adaptive_decision()` drives the loop.
+  # No network, no key, no model.
+  #
+  # This is the comparison's missing control. Every LLM arm changes two things
+  # against the reference at once -- the rules become a model AND the state
+  # machine becomes a tool-calling harness -- so none of the figures on file
+  # says which change is responsible. This arm changes only the harness. If it
+  # lands on the reference's numbers (0.159 GPU-h per passing fold, 92 % fold
+  # pass, fastrelax 64 %, median pLDDT 94.4) the harness is neutral and the LLM
+  # arms' advantage is the decision-maker; if it does not, part of every arm's
+  # result is the harness and the comparison needs restating.
+  #
+  # rules_client.py imports adaptive_decision rather than reimplementing it,
+  # for the reason this file imports PROD: a restatement drifts silently, and
+  # rule-identity is the entire point of the arm. It therefore reproduces the
+  # reference's quirks too -- the inert backbone similarity gate and the
+  # hardcoded `pass: True` on sequence -- which is correct, not a defect.
+  #
+  # UNMEASURED: no job has run this arm yet.
+  rules-d:
+    kind: rules
+
+  # No network, no key: replays the reference non-adaptive route as tool calls.
+  # Used by the offline test, and as the degraded mode when an endpoint fails
+  # mid-run.
+  #
+  # NOT a faithful replay of run_nonadaptive: its route sends packmin -> relax,
+  # where the reference's refine cycle runs a second design_sequence first. It
+  # is the degraded path and a plumbing fixture, not a control arm; `rules-d`
+  # is the control.
+  scripted:
+    kind: scripted
