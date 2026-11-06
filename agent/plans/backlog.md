@@ -418,11 +418,26 @@ no `impress-a serve` (executor side, inside the allocation, holding the plane op
 from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
 already describes as "implemented".
 
+**RESOLVED** (phase 7 of `control-plane-refactor.md`). `impress-a serve <spec>` runs the
+execution process - executor, Reviewer, Deployer, Runner, the one asyncflow engine - with no
+reasoner at all, behind `ControlPlaneServer`, and prints the URL it bound. `impress-a control
+--connect <url> --campaign <id> --model X` runs the Spec and Planning loops in their own
+process against `RemoteSession`. The split is now reachable from a shell, which is what this
+item was about; `test_serve_and_control_drive_a_campaign_in_two_processes` spawns both and
+drives a campaign, because every other test shares one interpreter and so cannot claim it.
+
 **C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
 `on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
 every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
 (`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
 as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
+
+**RESOLVED** (phase 7), by refusing rather than by detecting. `impress-a run --model C` now
+exits 1 and names the two commands to use instead. The entry points that make C real exist, so
+"no caller attached" is an operator error with an answer rather than a mode to degrade into -
+and `--specifier C` and `--planner C` are refused the same way, since they are the same hazard
+wearing a different flag. A disguised arm is indistinguishable from a real one in every figure
+derived from it, which is why this is a refusal and not a warning.
 
 **C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
 offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
@@ -431,6 +446,12 @@ single trusted client, no auth, no TLS. Planning question M6
 process runs relative to the job — was sidestepped rather than answered, and a real split on Delta
 needs it settled: the compute node's private interface, or a tunnel, and what the security boundary
 then is. Blocked on C5.
+
+**ANSWERED for this configuration** (phase 7): nowhere else. `impress-a serve` binds
+`127.0.0.1` by default and both processes belong on the same compute node, so the boundary is
+the node rather than a token nobody rotates. `--host` exists for a deliberate choice, and the
+plane still has no auth and no TLS - so anything other than loopback is a decision this item
+should be reopened for, not a flag to set casually.
 
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and

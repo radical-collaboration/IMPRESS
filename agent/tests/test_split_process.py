@@ -1,0 +1,314 @@
+"""T5 - the control plane in its own process.
+
+Backlog C5: the out-of-process split was reachable from `tests/` and from no shell, so
+`docs/reference/frontends.md` described as "implemented" something nobody could run. Three of
+these tests drive the roles over a loopback socket, which exercises the same code path the
+split uses; the last one spawns `impress-a serve` and `impress-a control` as real processes,
+because "reachable from a shell" is the part a same-process test cannot claim.
+
+What the split buys, and what these assert:
+
+* the roles run unchanged against `RemoteSession` - which is the whole reason phase 1 wrote
+  them against `CampaignSession` rather than against the executor;
+* the executor's pump reaps independently of the control side, so a slow Specifier costs
+  decisions rather than throughput;
+* losing the control process drains and stops with a reason that names the loss, rather than
+  leaving a campaign silently not replanning while it holds an allocation.
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import sys
+
+import pytest
+import yaml
+
+from impress_a.cli import run_campaign
+from impress_a.compose.validate import SiteCaps
+from impress_a.control.http import ControlPlaneClient, ControlPlaneServer
+from impress_a.control.plane import InProcessControlPlane
+from impress_a.control.session import RemoteSession
+from impress_a.core.goal import Goal
+from impress_a.core.pareto import Direction, Objective
+from impress_a.manager import CampaignManager, CampaignSpec
+from impress_a.policy.explicit import ThresholdPolicy
+from impress_a.policy.legacy import DecideAsRoles
+from impress_a.runtime.roles import RolesDriver
+from impress_a.tools.registry import Registry
+
+CHAIN = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
+OBJS = [Objective(name="sc_rmsd", direction=Direction.MIN, max=3.0),
+        Objective(name="iptm", direction=Direction.MAX, min=0.55)]
+
+
+@pytest.fixture(scope="module")
+def reg():
+    return Registry().load()
+
+
+def _spec(cid, tmp_path, **kw):
+    # A budget large enough that the interlock's 10%-of-available cap cannot reject the first
+    # admission. Not cosmetic: a rejected submission still burns a run label, run labels seed
+    # the replica draws, and so a comparison between two campaigns that retried a different
+    # number of times compares different science. Removing the retry makes the parity question
+    # answerable; the cap itself is tested in `test_validation.py`, where it belongs.
+    return CampaignSpec(
+        campaign_id=cid, goal="stabilize", objectives=OBJS,
+        budget={"gpu_hours": 40.0, "cpu_hours": 200.0},
+        site=SiteCaps(gpu_api="cuda", gpus_per_node=1), backend="concurrent",
+        backend_config={"workers": 3}, root=str(tmp_path),
+        trust_root=str(tmp_path / f"trust-{cid}"), stages=CHAIN, control="roles", **kw)
+
+
+class _Idle:
+    """The execution side's non-reasoner. See `cli._Idle`."""
+
+    name = "served"
+
+    async def conduct(self, session):
+        await asyncio.Event().wait()
+
+
+def _shape(nodes):
+    return [(n.cycle, n.qc.verdict.value,
+             sorted((k, p.value) for k, p in n.properties.items())) for n in nodes]
+
+
+async def _drive_remotely(reg, spec, driver_factory, wait_s=30.0):
+    """Serve `spec`, drive it over loopback, and return the campaign result."""
+    mgr = CampaignManager(spec, _Idle(), reg)
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+    async with ControlPlaneServer(plane) as server:
+        async def control():
+            try:
+                async with ControlPlaneClient(server.base_url) as api:
+                    session = RemoteSession(api, cid)
+                    obs = await session.observe()
+                    goal = Goal(text=obs.goal, objectives=list(obs.objectives))
+                    await driver_factory(goal).conduct(session)
+            finally:
+                # Without this a failed assertion leaves the served campaign waiting forever,
+                # and the test hangs instead of reporting which line broke.
+                await plane.stop(cid, "control side finished")
+
+        task = asyncio.create_task(control())
+        res = await asyncio.wait_for(mgr.run(), timeout=wait_s)
+        await task
+    return res
+
+
+async def test_the_roles_drive_a_campaign_over_a_socket(reg, tmp_path):
+    """The split changes nothing, which is the only thing worth asserting about a move.
+
+    Same policy, same science, in-process and across a socket. A failure after this is a
+    transport failure and nothing else - which is why the roles were written against
+    `CampaignSession` in phase 1 rather than against the executor.
+    """
+    local = await CampaignManager(
+        _spec("t-local", tmp_path, max_cycles=3), ThresholdPolicy(), reg).run()
+
+    # Built with the same bounds `CampaignManager._roles()` gives the in-process driver, so
+    # the only difference between the two campaigns is the transport.
+    remote = await _drive_remotely(
+        reg, _spec("t-remote", tmp_path, max_cycles=3),
+        lambda goal: RolesDriver(goal, *_halves(), max_turns=3, max_attempts=4,
+                                 concurrency=1))
+
+    assert _shape(remote.tree.nodes.values()) == _shape(local.tree.nodes.values()), \
+        "every node, verdict and metric must match the in-process campaign"
+    assert remote.cycles == local.cycles
+    assert len(remote.front) == len(local.front)
+
+
+def _halves():
+    pair = DecideAsRoles(ThresholdPolicy())
+    return pair.specifier, pair.planner
+
+
+async def test_the_pump_reaps_while_the_control_side_is_slow(reg, tmp_path):
+    """A slow Specifier costs decisions, not throughput.
+
+    This is what the split is FOR. The executor's pump and the roles are independent: work
+    already admitted is reaped while the control side is thinking, so a decision that takes a
+    minute does not idle the allocation for a minute. In one process that independence is a
+    property of the loop; across a socket it is a property of the process boundary, and this
+    exercises the same seam either way.
+    """
+    reaped: list[str] = []
+
+    class SlowPlanner:
+        name = "slow"
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def plan(self, spec, ctx):
+            # Long enough that a pump waiting on us would show it, short enough to keep the
+            # suite fast.
+            await asyncio.sleep(0.25)
+            return await self.inner.plan(spec, ctx)
+
+        async def replan(self, *a, **kw):
+            return await self.inner.replan(*a, **kw)
+
+        async def after_collect(self, *a, **kw):
+            return None
+
+    spec = _spec("t-slow", tmp_path, max_cycles=3, concurrency=3)
+    mgr = CampaignManager(spec, _Idle(), reg)
+    original = mgr.executor._reap
+
+    async def watched(run_id):
+        reaped.append(run_id)
+        return await original(run_id)
+
+    mgr.executor._reap = watched
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+
+    async with ControlPlaneServer(plane) as server:
+        async def control():
+            try:
+                async with ControlPlaneClient(server.base_url) as api:
+                    session = RemoteSession(api, cid)
+                    obs = await session.observe()
+                    goal = Goal(text=obs.goal, objectives=list(obs.objectives))
+                    spec_half, plan_half = _halves()
+                    await RolesDriver(goal, spec_half, SlowPlanner(plan_half),
+                                      max_turns=3, concurrency=3).conduct(session)
+            finally:
+                await plane.stop(cid, "control side finished")
+
+        task = asyncio.create_task(control())
+        await asyncio.wait_for(mgr.run(), timeout=60)
+        await task
+
+    assert reaped, "the pump must have collected work while the planner was thinking"
+
+
+async def test_execution_drains_and_stops_when_contact_is_lost(reg, tmp_path):
+    """A lost control process must be loud, and must not abandon paid-for work.
+
+    Draining rather than aborting is deliberate: cancellation is advisory, so in-flight work
+    will finish whether or not anyone collects it, and throwing away results already paid for
+    buys nothing. The stop reason names the loss, because a campaign that quietly stopped
+    replanning while holding an allocation is the failure this exists to make visible.
+    """
+    spec = _spec("t-lost", tmp_path, max_cycles=50, control_liveness_timeout_s=0.5)
+    mgr = CampaignManager(spec, _Idle(), reg)
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+
+    async with ControlPlaneServer(plane) as server:
+        async def control():
+            """Submit one Stage, then go silent - the shape of a control process that died."""
+            async with ControlPlaneClient(server.base_url) as api:
+                session = RemoteSession(api, cid)
+                obs = await session.observe()
+                goal = Goal(text=obs.goal, objectives=list(obs.objectives))
+                spec_half, plan_half = _halves()
+                driver = RolesDriver(goal, spec_half, plan_half, max_turns=1)
+                await driver.conduct(session)
+
+        task = asyncio.create_task(control())
+        res = await asyncio.wait_for(mgr.run(), timeout=60)
+        await task
+
+    assert "control plane lost" in res.stop_reason, res.stop_reason
+    assert mgr.executor._inflight == {}, "in-flight work was drained, not abandoned"
+    lost = [r for r in mgr.prov.read("transitions") if r.get("event") == "control_lost"]
+    assert lost, "the loss must be on the record, not only in the stop reason"
+    assert lost[0]["silent_s"] >= 0.5
+
+
+@pytest.mark.skipif(shutil.which("impress-a") is None,
+                    reason="console script not installed in this environment")
+async def test_serve_and_control_drive_a_campaign_in_two_processes(tmp_path):
+    """Backlog C5, answered the only way it can be: from a shell.
+
+    Every other test here shares one interpreter, so none of them can claim the entry points
+    exist. This spawns both and asserts the campaign completes - which is also the exact shape
+    `scripts/delta_gpu_run.sh` uses when it starts the control sidecar beside the server.
+    """
+    spec_path = tmp_path / "split.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "campaign_id": "split-cli", "goal": "stabilize", "backend": "concurrent",
+        "backend_config": {"workers": 3}, "max_cycles": 2, "stagnation_limit": 9,
+        "control_liveness_timeout_s": 30, "root": str(tmp_path),
+        "site": {"gpu_api": "cuda", "gpus_per_node": 1},
+        "budget": {"gpu_hours": 2.0, "cpu_hours": 12.0}, "stages": CHAIN,
+        "objectives": [{"name": "sc_rmsd", "direction": "minimize", "max": 3.0},
+                       {"name": "iptm", "direction": "maximize", "min": 0.55}]}))
+
+    env = dict(os.environ, IMPRESS_A_TRUST_DIR=str(tmp_path / "trust"),
+               IMPRESS_A_HEARTBEAT_S="0")
+    server = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "impress_a", "serve", str(spec_path), "--port", "0",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+    try:
+        url = None
+        for _ in range(200):                       # the URL is printed, not guessed
+            line = await asyncio.wait_for(server.stdout.readline(), timeout=30)
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            if "serving on" in text:
+                url = text.strip().split()[-1]
+                break
+        assert url, "the server must print the URL it bound, since the port is chosen for it"
+
+        control = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "impress_a", "control", "--connect", url,
+            "--campaign", "split-cli", "--model", "D",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+        out, _ = await asyncio.wait_for(control.communicate(), timeout=120)
+        assert control.returncode == 0, out.decode(errors="replace")[-2000:]
+
+        rest, _ = await asyncio.wait_for(server.communicate(), timeout=120)
+        served = rest.decode(errors="replace")
+        assert "stop" in served, served[-2000:]
+        assert server.returncode == 0, served[-2000:]
+    finally:
+        for proc in (server,):
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+
+async def test_model_c_is_refused_by_run_rather_than_silently_becoming_d(tmp_path, caplog):
+    """Backlog C6, closed by refusing rather than by detecting.
+
+    `impress-a run` attaches no control plane, so model C's `decide` blocked on an inbox
+    nothing fed, timed out every five seconds and ran its declared fallback - producing a
+    model-D campaign reported as model C. That is the single most dangerous failure mode in a
+    four-arm comparison, because a disguised arm is indistinguishable from a real one in every
+    figure derived from it.
+
+    The entry points that make C real exist now, so "no caller attached" is an operator error
+    with an answer rather than a mode to degrade into.
+    """
+    spec_path = tmp_path / "c.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "campaign_id": "c-refused", "goal": "stabilize", "backend": "concurrent",
+        "max_cycles": 1, "root": str(tmp_path), "stages": CHAIN,
+        "site": {"gpu_api": "cuda", "gpus_per_node": 1},
+        "budget": {"gpu_hours": 2.0, "cpu_hours": 12.0},
+        "objectives": [{"name": "iptm", "direction": "maximize", "min": 0.55}]}))
+
+    with caplog.at_level("ERROR"):
+        rc = await run_campaign(str(spec_path), model="C")
+    assert rc == 1, "a model-C `run` must fail, not fall back"
+    # And it must say what to do instead: an error that refuses without naming the remedy just
+    # moves the confusion.
+    assert "impress-a serve" in caplog.text and "impress-a control" in caplog.text, caplog.text
+    assert not (tmp_path / "c-refused-C").exists(), \
+        "no campaign directory: it refused before starting, rather than part way through"
+
+
+async def test_naming_c_as_either_half_is_refused_too():
+    """`--specifier C` is the same hazard wearing a different flag."""
+    assert await run_campaign("campaigns/mock-stabilize.yaml", specifier="C") == 1
+    assert await run_campaign("campaigns/mock-stabilize.yaml", planner="C") == 1

@@ -96,3 +96,47 @@ def test_the_declined_lint_rules_say_why():
     assert set(ignored) == {"UP007", "UP045", "N818"}, (
         f"the ignore list changed to {ignored}; add the reason beside it in pyproject.toml "
         f"and update this test, so a growing list stays a set of decisions")
+
+
+def test_no_campaign_spec_sets_a_key_the_loader_ignores():
+    """A key a spec file sets and the loader drops does nothing and says nothing.
+
+    This is a recurring shape here rather than a hypothetical. `sites/*.yaml` has carried a
+    `tool_delivery: {real|mock}` switch read by no code since it was written (backlog E1) - the
+    very switch that would have prevented a documented mock-chain-on-a-GPU run - and
+    `control_liveness_timeout_s: 120` sat in all three Delta specs doing nothing until
+    `cli.load_spec` was taught to read it.
+
+    Checks both directions of the gap: a key `CampaignSpec` has no field for, and a field the
+    loader never populates from YAML.
+    """
+    import dataclasses
+
+    import yaml
+
+    from impress_a.cli import load_spec
+    from impress_a.runtime.executor import CampaignSpec
+
+    fields = {f.name for f in dataclasses.fields(CampaignSpec)}
+    campaigns = sorted((REPO / "agent" / "campaigns").glob("*.yaml"))
+    assert campaigns, "no campaign specs found; this test would pass vacuously"
+
+    for path in campaigns:
+        doc = yaml.safe_load(path.read_text()) or {}
+        unknown = sorted(set(doc) - fields)
+        assert not unknown, (
+            f"{path.name} sets {unknown}, which `CampaignSpec` has no field for - so the "
+            f"value is read, parsed, and dropped")
+
+        # And every key it sets must survive the loader, not merely be a known field name.
+        spec = load_spec(str(path))
+        for key, value in doc.items():
+            if key in ("params", "objectives", "site", "budget", "backend_config"):
+                continue      # structured, and transformed on the way in
+            got = getattr(spec, key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                assert float(got) == float(value), (
+                    f"{path.name}: {key}={value} did not reach the spec (got {got!r})")
+            else:
+                assert got == value, (
+                    f"{path.name}: {key}={value!r} did not reach the spec (got {got!r})")

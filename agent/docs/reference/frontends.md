@@ -130,3 +130,37 @@ decision would be. Rejections come back through `on_rejected` with the gate and 
 Backends are selected **by name** from site configuration and resolved through
 `rhapsody.backends.get_backend()`, so no backend class is named outside `exec/backend.py`:
 `concurrent` for laptop and mock, `dragon` / `radical` / `dask` on HPC.
+
+
+## Running the two processes
+
+The interface frontend described above is reachable from a shell as of phase 7 of
+`plans/control-plane-refactor.md`. Until then it was reachable only from `tests/`, and this
+document described it as implemented anyway (backlog C5).
+
+```bash
+impress-a serve campaigns/<spec>.yaml            # execution: executor, Reviewer, Deployer,
+                                                 # Runner, the one asyncflow engine. No reasoner.
+# it prints: campaign <id> serving on http://127.0.0.1:<port>
+impress-a control --connect <url> --campaign <id> --model D
+```
+
+Three things worth knowing before using it.
+
+**Loopback is the security boundary.** The plane has no auth and no TLS, so both ends belong on
+the same compute node; `--host` exists for a deliberate choice rather than a casual one
+(backlog C7).
+
+**The execution side keeps the engine, and only the engine's loop matters.**
+`WorkflowEngine.__init__` captures the loop it is built on, and an engine built elsewhere
+dispatches nothing while looking healthy - two allocations were lost to that. The control
+process has its own loop and never touches an engine, which is why it is free to have one.
+
+**A lost control process drains and stops.** `control_liveness_timeout_s` on the campaign spec
+bounds the silence; on expiry the executor stops admitting, lets in-flight work finish and be
+absorbed, and stops with a reason naming the loss. Draining rather than aborting is deliberate:
+cancellation is advisory, so that work will finish whether or not anyone collects it.
+
+**`impress-a run --model C` is refused**, because `run` attaches no plane and model C means an
+external caller steers. It used to time out every five seconds and run its fallback, reporting
+a model-D campaign as model C (backlog C6).

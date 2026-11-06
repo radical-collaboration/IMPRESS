@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,6 +110,15 @@ class CampaignSpec:
     # works for one that has never seen Dragon is exactly the move this project's records
     # argue against.
     runner: str = "dispatcher"
+    # How long the execution process will run without a word from the control process before
+    # it drains and stops. 0 disables, which is right in-process - the roles are coroutines
+    # beside the pump and cannot go silent without the whole process going with them.
+    #
+    # Across a socket they can, and then the failure is a campaign that silently stops
+    # replanning while holding an allocation. Draining rather than aborting is deliberate:
+    # in-flight work runs to completion and is absorbed, because cancellation is advisory and
+    # throwing away results that are already paid for buys nothing.
+    control_liveness_timeout_s: float = 0.0
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -275,6 +285,9 @@ class CampaignExecutor:
         # a single draw sampled N times - evidence the interlock never actually gathered.
         self._untrusted_inflight: set[str] = set()
         self._last_front_ids: set[str] = set()
+        #: Monotonic time of the last call a control plane made. `None` until the campaign
+        #: starts, so a slow startup is never mistaken for a lost planner.
+        self._last_contact: float | None = None
         # Node ids in ABSORPTION order. `recent` used to mean "nodes stamped with the
         # previous cycle", which is only meaningful while a cycle absorbs exactly one
         # result. A cursor into this list says "what has landed since you last looked",
@@ -361,16 +374,35 @@ class CampaignExecutor:
         Phase 3 makes this a `CampaignSession` and `CampaignControlPlane` operation so it can
         cross a socket; today the manager hands it to the driver directly.
         """
+        self.touch()
         if isinstance(payload, Spec):
             return self.set_spec(payload)
         return self.apply_revision(payload)
 
     # -- observe -------------------------------------------------------------
+    def touch(self) -> None:
+        """Record that the control plane is still there.
+
+        Called by every operation a `CampaignSession` exposes. No heartbeat operation is added
+        for this: the Listener polls `observe()` on every cycle, so liveness is already
+        observable, and inventing an operation to carry it would put ADR 0007 in play for
+        something the existing traffic answers.
+        """
+        self._last_contact = time.monotonic()
+
+    def _control_lost_for(self) -> float | None:
+        """Seconds since the last contact, if the timeout is enabled and has expired."""
+        if not self.spec.control_liveness_timeout_s or self._last_contact is None:
+            return None
+        silent = time.monotonic() - self._last_contact
+        return silent if silent > self.spec.control_liveness_timeout_s else None
+
     def observe(self, last_rejection: ValidationFailure | None = None,
                 since: int | None = None) -> CampaignObservation:
         """A read-only snapshot. `since` is a watermark into absorption order; the
         default reports what the last consumer saw, so an observer on the control plane
         gets parity of evidence with the policy without disturbing its cursor."""
+        self.touch()
         live = self.tree.live()
         front = pareto_front(live, self.spec.objectives)
         allnodes = list(self.tree)
@@ -691,6 +723,7 @@ class CampaignExecutor:
         is a legitimate Stage with nothing to run, and composing an empty graph to reject it
         would turn housekeeping into a rejection.
         """
+        self.touch()
         if self._halt.is_set():
             raise CampaignStopped(self._stop_reason or "campaign has ended")
         await self._await_resume()
@@ -829,6 +862,7 @@ class CampaignExecutor:
 
     async def submit(self, intent: ExperimentIntent) -> str:
         """Admit and dispatch one experiment, without waiting for it."""
+        self.touch()
         if self._halt.is_set():
             raise CampaignStopped(self._stop_reason or "campaign has ended")
         await self._await_resume()
@@ -869,6 +903,7 @@ class CampaignExecutor:
         hang whenever termination is decided while a reasoner is waiting - which is the
         deadlock this two-coroutine split makes possible, and it is silent.
         """
+        self.touch()
         if (done := self._outcomes.get(run_id)) is not None:
             return done
         fut = self._waiters.get(run_id)
@@ -921,6 +956,7 @@ class CampaignExecutor:
 
     async def _await_resume(self) -> None:
         """Block while paused - but never past the end of the campaign."""
+        self.touch()
         if self._paused.is_set():
             return
         resumed = asyncio.ensure_future(self._paused.wait())
@@ -1194,13 +1230,36 @@ class CampaignExecutor:
         the science finishes, not the order it was asked for.
         """
         halt = asyncio.ensure_future(self._halt.wait())
+        poll = self.spec.control_liveness_timeout_s or 0.0
         try:
             while not self._halt.is_set():
+                if (silent := self._control_lost_for()) is not None:
+                    # Stop ADMITTING, then let the loop drain what is already running: the
+                    # results are paid for, cancellation is advisory, and throwing them away
+                    # buys nothing. The reason names the loss rather than saying "stopped",
+                    # because a campaign that quietly stopped replanning while holding an
+                    # allocation is the failure this exists to make loud.
+                    self._log("transitions", {"event": "control_lost",
+                                              "silent_s": round(silent, 1)})
+                    log.warning("control plane silent for %.1fs (limit %.1fs): draining "
+                                "%d in-flight run(s), then stopping",
+                                silent, self.spec.control_liveness_timeout_s,
+                                len(self._inflight))
+                    self.request_stop(
+                        f"control plane lost after {silent:.0f}s of silence")
+                    if not self._inflight:
+                        break
                 if not self._inflight:
                     wake = asyncio.ensure_future(self._activity.wait())
-                    await asyncio.wait({wake, halt},
-                                       return_when=asyncio.FIRST_COMPLETED)
+                    waits = {wake, halt}
+                    timer = (asyncio.ensure_future(asyncio.sleep(poll / 4))
+                             if poll else None)
+                    if timer is not None:
+                        waits.add(timer)
+                    await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
                     wake.cancel()
+                    if timer is not None:
+                        timer.cancel()
                     self._activity.clear()
                     continue
                 pending = {rec.handle.gather: rid

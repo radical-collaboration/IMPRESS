@@ -39,6 +39,13 @@ backend_startup_heartbeat_s: 30
 # Abandoning a stuck teardown is safe here: results are already durable in provenance and
 # the ledger by that point.
 backend_shutdown_timeout_s: 300
+# How long the execution process runs without a word from the control process before it drains
+# and stops. Only meaningful when the two are split (`impress-a serve` + `impress-a control`);
+# in one process the roles are coroutines beside the pump and cannot go silent without the
+# process going with them. 120s is generous for a model that is thinking and far below any
+# allocation, and the alternative is a campaign that quietly stops replanning while holding
+# four GPUs - which is the same shape of waste as the hung teardown above.
+control_liveness_timeout_s: 120
 max_cycles: 6
 stagnation_limit: 6
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}

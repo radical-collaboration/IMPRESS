@@ -52,7 +52,16 @@ ALLOWED = {
     "manager": frozenset({"runtime", "policy", "tools", "core"}),
     "control": frozenset({"manager", "runtime", "core"}),
     # cli/ and __main__ appeared in no layer of the doc's table at all.
-    "cli": frozenset({"manager", "policy", "compose", "tools", "core"}),
+    #
+    # `control` and `runtime` were added when `impress-a serve`/`control` landed: the CLI is
+    # the composition root, the one layer whose job is to know every other, which is why it
+    # already has the widest row. `serve` must build a control plane and an HTTP server;
+    # `control` must build a `RolesDriver`. Both edges were already transitively true through
+    # `manager` (which imports `runtime` directly), and neither touches the three rules this
+    # contract exists for: no policy reaches a tool adapter, no compose reaches exec, and core
+    # still imports nothing internal.
+    "cli": frozenset({"control", "manager", "runtime", "policy", "compose", "tools",
+                      "core"}),
     "__main__": frozenset({"cli"}),
 }
 

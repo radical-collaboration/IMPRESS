@@ -61,7 +61,7 @@ science imports into `run()` bodies, and a deferred `from ..exec import ...` ins
 be exactly as fatal as one at the top of the file.
 
 ```
-cli      → manager, policy, compose, tools, core
+cli      → control, manager, runtime, policy, compose, tools, core
 control  → manager, runtime, core
 policy   → core                           (NOT tools, NOT exec, NOT runtime)
 manager  → runtime, policy, tools, core   (a facade; the executor owns the work)
