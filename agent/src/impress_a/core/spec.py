@@ -96,9 +96,23 @@ class SatisfactionRule(BaseModel):
     port: ArtifactType | None = None
     n: int = 1
 
+    @property
+    def is_bounded(self) -> bool:
+        """Whether this rule expresses a condition at all.
+
+        `metric_in_range` with neither bound set expresses nothing, and must not be read as
+        "already satisfied". That distinction is load-bearing rather than pedantic: a campaign
+        objective with a direction and no bound - `total_score: minimize`, the common case - is
+        an optimisation target, never a finish line. `Objective.satisfied_by` answers True for
+        any non-None value when both bounds are None, which is correct for *ranking* (nothing
+        is pruned) and wrong for *satisfaction*, so the two readings part company here rather
+        than in a caller.
+        """
+        return self.min is not None or self.max is not None
+
     def as_objective(self) -> Objective | None:
-        """The ranking objective this rule is equivalent to, for `metric_in_range`."""
-        if self.kind != "metric_in_range" or self.metric is None:
+        """The ranking objective this rule is equivalent to, for a bounded `metric_in_range`."""
+        if self.kind != "metric_in_range" or self.metric is None or not self.is_bounded:
             return None
         # Direction is irrelevant to `satisfied_by`, which reads min/max only.
         return Objective(name=self.metric, direction="minimize", min=self.min, max=self.max)
@@ -107,10 +121,10 @@ class SatisfactionRule(BaseModel):
         """For the two value-shaped kinds. Artifact and count kinds need the registry."""
         if self.kind == "metric_present":
             return value is not None
-        obj = self.as_objective()
-        if obj is None:
+        if self.kind != "metric_in_range" or self.metric is None:
             raise ValueError(f"{self.kind!r} cannot be decided from a value alone")
-        return obj.satisfied_by(value)
+        obj = self.as_objective()
+        return obj.satisfied_by(value) if obj is not None else False
 
 
 class SpecObjective(BaseModel):

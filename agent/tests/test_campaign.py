@@ -12,17 +12,21 @@ from impress_a.compose.validate import SiteCaps
 from impress_a.control.plane import InProcessControlPlane
 from impress_a.core.artifacts import AUTHORITY_ASSAY, Property, PropertySource, SourceKind
 from impress_a.core.decision import ExperimentIntent
+from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
 from impress_a.core.session import CampaignStopped, SubmissionRejected
+from impress_a.core.spec import Spec
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.agentic import FourNodePolicy
 from impress_a.policy.explicit import ThresholdPolicy
 from impress_a.policy.external import ExternalPolicy
+from impress_a.policy.legacy import LegacyPlanner
 from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
+from impress_a.runtime.roles import _intent_for
 from impress_a.tools.registry import Registry
 
 ROOT = "/tmp/impress_a_tests"   # campaign root, and where direct engines put their sessions
@@ -905,3 +909,110 @@ async def test_a_policy_that_only_backtracks_is_stopped(reg):
     res = await CampaignManager(s, _Backtracker(always=True), reg).run()
     assert res.stop_reason == "policy backtracked twice without running anything between"
     assert res.runs == 1
+
+
+# ---------------------------------------------------------------------------
+# The role pipeline (phase 1 of plans/control-plane-refactor.md).
+#
+# The strangler's seam. Until a responsibility actually moves, the only thing worth asserting
+# about the Spec Loop + Planning Loop pipeline is that it changes nothing - and that is what
+# makes every later phase's failure attributable to that phase.
+# ---------------------------------------------------------------------------
+
+def _roles_shape(nodes):
+    """What a campaign FOUND, not the ids it minted. Mirrors tests/test_remote_session.py."""
+    return [(n.cycle, n.qc.verdict.value,
+             sorted((k, p.value) for k, p in n.properties.items())) for n in nodes]
+
+
+@pytest.mark.parametrize("make_policy, label", [
+    (ThresholdPolicy, "D"),
+    (FourNodePolicy, "A"),
+    (lambda: RuleCorrectionsPolicy(ThresholdPolicy(base_replicas=99), max_replicas=2), "guard"),
+    # The three members of the Decision union that the role interfaces deliberately cannot
+    # express, so each one exercises a different branch of the adapter's named overflow:
+    # NullPolicy stops on its first decision, and _Backtracker branches from an earlier node
+    # before every run after the first - which in the target design is a parent_node on a
+    # SpecObjective rather than a verb, and here must still reproduce exactly.
+    (NullPolicy, "null"),
+    (lambda: _Backtracker(always=True), "backtrack"),
+])
+async def test_roles_pipeline_reproduces_the_legacy_campaign(reg, tmp_path, make_policy, label):
+    """Same policy, both control paths, identical science.
+
+    **Each arm needs its own trust_root, and that is a finding rather than test hygiene.** The
+    trust ledger is site-scoped and spans campaigns by design, so with one ledger the first
+    arm's clean runs promote the pattern and the second arm runs *trusted* - its nodes come
+    back `pass` where the first arm's were `suspect`, with byte-identical metrics. Two
+    campaigns that differ only in which ran first is exactly the confound the four-arm
+    experiment gives each arm its own IMPRESS_A_TRUST_DIR to avoid, and this is the cheapest
+    place to see the mechanism.
+    """
+    out = {}
+    for control in ("legacy", "roles"):
+        s = spec(f"t-par-{label}-{control}", control=control,
+                 trust_root=str(tmp_path / f"trust-{control}"))
+        res = await CampaignManager(s, make_policy(), reg).run()
+        out[control] = (res.cycles, res.stop_reason, len(res.front),
+                        _roles_shape(res.tree.nodes.values()))
+
+    assert out["legacy"][1] == out["roles"][1], "the stop reason must be the same sentence"
+    assert out["legacy"][0] == out["roles"][0], "the same number of runs must be admitted"
+    assert out["legacy"][2] == out["roles"][2], "the front must be the same size"
+    assert out["legacy"][3] == out["roles"][3], "every node, verdict and metric must match"
+
+
+async def test_a_stage_round_trips_through_an_intent(reg):
+    """Scaffolding, pinned: phase 1 must not touch compose/ or exec/.
+
+    `LegacyPlanner` renders a decision as a Stage and the Deployer renders it back, so the
+    executor keeps receiving exactly the intent it always did. Everything `Composer.compose`
+    reads has to survive that round trip - the ordered tool list, the replica count, and the
+    per-tool params whose silent loss is backlog H3.
+    """
+    intent = ExperimentIntent(goal="stabilize", stages=CHAIN, replicas=3,
+                              params={"mock_generate": {"diffusion_steps": 170},
+                                      "mock_design": {"temperature": 0.35}})
+    planner = LegacyPlanner(ThresholdPolicy())
+    stage = planner._render(intent, Spec())
+    back = _intent_for(stage, Goal(text="stabilize"))
+
+    assert back.stages == intent.stages
+    assert back.replicas == intent.replicas
+    assert back.params == intent.params
+    assert len({t.lineage for t in stage.runs}) == 3
+    assert len(stage.runs) == 3 * len(CHAIN)
+
+
+async def test_the_listener_stops_the_campaign_when_every_objective_is_satisfied(reg, tmp_path):
+    """The Spec's own stop condition, which no legacy policy could express.
+
+    The bounded objectives here are all met by the first run, so the Spec completes and the
+    Listener asks to stop - with its own reason, not the policy's. `max_cycles` is high enough
+    that reaching it would prove nothing.
+    """
+    s = spec("t-spec-complete", control="roles", max_cycles=20,
+             trust_root=str(tmp_path / "trust"))
+    s.objectives = [Objective(name="iptm", direction=Direction.MAX, min=0.1),
+                    Objective(name="sc_rmsd", direction=Direction.MIN, max=99.0)]
+    res = await CampaignManager(s, ThresholdPolicy(max_cycles=20, target_front=99), reg).run()
+
+    assert res.stop_reason == "every spec objective satisfied"
+    assert res.cycles >= 1
+
+
+async def test_an_unbounded_objective_never_completes_the_spec(reg, tmp_path):
+    """`total_score: minimize` is an optimisation target, never a finish line.
+
+    `Objective.satisfied_by` answers True for any value when both bounds are None, which is
+    right for ranking - nothing is pruned - and would be wrong here: it would finish a campaign
+    the moment its first unbounded metric reported anything. This is the bug the parity probe
+    surfaced, and it is the reason `SatisfactionRule.is_bounded` exists.
+    """
+    s = spec("t-spec-unbounded", control="roles", max_cycles=2,
+             trust_root=str(tmp_path / "trust"))
+    s.objectives = [Objective(name="ddg", direction=Direction.MIN)]
+    res = await CampaignManager(s, ThresholdPolicy(max_cycles=2, target_front=99), reg).run()
+
+    assert res.stop_reason != "every spec objective satisfied"
+    assert "max_cycles" in res.stop_reason

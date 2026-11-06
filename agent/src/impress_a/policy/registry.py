@@ -94,6 +94,12 @@ class ReasonerModel:
     status: str
     cls: type
     build: Callable[[ReasonerOptions], Any]
+    #: The two halves. `None` means "derive them from `build`", which is what every model
+    #: does while the strangler is in place: `DecideAsRoles` presents a `ControlPolicy` as a
+    #: Specifier/Planner pair, so `--model X --control roles` runs the same decisions through
+    #: the role pipeline. Phase 9 fills these in per model, and the pair stops being derived.
+    specifier: Callable[[ReasonerOptions], Any] | None = None
+    planner: Callable[[ReasonerOptions], Any] | None = None
     #: Why the status is not `implemented`, or what is true of this model that a reader
     #: would otherwise have to learn from a backlog item. Printed by `impress-a models`.
     note: str = ""
@@ -198,6 +204,45 @@ def build(letter: str, options: ReasonerOptions | None = None) -> Any:
     if letter not in MODELS:
         raise KeyError(f"unknown control model {letter!r}; known: {sorted(MODELS)}")
     return MODELS[letter].build(options or ReasonerOptions())
+
+
+class RolePair:
+    """A Specifier half and a Planner half, which may come from different models.
+
+    `--model X` takes both halves from one row, which keeps the four-arm comparison
+    one-variable. `--specifier X --planner Y` takes one from each, which is what makes it
+    measurable whether specification or planning is where a model earns its cost. The second
+    form is reachable from the first day rather than retrofitted, because a pair that can only
+    ever come from one row is not two interfaces - it is one with a seam drawn on it.
+    """
+
+    def __init__(self, specifier: Any, planner: Any, label: str = "") -> None:
+        self.specifier = specifier
+        self.planner = planner
+        self.name = label or f"{getattr(specifier, 'name', '?')}+{getattr(planner, 'name', '?')}"
+
+
+def _half(letter: str, which: str, options: ReasonerOptions) -> Any:
+    """One half of one model, derived from `build` while the strangler is in place."""
+    if letter not in MODELS:
+        raise KeyError(f"unknown control model {letter!r}; known: {sorted(MODELS)}")
+    model = MODELS[letter]
+    explicit = model.specifier if which == "specifier" else model.planner
+    if explicit is not None:
+        return explicit(options)
+    from .legacy import DecideAsRoles
+    pair = DecideAsRoles(model.build(options))
+    return pair.specifier if which == "specifier" else pair.planner
+
+
+def build_roles(spec_letter: str, plan_letter: str | None = None,
+                options: ReasonerOptions | None = None) -> RolePair:
+    """Build a Specifier/Planner pair. One letter means both halves from that model."""
+    o = options or ReasonerOptions()
+    plan_letter = plan_letter or spec_letter
+    label = spec_letter if plan_letter == spec_letter else f"{spec_letter}/{plan_letter}"
+    return RolePair(_half(spec_letter, "specifier", o),
+                    _half(plan_letter, "planner", o), label=label)
 
 
 def table() -> list[tuple[str, ...]]:

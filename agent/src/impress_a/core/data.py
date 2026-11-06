@@ -142,6 +142,9 @@ class DataRegistry(BaseModel):
         if rule.kind == "metric_present":
             return len(self.metrics(rule.metric)) >= rule.n
         if rule.kind == "metric_in_range":
+            # An unbounded rule expresses no condition, so it is never satisfied - see
+            # `SatisfactionRule.is_bounded`. Reading "no constraint" as "already met" would
+            # finish a campaign the moment its first unbounded metric reported anything.
             obj = rule.as_objective()
             if obj is None:
                 return False

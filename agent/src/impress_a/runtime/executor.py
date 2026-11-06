@@ -40,6 +40,7 @@ from ..core.provenance import ProvenanceLog
 from ..core.qc import QCVerdict
 from ..core.results import RunOutcome, RunState, RunStatus
 from ..core.session import CampaignStopped, SubmissionRejected
+from ..core.spec import Spec, SpecRevision
 from ..core.tree import CampaignTree, DesignNode, NodeStatus
 from ..exec.dispatch import Dispatcher, ExecutionResults
 from ..exec.ledger import JobLedger
@@ -103,6 +104,12 @@ class CampaignSpec:
     # a policy asks for, so a policy never has to know a tool's parameter names.
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
     replicas: int = 0         # cap on lineages per experiment; 0 = policy decides
+    # Which control vocabulary drives this campaign. `legacy` is the single `decide(obs)`
+    # seam; `roles` is the Spec Loop + Planning Loop pipeline. Both run the same composition,
+    # validation, execution and state, which is what makes the two comparable - see
+    # `test_roles_pipeline_reproduces_the_legacy_campaign`. Phase 11 deletes `legacy` and this
+    # field with it.
+    control: str = "legacy"
 
 
 @dataclass
@@ -157,6 +164,12 @@ class CampaignExecutor:
         self.composer = Composer(self.reg)
         self.validator = Validator(self.reg, spec.site, self.budget)
         self.cycle = 0
+        # The APPLIED Spec. A Specifier authors revisions; this is the only writer, so `specs`
+        # provenance is executor-written - which is the structural reason an arm's own
+        # bookkeeping is never what it gets scored on. The Reviewer's coverage gate (phase 3)
+        # reads this replica rather than whatever a Planner asserts is open, because not
+        # trusting that assertion is the Reviewer's whole purpose.
+        self.spec_state: Spec = Spec(campaign_id=spec.campaign_id)
         # Labels issued vs experiments actually dispatched. A rejected submission still
         # burns a label - the retry is a different graph with a different draw, so it
         # must not reuse one - but it never ran and must not be counted as a run.
@@ -210,6 +223,44 @@ class CampaignExecutor:
         self.prov.append(kind, record)
         if self.prov_sink is not None:
             self.prov_sink(self.spec.campaign_id, kind, dict(record))
+
+    # -- the Spec ------------------------------------------------------------
+    # Both of these are synchronous and `await`-free, like every other mutating block here.
+    # The discipline is not enforced by the language: adding an `await` inside one would let an
+    # observation be taken half way through a revision, and a torn Spec is close to
+    # undiagnosable from provenance afterwards.
+    def set_spec(self, spec: Spec) -> int:
+        """Install the initial Spec. Returns the applied generation."""
+        spec.campaign_id = self.spec.campaign_id
+        self.spec_state = spec
+        self._log("specs", {"event": "initial", "generation": spec.generation,
+                            "aims": sorted(spec.aims),
+                            "objectives": {o.id: o.status.value
+                                           for o in spec.objectives.values()}})
+        return spec.generation
+
+    def apply_revision(self, rev: SpecRevision) -> int:
+        """Apply one revision to the Spec. Returns the applied generation."""
+        self.spec_state.apply(rev)
+        self._log("specs", {"event": "revision",
+                            "generation": self.spec_state.generation,
+                            "new_aims": [a.id for a in rev.new_aims],
+                            "new_objectives": [o.id for o in rev.new_objectives],
+                            "deleted": list(rev.deleted),
+                            "status_changes": {k: v.value
+                                               for k, v in rev.status_changes.items()},
+                            "rationale": rev.rationale})
+        return self.spec_state.generation
+
+    def publish_spec(self, payload: Spec | SpecRevision) -> int:
+        """One entry point for a Specifier, whichever side of a process boundary it is on.
+
+        Phase 3 makes this a `CampaignSession` and `CampaignControlPlane` operation so it can
+        cross a socket; today the manager hands it to the driver directly.
+        """
+        if isinstance(payload, Spec):
+            return self.set_spec(payload)
+        return self.apply_revision(payload)
 
     # -- observe -------------------------------------------------------------
     def observe(self, last_rejection: ValidationFailure | None = None,

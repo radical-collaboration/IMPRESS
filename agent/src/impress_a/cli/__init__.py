@@ -123,6 +123,29 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
     return pol
 
 
+def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
+                records: list[dict[str, Any]] | None = None,
+                specifier: str | None = None, planner: str | None = None):
+    """The same adapter, for the two halves.
+
+    The guard still wraps the *decision-making* half rather than the pair: while the strangler
+    is in place both halves come from one `ControlPolicy`, so wrapping it once is wrapping both.
+    Phase 9 replaces it with `StageGuard`, which can refuse a Stage directly - including a RUN
+    task that serves no objective, which no policy-level wrapper could see.
+    """
+    opts = reasoners.ReasonerOptions(stages=list(spec.stages) or None, records=records)
+    if specifier or planner:
+        return reasoners.build_roles(specifier or model, planner or model, opts)
+    pol = build_policy(model, spec, guard, records)
+    return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def _halves_of(policy: Any):
+    from ..policy.legacy import DecideAsRoles
+    pair = DecideAsRoles(policy)
+    return pair.specifier, pair.planner
+
+
 def print_models() -> int:
     """Print the control models, their shape and their real status.
 
@@ -242,7 +265,8 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
-                       replay_from: str | None = None) -> int:
+                       replay_from: str | None = None, control: str | None = None,
+                       specifier: str | None = None, planner: str | None = None) -> int:
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
@@ -257,10 +281,21 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
         actual = os.environ[var]
         log.info("thread cap %-22s %s%s", var, actual,
                  "" if actual == val else f"  (kept from the environment, not {val})")
-    spec.campaign_id = f"{spec.campaign_id}-{model}"
+    # Naming either half implies the role pipeline: a Specifier has nowhere to run in the
+    # single-`decide` path. Stated as an implication rather than an error so that
+    # `--specifier B --planner D` is one flag pair rather than three.
+    if specifier or planner:
+        control = "roles"
+    if control:
+        spec.control = control
+    label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
+    spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
         records = _replay_records(replay_from) if replay_from else None
-        policy = build_policy(model, spec, guard, records)
+        if spec.control == "roles":
+            policy = build_roles(model, spec, guard, records, specifier, planner)
+        else:
+            policy = build_policy(model, spec, guard, records)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -271,11 +306,19 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     # campaign that degraded to its fallback and one that deliberately ran the rehearsal
     # stand-in both report zero LLM calls; on the sibling example's job 23219379 that
     # ambiguity let 144 degraded turns read as a frontier-model result for a full day.
-    _m = reasoners.MODELS[model]
-    log.info("control model %s (%s): %s, %s llm shape, status=%s",
-             _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
-    if _m.note:
-        log.info("control model %s caveat: %s", _m.letter, _m.note)
+    # Which reasoner actually ran, and under which control vocabulary. Both halves are named
+    # even when they come from one model, because "model B" and "B's specifier with D's
+    # planner" produce different campaigns and a log that cannot tell them apart is how a
+    # degraded arm gets read as a frontier-model result.
+    for letter in dict.fromkeys([specifier or model, planner or model]):
+        _m = reasoners.MODELS[letter]
+        log.info("control model %s (%s): %s, %s llm shape, status=%s",
+                 _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
+        if _m.note:
+            log.info("control model %s caveat: %s", _m.letter, _m.note)
+    log.info("control vocabulary: %s%s", spec.control,
+             f" (specifier={specifier or model}, planner={planner or model})"
+             if spec.control == "roles" else "")
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
@@ -284,7 +327,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     if heartbeat_s is None:
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
     log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",
-             spec.campaign_id, model, spec.backend, mgr.root,
+             spec.campaign_id, label, spec.backend, mgr.root,
              ",".join(spec.stages) or "<policy default>", spec.replicas)
     # Absolute, and with a count. Trust accumulated inside each job's working directory for
     # three allocations without anyone noticing, because nothing ever named the file - a
@@ -511,6 +554,17 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run", help="run a campaign")
     r.add_argument("spec")
     r.add_argument("--model", default="D", choices=sorted(POLICIES))
+    # The two halves. `--model X` takes both from one row, which keeps a four-arm comparison
+    # one-variable; naming them separately takes one from each, which is what makes it
+    # measurable whether specification or planning is where a model earns its cost. Either
+    # form implies `--control roles`, because a Specifier has nowhere to run in the legacy
+    # single-`decide` path.
+    r.add_argument("--specifier", default=None, choices=sorted(POLICIES),
+                   help="Specifier half (implies --control roles)")
+    r.add_argument("--planner", default=None, choices=sorted(POLICIES),
+                   help="Planner half (implies --control roles)")
+    r.add_argument("--control", default=None, choices=("legacy", "roles"),
+                   help="control vocabulary (default: the campaign spec's, which is legacy)")
     r.add_argument("--no-guard", action="store_true")
     r.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS",
                    help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
@@ -527,7 +581,9 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
-                                        a.heartbeat, a.replay_from))
+                                        a.heartbeat, a.replay_from,
+                                        control=a.control, specifier=a.specifier,
+                                        planner=a.planner))
     if a.cmd == "models":
         return print_models()
     if a.cmd == "preflight":
