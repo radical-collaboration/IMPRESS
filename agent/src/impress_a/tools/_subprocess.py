@@ -97,17 +97,35 @@ async def run_cmd(cmd: list[str], cwd=None, env=None,
 
 
 def first_dep_output(inputs: dict, port: str):
-    """Task requests carry deps positionally (dep0, dep1, ...), not by port name -
-    dispatch.py wires edges by TYPE at compose time, not by name at run time. Every real
-    agent here has exactly one upstream dep, so scan for the first dict that has `port`
-    under its `outputs`."""
-    for v in inputs.values():
-        if isinstance(v, dict) and port in (v.get("outputs") or {}):
-            produced = v["outputs"][port]
-            # Upstream now hands over a typed handle rather than a bare string; what an
-            # adapter wants is the thing to open.
-            return getattr(produced, "located", produced)
-    return None
+    """Find an upstream output by the port name it was produced under. **Deprecating.**
+
+    This scans, and scanning is why a node with two typed inputs mis-wired silently: the
+    dispatcher used to key inputs `dep0..depN` positionally, so an adapter had no way to ask
+    which dependency it was handed and took the first whose `outputs` happened to contain the
+    name it wanted. With one upstream dep that is always right; with two it is a coin toss
+    that type-checks at composition.
+
+    `TaskRequest.input_ref(port)` resolves by the adapter's own DECLARED input port instead,
+    using the wiring the composer computed and gate 1 type-checked. The five real adapters
+    migrate to it in phase 9 and this goes with `ExperimentIntent` in phase 11.
+
+    Until then it **raises rather than guesses** when more than one dependency could satisfy
+    the request. A wrong artifact silently accepted is the `*.cif.gz` trajectory bug in
+    another form - plausible output, wrong provenance, discovered much later.
+    """
+    hits = [v for v in inputs.values()
+            if isinstance(v, dict) and port in (v.get("outputs") or {})]
+    if len(hits) > 1:
+        raise ValueError(
+            f"{len(hits)} dependencies could supply {port!r}; this helper cannot tell which "
+            f"was wired. Use `TaskRequest.input_ref({port!r})`, which resolves by declared "
+            f"input port rather than by scanning.")
+    if not hits:
+        return None
+    produced = hits[0]["outputs"][port]
+    # Upstream hands over a typed handle rather than a bare string; what an adapter wants is
+    # the thing to open.
+    return getattr(produced, "located", produced)
 
 
 def workdir_for(req: Any, prefix: str) -> Path:

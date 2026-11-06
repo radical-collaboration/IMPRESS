@@ -24,12 +24,36 @@ from .spec import ToolSpec
 class TaskRequest:
     tool: str
     params: dict[str, Any] = field(default_factory=dict)
+    #: Upstream payloads, keyed by this tool's own declared input PORT where the composer
+    #: wired one, and by `dep{i}` for an ordering-only edge with no typed port behind it.
     inputs: dict[str, Any] = field(default_factory=dict)
+    #: port -> the UPSTREAM output port it was wired to. The composer computed this and the
+    #: validator type-checked it; without it an adapter has to guess which of a dep's outputs
+    #: it was handed, which is what the scanning helper did.
+    input_ports: dict[str, str] = field(default_factory=dict)
     node_id: str | None = None
     seed: int | None = None
     #: Where this task may write. Defaults to the process CWD - see
     #: `_subprocess.workdir_for`, which is what every real adapter uses.
     workdir: str | None = None
+
+    def input_ref(self, port: str) -> Any:
+        """The artifact wired to one of this tool's declared input ports.
+
+        Resolves BY PORT rather than by scanning, so a node with two typed inputs gets the
+        right artifact on each. Returns `None` when nothing was wired, which a required port
+        should never see: gate 1 refuses a graph whose required input has no producer.
+        """
+        payload = self.inputs.get(port)
+        if not isinstance(payload, dict):
+            return payload
+        outputs = payload.get("outputs") or {}
+        out_port = self.input_ports.get(port)
+        if out_port and out_port in outputs:
+            return outputs[out_port]
+        # No recorded upstream port. A single-output producer is unambiguous; more than one
+        # is a composer bug rather than something to guess at.
+        return next(iter(outputs.values())) if len(outputs) == 1 else None
 
 
 @dataclass

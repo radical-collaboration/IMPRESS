@@ -143,8 +143,23 @@ class Dispatcher:
         self.workdir = workdir
 
     def _make_task(self, node_id: str, tool_id: str, params: dict[str, Any],
-                   invocation: str = "", seed: int | None = None):
-        """ONE generic factory for every node in every graph."""
+                   invocation: str = "", seed: int | None = None,
+                   dep_order: tuple[str, ...] = (),
+                   wiring: tuple[tuple[str, str, str], ...] = ()):
+        """ONE generic factory for every node in every graph.
+
+        `wiring` is the node's typed `inputs` map, flattened to
+        `(port, dep_id, out_port)` triples - the composer computed it and the validator
+        type-checked it, and until now the dispatcher threw it away: inputs were keyed
+        `dep0..depN` positionally, and every real adapter recovered its artifact by SCANNING
+        the payloads for one whose `outputs` happened to contain the port it wanted.
+
+        That works only while every node has exactly one upstream dependency. A node with two
+        typed inputs type-checks at composition and mis-wires at runtime, silently, because
+        the scan returns whichever dep is first. An Aim hierarchy with real dependencies hits
+        that on its first branch - which is why this is fixed before the Runner, and before
+        anything composes a branching Stage.
+        """
         reg, spec = self.reg, self.reg.get(tool_id)
         agent_cls = reg.agent_for(tool_id)
         # Bind to a local: the closure is pickled to the process pool, and reaching
@@ -153,9 +168,21 @@ class Dispatcher:
 
         async def _run(*deps: Any) -> dict[str, Any]:
             agent = agent_cls(spec)
+            by_dep = dict(zip(dep_order, deps, strict=False))
+            # Keyed by PORT where the composer named one. The values are still the dep
+            # payloads, so `_subprocess.first_dep_output` keeps working for adapters that
+            # have not migrated - the keys changed, not the shape.
+            inputs: dict[str, Any] = {port: by_dep[dep_id]
+                                      for port, dep_id, _ in wiring if dep_id in by_dep}
+            wired = {dep_id for _, dep_id, _ in wiring}
+            for i, (dep_id, payload) in enumerate(zip(dep_order, deps, strict=False)):
+                if dep_id not in wired:
+                    # An ordering-only dependency: a real edge with no typed port behind it.
+                    inputs[f"dep{i}"] = payload
             req = TaskRequest(tool=tool_id, params=params,
                               node_id=invocation, seed=seed, workdir=workdir,
-                              inputs={f"dep{i}": d for i, d in enumerate(deps)})
+                              inputs=inputs,
+                              input_ports={port: out for port, _, out in wiring})
             res = await agent(req)
             return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
                     "qc": res.qc.model_dump(), "cost": res.cost}
@@ -176,8 +203,12 @@ class Dispatcher:
         way to answer "what belongs to run R" - which cancellation and draining need.
         """
         invocation = run_id or g.id
-        tasks = {tid: self._make_task(tid, n.tool, n.params,
-                                      f"{invocation}:{tid}", n.seed)
+        tasks = {tid: self._make_task(
+                     tid, n.tool, n.params, f"{invocation}:{tid}", n.seed,
+                     dep_order=tuple(n.deps),
+                     wiring=tuple((port, *ref.split(".", 1)) if "." in ref
+                                  else (port, ref, "")
+                                  for port, ref in n.inputs.items()))
                  for tid, n in g.nodes.items()}
         futures: dict[str, Any] = {}
         for tid in g.topo_order():                       # edges via unawaited futures

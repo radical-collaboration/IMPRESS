@@ -269,6 +269,23 @@ class CampaignExecutor:
         if self.prov_sink is not None:
             self.prov_sink(self.spec.campaign_id, kind, dict(record))
 
+    def _orphan_tasks(self) -> list[str]:
+        """Non-terminal tasks whose every objective is now DELETED.
+
+        *Every*, not any - which is why `TaskMapping.objectives` is a list. A task serving one
+        live objective among three dead ones is still wanted, and with one objective per task
+        the question could not be asked at all.
+
+        Reported rather than acted on: cancelling is the Planner's decision, expressed as
+        `Stage.cancels`, and the executor's job is to make the fact visible. That keeps the
+        decision with the role the architecture gives it while the data access stays with the
+        only component that can see both the registry and the applied Spec.
+        """
+        if not self.spec_state.objectives:
+            return []
+        return sorted(r.task_id for r in self.tasks.open_tasks()
+                      if r.orphaned_by(self.spec_state))
+
     # -- the Spec ------------------------------------------------------------
     # Both of these are synchronous and `await`-free, like every other mutating block here.
     # The discipline is not enforced by the language: adding an `await` inside one would let an
@@ -338,6 +355,7 @@ class CampaignExecutor:
             # this one is derived from the other.
             budget=self.budget, available_tools=self._toolkit.ids,
             toolkit=self._toolkit, spec=self.spec_state,
+            orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)
 
     # -- update --------------------------------------------------------------
