@@ -229,6 +229,15 @@ class ControlPlaneServer:
             return 200, await p.ingest_measurement(
                 cid, body["node_id"], Property(**body["property"]))
 
+        if head == "stages":
+            # 202 with a run id, or 409 with the gate that refused it - the same contract as
+            # `runs`, because admission is synchronous on both and for the same reason: the
+            # dry-run instantiates task agents, so it happens where the toolkit is installed.
+            out = await p.submit_stage(cid, req.json())
+            return (202, out) if out.get("accepted") else (409, out)
+        if head == "spec":
+            return 200, await p.publish_spec(cid, req.json())
+
         if head == "runs":
             if len(rest) == 1:
                 if req.method == "POST":
@@ -352,6 +361,16 @@ class ControlPlaneClient:
                   "property": prop.model_dump(mode="json")})).json()
 
     # -- runs ---------------------------------------------------------------
+    async def submit_stage(self, campaign_id: str,
+                           stage: dict[str, Any]) -> dict[str, Any]:
+        return (await self._c.post(f"/campaigns/{campaign_id}/stages",
+                                   json=stage)).json()
+
+    async def publish_spec(self, campaign_id: str,
+                           payload: dict[str, Any]) -> dict[str, Any]:
+        return (await self._c.post(f"/campaigns/{campaign_id}/spec",
+                                   json=payload)).json()
+
     async def submit_run(self, campaign_id: str,
                          intent: dict[str, Any]) -> dict[str, Any]:
         return (await self._c.post(f"/campaigns/{campaign_id}/runs",

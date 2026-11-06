@@ -16,7 +16,7 @@ from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
 from impress_a.core.session import CampaignStopped, SubmissionRejected
-from impress_a.core.spec import Spec
+from impress_a.core.spec import Spec, Stage, TaskState
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.manager import CampaignManager, CampaignSpec
@@ -1113,3 +1113,74 @@ async def test_available_tools_is_narrowed_to_the_campaigns_stages(reg, tmp_path
     assert obs.toolkit is not None and obs.toolkit.ids == obs.available_tools
     assert "mock_noodle" not in obs.available_tools, \
         "a tool the campaign did not enable must not be offered to a reasoner"
+
+
+async def test_the_stage_path_refuses_a_chain_that_cannot_produce_an_objective(reg, tmp_path):
+    """Backlog A8, as a refusal on the new path.
+
+    The legacy `submit` still warns, deliberately: that keeps the old path's behaviour
+    unchanged - including the truncated-chain characterization test, which runs a sub-chain on
+    purpose - and phase 11 deletes the warning with the path. So the two differ here, and that
+    is the point of a strangler rather than an accident.
+    """
+    s = spec("t-a8-gate", control="roles", max_cycles=3,
+             trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(stages=["mock_generate", "mock_design"]), reg)
+    res = await mgr.run()
+
+    assert list(res.tree.nodes) == [], \
+        "nothing should have been admitted, so nothing was absorbed"
+    rejected = [r for r in mgr.prov.read("stages") if r.get("event") == "rejected"]
+    assert rejected, "the refusal must be on the record, not only in the return value"
+    assert any("reports" in r["rejected"]["reason"] for r in rejected), \
+        f"the reason must name the unproducible metric: {[r['rejected'] for r in rejected]}"
+
+
+async def test_a_stage_writes_one_durable_task_record_per_deployed_task(reg, tmp_path):
+    """Task-keyed and campaign-global, because nothing durable was before this.
+
+    The job ledger folds on `job_id`, per-task data existed only nested inside a RunOutcome,
+    and a task id was unique only within one TaskGraph - so to find one task you had to know
+    its run and scan a list. asyncflow cannot help: it tags tasks with `workflow_id` and
+    exposes no lookup by it, which is why the caller's own table is the only index that can
+    exist.
+    """
+    s = spec("t-taskreg", control="roles", max_cycles=2,
+             trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    snap = mgr.executor.tasks.snapshot()
+    assert snap, "the registry must be written, not merely available"
+    assert all(r.task_id.startswith(f"{s.campaign_id}/") for r in snap.values()), \
+        "a task id unique only inside one graph is what made DEFER and CANCEL unexpressible"
+    assert len({r.task_id for r in snap.values()}) == len(snap), "no collisions across runs"
+    assert {r.state for r in snap.values()} == {TaskState.DONE}, \
+        "states must leave DEPLOYED, or the registry answers only `what was deployed`"
+    assert mgr.executor.tasks.open_tasks() == [], \
+        "and nothing is left open, which is the question a restart asks"
+    assert all(r.objectives for r in snap.values()), \
+        "every task records what it was for - that is what makes an orphan decidable"
+
+
+async def test_a_cancel_only_stage_is_not_an_error_but_runs_nothing(reg, tmp_path):
+    """Housekeeping is a legitimate Stage with nothing to run.
+
+    Composing an empty graph to reject it would turn cancelling orphaned work into a
+    rejection, and the Planner would have to avoid asking.
+    """
+    s = spec("t-cancel-only", control="roles", trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    await ex.start()
+    try:
+        with pytest.raises(SubmissionRejected) as caught:
+            await ex.submit_stage(Stage(cancels=["nothing-here"]))
+        assert caught.value.failure.gate == "coverage"
+        assert caught.value.failure.transient is True, \
+            "nothing is wrong with the campaign; this Stage simply had no work"
+        assert ex.dispatched == 0
+    finally:
+        await ex.shutdown()

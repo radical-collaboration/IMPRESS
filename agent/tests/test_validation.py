@@ -9,6 +9,16 @@ from impress_a.compose.interlock import Scrutiny, TrustLedger
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger
 from impress_a.core.decision import ExperimentIntent
+from impress_a.core.spec import (
+    Aim,
+    Deferral,
+    Spec,
+    SpecObjective,
+    SpecRevision,
+    Stage,
+    TaskMapping,
+)
+from impress_a.runtime.reviewer import StageReviewer
 from impress_a.tools.registry import Registry
 
 CHAIN = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
@@ -564,3 +574,123 @@ def test_asserting_at_one_width_does_not_trust_another(reg):
     assert led.is_trusted(narrow.pattern_signature())
     assert not led.is_trusted(wide.pattern_signature()), \
         "asserting at width 1 must not trust width 4"
+
+
+# ---------------------------------------------------------------------------
+# The Reviewer (phase 3 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def _spec_with(*objectives):
+    aim = Aim(statement="test aim")
+    objs = [SpecObjective(aim=aim.id, statement=s, targets=[m], **kw)
+            for s, m, kw in objectives]
+    spec = Spec()
+    spec.apply(SpecRevision(new_aims=[aim], new_objectives=objs))
+    return spec, objs
+
+
+def _reviewer(reg):
+    budget = BudgetLedger(limits={"gpu_hours": 10.0, "cpu_hours": 10.0})
+    return StageReviewer(Validator(reg, SiteCaps(gpu_api="cuda", gpus_per_node=1), budget),
+                         budget)
+
+
+def _stage(objective_ids, tools=("mock_generate", "mock_design"), **kw):
+    return Stage(tasks=[TaskMapping(task_id=f"r0_s{i}_{t}", tool=t, lineage=0,
+                                    objectives=list(objective_ids))
+                        for i, t in enumerate(tools)], **kw)
+
+
+async def test_the_reviewer_refuses_a_stage_that_leaves_a_ready_objective_unanswered(reg):
+    """Backlog A8's shape: a gate, not a `log.warning`.
+
+    On job 22675512 a budget correction truncated `boltz_predict` off the chain, taking the
+    only producer of two of four objectives with it. Nothing refused it, the run was
+    unwinnable from the moment it was admitted, and the admitted graph recorded
+    `rejected: null`. A warning in a log nobody reads during an allocation is not a gate.
+    """
+    spec, objs = _spec_with(("make a backbone", "ss_fraction", {}),
+                            ("fold it", "iptm", {}))
+    stage = _stage([objs[0].id])        # answers the first, ignores the second
+
+    failure = _reviewer(reg).coverage(stage, spec)
+    assert failure is not None and failure.gate == "coverage"
+    assert objs[1].id in failure.detail["missing"]
+    assert "neither planned nor deferred" in failure.reason
+
+
+async def test_the_reviewer_accepts_a_deferral_in_place_of_a_task(reg):
+    """A Deferral is an answer. Demanding a Task for blocked work would force the invention
+    this gate exists to prevent."""
+    spec, objs = _spec_with(("make a backbone", "ss_fraction", {}),
+                            ("fold it", "iptm", {}))
+    stage = _stage([objs[0].id])
+    stage.deferrals = [Deferral(objective=objs[1].id, reason="waits on the backbone",
+                                waiting_on=[objs[0].id])]
+
+    assert _reviewer(reg).coverage(stage, spec) is None
+
+
+async def test_the_reviewer_does_not_demand_a_task_for_a_blocked_objective(reg):
+    """`ready()`, not `open_objectives()`: an objective whose dependency is unmet cannot be
+    planned, so requiring it would make every Stage impossible until the last one."""
+    spec, objs = _spec_with(("first", "ss_fraction", {}), ("second", "iptm", {}))
+    spec.objectives[objs[1].id].depends_on = [objs[0].id]
+    stage = _stage([objs[0].id])
+
+    assert _reviewer(reg).coverage(stage, spec) is None, \
+        "the second objective is blocked, so it is not the Planner's to answer yet"
+
+
+async def test_the_reviewer_refuses_a_task_that_serves_no_live_objective(reg):
+    """A task working only for DELETED objectives belongs in `cancels`, not in `tasks`.
+
+    This is the other half of what makes cancellation decidable: `objectives` is a list, so a
+    task serving one live objective and three dead ones is still wanted.
+    """
+    spec, objs = _spec_with(("one", "ss_fraction", {}), ("two", "iptm", {}))
+    stage = _stage([objs[0].id])
+    stage.deferrals = [Deferral(objective=objs[1].id)]
+    rev = _reviewer(reg)
+    assert rev.coverage(stage, spec) is None
+
+    spec.apply(SpecRevision(deleted=[objs[0].id]))
+    failure = rev.coverage(stage, spec)
+    assert failure is not None and "only deleted objectives" in failure.reason
+
+    # But a task with one live objective among dead ones is still legitimate.
+    stage.tasks[0].objectives = [objs[0].id, objs[1].id]
+    stage.tasks[1].objectives = [objs[0].id, objs[1].id]
+    stage.deferrals = []
+    assert rev.coverage(stage, spec) is None
+
+
+async def test_the_reviewer_refuses_an_objective_that_is_not_in_the_applied_spec(reg):
+    """A Planner cannot widen its own coverage by naming objectives it imagined.
+
+    Not trusting that claim is the Reviewer's entire purpose, and it is why the Spec has one
+    writer on the execution side: in phase 7 a remote Planner must not be able to smuggle a
+    Spec revision in with a Stage.
+    """
+    spec, objs = _spec_with(("one", "ss_fraction", {}))
+    stage = _stage([objs[0].id, "o-invented"])
+
+    failure = _reviewer(reg).coverage(stage, spec)
+    assert failure is not None and failure.detail["unknown"] == ["o-invented"]
+
+
+async def test_the_reviewer_marks_a_budget_refusal_transient(reg):
+    """Contention is a property of the moment, not of the graph.
+
+    Without that distinction a policy answers contention by mutilating its intent - dropping
+    replicas, truncating stages - in response to what OTHER runs are consuming, which reads as
+    the policy quietly degrading.
+    """
+    budget = BudgetLedger(limits={"gpu_hours": 0.001})
+    rev = StageReviewer(
+        Validator(reg, SiteCaps(gpu_api="cuda", gpus_per_node=1), budget), budget)
+    graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["mock_generate"], replicas=1))
+
+    failure = rev.affordable(graph)
+    assert failure is not None and failure.gate == "budget" and failure.transient is True

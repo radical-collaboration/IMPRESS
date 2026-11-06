@@ -47,11 +47,12 @@ log = logging.getLogger(__name__)
 
 
 def _intent_for(stage: Stage, goal: Goal) -> ExperimentIntent:
-    """Stage -> the intent the executor accepts today. Scaffolding; phase 3 removes it.
+    """Stage -> an equivalent intent. No longer on the submit path; kept for one test.
 
-    Lossless for everything `Composer.compose` reads: the ordered tool list comes from lineage
-    0, the replica count from the number of distinct lineages, and params are merged per tool.
-    `tests/test_campaign.py::test_a_stage_round_trips_through_an_intent` pins that.
+    `session.submit_stage` is the submit path now, so the executor composes the Stage directly
+    and the round trip this performed is gone. It survives only as the fixture for
+    `test_a_stage_round_trips_through_an_intent`, which is worth keeping as the record that
+    the two paths describe the same graph - phase 11 deletes it with `ExperimentIntent`.
     """
     runs = stage.runs
     tools = [t.tool for t in runs if t.lineage == 0]
@@ -162,9 +163,14 @@ class RolesDriver:
         mutates campaign state, which is what keeps the single-writer discipline intact across
         a boundary that becomes a process boundary in phase 7.
         """
-        if self.publish is None:
-            return
-        self.publish(self.spec if rev is None else rev)
+        payload = self.spec if rev is None else rev
+        # `publish_spec` is a core-protocol operation as of phase 3, so it crosses a socket
+        # with everything else and the injected fallback is only for a session that predates
+        # it. Phase 7 drops the fallback.
+        if hasattr(session, "publish_spec"):
+            await session.publish_spec(payload)
+        elif self.publish is not None:
+            self.publish(payload)
 
     # -- Planner overflow (scaffolding) --------------------------------------
     async def _handle_overflow(self, session: CampaignSession, branched: bool) -> str | None:
@@ -204,7 +210,7 @@ class RolesDriver:
         """
         for _ in range(self.max_attempts):
             try:
-                run_id = await session.submit(_intent_for(stage, self.goal))
+                run_id = await session.submit_stage(stage)
             except SubmissionRejected as rejected:
                 nxt = await self.planner.replan(stage, rejected.failure, self.spec, ctx)
                 if nxt is None:

@@ -43,6 +43,7 @@ from typing import Any
 from ..core.decision import CampaignObservation, ExperimentIntent, ValidationFailure
 from ..core.results import RunOutcome, RunStatus
 from ..core.session import CampaignStopped, SubmissionRejected
+from ..core.spec import Spec, SpecRevision, Stage
 
 
 class RemoteSession:
@@ -74,6 +75,23 @@ class RemoteSession:
         return await self._client.observe(self._cid, since)
 
     # -- submit ---------------------------------------------------------------
+    async def submit_stage(self, stage: Stage) -> str:
+        """Synchronous admission over the wire, and no less synchronous for it.
+
+        The answer is the call's own result rather than an event, because a rejection severed
+        from the request that caused it leaves nothing to bound retries against.
+        """
+        out = await self._client.submit_stage(self._cid, stage.model_dump(mode="json"))
+        if not out.get("accepted"):
+            if (failure := out.get("failure")) is not None:
+                raise SubmissionRejected(ValidationFailure(**failure))
+            raise CampaignStopped(out.get("reason", "campaign has ended"))
+        return out["run_id"]
+
+    async def publish_spec(self, payload: Spec | SpecRevision) -> int:
+        out = await self._client.publish_spec(self._cid, payload.model_dump(mode="json"))
+        return int(out["generation"])
+
     async def submit(self, intent: ExperimentIntent) -> str:
         """Admission stays SYNCHRONOUS across the wire.
 

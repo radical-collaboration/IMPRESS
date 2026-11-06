@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 
 from ..core.decision import ExperimentIntent
+from ..core.spec import Stage
 from ..core.types import Pattern
 from ..tools.registry import Registry
 from .graph import TaskGraph, TaskNode
@@ -66,3 +67,75 @@ class Composer:
                                seed=_replica_seed(run_label or g.id, r)))
                 prev = tid
         return g
+
+    def compose_stage(self, stage: Stage, run_label: str = "") -> TaskGraph:
+        """Build the DAG for a Stage's Objective:Task mappings.
+
+        Where `compose` derives the shape from an ordered tool list and a replica count, this
+        is handed the mappings directly - so a Planner can express work `compose` cannot: two
+        independent Aims in one Stage, a chain that branches, or a task serving several
+        objectives.
+
+        Three things it must preserve, because the rest of the system is built on them:
+
+        * **Shape only, in the signature.** Stage id, generation, attempt, rationale and
+          deferrals are not graph shape and never reach `pattern_signature()`. Every trust
+          record a site has earned stays valid; backlog A10 is the standing proof of what
+          leaking something non-structural into that hash costs.
+        * **Lineages stay independent.** A replica is a whole chain, not a fan-out that
+          funnels back - and its seed comes from `_replica_seed`, unchanged, so a lineage that
+          declares no seed still gets a distinct draw.
+        * **P6 is inlined.** A scheduled P6 node is a composer bug (gate 4), so the mappings
+          are filtered here exactly as `compose` filters the stage list.
+
+        CANCEL mappings are not composed: a cancel is an instruction about work already
+        deployed, not work to do.
+        """
+        g = TaskGraph(intent_goal=stage.rationale)
+        runs = [m for m in stage.runs
+                if self.reg.get(m.tool).pattern is not Pattern.P6]
+        by_id = {m.task_id: m for m in runs}
+        for mapping in runs:
+            spec = self.reg.get(mapping.tool)
+            deps: list[str] = []
+            inputs: dict[str, str] = {}
+            for port, ref in mapping.inputs.items():
+                dep_id = ref.split(".", 1)[0]
+                if dep_id in by_id:
+                    deps.append(dep_id)
+                    inputs[port] = ref
+            # A mapping that named no inputs but follows another task in its own lineage is
+            # the common linear case; wire it the way `compose` does, by type.
+            if not deps:
+                prior = [m for m in runs if m.lineage == mapping.lineage
+                         and m.task_id != mapping.task_id
+                         and runs.index(m) < runs.index(mapping)]
+                if prior:
+                    prev = prior[-1]
+                    src = self.reg.get(prev.tool)
+                    for port, ps in spec.inputs.items():
+                        match = next((op for op, os_ in src.outputs.items()
+                                      if os_.type.unifies_with(ps.type)), None)
+                        if match:
+                            inputs[port] = f"{prev.task_id}.{match}"
+                    if inputs:
+                        deps = [prev.task_id]
+            g.add(TaskNode(id=mapping.task_id, tool=mapping.tool,
+                           params=dict(mapping.params), deps=deps, inputs=inputs,
+                           node_id=self._parent_of(mapping, stage),
+                           lineage=mapping.lineage,
+                           seed=mapping.seed
+                           if mapping.seed is not None
+                           else _replica_seed(run_label or g.id, mapping.lineage)))
+        return g
+
+    @staticmethod
+    def _parent_of(mapping, stage: Stage) -> str | None:
+        """The design node this task refines, if its Stage says so.
+
+        Carried from the Stage rather than from the mapping so a Planner does not have to
+        repeat it per task. Phase 8 is what makes it executable - today it labels lineage, and
+        feeding a parent's artifacts into a child chain is that phase's work.
+        """
+        del mapping
+        return getattr(stage, "parent_node", None)

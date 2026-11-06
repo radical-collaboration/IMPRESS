@@ -25,6 +25,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from .decision import CampaignObservation, ExperimentIntent, ValidationFailure
 from .results import RunOutcome, RunStatus
+from .spec import Spec, SpecRevision, Stage
 
 RunId = str
 
@@ -62,6 +63,26 @@ class CampaignSession(Protocol):
 
     async def submit(self, intent: ExperimentIntent) -> RunId:
         """Admit and dispatch one experiment. Raises `SubmissionRejected`."""
+        ...
+
+    async def submit_stage(self, stage: Stage) -> RunId:
+        """Admit and dispatch one Stage. Raises `SubmissionRejected`.
+
+        Synchronous admission, like `submit`, and for the same reason: the dry-run
+        instantiates task agents, so admission has to happen where the toolkit is installed.
+        A Planner therefore gets its verdict in the call - accepted with an id, or refused
+        with the gate and the reason - which is what "review rejections route back to the
+        Planner" needs in order to be bounded.
+        """
+        ...
+
+    async def publish_spec(self, payload: Spec | SpecRevision) -> int:
+        """Install the initial Spec, or apply one revision. Returns the applied generation.
+
+        The Specifier AUTHORS; the executor applies. One writer, on the execution side, so
+        `specs` provenance is executor-written and a Planner cannot widen its own coverage by
+        asserting a smaller Spec.
+        """
         ...
 
     async def status(self, run_id: RunId) -> RunStatus: ...

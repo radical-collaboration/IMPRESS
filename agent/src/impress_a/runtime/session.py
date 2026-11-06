@@ -17,6 +17,7 @@ from typing import Any
 from ..core.decision import CampaignObservation, ExperimentIntent
 from ..core.results import RunOutcome, RunStatus
 from ..core.session import CampaignStopped
+from ..core.spec import Spec, SpecRevision, Stage
 from .executor import CampaignExecutor
 
 
@@ -26,6 +27,12 @@ class InProcessSession:
 
     async def observe(self, since: int | None = None) -> CampaignObservation:
         return self._ex.observe(self._ex.last_rejection, since=since)
+
+    async def submit_stage(self, stage: Stage) -> str:
+        return await self._ex.submit_stage(stage)
+
+    async def publish_spec(self, payload: Spec | SpecRevision) -> int:
+        return self._ex.publish_spec(payload)
 
     async def submit(self, intent: ExperimentIntent) -> str:
         return await self._ex.submit(intent)

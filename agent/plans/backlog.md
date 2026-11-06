@@ -227,6 +227,21 @@ A terminal-metrics gate was specified in
   caught; `test_every_tool_declares_the_metrics_it_reports` enforces both halves. **Still open:**
   this is a warning, not a gate.
 
+**RESOLVED on the Stage path** (phase 3 of `control-plane-refactor.md`). `submit_stage` refuses a
+graph that no tool in it reports a declared objective for, with `gate="coverage"` and the metric
+named, and `StageReviewer` additionally refuses a Stage that leaves a *ready* objective neither
+planned nor deferred, a task that serves only DELETED objectives, and a task naming an objective
+absent from the applied Spec. The terminal-metrics gate specified in
+`planning/phase1-partB-architecture/05-...:66` therefore exists, five years of intent later.
+
+Two deliberate limits. The coverage check reads the **executor's applied Spec**, never the
+Stage's own claim about what is open - not trusting that claim is the Reviewer's whole purpose,
+and it is why the Spec keeps one writer on the execution side so a remote Planner in phase 7
+cannot smuggle a revision in with a Stage. And the legacy `submit` **keeps its warning**: that
+leaves the old path's behaviour unchanged, including
+`test_a_truncated_chain_does_not_count_toward_stagnation`, which runs a sub-chain on purpose.
+The two paths differ here by design, and phase 11 deletes the warning with the path.
+
 **A9. Three of four admission attempts are wasted, and the fourth is the last one.** `ThresholdPolicy.
 decide` asks for `base_replicas + 1 = 3` replicas, but the campaign's `replicas: 1` is applied
 downstream as an executor cap (`executor._apply_campaign_defaults`), so the policy never sees it.

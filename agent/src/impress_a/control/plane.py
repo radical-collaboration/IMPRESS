@@ -15,6 +15,8 @@ from typing import Any, Protocol
 from ..core.artifacts import Property
 from ..core.decision import CampaignObservation
 from ..core.results import RunStatus
+from ..core.session import CampaignStopped, SubmissionRejected
+from ..core.spec import Spec, SpecRevision, Stage
 
 
 class Event(dict):
@@ -46,6 +48,33 @@ class CampaignControlPlane(Protocol):
                                  prop: Property) -> dict[str, Any]: ...
 
     # -- runs ----------------------------------------------------------------
+    async def submit_stage(self, campaign_id: str,
+                           stage: dict[str, Any]) -> dict[str, Any]:
+        mgr = self._need(campaign_id)
+        try:
+            run_id = await mgr.executor.submit_stage(Stage(**stage))
+        except SubmissionRejected as rejected:
+            self.emit(campaign_id, "transitions",
+                      {"event": "stage_rejected", "gate": rejected.failure.gate,
+                       "reason": rejected.failure.reason})
+            return {"accepted": False, "failure": rejected.failure.model_dump(mode="json")}
+        except CampaignStopped as stopped:
+            return {"accepted": False, "reason": str(stopped)}
+        return {"accepted": True, "run_id": run_id}
+
+    async def publish_spec(self, campaign_id: str,
+                           payload: dict[str, Any]) -> dict[str, Any]:
+        """One entry point for both shapes, discriminated by the payload itself.
+
+        A revision carries `generation` and the lists of what it changes; an initial Spec
+        carries `objectives`. Discriminating on content rather than on a flag means a caller
+        cannot disagree with itself about which it sent.
+        """
+        mgr = self._need(campaign_id)
+        obj = (Spec(**payload) if "objectives" in payload and "deleted" not in payload
+               else SpecRevision(**payload))
+        return {"generation": mgr.executor.publish_spec(obj)}
+
     async def submit_run(self, campaign_id: str,
                          intent: dict[str, Any]) -> dict[str, Any]: ...
     async def list_runs(self, campaign_id: str,
@@ -197,7 +226,6 @@ class InProcessControlPlane:
         there would be nothing left to bound retries against.
         """
         from ..core.decision import ExperimentIntent
-        from ..core.session import CampaignStopped, SubmissionRejected
         mgr = self.managers[campaign_id]
         try:
             run_id = await mgr.runs.submit(ExperimentIntent(**intent))

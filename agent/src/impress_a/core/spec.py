@@ -342,6 +342,10 @@ class Stage(BaseModel):
     graph_id: str = ""
     status: StageStatus = StageStatus.CANDIDATE
     rationale: str = ""
+    #: The design node every task in this Stage refines, when it refines one. On the Stage
+    #: rather than per task so a Planner need not repeat it; phase 8 makes it executable by
+    #: feeding the parent's artifacts into the chain.
+    parent_node: str | None = None
 
     @property
     def runs(self) -> list[TaskMapping]:
@@ -360,3 +364,77 @@ class Stage(BaseModel):
     @property
     def lineages(self) -> int:
         return len({t.lineage for t in self.runs}) or 1
+
+
+class TaskState(str, Enum):
+    """Where one Task stands. Task granularity, not run granularity."""
+
+    PENDING = "pending"        # in an approved Stage, not yet dispatched
+    DEPLOYED = "deployed"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    ORPHANED = "orphaned"      # every objective it served is DELETED, and it had started
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in (TaskState.DONE, TaskState.FAILED, TaskState.CANCELLED)
+
+    @property
+    def is_cancellable(self) -> bool:
+        """Only work that has not started can be reclaimed.
+
+        Cancellation is advisory once a callable is running: the concurrent backend's
+        `Future.cancel()` returns False and asyncflow discards that answer, and `impress`'s
+        own `kill_parent` cancels a pipeline's asyncio Task without reaching the backend. So
+        this is the honest set, and a RUNNING task marked for cancellation is recorded as
+        ORPHANED rather than pretended to be CANCELLED.
+        """
+        return self is TaskState.PENDING
+
+
+class TaskRecord(BaseModel):
+    """One Task, durably, keyed by a campaign-global id.
+
+    Everything durable was run-keyed before this: the job ledger folds on `job_id`, per-task
+    data existed only nested inside a `RunOutcome`, and a task id was `r{r}_s{i}_{tool}` -
+    unique only within one `TaskGraph`. So nothing could be deferred, re-planned or cancelled
+    *as work*, and asyncflow cannot help: it tags tasks with `workflow_id` and exposes no way
+    to look one up by it, which is why the caller's own table is the only index there has ever
+    been.
+
+    Holds state and accounting, never metrics. Metrics stay in the run's outcome, and
+    `outcome_ref` points at it - two places claiming to know a number is how they come to
+    disagree.
+    """
+
+    task_id: str
+    campaign_id: str = ""
+    stage_id: str = ""
+    run_id: str = ""
+    graph_node_id: str = ""
+    tool: str = ""
+    objectives: list[str] = Field(default_factory=list)
+    state: TaskState = TaskState.PENDING
+    directive: TaskDirective = TaskDirective.RUN
+    deployed_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    #: Projected at admission, settled on completion. Phase 5 adds the measured figures.
+    commitment: dict[str, float] = Field(default_factory=dict)
+    outcome_ref: str = ""
+
+    def orphaned_by(self, spec: Spec) -> bool:
+        """Whether every objective this Task serves is now DELETED.
+
+        *Every*, not any - which is why `objectives` is a list. A Task serving one live
+        objective and three dead ones is still wanted, and with a single objective per task
+        the question could not be asked at all.
+        """
+        if not self.objectives:
+            return False
+        return all(
+            (o := spec.objectives.get(oid)) is not None
+            and o.status is ObjectiveStatus.DELETED
+            for oid in self.objectives)
