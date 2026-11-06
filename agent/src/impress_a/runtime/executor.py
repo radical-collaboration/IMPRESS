@@ -62,6 +62,7 @@ from ..exec.task_ledger import TaskLedger
 from ..tools.registry import Registry
 from ..tools.view import view_of
 from .reviewer import StageReviewer
+from .runner import StageRunner
 
 
 class CampaignAborted(RuntimeError):
@@ -97,6 +98,17 @@ class CampaignSpec:
     # recorded in `campaign` provenance because a draw nobody can name is one nobody can
     # repeat.
     seed_salt: str = ""
+    # Which execution loop runs a graph. `dispatcher` registers tasks on the engine directly;
+    # `impress` deploys each Stage as an `ImpressBasePipeline` through `ImpressManager`,
+    # reusing the framework's task labelling, failure reporting and the examples' own
+    # task_description and GPU-pinning conventions.
+    #
+    # The default stays `dispatcher` until a Delta smoke has run. The Runner is tested against
+    # ConcurrentExecutionBackend, but the component it replaces is the one whose failure modes
+    # cost jobs 22328172 and 22328262 their full allocations, and swapping a dispatcher that
+    # works for one that has never seen Dragon is exactly the move this project's records
+    # argue against.
+    runner: str = "dispatcher"
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -1157,7 +1169,13 @@ class CampaignExecutor:
             self.spec.backend, self.spec.backend_config, self.spec.backend_startup_timeout_s,
             self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
         log.info("engine: %s backend ready", self.spec.backend)
-        self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend)
+        if self.spec.runner == "impress":
+            self.dispatcher = StageRunner(self.flow, self.reg, workdir=None)
+            await self.dispatcher.start()
+            log.info("execution loop: impress ImpressManager (one pipeline per stage)")
+        else:
+            self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend,
+                                         gpus_per_node=self.spec.site.gpus_per_node)
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))
@@ -1245,6 +1263,17 @@ class CampaignExecutor:
         is about to exit anyway. The timeout is therefore logged, not raised - an
         abandoned teardown must not turn a finished campaign into a failed one.
         """
+        # The Runner's manager drains BEFORE the engine goes, and does not own it: the caller
+        # owns the engine in `ImpressManager`'s design, so the bounded teardown below stays
+        # exactly where it was. Teardown is the expensive end - on job 22491438
+        # `flow.shutdown()` never returned and the job sat 60 minutes, about 64 GPU-hours,
+        # after the science was already done.
+        if isinstance(self.dispatcher, StageRunner):
+            try:
+                await self.dispatcher.shutdown()
+            except Exception as exc:          # noqa: BLE001 - never sink a finished campaign
+                log.warning("execution loop: runner shutdown ended with %r", exc)
+
         timeout_s = self.spec.backend_shutdown_timeout_s
         if timeout_s <= 0:
             await self.flow.shutdown()

@@ -277,6 +277,27 @@ does anything. Every real run so far has been `replicas: 1`.
   every task sees `CUDA_VISIBLE_DEVICES=0,1,2,3`, and `exec/resources.to_backend_description` is
   called by nothing. `plans/next-run-replicas.md` pins lineages to GPUs before running width 2.
 
+**HALF-RESOLVED** (phases 3a and 6 of `control-plane-refactor.md`). The budget half and the
+pinning half were separate problems and are addressed separately.
+
+*Trust.* Asserting trust is now possible and is how a width-4 pattern becomes runnable:
+`impress-a trust --assert <spec> --replicas 1 --replicas 4` computes the signature at each
+width, because the signature includes replica multiplicity and so width 1 does not cover
+width 4. That is this item's route (a) made available rather than impossible - earning trust at
+width 4 still cannot happen under a realistic budget, and now does not have to.
+
+*Pinning.* `exec/resources.to_backend_description` has a sibling with a caller:
+`Dispatcher._gpu_for(lineage)` assigns one device per lineage, round-robin across
+`SiteCaps.gpus_per_node`, and `TaskRequest.gpu_index` carries it to the adapter. `gpu_env`
+returns `CUDA_VISIBLE_DEVICES` for a concurrent backend and **nothing for Dragon**, because
+local services merges a template's env and applies the placement policy afterwards - so an env
+var there looks like pinning and does nothing, and Dragon needs
+`Policy(gpu_affinity=[gpu_index])` on the process template instead.
+
+**Still open:** the five real adapters do not yet apply `gpu_index` to their own child
+environments - that lands with their migration to `TaskRequest.input_ref` in phase 9 - and
+`replicas > 1` has still never executed on hardware. Nothing here has seen a GPU.
+
 **A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
 `rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
 shape, same parameters. Every `cost_model` figure now in the specs comes from one or two

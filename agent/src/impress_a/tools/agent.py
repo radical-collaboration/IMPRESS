@@ -37,6 +37,12 @@ class TaskRequest:
     input_ports: dict[str, str] = field(default_factory=dict)
     node_id: str | None = None
     seed: int | None = None
+    #: Which GPU this task may use, when the site has more than one. Backlog A10: concurrent
+    #: GPU tasks were not pinned, so several could land on the same device while others sat
+    #: idle - measured as GPU-busy at most 17% with three of four GPUs never holding work.
+    #: An adapter applies it to its own child's environment via `exec/resources.gpu_env`,
+    #: because under Dragon the env is not what does the pinning.
+    gpu_index: int | None = None
     #: Where this task may write. Defaults to the process CWD - see
     #: `_subprocess.workdir_for`, which is what every real adapter uses.
     workdir: str | None = None
