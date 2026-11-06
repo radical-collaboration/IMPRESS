@@ -61,6 +61,15 @@ class CostModel(BaseModel):
 
     unit: str = "invocation"
     cost: dict[str, float] = Field(default_factory=dict)
+    #: Consumption per SECOND, for open-ended work - the outline's "burn rate". Distinct from
+    #: `cost`, which is per invocation: a tool that runs until told to stop has no per-call
+    #: figure, and a tool that runs to completion has no meaningful rate.
+    burn: dict[str, float] = Field(default_factory=dict)
+    #: The most one invocation may ever commit, per dimension. The effective commitment is the
+    #: SMALLER of this and any workflow maximum the campaign declared, which is what the
+    #: outline means by "the smaller value of the optionally configured workflow maximum and
+    #: the per-stage hard limit".
+    max_commitment: dict[str, float] = Field(default_factory=dict)
 
 
 class GPUPortability(BaseModel):
@@ -104,6 +113,13 @@ class ToolSpec(BaseModel):
         overlap = set(self.parameters) & set(self.frozen_parameters)
         if overlap:
             raise ValueError(f"{self.id}: {overlap} both varyable and frozen")
+        for dim, cap in self.cost_model.max_commitment.items():
+            declared = self.cost_model.cost.get(dim)
+            if declared is not None and cap < declared:
+                raise ValueError(
+                    f"{self.id}: max_commitment {dim}={cap} is below its own declared cost "
+                    f"{declared} - a cap a single invocation cannot satisfy refuses every "
+                    f"graph containing this tool")
         if self.pattern is Pattern.P1 and self.resources.gpus == 0:
             raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
         # An acceptance threshold must not be the only thing that notices a value is

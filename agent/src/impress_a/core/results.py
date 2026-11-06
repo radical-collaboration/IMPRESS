@@ -16,6 +16,7 @@ make that impossible.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +43,15 @@ class TaskOutcome(BaseModel):
     tool: str
     metrics: dict[str, float] = Field(default_factory=dict)
     qc: QCReport = Field(default_factory=QCReport)
+    #: DECLARED. What the budget reserved and settles on.
     cost: dict[str, float] = Field(default_factory=dict)
+    #: MEASURED, and kept separate: the declared figure feeds gates that REFUSE graphs, so it
+    #: must stay conservative rather than drift toward measurement (backlog A11). The ratio of
+    #: the two is the number that closes backlog G8 - and above 1.0 it says a declared figure
+    #: has fallen below measurement, at which point gate 5 refuses work that would in fact fit.
+    cost_measured: dict[str, float] = Field(default_factory=dict)
+    #: Wall clock, per phase, host and pid. See `tools/agent.TaskUsage`.
+    usage: dict[str, Any] = Field(default_factory=dict)
     outputs: dict[str, ArtifactRef] = Field(default_factory=dict)
 
 

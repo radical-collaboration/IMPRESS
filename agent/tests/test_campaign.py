@@ -7,11 +7,18 @@ import asyncio
 
 import pytest
 
+from impress_a.compose.composer import Composer
 from impress_a.compose.graph import TaskGraph, TaskNode
 from impress_a.compose.interlock import Scrutiny
 from impress_a.compose.validate import SiteCaps
 from impress_a.control.plane import InProcessControlPlane
-from impress_a.core.artifacts import AUTHORITY_ASSAY, Property, PropertySource, SourceKind
+from impress_a.core.artifacts import (
+    AUTHORITY_ASSAY,
+    AUTHORITY_ML_PREDICTOR,
+    Property,
+    PropertySource,
+    SourceKind,
+)
 from impress_a.core.decision import ExperimentIntent
 from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
@@ -1348,3 +1355,99 @@ async def test_a_mock_draw_does_not_depend_on_what_its_inputs_are_called(reg, tm
     # And an added QC field must not either - the original form of this bug.
     noisier = dict(payload, qc={"verdict": "pass", "new_field": 1})
     assert _upstream({"backbone": noisier}) == by_port
+
+
+async def test_a_task_reports_its_own_wall_clock(reg, tmp_path):
+    """Backlog G8: nothing timed a task, and every cost figure was the estimate repeated.
+
+    `TaskResult.cost` was `dict(self.spec.cost_model.cost)` - a copy of the spec - and the job
+    ledger recorded that same figure. The consequences were measurable from outside anyway:
+    GPU-busy at most 17% of billed GPU time, CPU efficiency around 42%, three of four GPUs
+    never holding work. None of it was attributable to a task.
+    """
+    s = spec("t-timed", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    telemetry = list(mgr.prov.read("tasks"))
+    assert telemetry, "per-task telemetry must be written, not merely available"
+    timed = [r for r in telemetry if r.get("wall_s") is not None]
+    assert timed, "every settled task carries its own wall clock"
+    assert all(r["wall_s"] > 0 for r in timed)
+    assert all(set(r["phases"]) == {"pre_process", "parameterize", "run", "post_process"}
+               for r in timed), (
+        "per-phase, so import time is separable from work - `import pyrosetta` alone took "
+        "471s off HDD against a 300s budget, and a timeout names a budget, not a cause")
+    assert all(r["host"] and r["pid"] for r in timed), \
+        "recorded where the task ran, which is the only place that can know"
+
+
+async def test_declared_and_measured_cost_are_both_recorded_and_distinct(reg, tmp_path):
+    """Two numbers, not one quietly redefined.
+
+    The declared figure feeds gate 5 and the untrusted-pattern cap, and those REFUSE graphs -
+    so it must stay conservative rather than drift toward measurement (backlog A11). Settling
+    the measured figure instead would change what admission refuses for every campaign at
+    once.
+    """
+    s = spec("t-twocosts", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    rows = [r for r in mgr.prov.read("tasks") if r.get("wall_s") is not None]
+    assert all(r["cost_estimated"] for r in rows), "the declared figure is still recorded"
+    assert all("wall_s" in r["cost_measured"] for r in rows)
+    # And the budget settled on the DECLARED figure, which is what keeps refusals comparable.
+    assert mgr.budget.spent, "something was charged"
+    declared_total = sum(v for r in rows for d, v in r["cost_estimated"].items()
+                         if d == "gpu_hours")
+    assert abs(mgr.budget.spent.get("gpu_hours", 0.0) - declared_total) < 1e-9, \
+        "the ledger must still settle the declared estimate, not the measurement"
+
+
+async def test_a_property_names_the_tool_that_reported_it(reg, tmp_path):
+    """Defect (k): every metric from every tool carried `mock_toolkit`/authority 10.
+
+    That made the whole predicted-versus-measured machinery unreachable from the normal path.
+    Decision 0012 turns on a property knowing where it came from: `outranks` compares
+    authority, so an assay can supersede an ML prediction only if the prediction says it is
+    one.
+    """
+    s = spec("t-sources", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    sources = {p.source.name for n in mgr.tree.nodes.values() for p in n.properties.values()}
+    assert sources, "the campaign produced properties"
+    assert "mock_toolkit" not in sources, "the hardcoded source is gone"
+    assert sources <= set(reg.ids()), f"every source must be a real tool id: {sources}"
+    assert all(p.source.authority == AUTHORITY_ML_PREDICTOR
+               for n in mgr.tree.nodes.values() for p in n.properties.values()), (
+        "a mock ML predictor must not claim an authority that would outrank an assay")
+
+
+async def test_two_campaign_instances_with_different_salts_draw_differently(reg, tmp_path):
+    """Backlog G7: run labels restart at `r0001`, so without a salt every job drew the same.
+
+    17 designs on record turned out to be 5 independent folds sampled about three times each.
+    Seeding fixes length and biases fold - same-seed pairs measured median TM 0.82 against
+    0.28 across seeds - and does not reproduce coordinates, so this is variance reduction
+    rather than exact pairing. An empty salt reproduces the old behaviour exactly, which is
+    what keeps every recorded figure comparable.
+    """
+    def seeds(salt):
+        g = Composer(reg, seed_salt=salt).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001")
+        return sorted(n.seed for n in g.nodes.values())
+
+    assert seeds("exp-a") != seeds("exp-b"), "different experiments must draw differently"
+    assert seeds("exp-a") == seeds("exp-a"), "and the same salt must reproduce"
+    assert seeds("") == sorted(
+        Composer(reg).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001").nodes[k].seed
+        for k in Composer(reg).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001").nodes), (
+        "an empty salt must reproduce the pre-G7 draw exactly")

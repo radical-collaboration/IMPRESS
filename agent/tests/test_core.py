@@ -1,5 +1,7 @@
 """T1 - unit tests. Pure logic, no I/O."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from impress_a.core.artifacts import (
@@ -10,7 +12,7 @@ from impress_a.core.artifacts import (
     PropertySource,
     SourceKind,
 )
-from impress_a.core.budget import BudgetLedger
+from impress_a.core.budget import BudgetLedger, Commitment, Walltime
 from impress_a.core.data import DataRegistry, DatumKind, TaskFuture
 from impress_a.core.pareto import Direction, Objective, pareto_front
 from impress_a.core.qc import GateOutcome, GateResult, QCReport, QCVerdict
@@ -400,3 +402,84 @@ def test_a_future_is_a_record_and_is_settled_by_ingestion():
     reg.ingest(_outcome(metrics={"plddt": 0.9}))
     assert reg.pending() == []
     assert reg.futures["t1"].settled, "the record is kept, not dropped"
+
+
+# ---------------------------------------------------------------------------
+# Measured cost, walltime, burn and commitments (phase 5).
+# ---------------------------------------------------------------------------
+
+def test_an_undeclared_walltime_limit_never_refuses_anything():
+    """Zero-risk by construction, which is why the dimension is additive.
+
+    `remaining` returns `inf` for an undeclared dimension and `exhausted()` iterates `limits`
+    only, so every campaign that never mentions wall clock behaves byte-identically.
+    """
+    led = BudgetLedger(limits={"gpu_hours": 1.0})
+    assert led.walltime is None
+    assert not led.would_exceed_walltime(10_000_000.0)
+    assert led.remaining("not_a_dimension") == float("inf")
+    assert led.exhausted() == []
+
+
+def test_remaining_walltime_is_the_limit_less_elapsed():
+    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    led = BudgetLedger(walltime=Walltime(started_at=started, limit_s=150.0))
+    assert 99 <= led.walltime.elapsed_s <= 102
+    assert 48 <= led.walltime.remaining_s <= 51
+    assert led.would_exceed_walltime(60.0), "60s more does not fit in ~50s"
+    assert not led.would_exceed_walltime(10.0)
+
+
+def test_burn_rate_is_measured_not_declared():
+    """A rate with no measurement behind it is a guess.
+
+    The one thing it must not be is the declared estimate in new units: those figures sit
+    2.25x-69x above measurement on purpose, because they feed gates that REFUSE graphs.
+    """
+    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    led = BudgetLedger(limits={"gpu_hours": 10.0},
+                       walltime=Walltime(started_at=started, limit_s=1000.0))
+    assert led.burn_rate().per_s == {}, "nothing settled yet, so no rate exists"
+
+    led.charge({"gpu_hours": 2.0})
+    rate = led.burn_rate()
+    assert 0.019 <= rate.per_s["gpu_hours"] <= 0.021, rate.per_s
+    assert rate.measured_over_s > 0
+    # And a projection is that rate over a horizon, not a re-reading of the estimate.
+    assert 1.9 <= led.project("gpu_hours", 100.0) <= 2.1
+
+
+def test_committed_is_the_sum_over_pending_stages():
+    led = BudgetLedger(limits={"gpu_hours": 10.0})
+    led.commit(Commitment(stage_id="s1", projected={"gpu_hours": 1.5}))
+    led.commit(Commitment(stage_id="s2", projected={"gpu_hours": 2.0}))
+    assert led.committed("gpu_hours") == 3.5
+    led.release_commitment("s1")
+    assert led.committed("gpu_hours") == 2.0
+    assert led.committed("cpu_hours") == 0.0
+
+
+def test_a_commitment_over_its_cap_is_reported_rather_than_silently_kept():
+    """The outline's "maximum allocation commitment": the smaller of a workflow maximum and a
+    per-stage hard limit. Exceeding it is a fact the caller has to be told, not one to drop."""
+    led = BudgetLedger(limits={"gpu_hours": 10.0})
+    blown = led.commit(Commitment(stage_id="s1", projected={"gpu_hours": 5.0},
+                                  cap={"gpu_hours": 2.0}))
+    assert blown == ["gpu_hours"]
+    assert "s1" in led.commitments, "it is recorded, so the overrun is visible afterwards"
+
+
+def test_reserving_and_settling_are_untouched_by_the_new_dimensions():
+    """`reserve`/`settle`/`release` are on every admission path.
+
+    Rewriting them would make budget refusals untestable against recorded Delta behaviour
+    (backlog A11), so walltime, burn and commitments are layered BESIDE them.
+    """
+    led = BudgetLedger(limits={"gpu_hours": 1.0},
+                       walltime=Walltime(limit_s=10.0))
+    led.commit(Commitment(stage_id="s1", projected={"gpu_hours": 0.9}))
+    assert led.reserve({"gpu_hours": 0.9}, "r1") == [], \
+        "a commitment is bookkeeping, not a hold - it must not consume `available`"
+    assert led.would_exceed({"gpu_hours": 0.2}) == ["gpu_hours"]
+    led.settle("r1", {"gpu_hours": 0.4})
+    assert led.spent == {"gpu_hours": 0.4} and led.holds == {}

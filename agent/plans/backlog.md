@@ -619,6 +619,20 @@ consequences:
 The fix is a decision: salt the seed per campaign instance, for example with the job id, and
 record the salt. Making rfd3 deterministic is a separate question, probably GPU nondeterminism.
 
+**RESOLVED** (phase 5 of `control-plane-refactor.md`). `_replica_seed` takes a per-campaign-instance
+salt: `sha256(f"{salt}/{run_label}/{lineage}")`. `cli.load_spec` fills it from
+`$IMPRESS_A_SEED_SALT`, and it is recorded in `campaign` provenance, because a draw nobody can
+name is one nobody can repeat. An empty salt reproduces the pre-G7 behaviour byte for byte,
+which is what keeps every recorded figure comparable.
+
+The decision the item asked for, stated: **the four-arm experiment shares ONE salt across its
+arms.** G7 measured the seed as the dominant variance component (same-seed median TM 0.82
+against 0.28 across seeds), so sharing it applies common random numbers and removes "that arm
+drew luckier backbones" as an explanation - which matters at a minimum detectable effect as
+coarse as 2.2x. It is variance reduction and not exact pairing: rfd3 is not reproducible to
+coordinates (median Ca RMSD 2.4 A), and the pairing holds only for runs composing the same
+shape with the same parameters.
+
 **G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.**
 - **The `cost` field:** each run's ledger `cost` repeats its admission estimate (0.17 in every
   trust run). Measured task time exists only as asyncflow state lines in `campaign.log`, which
@@ -632,6 +646,22 @@ record the salt. Making rfd3 deterministic is a separate question, probably GPU 
   2026-10-09 from the sacct snapshot shipped with the run archive (G9).
 - **The idle GPUs are the whole of it.** Tasks fill 95% of elapsed in the trust jobs, so
   orchestration is not where the allocation goes - three of four GPUs never have work.
+
+**HALF-RESOLVED** (phase 5 of `control-plane-refactor.md`). Cost is measured now, and recorded
+BESIDE the declared figure rather than replacing it. `TaskAgent.__call__` times all four phases;
+`TaskUsage` carries `wall_s`, the per-phase breakdown, host, pid and `CUDA_VISIBLE_DEVICES`;
+`TaskOutcome` carries `cost_measured` next to `cost`; and a new `tasks` provenance kind writes
+one line per task so a scoring harness never has to parse the ledger's nested payload.
+
+Two numbers, deliberately. The declared figure feeds gate 5 and the untrusted-pattern cap, and
+those REFUSE graphs, so it must stay conservative rather than drift toward measurement (A11) -
+settling the measured figure instead would change what admission refuses for every campaign at
+once. Their ratio is the number this item wanted, and above 1.0 it says a declared figure has
+fallen below measurement, at which point gate 5 refuses work that would in fact fit.
+
+**Still open:** the hardware-side half. `gpusample.csv`, `sacct` and `seff` are the launcher's
+to collect, and nothing yet measures GPU occupancy from inside the allocation - so "GPU-busy at
+most 17%" remains the last word until an arm runs with the sampler attached.
 
 **G9. The run export omitted `sacct.json`, so C3 could not be reproduced off-cluster — RESOLVED.**
 `performance_analysis` was written on Delta with sacct reachable, and

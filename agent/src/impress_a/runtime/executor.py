@@ -27,7 +27,12 @@ from typing import Any
 from ..compose.composer import Composer
 from ..compose.interlock import Scrutiny, TrustLedger
 from ..compose.validate import SiteCaps, Validator
-from ..core.artifacts import Property, PropertySource
+from ..core.artifacts import (
+    AUTHORITY_ML_PREDICTOR,
+    AUTHORITY_PHYSICS,
+    Property,
+    PropertySource,
+)
 from ..core.budget import BudgetLedger
 from ..core.decision import (
     CampaignObservation,
@@ -85,6 +90,13 @@ class CampaignSpec:
     # well above any legitimate run of exploration, and tripping it means the chain is wrong
     # rather than unlucky.
     max_unproductive_runs: int = 8
+    # Distinguishes this campaign instance's draws from every other's (backlog G7). Run labels
+    # restart at `r0001` in every job, so without a salt every job drew the same designs: 17
+    # on record were 5 independent folds sampled about three times each. Empty reproduces the
+    # old behaviour exactly; `cli.load_spec` fills it from $IMPRESS_A_SEED_SALT, and it is
+    # recorded in `campaign` provenance because a draw nobody can name is one nobody can
+    # repeat.
+    seed_salt: str = ""
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -197,7 +209,7 @@ class CampaignExecutor:
         self.tasks = TaskLedger(self.root / "jobs" / "tasks.jsonl")
         trust_dir = Path(spec.trust_root) if spec.trust_root else Path(spec.root) / "_trust"
         self.trust = TrustLedger.load(trust_dir / f"{spec.site.gpu_api}.jsonl")
-        self.composer = Composer(self.reg)
+        self.composer = Composer(self.reg, seed_salt=spec.seed_salt)
         self.validator = Validator(self.reg, spec.site, self.budget)
         self.reviewer = StageReviewer(self.validator, self.budget)
         self.cycle = 0
@@ -268,6 +280,23 @@ class CampaignExecutor:
         self.prov.append(kind, record)
         if self.prov_sink is not None:
             self.prov_sink(self.spec.campaign_id, kind, dict(record))
+
+    def _authority_of(self, tool_id: str) -> int:
+        """The authority band a tool's numbers carry.
+
+        Every real tool here is an ML predictor or a physics score, so `AUTHORITY_ML_PREDICTOR`
+        is the honest default and `AUTHORITY_PHYSICS` applies to the Rosetta stages. A measured
+        value from an assay arrives through `ingest_measurement`, never from a task, and carries
+        `AUTHORITY_ASSAY` - which is what lets it supersede. Guessing higher here would let a
+        prediction outrank one.
+        """
+        if not tool_id:
+            return AUTHORITY_ML_PREDICTOR
+        try:
+            toolkit = self.reg.get(tool_id).toolkit
+        except KeyError:
+            return AUTHORITY_ML_PREDICTOR
+        return AUTHORITY_PHYSICS if toolkit == "rosetta" else AUTHORITY_ML_PREDICTOR
 
     def _orphan_tasks(self) -> list[str]:
         """Non-terminal tasks whose every objective is now DELETED.
@@ -379,10 +408,19 @@ class CampaignExecutor:
             # never populated, so there was no way to get from a node on the Pareto
             # front to the structure it is a claim about.
             node.artifacts = results.artifacts_for(task_ids)
+            # The PRODUCING tool, with its own authority band - not a hardcoded
+            # `mock_toolkit`/10 for every metric from every tool, real or mock, which is what
+            # this was and which made the whole predicted-versus-measured machinery
+            # unreachable from the normal path. Decision 0012 turns on a property knowing
+            # where it came from: `outranks` compares authority, so a later assay can
+            # supersede an ML prediction only if the prediction says it is one.
+            reporters = results.reporters_for(task_ids)
             for k, v in results.metrics_for(task_ids).items():
+                tool = reporters.get(k, "")
                 node.properties[k] = Property(
                     name=k, value=v,
-                    source=PropertySource(name="mock_toolkit", authority=10))
+                    source=PropertySource(name=tool or "unknown",
+                                          authority=self._authority_of(tool)))
             if any(t in results.failures for t in task_ids):
                 node.status = NodeStatus.FAILED
             self.tree.add(node)
@@ -970,6 +1008,7 @@ class CampaignExecutor:
                                      nodes=[n.id for n in nodes],
                                      signature=rec.signature)
         self._settle_stage_tasks(rec, outcome)
+        self._log_task_telemetry(rec, outcome)
         # NOTE: `policy.interpret` is deliberately NOT called here. It used to be, which
         # made this the only place the executor reached into the reasoner - and it worked
         # only while the two shared a process. A reasoner driving the campaign through a
@@ -1005,6 +1044,40 @@ class CampaignExecutor:
                 f"objective, so none could reach the front")
         elif blown := self.budget.exhausted():
             self.request_stop(f"budget exhausted: {blown}")
+
+    def _log_task_telemetry(self, rec: RunRecord, outcome: RunOutcome) -> None:
+        """One `tasks` provenance line per task, with what it measured and what it cost.
+
+        Exists so the scoring harness never has to parse the job ledger's nested `RunOutcome`
+        payload to answer a per-task question. The ledger stays the durable record of last
+        resort; this is the readable one.
+
+        Both cost figures are written. The ratio is what closes backlog G8, and above 1.0 it
+        says a declared figure has fallen below measurement - at which point gate 5 starts
+        refusing work that would in fact fit.
+        """
+        for task in outcome.tasks:
+            usage = task.usage or {}
+            self._log("tasks", {
+                "run": outcome.run_id, "graph": rec.graph.id, "cycle": rec.turn,
+                "stage": getattr(rec.stage, "id", ""), "task": task.task_id,
+                "tool": task.tool, "lineage": rec.graph.nodes[task.task_id].lineage
+                if task.task_id in rec.graph.nodes else None,
+                "seed": rec.graph.nodes[task.task_id].seed
+                if task.task_id in rec.graph.nodes else None,
+                "metrics": task.metrics,
+                "qc": task.qc.verdict.value,
+                "failed_gates": [g.gate for g in task.qc.failed()],
+                "cost_estimated": task.cost, "cost_measured": task.cost_measured,
+                "started_at": usage.get("started_at"),
+                "finished_at": usage.get("finished_at"),
+                "wall_s": usage.get("wall_s"), "phases": usage.get("phases"),
+                "host": usage.get("host"), "pid": usage.get("pid"),
+                "cuda_visible_devices": usage.get("cuda_visible_devices"),
+            })
+        for tid, err in outcome.failures.items():
+            self._log("tasks", {"run": outcome.run_id, "task": tid, "failed": err,
+                                "cycle": rec.turn})
 
     def _settle_stage_tasks(self, rec: RunRecord, outcome: RunOutcome) -> None:
         """Move this run's TaskRecords out of DEPLOYED.
@@ -1089,6 +1162,7 @@ class CampaignExecutor:
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))
         self._log("campaign", {"spec": self.spec.campaign_id, "goal": self.spec.goal,
+                               "seed_salt": self.spec.seed_salt,
                                "policy": getattr(self.policy, "name", "?"),
                                "objectives": [o.model_dump()
                                               for o in self.spec.objectives],

@@ -11,7 +11,71 @@ overspends. The reservation is what makes the gate mean anything under concurren
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from pydantic import BaseModel, Field
+
+
+class Walltime(BaseModel):
+    """Elapsed and remaining wall clock.
+
+    A dimension the ledger could not express: `limits`/`spent` are consumables, and wall clock
+    is not - it passes whether or not work is running. `None` for `limit_s` means unbounded
+    here and bounded only by the allocation, which is the usual case on HPC where SLURM's
+    `--time` is the real backstop and this field would only duplicate it less reliably.
+    """
+
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    limit_s: float | None = None
+
+    @property
+    def elapsed_s(self) -> float:
+        return (datetime.now(timezone.utc) - self.started_at).total_seconds()
+
+    @property
+    def remaining_s(self) -> float:
+        if self.limit_s is None:
+            return float("inf")
+        return self.limit_s - self.elapsed_s
+
+    def would_exceed(self, projected_s: float) -> bool:
+        return self.limit_s is not None and projected_s > self.remaining_s
+
+
+class BurnRate(BaseModel):
+    """Consumption per second, MEASURED over a window.
+
+    For open-ended work, which is what the Toolkit's budget requirements are stated as. A rate
+    derived from `spent / elapsed` is a measurement; one derived from `cost_model` would be the
+    declared estimate wearing a different unit, and those figures sit 2.25x-69x above
+    measurement on purpose because they feed gates that refuse graphs.
+    """
+
+    per_s: dict[str, float] = Field(default_factory=dict)
+    measured_over_s: float = 0.0
+    samples: int = 0
+
+    def project(self, dim: str, horizon_s: float) -> float:
+        return self.per_s.get(dim, 0.0) * horizon_s
+
+
+class Commitment(BaseModel):
+    """What one pending Stage has promised to spend.
+
+    Distinct from a `holds` reservation, which is per RUN and per dimension. A commitment is
+    per STAGE and carries the cap the Toolkit declared: the outline's "maximum allocation
+    commitment" is the smaller of an optional workflow maximum and a per-stage hard limit,
+    which is `min(goal.budget[d], card.max_commitment[d])`.
+    """
+
+    stage_id: str
+    projected: dict[str, float] = Field(default_factory=dict)
+    cap: dict[str, float] = Field(default_factory=dict)
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def exceeds_cap(self) -> list[str]:
+        return [d for d, v in self.projected.items()
+                if d in self.cap and v > self.cap[d]]
 
 
 class BudgetLedger(BaseModel):
@@ -19,6 +83,13 @@ class BudgetLedger(BaseModel):
     spent: dict[str, float] = Field(default_factory=dict)
     #: hold_id -> estimated cost, for work admitted but not yet settled.
     holds: dict[str, dict[str, float]] = Field(default_factory=dict)
+    #: Wall clock, when the campaign declared a limit. Separate from `limits` because wall
+    #: clock is not a consumable: it passes whether or not work is running.
+    walltime: Walltime | None = None
+    #: stage_id -> what that pending Stage promised. Layered BESIDE `holds` rather than
+    #: replacing it: `reserve`/`settle`/`release` are on every admission path, and rewriting
+    #: them would make budget refusals untestable against recorded Delta behaviour.
+    commitments: dict[str, Commitment] = Field(default_factory=dict)
 
     # -- what has been consumed ---------------------------------------------
     def remaining(self, dim: str) -> float:
@@ -72,6 +143,38 @@ class BudgetLedger(BaseModel):
         """Dimensions with nothing left. Deliberately ignores reservations: a campaign
         with everything in flight is busy, not exhausted, and must not terminate."""
         return [d for d in self.limits if self.remaining(d) <= 0]
+
+    # -- walltime, burn and commitments --------------------------------------
+    def commit(self, c: Commitment) -> list[str]:
+        """Record a Stage's commitment. Returns the dimensions that exceed its declared cap."""
+        self.commitments[c.stage_id] = c
+        return c.exceeds_cap()
+
+    def release_commitment(self, stage_id: str) -> None:
+        self.commitments.pop(stage_id, None)
+
+    def committed(self, dim: str) -> float:
+        """Projected spend across every pending Stage."""
+        return sum(c.projected.get(dim, 0.0) for c in self.commitments.values())
+
+    def burn_rate(self) -> BurnRate:
+        """Measured consumption per second, from what has actually been SPENT.
+
+        Zero until something settles, which is correct: a rate with no measurement behind it
+        is a guess, and the one thing this must not be is the declared estimate in new units.
+        """
+        if self.walltime is None or self.walltime.elapsed_s <= 0:
+            return BurnRate()
+        elapsed = self.walltime.elapsed_s
+        return BurnRate(per_s={d: v / elapsed for d, v in self.spent.items()},
+                        measured_over_s=elapsed, samples=len(self.spent))
+
+    def project(self, dim: str, horizon_s: float) -> float:
+        """What the measured rate says `horizon_s` more seconds would cost."""
+        return self.burn_rate().project(dim, horizon_s)
+
+    def would_exceed_walltime(self, projected_s: float) -> bool:
+        return self.walltime is not None and self.walltime.would_exceed(projected_s)
 
     def fraction_used(self, dim: str) -> float:
         lim = self.limits.get(dim)

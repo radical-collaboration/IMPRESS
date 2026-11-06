@@ -15,13 +15,13 @@ GOTCHA: asyncflow takes the task name from `fn.__name__`; the decorator accepts 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..compose.graph import TaskGraph
 from ..core.qc import QCReport, QCVerdict
 from ..core.results import RunOutcome, RunState, TaskOutcome
-from ..tools.agent import TaskRequest, TaskResult
+from ..tools.agent import TaskRequest, TaskResult, TaskUsage
 from ..tools.registry import Registry
 
 
@@ -30,7 +30,11 @@ class ExecutionResults:
     graph_id: str
     per_task: dict[str, TaskResult] = field(default_factory=dict)
     failures: dict[str, str] = field(default_factory=dict)
+    #: DECLARED, summed. What the budget settles on - unchanged on purpose.
     cost: dict[str, float] = field(default_factory=dict)
+    #: MEASURED, summed. For analysis, and for noticing a declared figure drifting below
+    #: measurement - at which point gate 5 starts refusing work that would in fact fit.
+    cost_measured: dict[str, float] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -104,8 +108,22 @@ class ExecutionResults:
             cost=dict(self.cost), failures=dict(self.failures),
             artifacts=self.merged_artifacts(),
             tasks=[TaskOutcome(task_id=tid, tool=r.tool, metrics=r.metrics, qc=r.qc,
-                               cost=r.cost, outputs=dict(r.outputs))
+                               cost=r.cost, cost_measured=r.cost_measured,
+                               usage=asdict(r.usage), outputs=dict(r.outputs))
                    for tid, r in self.per_task.items()])
+
+    def reporters_for(self, task_ids: list[str]) -> dict[str, str]:
+        """metric name -> the tool that reported it.
+
+        Later tasks win, which matches `metrics_for`: a chain's last word on a metric is the
+        one the node carries, so the attribution has to agree with the value.
+        """
+        out: dict[str, str] = {}
+        for tid in task_ids:
+            if (r := self.per_task.get(tid)) is not None:
+                for metric in r.metrics:
+                    out[metric] = r.tool
+        return out
 
     def merged_qc(self) -> QCReport:
         q = QCReport()
@@ -185,7 +203,10 @@ class Dispatcher:
                               input_ports={port: out for port, _, out in wiring})
             res = await agent(req)
             return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
-                    "qc": res.qc.model_dump(), "cost": res.cost}
+                    "qc": res.qc.model_dump(), "cost": res.cost,
+                    # Measured, beside declared. The closure crosses a process boundary, so
+                    # both travel as plain data.
+                    "usage": asdict(res.usage), "cost_measured": res.cost_measured}
 
         _run.__name__ = node_id   # asyncflow reads the name from __name__
         return self.flow.function_task(_run)
@@ -231,9 +252,16 @@ class Dispatcher:
                 continue
             out.per_task[tid] = TaskResult(
                 tool=r["tool"], outputs=r["outputs"], metrics=r["metrics"],
-                qc=QCReport(**r["qc"]), cost=r["cost"])
+                qc=QCReport(**r["qc"]), cost=r["cost"],
+                usage=TaskUsage(**r.get("usage", {})),
+                cost_measured=r.get("cost_measured", {}))
+            # `out.cost` aggregates the DECLARED figure, deliberately unchanged: it is what
+            # the budget settles on, and redefining it here would change what admission
+            # refuses for every campaign at once (backlog A11).
             for d, c in r["cost"].items():
                 out.cost[d] = out.cost.get(d, 0.0) + c
+            for d, c in (r.get("cost_measured") or {}).items():
+                out.cost_measured[d] = out.cost_measured.get(d, 0.0) + c
         return out
 
     def cancel(self, h: DispatchHandle) -> None:

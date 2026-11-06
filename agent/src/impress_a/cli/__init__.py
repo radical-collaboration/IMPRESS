@@ -77,6 +77,10 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # outside the per-job working directory the launcher cds into, and YAML carries no
         # env expansion. Set beside MPNN_DIR/BOLTZ_CACHE in scripts/delta_gpu_run.sh.
         trust_root=d.get("trust_root") or os.environ.get("IMPRESS_A_TRUST_DIR", ""),
+        # Env, not YAML: one experiment's salt has to be shared across several submissions
+        # of the same spec, and differ between experiments. `scripts/delta_gpu_run.sh` records
+        # it in the job manifest.
+        seed_salt=d.get("seed_salt") or os.environ.get("IMPRESS_A_SEED_SALT", ""),
         stages=d.get("stages", []) or [],
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
