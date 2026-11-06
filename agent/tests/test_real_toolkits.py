@@ -17,10 +17,19 @@ import pytest
 
 from impress_a.compose.composer import Composer
 from impress_a.compose.validate import SiteCaps, Validator
+from impress_a.core.artifacts import Property, PropertySource
 from impress_a.core.budget import BudgetLedger
-from impress_a.core.decision import ExperimentIntent
+from impress_a.core.data import DataRegistry
+from impress_a.core.decision import CampaignObservation, ExperimentIntent
+from impress_a.core.goal import Goal
+from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
+from impress_a.core.tree import DesignNode
+from impress_a.core.types import ArtifactType
+from impress_a.policy.specifier import SpecEvidence
+from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.tools.registry import Registry
+from impress_a.tools.view import view_of
 
 CHAIN = ["rfd3_design", "ligandmpnn_design", "packmin", "fastrelax", "filter_shape",
          "boltz_predict"]
@@ -1026,3 +1035,159 @@ async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
     assert "[phase] import pyrosetta" in err.stderr, \
         "the phase timings are the whole diagnostic; losing them is the old bug"
     assert "partial stdout" in err.stdout
+
+
+# ---------------------------------------------------------------------------
+# The ToolkitView and the model-D Specifier (phase 2 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_the_view_exposes_every_declared_parameter_with_its_range(reg):
+    """A reasoner given bare tool ids cannot choose, so it guesses - which is backlog H3.
+
+    Every policy emitted params keyed to `mock_generate` and `mock_design`, the composer
+    dropped them because no such tool was in the graph, and no policy could vary a real tool's
+    parameter at all. The view is what makes that choosable: typed ports, ranges, and the one
+    sentence the spec gives about what a parameter trades.
+    """
+    view = view_of(reg)
+    assert set(view.ids) == set(reg.ids())
+    for tool_id in view.ids:
+        card, spec = view.tools[tool_id], reg.get(tool_id)
+        assert set(card.parameters) == set(spec.parameters), tool_id
+        assert set(card.frozen) == set(spec.frozen_parameters), tool_id
+        assert set(card.parameters).isdisjoint(card.frozen), (
+            f"{tool_id}: a frozen parameter must not be proposable")
+        for name, p in spec.parameters.items():
+            assert card.parameters[name].min == p.min
+            assert card.parameters[name].max == p.max
+            assert card.parameters[name].trades == p.trades
+    assert view.tools["rfd3_design"].parameters["diffusion_steps"].trades, \
+        "`trades` is the only prose a reasoner gets about cost; it must survive projection"
+
+
+def test_the_view_carries_the_skill_documents(reg):
+    """`Registry.toolkit_skills()` had no caller at all (backlog H4).
+
+    The guidance written for an agent had therefore never reached one.
+    """
+    view = view_of(reg)
+    toolkits = {reg.get(t).toolkit for t in reg.ids()}
+    assert set(view.skills) == {t for t in toolkits if t in reg.skills}
+    assert all(view.skills.values()), "an empty skill document is a load error, not a blank"
+
+
+def test_the_view_narrows_to_the_campaigns_own_stages(reg):
+    """A Specifier shown the mock toolkit on a real campaign can propose mocks on a GPU.
+
+    `plans/done/02-real-toolkit.md` records that as the headline bug of that work: the
+    documented real run loaded the real toolkits, validated them, and executed mock tools on an
+    allocation. Narrowing is the cheap half of preventing it; the `tool_delivery` gate is the
+    other.
+    """
+    view = view_of(reg, CHAIN)
+    assert view.ids == sorted(CHAIN)
+    assert "mock" not in set(view.skills), "no mock guidance reaches a real campaign's reasoner"
+
+
+def test_the_view_answers_by_output_type_and_by_metric(reg):
+    """The two questions a Planner and a Specifier actually ask."""
+    view = view_of(reg, CHAIN)
+    assert [t.id for t in view.reporting("complex_plddt")] == ["boltz_predict"]
+    assert "rfd3_design" in [t.id for t in view.producers_of(ArtifactType.BACKBONE)]
+    # The unification rule applies here exactly as it does in gate 1: a Complex satisfies a
+    # Backbone requirement, never the reverse.
+    assert view.tools["boltz_predict"].produces(ArtifactType.BACKBONE)
+    assert not view.tools["rfd3_design"].produces(ArtifactType.COMPLEX)
+    assert view.tools["boltz_predict"].acceptance_metrics == ["complex_plddt", "ligand_iptm"]
+
+
+def _evidence(view, goal, spec, front=()):
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal=goal.text,
+                              objectives=goal.objectives, toolkit=view, spec=spec,
+                              pareto_front=list(front))
+    return SpecEvidence(obs, DataRegistry())
+
+
+def _real_goal():
+    return Goal(text="design a small-molecule binder", objectives=[
+        Objective(name="total_score", direction=Direction.MIN),
+        Objective(name="shape_complementarity", direction=Direction.MAX, min=0.55),
+        Objective(name="complex_plddt", direction=Direction.MAX, min=0.75),
+        Objective(name="ligand_iptm", direction=Direction.MAX, min=0.4)])
+
+
+async def test_the_specifier_gives_an_unbounded_objective_a_measurement_rule(reg):
+    """`total_score: minimize` has no finish line, so what the campaign owes it is a number.
+
+    A `metric_in_range` with no range expresses no condition, so using one here would leave an
+    objective that can never be satisfied and a Spec that can never complete. `metric_present`
+    is the honest requirement: without a measurement the front cannot order anything by it.
+    """
+    sp = ThresholdSpecifier()
+    spec = await sp.initial_spec(_real_goal())
+    rules = {o.targets[0]: o.satisfied_when.kind for o in spec.objectives.values()}
+    assert rules == {"total_score": "metric_present",
+                     "shape_complementarity": "metric_in_range",
+                     "complex_plddt": "metric_in_range",
+                     "ligand_iptm": "metric_in_range"}
+    assert not spec.complete()
+
+
+async def test_the_specifier_names_an_objective_no_enabled_task_can_produce(reg):
+    """Job 22675512, caught at specification instead of never.
+
+    There, a budget correction removed the only producer of two of four objectives; nothing
+    noticed, and the admitted graph recorded `rejected: null`. An objective the Toolkit cannot
+    report is left OPEN and named, so the coverage gate sees it rather than the campaign
+    quietly optimising three quarters of what it was for.
+    """
+    goal = _real_goal()
+    goal.objectives.append(Objective(name="nonexistent_metric", direction=Direction.MAX,
+                                     min=1.0))
+    sp = ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+    ev = _evidence(view_of(reg, CHAIN), goal, spec)
+
+    bad = sp.unproducible(spec, ev)
+    assert [spec.objectives[b].targets for b in bad] == [["nonexistent_metric"]]
+    assert await sp.failed(spec, ev) == bad, "unproducible is the one thing retrying cannot fix"
+    # And narrowing matters: with boltz dropped, its two objectives become unproducible too.
+    ev_narrow = _evidence(view_of(reg, CHAIN[:-1]), goal, spec)
+    targets = {spec.objectives[b].targets[0] for b in sp.unproducible(spec, ev_narrow)}
+    assert {"complex_plddt", "ligand_iptm"} <= targets
+
+
+async def test_the_specifier_exploits_by_adding_a_refinement_objective(reg):
+    """Exploitation as a Spec change, which is what `parent_node` is for.
+
+    The legacy cascade raised `diffusion_steps` - asking for the same draw again, harder. A
+    refinement objective names the design to improve on, which keeps ADR 0004's backtracking
+    reachable from the Spec and is the thing phase 8 makes executable by feeding a parent's
+    artifacts into a child chain.
+    """
+    goal = _real_goal()
+    sp = ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+
+    assert (await sp.revise(spec, _evidence(view_of(reg, CHAIN), goal, spec))).is_empty, \
+        "with an empty front there is nothing to refine, and inventing work from the absence " \
+        "of evidence is not specification"
+
+    node = DesignNode()
+    for name, value in (("shape_complementarity", 0.56), ("complex_plddt", 0.95),
+                        ("ligand_iptm", 0.9), ("total_score", -300.0)):
+        node.properties[name] = Property(name=name, value=value,
+                                         source=PropertySource(name="t"))
+    ev = _evidence(view_of(reg, CHAIN), goal, spec, front=[node])
+
+    rev = await sp.revise(spec, ev)
+    assert len(rev.new_objectives) == 1
+    added = rev.new_objectives[0]
+    assert added.parent_node == node.id
+    assert added.targets == ["shape_complementarity"], (
+        "the weakest objective by normalised margin: 0.56 clears 0.55 by 1.8%, where "
+        "complex_plddt clears 0.75 by 27%")
+
+    spec.apply(rev)
+    assert (await sp.revise(spec, ev)).is_empty, \
+        "one open refinement at a time, or the Spec grows without bound and never completes"

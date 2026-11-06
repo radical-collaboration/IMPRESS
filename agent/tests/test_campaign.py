@@ -837,34 +837,59 @@ async def test_interpret_fires_once_per_collected_run(reg, tmp_path):
     assert res.stop_reason
 
 
-async def test_a_truncated_chain_can_never_move_the_front(reg, tmp_path):
-    """Backlog G1, made detectable rather than fixed.
+async def test_a_truncated_chain_does_not_count_toward_stagnation(reg, tmp_path):
+    """Backlog G1, decided.
 
     A chain that skips the stage producing a constrained objective yields nodes that
-    `pareto.feasible` rejects for a MISSING value. The front stays empty; `_note_progress`
-    increments on every informed landing that leaves it unchanged, including
-    empty-and-still-empty; and at concurrency 1 every landing is informed by the one
-    before it. So the executor ends a campaign whose science is going fine. Nothing here
-    is a QC failure and nothing is over budget.
+    `pareto.feasible` rejects for a MISSING value, so the front stays empty however well the
+    science goes. The counter used to increment on every such landing - at concurrency 1 every
+    landing is informed by the one before it - and ended a campaign with nothing wrong with it,
+    modelled at t~135 min of a 4 h allocation, before the first exploit run could land.
 
     Here `mock_generate -> mock_design` stands in for the real explore chain: it emits
-    ss_fraction, designability, seq_recovery and diversity, and none of OBJS' sc_rmsd,
-    iptm or ddg.
+    ss_fraction, designability, seq_recovery and diversity, and none of OBJS' sc_rmsd, iptm or
+    ddg.
 
-    This asserts the CURRENT behaviour. When G1 is decided
-    (plans/exploration-vs-stagnation.md) this test is the first thing that must change.
+    The ruling is that a run which COULD NOT have moved the front is not evidence that progress
+    has stalled - the same kind of flaw as the fan-out one, and found the same way: the counter
+    was asking "did the front change" when the question it needs is "did something that could
+    have changed the front fail to". **This test previously asserted the opposite**, by design,
+    and its docstring said it would be the first thing to change.
+
+    Raising `stagnation_limit` was the wrong fix and is not what happened:
+    `test_stagnation_still_counts_a_chain_that_could_have_moved_the_front` is the other half.
     """
-    s = spec("t-g1", max_cycles=10, stagnation_limit=3, concurrency=1)
+    s = spec("t-g1", max_cycles=4, stagnation_limit=2, concurrency=1)
     s.root = str(tmp_path)
     res = await CampaignManager(
-        s, ThresholdPolicy(stages=["mock_generate", "mock_design"]), reg).run()
+        s, ThresholdPolicy(stages=["mock_generate", "mock_design"], max_cycles=99,
+                           target_front=99), reg).run()
 
     assert len(res.tree) > 0, "the runs happened"
     assert all(n.qc.verdict is not QCVerdict.FAIL for n in res.tree), \
         "and QC passed - nothing is wrong with the science"
-    assert res.front == [], "yet the front is empty: no node carries sc_rmsd or iptm"
+    assert res.front == [], "the front is still empty: no node carries sc_rmsd or iptm"
+    assert not res.stop_reason.startswith("stagnation:"), res.stop_reason
+    assert "max_cycles" in res.stop_reason, (
+        f"the allocation should be what ends it, not the counter: {res.stop_reason}")
+    assert res.cycles == s.max_cycles, "every cycle it was given was used"
+
+
+async def test_stagnation_still_counts_a_chain_that_could_have_moved_the_front(reg, tmp_path):
+    """The other half of G1: the fix is additive, not a weakening.
+
+    A full chain produces every constrained objective, so its nodes are front-eligible and a
+    run that leaves the front unchanged is real evidence of a stall. Without this, "exclude the
+    runs that never had a chance" would be indistinguishable from "stop counting".
+    """
+    s = spec("t-g1-still-counts", max_cycles=20, stagnation_limit=2, concurrency=1)
+    s.root = str(tmp_path)
+    # target_front=99 keeps the policy from stopping first, so the counter is what ends it.
+    res = await CampaignManager(
+        s, ThresholdPolicy(max_cycles=99, target_front=99), reg).run()
+
     assert res.stop_reason.startswith("stagnation:"), res.stop_reason
-    assert res.cycles < s.max_cycles, "the executor stopped it early"
+    assert res.cycles < s.max_cycles, "the counter stopped it early, as it should"
 
 
 class _Backtracker:

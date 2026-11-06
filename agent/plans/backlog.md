@@ -512,6 +512,27 @@ first exploit run lands (`slides/timeline_model.py --limit 4`). This is latent, 
 policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 [`exploration-vs-stagnation.md`](exploration-vs-stagnation.md).
 
+**RESOLVED** (phase 2 of `control-plane-refactor.md`). The ruling: **a run that could not have
+moved the front is not evidence that progress has stalled.** `pareto.feasible` admits a node
+only if every *constrained* objective has a value satisfying it, and `satisfied_by(None)` is
+False - so a graph that cannot produce one of those names cannot produce a front-eligible node,
+whatever the science does. `RunRecord.could_reach_the_front` is answered at admission, where the
+graph is in hand, and `_note_progress` skips the increment when it is False.
+
+It is the same KIND of flaw as the fan-out one in `plans/done/03-stagnation-under-fanout.md`, and
+it was found the same way: the counter was asking "did the front change" when the question it
+needs answered is "did something that could have changed the front fail to". Unconstrained
+objectives are deliberately excluded - they rank but never prune, so missing one costs a node
+nothing.
+
+Additive by construction: a run that can produce every constrained objective counts exactly as
+it did, which `test_stagnation_still_counts_a_chain_that_could_have_moved_the_front` pins.
+Without that second test, "exclude the runs that never had a chance" would be
+indistinguishable from "stop counting". `test_a_truncated_chain_can_never_move_the_front` is
+renamed `..._does_not_count_toward_stagnation` and asserts the opposite of what it did, which
+its own docstring said would be the first thing to change. Raising the limit remains the wrong
+fix and was not what happened.
+
 **G2. rfd3 output parsing ignores the metrics rfd3 reports.** See B1 and A4. Switching
 `RFD3DesignAgent` to read the sidecar `*_model_*.json` would give a genuine structural gate
 (`ligand_clashes == 0`), replace our non-DSSP phi/psi estimate with rfd3's own `helix_fraction`/
@@ -746,8 +767,9 @@ paid for out of the first allocation.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
-9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
-   then, and now pinned by two characterization tests that must change when it is decided.
+9. ~~**G1**~~ **DONE** — decided in phase 2, before the `conduct()` role pipeline it was gating
+   could explore with a truncated chain. The characterization test did change, exactly as it
+   said it would, and a second test now holds the fix to being additive.
 10. ~~**H6 the lint gate**~~ **DONE** — it was the reason H1-H5 went unnoticed, and it was cheap.
     Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
     claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**

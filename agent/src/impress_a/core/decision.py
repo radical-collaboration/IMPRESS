@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from .budget import BudgetLedger
 from .ids import counter
 from .pareto import Objective
+from .spec import Spec
+from .toolkit import ToolkitView
 from .tree import DesignNode
 
 new_decision_id = counter("d")
@@ -92,5 +94,15 @@ class CampaignObservation(BaseModel):
     recent: list[DesignNode] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     budget: BudgetLedger = Field(default_factory=BudgetLedger)
+    #: Bare tool ids. Superseded by `toolkit` below and removed in phase 11: a reasoner given
+    #: only ids cannot choose by output type, cannot see a parameter's range and cannot know
+    #: which parameters are frozen, so it guesses or hardcodes - which is backlog H3.
     available_tools: list[str] = Field(default_factory=list)
+    #: The Toolkit as a reasoner may see it: typed ports, parameter ranges, what each
+    #: parameter trades, which are frozen and why, and the toolkits' own skill documents.
+    toolkit: ToolkitView | None = None
+    #: The applied Spec. Carried so a Planner plans against objectives the executor has
+    #: actually applied rather than against ones it imagined, and so an external caller sees
+    #: the same Spec the in-process roles do (ADR 0007's parity of evidence).
+    spec: Spec | None = None
     last_rejection: ValidationFailure | None = None

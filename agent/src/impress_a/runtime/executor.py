@@ -45,6 +45,7 @@ from ..core.tree import CampaignTree, DesignNode, NodeStatus
 from ..exec.dispatch import Dispatcher, ExecutionResults
 from ..exec.ledger import JobLedger
 from ..tools.registry import Registry
+from ..tools.view import view_of
 
 
 class CampaignAborted(RuntimeError):
@@ -144,6 +145,10 @@ class RunRecord:
     #: Absorptions visible when this run was admitted. What separates a run that had a
     #: chance to act on the last result from one already in flight when it landed.
     informed_by: int = 0
+    #: Whether a node from this run's graph could be front-eligible at all. False for a
+    #: chain that cannot produce some constrained objective - an explore chain, or one a
+    #: budget correction truncated. Such a run is not evidence of stagnation (backlog G1).
+    could_reach_the_front: bool = True
 
 
 log = logging.getLogger(__name__)
@@ -170,6 +175,11 @@ class CampaignExecutor:
         # reads this replica rather than whatever a Planner asserts is open, because not
         # trusting that assertion is the Reviewer's whole purpose.
         self.spec_state: Spec = Spec(campaign_id=spec.campaign_id)
+        # Immutable for the campaign, so built once. Narrowed to the campaign's own stages
+        # when it declared any: a Specifier shown the mock toolkit on a real campaign can map
+        # the Goal onto outputs that would then execute mocks on a GPU allocation, which
+        # plans/done/02-real-toolkit.md records as the headline bug of that work.
+        self._toolkit = view_of(self.reg, list(spec.stages) or None)
         # Labels issued vs experiments actually dispatched. A rejected submission still
         # burns a label - the retry is a different graph with a different draw, so it
         # must not reuse one - but it never ran and must not be counted as a run.
@@ -287,6 +297,7 @@ class CampaignExecutor:
             recent=[self.tree.get(nid) for nid in self._absorbed[cursor:]],
             seq=len(self._absorbed),
             budget=self.budget, available_tools=self.reg.ids(),
+            toolkit=self._toolkit, spec=self.spec_state,
             last_rejection=last_rejection)
 
     # -- update --------------------------------------------------------------
@@ -341,10 +352,24 @@ class CampaignExecutor:
 
         At `concurrency: 1` every run is submitted after the previous one was absorbed,
         so every run counts and the behaviour is exactly what it always was.
+
+        **A run that could not have moved the front is not evidence either** (backlog G1).
+        The flaw there is the same KIND as the fan-out one and was found the same way: the
+        counter was asking "did the front change" when the question it needs answered is "did
+        something that could have changed the front fail to". An explore chain emits none of
+        the constrained objectives, so `pareto.feasible` rejects its nodes for a missing value,
+        the front stays empty, and at concurrency 1 every landing increments - ending a
+        campaign whose science is going fine, modelled at t~135 min of a 4 h allocation,
+        before the first exploit run lands. Raising `stagnation_limit` would hide that rather
+        than fix it; excluding the runs that never had a chance fixes it. Additive by
+        construction: a run that can produce every constrained objective counts exactly as
+        it did.
         """
         ids = {n.id for n in pareto_front(self.tree.live(), self.spec.objectives)}
         if ids != self._last_front_ids:
             self._last_front_ids, self._stagnant = ids, 0
+        elif not rec.could_reach_the_front:
+            pass    # never had a chance; says nothing about whether progress has stalled
         elif rec.informed_by >= self._counted_through:
             self._stagnant += 1
             self._counted_through = len(self._absorbed)
@@ -437,7 +462,42 @@ class CampaignExecutor:
             self._untrusted_inflight.add(sig)
         return RunRecord(run_id=run_label, graph=graph, signature=sig,
                          scrutiny=scrutiny, intent=intent, turn=self.cycle,
-                         informed_by=len(self._absorbed)), None
+                         informed_by=len(self._absorbed),
+                         # Answered here, where the graph is in hand. The stagnation counter
+                         # is updated much later, by which time it is not.
+                         could_reach_the_front=self._could_reach_the_front(graph)), None
+
+    def _producible_metrics(self, graph) -> set[str]:
+        """Every metric some tool in this graph declares, or gates on.
+
+        Gate metrics are unioned in because a gated name is by definition reported, which
+        keeps a tool honest if its `metrics:` declaration drifts.
+        """
+        produced: set[str] = set()
+        for node in graph.nodes.values():
+            spec = self.reg.get(node.tool)
+            produced.update(spec.metrics)
+            for gate in spec.qc_gates:
+                if metric := (gate.params or {}).get("metric"):
+                    produced.add(metric)
+        return produced
+
+    def _could_reach_the_front(self, graph) -> bool:
+        """Whether a node from this graph could be FEASIBLE at all.
+
+        `pareto.feasible` admits a node only if every *constrained* objective - one with a
+        min or a max - has a value satisfying it, and `satisfied_by(None)` is False. So a
+        graph that cannot produce one of those names cannot produce a front-eligible node,
+        whatever the science does.
+
+        That is backlog G1's mechanism, and this is the one question whose answer makes the
+        stagnation counter honest: a run that COULD NOT have moved the front is not evidence
+        that progress has stalled. Unconstrained objectives are deliberately excluded - they
+        rank but never prune, so missing one costs a node nothing.
+        """
+        constrained = {o.name for o in self.spec.objectives
+                       if o.min is not None or o.max is not None}
+        return not constrained or constrained <= self._producible_metrics(graph)
 
     def _objectives_without_a_producer(self, graph) -> list[str]:
         """Campaign objectives no tool in this graph reports a metric for.
@@ -458,14 +518,7 @@ class CampaignExecutor:
         wanted = {o.name for o in self.spec.objectives}
         if not wanted:
             return []
-        produced: set[str] = set()
-        for node in graph.nodes.values():
-            spec = self.reg.get(node.tool)
-            produced.update(spec.metrics)
-            for gate in spec.qc_gates:
-                if metric := (gate.params or {}).get("metric"):
-                    produced.add(metric)
-        return sorted(wanted - produced)
+        return sorted(wanted - self._producible_metrics(graph))
 
     def _apply_campaign_defaults(self, intent: ExperimentIntent) -> ExperimentIntent:
         """Fill in what the campaign declares and the policy did not ask about.
