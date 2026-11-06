@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from ._ensemble import pair_by_index, select_best
 from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
@@ -160,10 +161,40 @@ class BoltzPredictAgent(TaskAgent):
         if not confidence_files or not pdb_files:
             return {"result": None, "count": 0, "outputs": {}, "metrics": {}}
 
-        conf = json.loads(confidence_files[0].read_text())
+        # The best sample, not the first. `diffusion_samples` asks Boltz for N co-folds and
+        # this adapter kept `[0]`, so N were computed, N were paid for, and one was reported -
+        # chosen by sort order rather than by confidence.
+        scored = [(p, _boltz_metrics(json.loads(p.read_text()))) for p in confidence_files]
+        choice = select_best(scored, lambda row: row[1].get("complex_plddt"))
+        if choice is None:
+            # Every confidence file unreadable or missing the metric. Omit rather than report
+            # a zero: `metrics_reported` is the integrity gate that catches it, and a
+            # fabricated 0.0 would read as a weak design instead of a broken tool.
+            return {"result": "complex", "count": len(pdb_files),
+                    "outputs": {"complex": pdb_files[0]},
+                    "metrics": {"ensemble_size": float(len(confidence_files)),
+                                "ensemble_paired": 0.0}}
+
+        idx, (conf_path, metrics) = choice
+        metrics = dict(metrics)
+        metrics["ensemble_size"] = float(len(confidence_files))
+
+        # Pair the chosen confidence file with its own structure by member number. Boltz writes
+        # `confidence_<name>_model_<n>.json` beside `<name>_model_<n>.pdb`, so the number is
+        # there - but the two globs are sorted independently, and matching by position is how
+        # a confidence gets attributed to the wrong structure.
+        pairs = pair_by_index(confidence_files, pdb_files)
+        if pairs is not None:
+            chosen_conf = conf_path
+            structure = next(pdb for conf, pdb in pairs if conf == chosen_conf)
+            metrics["ensemble_paired"] = 1.0
+        else:
+            structure = pdb_files[idx] if idx < len(pdb_files) else pdb_files[0]
+            metrics["ensemble_paired"] = 1.0 if len(pdb_files) == 1 else 0.0
+
         return {
             "result": "complex",
             "count": len(pdb_files),
-            "outputs": {"complex": pdb_files[0]},
-            "metrics": _boltz_metrics(conf),
+            "outputs": {"complex": structure},
+            "metrics": metrics,
         }

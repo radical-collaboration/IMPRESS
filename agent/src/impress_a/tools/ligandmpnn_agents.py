@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ._ensemble import member_index, select_best
 from ._subprocess import first_dep_output, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
@@ -20,18 +21,35 @@ from .agent import TaskAgent, TaskRequest
 _CONF_RE = re.compile(r"overall_confidence=([\d.]+),\s*ligand_confidence=([\d.]+)")
 
 
-def _parse_confidence(fasta_text: str) -> dict[str, float]:
-    """Confidences from the first header that carries them; empty if none parses.
+def _parse_all_confidences(fasta_text: str) -> list[dict[str, float]]:
+    """One entry per header that carries confidences, in file order.
 
-    Empty, not 0.0/0.0: a header `_CONF_RE` cannot read is a parser failure, and
-    reporting it as a zero-confidence design made it indistinguishable from a
-    genuinely bad one. Omitted, the integrity gate `metrics_reported` catches it.
+    Real LigandMPNN writes **every candidate for a design into one file**, so a parser that
+    stops at the first header reads one candidate and ignores the rest. The reference pipeline
+    recorded exactly that: `analysis_sequence` "silently never compared MPNN candidates against
+    each other", which is what made `mpnn_ensemble_size` inert there until it was fixed.
+
+    A header the regex cannot read is skipped rather than recorded as 0.0/0.0 - a parser
+    failure must not be indistinguishable from a genuinely bad design, and omitted it is caught
+    by the integrity gate `metrics_reported`.
     """
+    out = []
     for header in fasta_text.splitlines():
         if m := _CONF_RE.search(header):
-            return {"overall_confidence": round(float(m.group(1)), 3),
-                    "ligand_confidence": round(float(m.group(2)), 3)}
-    return {}
+            out.append({"overall_confidence": round(float(m.group(1)), 3),
+                        "ligand_confidence": round(float(m.group(2)), 3)})
+    return out
+
+
+def _parse_confidence(fasta_text: str) -> dict[str, float]:
+    """The BEST candidate's confidences, or empty if none parses.
+
+    Best by `overall_confidence`, which is the metric the spec's acceptance gate reads - so the
+    candidate carried forward is the one judged, rather than whichever appeared first.
+    """
+    candidates = _parse_all_confidences(fasta_text)
+    best = select_best(candidates, lambda c: c.get("overall_confidence"))
+    return best[1] if best is not None else {}
 
 # Written into the task workdir and run instead of `run.py` itself. Same device as the
 # reference pipeline's `scripts/mpnn_run.py`, and the same device as the `_*_WORKER`
@@ -154,10 +172,17 @@ class LigandMPNNDesignAgent(TaskAgent):
             "--pdb_path", str(backbone_pdb),
             "--out_folder", str(out),
             "--temperature", str(params["temperature"]),
-            # `--number_of_batches` is batches, not sequences; with `--batch_size`
-            # unset (default 1) one batch is one sequence, so this holds only while
-            # num_seqs stays small. Confirm against `run.py --help` before raising it.
-            "--number_of_batches", str(params["num_seqs"]),
+            # ONE WIDE BATCH, not several narrow ones. `--batch_size` is candidates per
+            # forward pass and `--number_of_batches` is passes, so the old form - batches set
+            # to `num_seqs` with `--batch_size` left at its default of 1 - asked for N
+            # sequential batches of one, which is the worse of the two options for a model
+            # tuned for batched output. The comment here used to say "confirm against
+            # `run.py --help` before raising it", and that is now `impress-a preflight`'s job:
+            # A3's lesson is that a tool's contract was not merely unverified but WRONG
+            # (RFD3 was invoked with flags its real CLI does not have), so a flag nobody has
+            # run is a flag that may not exist.
+            "--batch_size", str(params["batch_size"]),
+            "--number_of_batches", str(params["number_of_batches"]),
         ]
         if params.get("seed") is not None:
             cmd += ["--seed", str(params["seed"])]
@@ -183,9 +208,31 @@ class LigandMPNNDesignAgent(TaskAgent):
         if not fastas or not packed:
             return {"result": None, "count": 0, "outputs": {}, "metrics": {}}
 
+        # Every candidate in the file, then the best of them - not the first. Real LigandMPNN
+        # writes all of a design's candidates into one `.fa`, so reading one header was reading
+        # one candidate out of `num_seqs` and paying for the rest.
+        candidates = _parse_all_confidences(fastas[0].read_text())
+        choice = select_best(candidates, lambda c: c.get("overall_confidence"))
+        metrics = dict(choice[1]) if choice is not None else {}
+        metrics["ensemble_size"] = float(len(candidates) or len(packed))
+
+        # The packed structure that belongs to the chosen candidate. Paired by member number;
+        # if the two sets cannot be paired one-to-one, keep index 0 and SAY so rather than
+        # selecting confidently from a mismatched pair - two independently-sorted globs agree
+        # only by luck, which is the bug this whole helper exists for.
+        structure, paired = packed[0], False
+        if choice is not None and len(packed) == len(candidates) > 1:
+            idx = choice[0]
+            by_index = {member_index(p): p for p in packed}
+            if None not in by_index and idx in by_index:
+                structure, paired = by_index[idx], True
+            elif idx < len(packed):
+                structure, paired = packed[idx], True
+        metrics["ensemble_paired"] = 1.0 if paired or len(packed) == 1 else 0.0
+
         return {
             "result": "structure",
             "count": len(packed),
-            "outputs": {"structure": packed[0]},
-            "metrics": _parse_confidence(fastas[0].read_text()),
+            "outputs": {"structure": structure},
+            "metrics": metrics,
         }

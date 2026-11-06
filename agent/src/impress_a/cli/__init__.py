@@ -737,6 +737,37 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
 
+    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
+    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
+    # does not have, and that survived review because nobody had run it. So the flag is checked
+    # against the installed `run.py --help` rather than trusted.
+    mpnn_dir = os.environ.get("MPNN_DIR")
+    if stages and "ligandmpnn_design" in stages and mpnn_dir:
+        run_py = Path(mpnn_dir) / "run.py"
+        if run_py.is_file():
+            try:
+                helped = subprocess.run(
+                    [sys.executable, str(run_py), "--help"], capture_output=True, text=True,
+                    timeout=300, cwd=mpnn_dir)
+                helptext = helped.stdout + helped.stderr
+                missing = [f for f in ("--batch_size", "--number_of_batches")
+                           if f not in helptext]
+                if not helptext.strip():
+                    checks.append(("ligandmpnn batch flags", None,
+                                   "`run.py --help` produced no output - undetermined"))
+                elif missing:
+                    checks.append(("ligandmpnn batch flags", False,
+                                   f"installed run.py does not offer {', '.join(missing)} - "
+                                   f"the adapter passes them and would fail inside the job"))
+                else:
+                    checks.append(("ligandmpnn batch flags", True,
+                                   "--batch_size and --number_of_batches both offered"))
+            except subprocess.TimeoutExpired:
+                checks.append(("ligandmpnn batch flags", None,
+                               "`run.py --help` did not answer in 300s - undetermined"))
+            except (OSError, subprocess.SubprocessError) as e:
+                checks.append(("ligandmpnn batch flags", False, f"could not check: {e}"))
+
     # The `impress` dependency is published on no index, so if pip ever went looking for that
     # name it installed something else - and the failure is silent, because the import succeeds
     # and hands back a working module that is simply not ours. Both installers put the root

@@ -42,6 +42,20 @@ machine, means laptop / login node / batch job each get the right answer with no
 **Breadth comes from `replicas`, not from each tool's internal sampling.** The adapters generated N
 samples and kept only `[0]`, paying 4-5× GPU for one candidate. Internal N now defaults to 1.
 
+> **OVERRULED** in phase 8 of `plans/control-plane-refactor.md`, and recorded here rather than
+> edited out. The second clause names the defect: the adapters *kept only `[0]`*. So this was a
+> consequence of a bug, not a property worth keeping — and these models are tuned for batched
+> output, which makes a batch of one a waste of the device rather than a conservative default.
+>
+> `ligandmpnn_design` and `boltz_predict` now select the best member of their own ensemble, and
+> their sampling is 8. Breadth comes from `replicas` **and** from internal sampling; the
+> ordering constraint this ruling was really protecting survives as "raise sampling only once
+> the adapter selects", because before that 8 samples cost 8× and still yield one design.
+>
+> `rfd3_design` stays at 1, which is the honest exception: its adapter still keeps
+> `cif_models[0]`, and selecting among its designs needs the sidecar `*_model_*.json`'s metric
+> names confirmed against a real out_dir (backlog G2).
+
 ## Bugs found that had never run
 
 - **Boltz wrote invalid YAML** — `msa:` indented one level too deep, under the `sequence:` scalar.

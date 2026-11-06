@@ -157,7 +157,8 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
               params: dict[str, Any], *, invocation: str = "",
               seed: int | None = None, dep_order: tuple[str, ...] = (),
               wiring: tuple[tuple[str, str, str], ...] = (),
-              workdir: str | None = None, gpu_index: int | None = None):
+              workdir: str | None = None, gpu_index: int | None = None,
+              seed_inputs: dict[str, Any] | None = None):
     """ONE generic factory for every node in every graph.
 
     `wiring` is the node's typed `inputs` map, flattened to
@@ -191,6 +192,7 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
         req = TaskRequest(tool=tool_id, params=params,
                           node_id=invocation, seed=seed, workdir=workdir,
                           inputs=inputs, gpu_index=gpu_index,
+                          seed_inputs=dict(seed_inputs or {}),
                           input_ports={port: out for port, _, out in wiring})
         res = await agent(req)
         return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
@@ -256,10 +258,12 @@ class Dispatcher:
                    invocation: str = "", seed: int | None = None,
                    dep_order: tuple[str, ...] = (),
                    wiring: tuple[tuple[str, str, str], ...] = (),
-                   gpu_index: int | None = None):
+                   gpu_index: int | None = None,
+                   seed_inputs: dict[str, Any] | None = None):
         return node_task(self.flow, self.reg, node_id, tool_id, params,
                          invocation=invocation, seed=seed, dep_order=dep_order,
-                         wiring=wiring, workdir=self.workdir, gpu_index=gpu_index)
+                         wiring=wiring, workdir=self.workdir, gpu_index=gpu_index,
+                         seed_inputs=seed_inputs)
 
 
     def submit(self, g: TaskGraph, run_id: str = "") -> DispatchHandle:
@@ -281,7 +285,8 @@ class Dispatcher:
                      wiring=tuple((port, *ref.split(".", 1)) if "." in ref
                                   else (port, ref, "")
                                   for port, ref in n.inputs.items()),
-                     gpu_index=self._gpu_for(n.lineage))
+                     gpu_index=self._gpu_for(n.lineage),
+                     seed_inputs=n.seed_inputs)
                  for tid, n in g.nodes.items()}
         futures: dict[str, Any] = {}
         for tid in g.topo_order():                       # edges via unawaited futures

@@ -323,6 +323,25 @@ class CampaignExecutor:
             return AUTHORITY_ML_PREDICTOR
         return AUTHORITY_PHYSICS if toolkit == "rosetta" else AUTHORITY_ML_PREDICTOR
 
+    def _artifacts_of(self, node_id: str | None) -> dict[str, Any]:
+        """What one design node produced, for a Stage that refines it.
+
+        Empty for an unknown node rather than an error: a Planner naming a node that no longer
+        exists gets a graph with unsatisfied roots, which gate 1 is the right place to refuse -
+        the composer is not where identity is checked.
+        """
+        if not node_id:
+            return {}
+        try:
+            node = self.tree.get(node_id)
+        except KeyError:
+            # `CampaignTree.get` raises for an unknown id, and that contract is right for its
+            # other callers - a campaign asking for a node it created and cannot find has a
+            # real problem. Here the id came from a Planner, so a stale reference is ordinary
+            # and belongs in a rejection rather than a traceback.
+            return {}
+        return dict(node.artifacts)
+
     def _orphan_tasks(self) -> list[str]:
         """Non-terminal tasks whose every objective is now DELETED.
 
@@ -762,7 +781,11 @@ class CampaignExecutor:
                            ) -> tuple[RunRecord | None, ValidationFailure | None]:
         """Compose the Stage, review it, then admit the graph."""
         try:
-            graph = self.composer.compose_stage(stage, run_label)
+            # A refinement Stage starts from the design it names. Resolved here because the
+            # composer has no tree, and the tree is the only thing that knows what a node
+            # produced.
+            graph = self.composer.compose_stage(
+                stage, run_label, parent_artifacts=self._artifacts_of(stage.parent_node))
         except KeyError as unknown:
             return None, ValidationFailure(
                 gate="type",

@@ -15,6 +15,7 @@ from impress_a.control.plane import InProcessControlPlane
 from impress_a.core.artifacts import (
     AUTHORITY_ASSAY,
     AUTHORITY_ML_PREDICTOR,
+    ArtifactRef,
     Property,
     PropertySource,
     SourceKind,
@@ -30,6 +31,7 @@ from impress_a.core.spec import (
     SpecObjective,
     SpecRevision,
     Stage,
+    TaskMapping,
     TaskRecord,
     TaskState,
 )
@@ -45,6 +47,7 @@ from impress_a.policy.legacy import LegacyPlanner
 from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
 from impress_a.runtime.roles import _intent_for
+from impress_a.tools.agent import TaskRequest
 from impress_a.tools.mock_agents import _upstream
 from impress_a.tools.registry import Registry
 
@@ -1451,3 +1454,76 @@ async def test_two_campaign_instances_with_different_salts_draw_differently(reg,
         for k in Composer(reg).compose(
             ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001").nodes), (
         "an empty salt must reproduce the pre-G7 draw exactly")
+
+
+async def test_a_refinement_stage_starts_from_its_parents_artifacts(reg, tmp_path):
+    """The mechanism the ten-sequence Goal needs, and which did not exist.
+
+    `ExperimentIntent.parent_node` set `DesignNode.parent` and nothing else, so "exploit a
+    node" re-ran its RECIPE rather than refining its STRUCTURE. The reference pipeline's median
+    pLDDT of 94.4 comes from a partial-diffusion loop - `num_refine_cycles`, `rfd3_partial_t` -
+    feeding a parent's structure back into the generator, and no campaign here could express
+    that. Across every recorded run `complex_plddt` is 0.426 / 0.486 / 0.507 against a 0.75
+    bound: 0 of 3, which is a missing mechanism rather than bad luck.
+
+    Matched by declared TYPE, not by name: a parent's artifacts are named for the port that
+    produced them and a consumer names them for its own purpose.
+    """
+    s = spec("t-refine", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    await ex.start()
+    try:
+        parent = DesignNode()
+        parent.artifacts = {"designs": ArtifactRef(type=ArtifactType.BACKBONE,
+                                                   value="parent-backbone")}
+        ex.tree.add(parent)
+
+        # `mock_design` takes a Backbone. As the root of a refinement Stage it has no upstream
+        # task, so without the parent feed its input port would be unsatisfied.
+        stage = Stage(parent_node=parent.id,
+                      tasks=[TaskMapping(task_id="r0_s0_mock_design", tool="mock_design",
+                                         objectives=["o1"], lineage=0)])
+        graph = ex.composer.compose_stage(
+            stage, "r0001", parent_artifacts=ex._artifacts_of(stage.parent_node))
+
+        node = graph.nodes["r0_s0_mock_design"]
+        assert node.deps == [], "it is a root: nothing upstream in this graph"
+        assert "backbone" in node.seed_inputs, (
+            "the parent's Backbone must satisfy the declared `backbone` port")
+        assert node.seed_inputs["backbone"].value == "parent-backbone"
+
+        # And the request a task actually receives resolves it through the same accessor as a
+        # real upstream dependency, so an adapter needs no special case.
+        req = TaskRequest(tool="mock_design", seed_inputs=dict(node.seed_inputs))
+        assert req.input_ref("backbone").value == "parent-backbone"
+    finally:
+        await ex.shutdown()
+
+
+async def test_an_upstream_payload_beats_a_seeded_one(reg):
+    """A refinement's later stages consume what THIS run produced, not what its parent did.
+
+    Otherwise a chain would refine the parent at every stage instead of once at the root, and
+    the loop would not be a loop.
+    """
+    upstream = {"outputs": {"designs": ArtifactRef(type=ArtifactType.BACKBONE,
+                                                   value="this-run")}}
+    req = TaskRequest(tool="mock_design", inputs={"backbone": upstream},
+                      input_ports={"backbone": "designs"},
+                      seed_inputs={"backbone": ArtifactRef(type=ArtifactType.BACKBONE,
+                                                           value="parent")})
+    assert req.input_ref("backbone").value == "this-run"
+
+
+async def test_a_refinement_naming_an_unknown_node_gets_no_artifacts(reg, tmp_path):
+    """An unknown parent is a graph with unsatisfied roots, which gate 1 is the place to refuse.
+
+    The composer is not where identity is checked, and raising there would turn a Planner's
+    stale reference into a crash rather than a rejection it can answer.
+    """
+    s = spec("t-refine-unknown", control="roles", trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    assert ex._artifacts_of("n-does-not-exist") == {}
+    assert ex._artifacts_of(None) == {}

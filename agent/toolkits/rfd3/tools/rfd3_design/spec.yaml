@@ -8,8 +8,19 @@ gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
 outputs:
   backbone: {type: Backbone}
 parameters:
-  # Default 1: breadth comes from `replicas` (N independent lineages, N DesignNodes),
-  # not from internal sampling the adapter would discard all but the first of.
+  # STAYS AT 1, and this is the one tool here where that is still the honest setting.
+  #
+  # LigandMPNN and Boltz now select the best member of their own ensemble, so raising their
+  # sampling pays. rfd3's adapter still keeps `cif_models[0]`, and selecting among its designs
+  # needs the sidecar `*_model_*.json`'s metric NAMES confirmed against a real out_dir -
+  # backlog G2's remaining half. Until that is read on hardware, raising this would pay N times
+  # for one design, which is what the old comment here described as a design principle.
+  #
+  # Not listed in `frozen_parameters`, and the reason is worth recording: `ToolSpec` refuses a
+  # name that is both varyable and frozen, so freezing it means REMOVING the parameter - which
+  # changes what the adapter reads, and the adapter is the part that cannot be exercised
+  # without a GPU. A default and a stated reason, rather than a gate built on an unverifiable
+  # change.
   num_designs: {type: int, default: 1, min: 1, max: 64, trades: "coverage vs GPU-hours"}
   diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs wall-clock"}
   seed: {type: int, default: null, min: 0, max: 2147483647,

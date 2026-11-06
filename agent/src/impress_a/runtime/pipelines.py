@@ -85,7 +85,7 @@ class StagePipeline(ImpressBasePipeline):
                 dep_order=tuple(node.deps),
                 wiring=tuple((port, *ref.split(".", 1)) if "." in ref else (port, ref, "")
                              for port, ref in node.inputs.items()),
-                workdir=workdir)
+                workdir=workdir, seed_inputs=node.seed_inputs)
             setattr(self, tid, task)
 
     async def run(self) -> None:

@@ -31,6 +31,11 @@ class TaskRequest:
     #: Upstream payloads, keyed by this tool's own declared input PORT where the composer
     #: wired one, and by `dep{i}` for an ordering-only edge with no typed port behind it.
     inputs: dict[str, Any] = field(default_factory=dict)
+    #: port -> an artifact from outside this graph: the parent design a refinement starts
+    #: from, or a file the Goal supplied. Read by `input_ref` when no upstream task produced
+    #: that port, which is what makes a refinement chain start from a structure rather than
+    #: from nothing.
+    seed_inputs: dict[str, Any] = field(default_factory=dict)
     #: port -> the UPSTREAM output port it was wired to. The composer computed this and the
     #: validator type-checked it; without it an adapter has to guess which of a dep's outputs
     #: it was handed, which is what the scanning helper did.
@@ -55,6 +60,11 @@ class TaskRequest:
         should never see: gate 1 refuses a graph whose required input has no producer.
         """
         payload = self.inputs.get(port)
+        if payload is None:
+            # No upstream produced this port, so fall back to what was handed in from outside
+            # the graph. An upstream payload always wins: a refinement's later stages consume
+            # what this run produced, not what its parent did.
+            return self.seed_inputs.get(port)
         if not isinstance(payload, dict):
             return payload
         outputs = payload.get("outputs") or {}

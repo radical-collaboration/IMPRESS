@@ -603,6 +603,13 @@ measure, and A1 is still open.
   `helix_fraction`/`sheet_fraction` instead of our phi/psi estimate, and selecting the best model
   rather than the first. The file is now open in the adapter; nothing is read from it yet.
 
+**Still the blocker for rfd3's ensembling** (noted in phase 8 of
+`control-plane-refactor.md`). `ligandmpnn_design` and `boltz_predict` now select the best member
+of their own ensemble and their sampling is raised to 8; `rfd3_design` cannot, because choosing
+among its designs means reading the sidecar `*_model_*.json` and nothing here has confirmed
+which metric names it carries. So rfd3 stays at `num_designs: 1` with that reason recorded in
+its spec, and this item is now what gates raising it.
+
 **G3. `dump_trajectories=True` writes 99.4% waste.** Upstream measured trajectories at 11.85 MB of
 each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a campaign from ~30 GB to
 ~3.8 GB. Safe because trajectory files ship no `.json`. We never read them.

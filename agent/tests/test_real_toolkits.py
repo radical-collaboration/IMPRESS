@@ -11,6 +11,7 @@ and each toolkit's SKILL.md Pitfalls).
 from __future__ import annotations
 
 import pathlib
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +30,8 @@ from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.policy.specifier import SpecEvidence
 from impress_a.policy.specifiers import ThresholdSpecifier
+from impress_a.tools._ensemble import member_index, pair_by_index, select_best
+from impress_a.tools.ligandmpnn_agents import _parse_all_confidences, _parse_confidence
 from impress_a.tools.registry import Registry
 from impress_a.tools.view import view_of
 
@@ -1232,3 +1235,117 @@ async def test_a_refinement_objective_is_not_satisfied_by_its_parents_own_measur
         "the parent's measurement alone must not satisfy a refinement of it"
     assert [o.id for o in spec.open_objectives() if o.parent_node] == [added.id], \
         "and it stays OPEN, so the one-at-a-time cap actually binds"
+
+
+# ---------------------------------------------------------------------------
+# Ensemble selection (phase 8 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_the_mpnn_parser_reads_every_candidate_not_the_first():
+    """Real LigandMPNN writes every candidate for a design into ONE file.
+
+    So a parser that stops at the first header reads one candidate out of `num_seqs` and the
+    rest are computed, charged for and discarded. The reference pipeline recorded exactly this:
+    `analysis_sequence` "silently never compared MPNN candidates against each other", and
+    fixing it there is what made `mpnn_ensemble_size` mean anything.
+    """
+    text = (">design, id=1, overall_confidence=0.5100, ligand_confidence=0.4000\nMKT\n"
+            ">design, id=2, overall_confidence=0.8200, ligand_confidence=0.7100\nMKV\n"
+            ">design, id=3, overall_confidence=0.6300, ligand_confidence=0.5500\nMKW\n")
+    every = _parse_all_confidences(text)
+    assert [c["overall_confidence"] for c in every] == [0.51, 0.82, 0.63]
+    assert _parse_confidence(text)["overall_confidence"] == 0.82, \
+        "the BEST candidate, not the first - 0.82 is what the acceptance gate reads"
+
+
+def test_an_unreadable_header_is_skipped_rather_than_scored_zero():
+    """A parser failure must not be indistinguishable from a genuinely bad design.
+
+    Omitted, the integrity gate `metrics_reported` catches it; reported as 0.0 it reads as a
+    weak design and an acceptance gate takes the blame for a broken tool (decision 0013).
+    """
+    text = (">design, id=1, confidence=unparseable\nMKT\n"
+            ">design, id=2, overall_confidence=0.7000, ligand_confidence=0.6000\nMKV\n")
+    assert len(_parse_all_confidences(text)) == 1
+    assert _parse_confidence(text)["overall_confidence"] == 0.7
+    assert _parse_confidence(">no confidences here\nMKT\n") == {}
+
+
+def test_a_member_index_is_absent_rather_than_zero_when_the_name_carries_none():
+    """"This is member zero" and "this filename does not say" must not be the same answer.
+
+    Only one of them is safe to pair on, and pairing on the wrong one attributes a confidence
+    to another member's structure.
+    """
+    assert member_index("confidence_abc_model_3.json") == 3
+    assert member_index("abc_model_0.pdb") == 0
+    assert member_index("backbone_0_packed_1_2.pdb") == 2, "the LAST integer in the stem"
+    assert member_index("structure.pdb") is None
+
+
+def test_pairing_refuses_rather_than_falls_back_to_position():
+    """Two independently sorted globs agree only by luck.
+
+    `rfd3_agents` already states the principle for its trajectory bug: a confident guess is
+    worse than a loud failure. A caller that gets `None` here must say it could not pair, which
+    is what `ensemble_paired: 0` records.
+    """
+    conf = [Path("confidence_x_model_0.json"), Path("confidence_x_model_1.json")]
+    pdbs = [Path("x_model_0.pdb"), Path("x_model_1.pdb")]
+    paired = pair_by_index(conf, pdbs)
+    assert paired is not None
+    assert [(c.name, p.name) for c, p in paired] == [
+        ("confidence_x_model_0.json", "x_model_0.pdb"),
+        ("confidence_x_model_1.json", "x_model_1.pdb")]
+
+    # Counts differ, indices differ, or a name carries no index: all unpairable.
+    assert pair_by_index(conf, pdbs[:1]) is None
+    assert pair_by_index(conf, [Path("x_model_0.pdb"), Path("x_model_7.pdb")]) is None
+    assert pair_by_index(conf, [Path("a.pdb"), Path("b.pdb")]) is None
+
+
+def test_select_best_skips_a_member_whose_metric_cannot_be_read():
+    """The same rule the gates use: an unreadable value is an omission, not a zero."""
+    members = [{"plddt": None}, {"plddt": 0.4}, {}, {"plddt": 0.9}, {"plddt": 0.6}]
+    chosen = select_best(members, lambda m: m.get("plddt"))
+    assert chosen == (3, {"plddt": 0.9})
+    assert select_best(members, lambda m: m.get("plddt"), higher_is_better=False) \
+        == (1, {"plddt": 0.4})
+    assert select_best([{}, {"plddt": None}], lambda m: m.get("plddt")) is None
+
+
+def test_mpnn_prefers_one_wide_batch_over_several_narrow_ones(reg):
+    """The one place the preference is mechanical rather than a comment.
+
+    `--batch_size` is candidates per forward pass and `--number_of_batches` is passes, so the
+    old form - batches set to `num_seqs` with `--batch_size` left at its default of 1 - asked
+    for N sequential batches of one. For a model tuned for batched output that is the worse of
+    the two options: linear in N where a single wide batch is close to sublinear.
+    """
+    spec = reg.get("ligandmpnn_design")
+    assert spec.parameters["batch_size"].default == 8
+    assert spec.parameters["number_of_batches"].default == 1
+    # And the declared sampling must be reachable: a width the spec forbids is a width the
+    # Planner cannot ask for.
+    assert spec.parameters["batch_size"].max >= 8
+
+
+def test_the_sampled_tools_declare_what_the_adapter_reports(reg):
+    """`ensemble_size`/`ensemble_paired` come from the adapter, not the tool - and must still
+    be declared, or a reasoner cannot see that the campaign is measuring them."""
+    for tool in ("ligandmpnn_design", "boltz_predict"):
+        declared = set(reg.get(tool).metrics)
+        assert {"ensemble_size", "ensemble_paired"} <= declared, tool
+
+
+def test_rfd3_sampling_stays_at_one_with_its_reason_recorded(reg):
+    """The honest exception: rfd3's adapter still keeps `cif_models[0]`.
+
+    Selecting among its designs needs the sidecar `*_model_*.json`'s metric names confirmed
+    against a real out_dir, which is backlog G2's remaining half. Raising it before that pays N
+    times for one design - which is precisely what the comment there used to describe as a
+    design principle.
+    """
+    assert reg.get("rfd3_design").parameters["num_designs"].default == 1
+    assert reg.get("boltz_predict").parameters["diffusion_samples"].default == 8, \
+        "the tools whose adapters DO select are the ones raised"
