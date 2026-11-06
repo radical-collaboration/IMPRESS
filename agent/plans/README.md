@@ -5,6 +5,7 @@ Working notes on what is being built and why. Not shipping reference — `docs/`
 | | |
 |---|---|
 | [`backlog.md`](backlog.md) | **The live list.** Everything outstanding, grouped, with a recommended order |
+| [`control-plane-refactor.md`](control-plane-refactor.md) | **The exception to the row below: a full plan, approved and being executed.** The Spec/Planning/Execution split, the Specifier/Planner halves of the four reasoners, and the four-arm experiment. Eleven phases in four branch groups |
 | `*.md` (this directory) | Stubs for the next tracks — enough to start from, not full plans |
 | [`done/`](done/) | Completed work, kept for the decisions it records |
 
