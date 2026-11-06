@@ -8,6 +8,15 @@ version = "0.1.0"
 description = "Autonomous protein design agent for HPC"
 requires-python = ">=3.10"
 dependencies = [
+  # The IMPRESS framework at the repository root. IMPRESS-A's execution loop is built on
+  # its ImpressBasePipeline/ImpressManager rather than re-deriving the engine conventions
+  # (named backends, task_description defaults, GPU pinning) a second time. No version
+  # pin: `impress` is unreleased, so it is installed editable from `..` alongside this
+  # project - see scripts/dev_setup.sh. `agent/` depends on it and may not modify it;
+  # runtime/runner.py and runtime/pipelines.py are the only modules that may import it,
+  # which tests/test_layering.py asserts.
+  "impress",
+  # Both floors intersect to >=0.5.1: the root project declares >=0.4.0, this one >=0.5.1.
   "radical.asyncflow>=0.5.1",
   "rhapsody-py>=0.5.0",
   "langgraph>=1.0",
@@ -26,7 +35,10 @@ dependencies = [
 agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.git@dd27bd8b7e6edb2995038c9c1cc9b2fec3b7c7e9"]
 oracle = ["litellm"]
 http = ["httpx"]          # the HTTP control-plane adapter
-dev = ["pytest", "pytest-asyncio", "ruff", "httpx"]
+# `tomli` only below 3.11, where `tomllib` is not in the standard library. It is used by
+# tests/test_toolchain.py to read this file's own [tool.ruff] table, rather than grepping it -
+# a text match would be satisfied by the word `false` appearing in a comment.
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx", "tomli; python_version<'3.11'"]
 
 [project.scripts]
 impress-a = "impress_a.cli:main"
@@ -37,3 +49,33 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# Ruff resolves the NEAREST pyproject.toml with a [tool.ruff] table, walking upwards. Without
+# this table it walked up to IMPRESS's own, which sets `fix = true` - so the documented
+# `ruff check src tests` REWROTE the working tree rather than reporting on it (36 files on its
+# first run), and the ceiling of 41 that CLAUDE.md quoted did not reproduce against it: 449
+# findings under the resolved config, 9 under ruff's own defaults. Nothing linted `agent/` at
+# all, and CI ran only the test suite. Hence a local table, and `ruff check src tests` in CI.
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# NEVER true here. A linter that edits the tree cannot be a gate: a clean run and a run that
+# silently rewrote 36 files are indistinguishable afterwards. `ruff check --fix` on request.
+fix = false
+exclude = ["campaigns/_runs", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "N", "UP"]
+ignore = [
+  # UP007/UP045 (`X | None` over `Optional[X]`) are the root project's exclusions, kept so the
+  # two trees read the same way.
+  "UP007", "UP045",
+  # N818 wants an `Error` suffix on `CampaignAborted`, `CampaignStopped`,
+  # `SubmissionRejected` and `BackendConstructionTimeout`. Those four names are the written
+  # vocabulary of this project: they appear in docs/decisions, plans/done, docs/limitations.md
+  # and CLAUDE.md, and in sentences like "raises `CampaignStopped` if the campaign ends first"
+  # that are the record of why a seam exists. Renaming them buys nothing at runtime and makes
+  # every one of those sentences wrong, so the rule is declined rather than worked around with
+  # four `noqa`s. Any NEW exception type should carry the suffix.
+  "N818",
+]

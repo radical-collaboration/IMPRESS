@@ -20,8 +20,14 @@ from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from ..core.decision import (CampaignObservation, ComposeAndRun, Decision,
-                             ExperimentIntent, Stop, ValidationFailure)
+from ..core.decision import (
+    CampaignObservation,
+    ComposeAndRun,
+    Decision,
+    ExperimentIntent,
+    Stop,
+    ValidationFailure,
+)
 from .base import BasePolicy
 
 SELF_CONSISTENCY = ["mock_generate", "mock_design", "mock_fold", "mock_score"]

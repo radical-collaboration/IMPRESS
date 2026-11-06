@@ -9,6 +9,7 @@ first test here fails a model that claims `implemented` while still inheriting
 from __future__ import annotations
 
 import pytest
+
 from impress_a.cli import POLICIES, SUBCOMMANDS, build_policy, main
 from impress_a.core.pareto import Objective
 from impress_a.policy import registry as reasoners

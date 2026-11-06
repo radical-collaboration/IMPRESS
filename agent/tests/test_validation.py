@@ -93,14 +93,14 @@ def test_pattern_signature_ignores_parameter_values(reg):
 
 
 def test_interlock_promotes_then_demotes():
-    L = TrustLedger(promote_after=3)
-    L.record_for("sig", ["x"])
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert not L.on_clean_run("sig") and not L.on_clean_run("sig")
-    assert L.on_clean_run("sig"), "third clean run promotes"
-    assert not Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert L.on_failure("sig"), "failure demotes"
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
+    led = TrustLedger(promote_after=3)
+    led.record_for("sig", ["x"])
+    assert Scrutiny.for_pattern(led, "sig").mark_suspect
+    assert not led.on_clean_run("sig") and not led.on_clean_run("sig")
+    assert led.on_clean_run("sig"), "third clean run promotes"
+    assert not Scrutiny.for_pattern(led, "sig").mark_suspect
+    assert led.on_failure("sig"), "failure demotes"
+    assert Scrutiny.for_pattern(led, "sig").mark_suspect
 
 
 def test_trust_ledger_survives_concurrent_writers(tmp_path):
@@ -136,7 +136,8 @@ def test_trust_survives_a_campaign_running_from_a_different_directory(tmp_path, 
     """Promotion has to accumulate across JOBS, and on HPC every job is a fresh CWD.
 
     `spec.root` defaulted to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into a
-    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger resolved inside
+    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger
+    resolved inside
     each job's own directory and started empty every time. On disk after two real runs:
 
         22684607/campaigns/_runs/_trust/cuda.jsonl   0 clean
@@ -216,11 +217,11 @@ def test_run_root_comes_from_the_environment_unless_the_yaml_names_one(tmp_path,
 
 def test_trust_ledger_without_a_path_persists_nothing():
     """The in-memory form is what the validation tier uses; it must not touch disk."""
-    L = TrustLedger(promote_after=2)
-    L.record_for("sig", ["x"])
-    assert L.on_clean_run("sig") is False
-    assert L.on_clean_run("sig") is True
-    assert L.path is None
+    led = TrustLedger(promote_after=2)
+    led.record_for("sig", ["x"])
+    assert led.on_clean_run("sig") is False
+    assert led.on_clean_run("sig") is True
+    assert led.path is None
 
 
 # -- integrity vs acceptance (decision 0013) ------------------------------------------
@@ -359,7 +360,7 @@ def test_replaying_job_22702568_promotes_at_its_third_run(reg, tmp_path):
 
     ex = _executor_with_memory_ledger(tmp_path)
     promoted_at = None
-    for run_id, results in zip(_JOB_22702568, runs):
+    for run_id, results in zip(_JOB_22702568, runs, strict=True):
         assert ex._record_evidence(SimpleNamespace(signature="sig"), results) is False, \
             f"{run_id}: every tool worked, so no run is evidence against the pattern"
         if promoted_at is None and ex.trust.is_trusted("sig"):

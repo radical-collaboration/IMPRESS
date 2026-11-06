@@ -27,8 +27,9 @@ Two constraints on what may live in this file:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .agentic import FourNodePolicy
 from .explicit import ReplayPolicy, ThresholdPolicy

@@ -512,7 +512,8 @@ async def test_boltz_agent_passes_no_kernels(reg, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     pdb = tmp_path / "in.pdb"
-    pdb.write_text("ATOM      1  N   ALA A   1      11.104  13.207   2.100  1.00 20.00           N\n"
+    pdb.write_text("ATOM      1  N   ALA A   1      11.104  13.207   2.100  1.00 20.00"
+                   "           N\n"
                     "END\n")
 
     captured: dict[str, list[str]] = {}

@@ -55,7 +55,7 @@ class ArtifactType(str, Enum):
     METRIC_SET = "MetricSet"
     TRAJECTORY = "Trajectory"
 
-    def unifies_with(self, other: "ArtifactType") -> bool:
+    def unifies_with(self, other: ArtifactType) -> bool:
         """Can a value of type `self` be consumed where `other` is required?"""
         if self is other:
             return True

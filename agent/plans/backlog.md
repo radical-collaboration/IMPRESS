@@ -4,7 +4,7 @@ Everything outstanding. Each item says why it matters so the list can be triaged
 worked through top to bottom. Items resolved since the list was written carry a **RESOLVED**
 paragraph in place rather than being deleted - the evidence that forced them is the useful part.
 
-State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
+State it is measured against: local tier green, lint reporting nothing, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
 on Delta. **One campaign has completed:** job 22692304 ran all six stages to `6/6 tasks ok`
@@ -699,6 +699,23 @@ This belongs to the project-level CI and documentation consolidation, not to a r
 is recorded here because the verification paragraph below currently states a number no configuration
 produces.
 
+**RESOLVED** (phase 0 of `control-plane-refactor.md`). `agent/pyproject.toml` now carries its own
+`[tool.ruff]` at `line-length = 100`, `target-version = "py310"` and **`fix = false`** — a linter
+that edits the tree cannot be a gate, because a clean run and a run that rewrote 36 files are
+indistinguishable afterwards. The residual against that config was **57**, and all 57 were closed
+rather than budgeted: 37 by one deliberate `ruff check --fix`, 20 by hand (10 line reflows, 3 unused
+locals, 3 `zip(strict=)`, 2 semicolons, 2 `N806`, 1 `E741`, 1 `B904`). `N818` is **declined**, not
+worked around — an `Error` suffix on `CampaignAborted`, `CampaignStopped`, `SubmissionRejected` and
+`BackendConstructionTimeout` would falsify every sentence in `docs/decisions/`, `plans/done/` and
+`CLAUDE.md` that names them, for no runtime benefit; the reason sits beside the `ignore` entry.
+`.github/workflows/agent-tests.yml` runs `ruff check src tests` before the suite, and its path
+filter now includes `src/impress/**` and the root `pyproject.toml`, because this package now
+depends on the root one. **The ceiling is zero**, stated in `CLAUDE.md`, so a finding is a
+regression rather than a budget — which is the only form in which a ceiling is worth anything.
+One measurement worth keeping: the 3.2× spread between the numbers quoted here came from *which
+config resolved*, not from drift, and that is why the table a tool reads must live next to the code
+it lints.
+
 **H7. Hardware: paired 1-hour, 1-node runs of B and D.** After H2. One spec, two arms, differing only
 in `--model`, submitted together - `campaigns/delta-small-molecule-arms.yaml` derived from
 `delta-small-molecule-trust.yaml`, 1 node on `gpuA40x4`, 8 GPU-h total. They test the `ControlPolicy`
@@ -731,15 +748,17 @@ paid for out of the first allocation.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
 9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
    then, and now pinned by two characterization tests that must change when it is decided.
-10. **H6 the lint gate**, before anything else in H — it is the reason H1-H5 went unnoticed, and it
-    is cheap. Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
+10. ~~**H6 the lint gate**~~ **DONE** — it was the reason H1-H5 went unnoticed, and it was cheap.
+    Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
     claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
-    after H2, which is what makes it cheap. **H4** and **H5** on demand.
+    after H2, which is what makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now
+    phases 9 and the experiment of [`control-plane-refactor.md`](control-plane-refactor.md).
 
 ## Verification that applies to any item
 
-`pytest tests -q` green, no allocation. `ruff check src tests` **must not exceed 41** — the one
-number worth stating, and a budget that drifts upward is the thing you want to notice. The import
+`pytest tests -q` green, no allocation. `ruff check src tests` **must report nothing** — the one
+number worth stating, and it is zero rather than a budget, so any finding is a regression. It was
+quoted as 41 until H6 found that no configuration produced that number. The import
 contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
 `impress-a run campaigns/delta-small-molecule-smoke.yaml --model D` must compose `rfd3_design…`,

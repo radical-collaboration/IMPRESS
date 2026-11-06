@@ -134,7 +134,7 @@ def print_models() -> int:
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     print()
     for n, row in enumerate(rows):
-        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
+        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip())
         if n == 0:
             print("  " + "  ".join("-" * w for w in widths))
     print()

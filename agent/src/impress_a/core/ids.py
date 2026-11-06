@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import itertools
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 #: Distinguishes ids minted by this interpreter from any other's. Regenerated per process
 #: on purpose - it is an identity, not a seed, and must never be made reproducible.

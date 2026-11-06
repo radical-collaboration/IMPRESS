@@ -43,7 +43,7 @@ class ArtifactRef(BaseModel):
     sha256: str | None = None
     bytes: int | None = None
 
-    def hash_file(self) -> "ArtifactRef":
+    def hash_file(self) -> ArtifactRef:
         """Record size, and content digest for anything small enough to be worth it."""
         if not self.path:
             return self
@@ -99,5 +99,5 @@ class Property(BaseModel):
     def is_measured(self) -> bool:
         return self.source.kind is SourceKind.MEASURED
 
-    def outranks(self, other: "Property") -> bool:
+    def outranks(self, other: Property) -> bool:
         return self.source.authority > other.source.authority

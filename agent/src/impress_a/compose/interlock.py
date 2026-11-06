@@ -44,7 +44,7 @@ class TrustLedger(BaseModel):
     path: str | None = None
 
     @classmethod
-    def load(cls, path: str | Path, **kw) -> "TrustLedger":
+    def load(cls, path: str | Path, **kw) -> TrustLedger:
         led = cls(path=str(Path(path)), **kw)
         led.reload()
         return led
@@ -143,7 +143,7 @@ class Scrutiny(BaseModel):
     mark_suspect: bool = False
 
     @classmethod
-    def for_pattern(cls, ledger: TrustLedger, sig: str) -> "Scrutiny":
+    def for_pattern(cls, ledger: TrustLedger, sig: str) -> Scrutiny:
         if ledger.is_trusted(sig):
             return cls(trusted=True, force_dry_run=False, mark_suspect=False)
         return cls(trusted=False,

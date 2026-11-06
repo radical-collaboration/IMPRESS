@@ -8,7 +8,8 @@ the result passed its clash check.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from ..core.qc import GateOutcome, GateResult, QCReport
 
