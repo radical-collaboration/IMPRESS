@@ -147,9 +147,38 @@ echo "── Step 2: Bootstrapping pip ──"
 "${PIP}" install -q --force-reinstall "setuptools<71"
 
 # ── 3. IMPRESS-A itself (editable), pulling radical.asyncflow + rhapsody-py ───
+#
+# TWO installs, and the root one goes FIRST. IMPRESS-A depends on `impress`, the package at
+# the repository root, which is published on no index. Install IMPRESS-A alone and pip resolves
+# that name against PyPI and installs whatever happens to be registered there - a dependency
+# confusion exposure, and a silent one: the import succeeds and returns the wrong module.
+#
+# A `git+https://...@<commit>` pin in pyproject.toml would also close it, but at the cost of
+# making every install fetch from GitHub rather than use the checkout in front of it, which is
+# wrong for an editable workflow where `agent/` and `src/impress/` are developed together.
+# Order plus verification is the cheaper correct answer, so Step 3c asserts the result.
 echo ""
-echo "── Step 3: IMPRESS-A (editable, pulls radical.asyncflow>=0.5.1, rhapsody-py>=0.5.0) ──"
+echo "── Step 3: impress (editable, from the repository root) ──"
+"${PIP}" install -q -e "${IMPRESS_A_DIR}/.."
+
+echo ""
+echo "── Step 3a: IMPRESS-A (editable, pulls radical.asyncflow>=0.5.1, rhapsody-py>=0.5.0) ──"
 "${PIP}" install -q -e "${IMPRESS_A_DIR}[dev]"
+
+# ── 3c. Prove `impress` is the one in this checkout, not one from an index ────
+echo ""
+echo "── Step 3c: verifying the installed impress ──"
+"${PY}" - "${IMPRESS_A_DIR}" <<'EOF'
+import pathlib, sys
+import impress
+repo = pathlib.Path(sys.argv[1]).resolve().parent
+got = pathlib.Path(impress.__file__).resolve()
+want = repo / "src" / "impress" / "__init__.py"
+if got != want:
+    sys.exit(f"FAIL: `impress` resolved to {got}, not {want}. A package of that name was "
+             f"installed from an index. Uninstall it and re-run this script.")
+print(f"  ok  impress -> {got}")
+EOF
 
 # pyproject.toml's base rhapsody-py dependency has no [dragon] extra - install it
 # explicitly, or Dragon backend resolution (exec/backend.py's get_backend("dragon", ...))

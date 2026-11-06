@@ -37,9 +37,19 @@ echo "== installing impress (editable, from $ROOT)"
 echo "== installing impress-a with dev extras (editable)"
 .venv/bin/pip install --quiet -e ".[dev]"
 
-echo "== versions"
-.venv/bin/python - <<'EOF'
+# Verify rather than trust the order: `impress` is on no index, so if pip went looking for the
+# name and found something, the import below succeeds and returns the wrong module. Failing hard
+# here is the difference between a confusing campaign and a one-line error.
+echo "== verifying"
+.venv/bin/python - "$ROOT" <<'EOF'
+import pathlib, sys
 import impress, radical.asyncflow as af, rhapsody
+repo = pathlib.Path(sys.argv[1]).resolve()
+got = pathlib.Path(impress.__file__).resolve()
+want = repo / "src" / "impress" / "__init__.py"
+if got != want:
+    sys.exit(f"FAIL: `impress` resolved to {got}, not {want} - a package of that name came "
+             f"from an index. `pip uninstall impress` and re-run this script.")
 print(f"  impress            {impress.__all__}")
 print(f"  radical.asyncflow  {af.__version__}")
 print(f"  rhapsody           {getattr(rhapsody, '__version__', 'installed')}")

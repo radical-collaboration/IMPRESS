@@ -459,6 +459,35 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
 
+    # The `impress` dependency is published on no index, so if pip ever went looking for that
+    # name it installed something else - and the failure is silent, because the import succeeds
+    # and hands back a working module that is simply not ours. Both installers put the root
+    # editable install first to prevent that; this proves the result on the machine that will
+    # run the campaign. Deterministic either way, so never undetermined.
+    # `find_spec`, not `import`: this resolves the name without executing the module, so
+    # preflight stays cheap and the import surface for the root package stays at exactly the two
+    # modules `tests/test_layering.py` allows. Checking where a dependency resolves to does not
+    # require depending on it.
+    try:
+        import importlib.util
+
+        import impress_a as _ia
+        found = importlib.util.find_spec("impress")
+        origin = Path(found.origin).resolve() if found and found.origin else None
+        want = Path(_ia.__file__).resolve().parents[3] / "src" / "impress" / "__init__.py"
+        if origin is None:
+            checks.append(("impress package", False,
+                           "not installed - run scripts/dev_setup.sh (or step 3 of "
+                           "scripts/delta_env_setup.sh), which installs it from the root"))
+        else:
+            checks.append(("impress package", origin == want,
+                           f"{origin}" if origin == want else
+                           f"resolved to {origin}, not {want} - a package of that name came "
+                           f"from an index; `pip uninstall impress` and re-run "
+                           f"scripts/dev_setup.sh"))
+    except (ImportError, ValueError) as e:
+        checks.append(("impress package", False, f"could not resolve: {e!r}"))
+
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
 
