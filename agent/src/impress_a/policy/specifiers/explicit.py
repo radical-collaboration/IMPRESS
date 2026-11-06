@@ -21,11 +21,13 @@ objective may name any earlier node, so re-specifying never costs the population
 the mechanism phase 8 makes executable by feeding a parent's artifacts into a child chain. The
 legacy cascade raised `diffusion_steps` instead, which asks for the same draw again, harder.
 
-Satisfaction stays inherited and rule-driven. Worth knowing why that is safe for a refinement
-objective: `DataRegistry.satisfies` counts *hits* rather than reading one value, so an
-objective asking for one more design over a threshold is satisfied by one more design over the
-threshold - not by its parent's own measurement, which was already on the record when the
-objective was created.
+Satisfaction stays inherited and rule-driven, but a refinement objective needs its threshold
+**bound to new evidence** or it satisfies itself. `DataRegistry.satisfies` counts hits against
+everything realized so far, and the parent's own measurement is by definition already on the
+record when the objective is created - so a default `n=1` rule is met the instant the objective
+exists. That also defeats the open-refinement cap, because an objective satisfied immediately
+leaves the open set and the next signal adds another: the Spec grows every cycle. Hence
+`n = hits + 1` at creation, which is what "one MORE design over the threshold" has to mean.
 """
 from __future__ import annotations
 
@@ -111,6 +113,18 @@ class ThresholdSpecifier(BaseSpecifier):
         if goal_obj is None:
             return SpecRevision()
 
+        # Bind the threshold to NEW evidence. Satisfaction counts hits against everything
+        # realized so far, and the parent's own measurement is already among them, so a
+        # default rule would be satisfied the moment this objective is created - and the
+        # open-refinement cap would then never bind, because a satisfied objective is not an
+        # open one. `hits + 1` is what "one more design over the threshold" means.
+        rule = SatisfactionRule(kind="metric_in_range", metric=target,
+                                min=goal_obj.min, max=goal_obj.max)
+        bound = rule.as_objective()
+        hits = sum(1 for d in ev.data.metrics(target)
+                   if bound is not None and bound.satisfied_by(d.value))
+        rule = rule.model_copy(update={"n": hits + 1})
+
         aim = None
         if self._refinement_aim is None or self._refinement_aim not in spec.aims:
             aim = Aim(statement="refine the best design so far")
@@ -122,8 +136,7 @@ class ThresholdSpecifier(BaseSpecifier):
                 statement=f"improve {target} on {best.id}",
                 targets=[target],
                 parent_node=best.id,
-                satisfied_when=SatisfactionRule(kind="metric_in_range", metric=target,
-                                                min=goal_obj.min, max=goal_obj.max),
+                satisfied_when=rule,
             )],
             rationale=f"{self.name}: refine {best.id} on {target}")
 

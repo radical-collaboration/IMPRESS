@@ -21,6 +21,15 @@ class PatternRecord(BaseModel):
     clean_runs: int = 0
     trusted: bool = False
     demotions: int = 0
+    #: True when trust was GRANTED rather than earned. Never conflated with `trusted`: a
+    #: figure derived from an asserted-trusted admission must be reportable as such, or
+    #: "this pattern earned trust over three clean runs" becomes a claim nobody can check.
+    asserted: bool = False
+    #: Who granted it, why, and against which commit. Empty for earned trust.
+    asserted_by: str = ""
+    asserted_reason: str = ""
+    asserted_at: str = ""
+    git_sha: str = ""
 
 
 class TrustLedger(BaseModel):
@@ -86,6 +95,18 @@ class TrustLedger(BaseModel):
                 r.demotions += 1
             r.trusted = False
             r.clean_runs = 0
+            r.asserted = False      # a demoted assertion was wrong; it does not survive it
+        elif event == "asserted":
+            r.trusted = True
+            r.asserted = True
+            r.asserted_by = e.get("by", "")
+            r.asserted_reason = e.get("reason", "")
+            r.asserted_at = e.get("ts", "")
+            r.git_sha = e.get("git_sha", "")
+        elif event == "revoked":
+            r.trusted = False
+            r.asserted = False
+            r.clean_runs = 0
 
     def _append(self, event: str, sig: str, **extra: Any) -> None:
         if not self.path:
@@ -120,14 +141,72 @@ class TrustLedger(BaseModel):
             return True
         return False
 
+    def assert_trusted(self, sig: str, tools: list[str], *, reason: str, by: str = "",
+                       git_sha: str = "") -> PatternRecord:
+        """Grant trust to a pattern whose Tasks are proven outside this system.
+
+        The pre-loaded Toolkit is the six-stage chain from
+        `examples/small_molecule_binding`, which has months of multi-node campaigns behind it.
+        Spending an allocation re-earning trust for it buys nothing: promotion costs three
+        consecutive clean runs under a forced dry-run, a 10%-of-available cost cap and
+        one-instance-in-flight, and backlog A10 is the case where that is not merely wasteful
+        but impossible - replica multiplicity is part of the signature, so width 4 can never
+        earn trust under a realistic budget and would stay serialised behind the
+        one-in-flight rule forever.
+
+        **This widens the residual risk ADR 0003 accepts.** 0003 accepts that a *consistent*
+        novel silent failure will promote; an asserted pattern never receives the examination
+        and delay the interlock buys at all. The justification is external evidence plus a
+        passing `impress-a validate-tasks` on the same hardware - never fiat - and
+        `asserted_reason` is where that justification is recorded.
+
+        **Not three forged `clean` events.** That would also produce a trusted record, and
+        would be indistinguishable from earned evidence afterwards - corrupting the one log
+        the interlock reasons from. Hence a distinct event kind.
+
+        Demotion still applies: `on_failure` clears `asserted` along with `trusted`, because a
+        demoted assertion was wrong and should not survive being disproved.
+        """
+        if not reason.strip():
+            raise ValueError("an assertion needs a reason: it is the justification on the "
+                             "record, and the thing a later reader will ask for")
+        r = self.record_for(sig, tools)
+        self._append("asserted", sig, tools=sorted(set(tools)), reason=reason, by=by,
+                     git_sha=git_sha)
+        r.trusted = True
+        r.asserted = True
+        r.asserted_by = by
+        r.asserted_reason = reason
+        r.git_sha = git_sha
+        return r
+
+    def revoke(self, sig: str, *, reason: str) -> bool:
+        """Withdraw an assertion. Returns False if the pattern was not trusted."""
+        r = self.patterns.get(sig)
+        if r is None or not r.trusted:
+            return False
+        self._append("revoked", sig, reason=reason)
+        r.trusted = False
+        r.asserted = False
+        r.clean_runs = 0
+        return True
+
     def on_failure(self, sig: str) -> bool:
-        """Demotion is symmetric: trust decays on evidence. Returns True if demoted."""
+        """Demotion is symmetric: trust decays on evidence. Returns True if demoted.
+
+        Clears `asserted` as well as `trusted`, and must: a demoted assertion was wrong, and
+        should not survive being disproved. It also has to match what `_apply` does when the
+        log is re-folded, or the live record and `reload()` would answer differently - the kind
+        of divergence that shows up as a pattern being trusted in one process and not in the
+        next.
+        """
         r = self.patterns.get(sig)
         if r is None:
             return False
         was = r.trusted
         self._append("failure", sig)
         r.trusted = False
+        r.asserted = False
         r.clean_runs = 0
         if was:
             r.demotions += 1

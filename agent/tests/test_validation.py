@@ -460,3 +460,107 @@ def test_shipped_campaigns_carry_no_absolute_checkout_paths():
     for f in pathlib.Path("campaigns").glob("*.yaml"):
         assert "/work/" not in f.read_text(), f
     assert "/work/" not in pathlib.Path("campaigns/data/alr/ALR_binder_design.json").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Asserted trust (phase 3 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_asserted_trust_skips_the_cap_and_the_forced_dry_run(tmp_path):
+    """A pre-loaded Toolkit of proven Tasks should not re-earn trust at runtime.
+
+    Promotion costs three consecutive clean runs under a forced dry-run, a 10%-of-available
+    cost cap and one-instance-in-flight. For a wide pattern that is not merely wasteful but
+    impossible: replica multiplicity is part of the signature, so width 4 can never reach three
+    clean runs under a realistic budget while the one-in-flight rule serialises it (backlog
+    A10).
+    """
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["rfd3_design"], reason="proven elsewhere", by="tester")
+
+    s = Scrutiny.for_pattern(led, "sig")
+    assert s.trusted and not s.force_dry_run and not s.mark_suspect
+    assert s.cost_cap_fraction is None
+
+
+def test_asserted_trust_is_distinguishable_from_earned_trust(tmp_path):
+    """Or "this pattern earned trust over three clean runs" becomes uncheckable.
+
+    Three forged `clean` events would also produce a trusted record, and would be
+    indistinguishable from evidence afterwards - which is why the ledger has a distinct event
+    kind rather than a documented convention.
+    """
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("granted", ["x"], reason="proven elsewhere", by="tester",
+                       git_sha="abc123")
+    led.record_for("earned", ["y"])
+    for _ in range(3):
+        led.on_clean_run("earned")
+
+    assert led.patterns["granted"].trusted and led.patterns["granted"].asserted
+    assert led.patterns["granted"].asserted_reason == "proven elsewhere"
+    assert led.patterns["granted"].git_sha == "abc123"
+    assert led.patterns["earned"].trusted and not led.patterns["earned"].asserted
+    assert led.patterns["earned"].clean_runs == 3
+    assert led.patterns["granted"].clean_runs == 0, \
+        "an assertion is not evidence, so it must not look like three runs of it"
+
+
+def test_an_assertion_accumulates_no_phantom_promotion(tmp_path):
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.on_clean_run("sig") is False, "already trusted; nothing to promote"
+    assert led.patterns["sig"].clean_runs == 0
+
+
+def test_an_asserted_pattern_still_demotes_and_does_not_survive_it(tmp_path):
+    """Demotion applies, and is a FINDING: it says the assertion was wrong.
+
+    The in-memory record and a re-fold of the log must agree, or a pattern is trusted in one
+    process and not in the next.
+    """
+    path = tmp_path / "cuda.jsonl"
+    led = TrustLedger.load(path)
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.on_failure("sig") is True, "demoting an asserted pattern is a demotion"
+    live = (led.patterns["sig"].trusted, led.patterns["sig"].asserted)
+
+    refolded = TrustLedger.load(path)
+    assert live == (False, False)
+    assert live == (refolded.patterns["sig"].trusted, refolded.patterns["sig"].asserted)
+    assert refolded.patterns["sig"].demotions == 1
+
+
+def test_an_assertion_without_a_reason_is_refused(tmp_path):
+    """The reason is the justification on the record, and what a later reader will ask for."""
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    with pytest.raises(ValueError, match="needs a reason"):
+        led.assert_trusted("sig", ["x"], reason="   ")
+    assert "sig" not in led.patterns or not led.patterns["sig"].trusted
+
+
+def test_revoking_withdraws_an_assertion(tmp_path):
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.revoke("sig", reason="superseded") is True
+    assert not led.patterns["sig"].trusted and not led.patterns["sig"].asserted
+    assert led.revoke("sig", reason="again") is False, "nothing left to revoke"
+
+
+def test_asserting_at_one_width_does_not_trust_another(reg):
+    """Backlog A10, as a property of the signature rather than a footnote.
+
+    The pattern signature includes replica multiplicity, so trust earned - or granted - at
+    width 1 does not transfer to width 4. `impress-a trust --replicas` therefore takes the
+    widths a campaign will actually run.
+    """
+    composer = Composer(reg)
+    narrow = composer.compose(ExperimentIntent(goal="g", stages=["mock_generate"], replicas=1))
+    wide = composer.compose(ExperimentIntent(goal="g", stages=["mock_generate"], replicas=4))
+    assert narrow.pattern_signature() != wide.pattern_signature()
+
+    led = TrustLedger()
+    led.assert_trusted(narrow.pattern_signature(), ["mock_generate"], reason="proven at 1")
+    assert led.is_trusted(narrow.pattern_signature())
+    assert not led.is_trusted(wide.pattern_signature()), \
+        "asserting at width 1 must not trust width 4"

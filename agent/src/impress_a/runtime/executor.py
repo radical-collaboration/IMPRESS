@@ -67,6 +67,13 @@ class CampaignSpec:
     max_runs: int = 0         # submissions; 0 = unbounded. See `max_cycles`.
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
+    # Backstop for runs exempted from the stagnation counter. A run that could not reach the
+    # front is not evidence of stagnation (backlog G1) - but an exemption with no bound is
+    # fail-open, and a campaign whose chain can NEVER produce a constrained objective would
+    # then burn its whole allocation at full speed. This is not a search-shaping knob: it sits
+    # well above any legitimate run of exploration, and tripping it means the chain is wrong
+    # rather than unlucky.
+    max_unproductive_runs: int = 8
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -189,6 +196,9 @@ class CampaignExecutor:
         self.pending_human: RequestHuman | None = None
         self.prov_sink: Any = None
         self._stagnant = 0
+        # Consecutive absorbed runs that could not have reached the front. Reset by any run
+        # that could.
+        self._unproductive = 0
         # Absorptions counted toward stagnation so far. Runs admitted before this
         # watermark were already in flight when the last counted result landed.
         self._counted_through = 0
@@ -296,7 +306,12 @@ class CampaignExecutor:
             objectives=self.spec.objectives, pareto_front=front, population=stats,
             recent=[self.tree.get(nid) for nid in self._absorbed[cursor:]],
             seq=len(self._absorbed),
-            budget=self.budget, available_tools=self.reg.ids(),
+            # The NARROWED ids, not the registry's. These go straight into model B's prompt
+            # (`policy/oracle.py`), so the full list told a real campaign that the mock
+            # toolkit was available - the mock-chain-on-a-GPU hazard surviving in the half
+            # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
+            # this one is derived from the other.
+            budget=self.budget, available_tools=self._toolkit.ids,
             toolkit=self._toolkit, spec=self.spec_state,
             last_rejection=last_rejection)
 
@@ -365,6 +380,16 @@ class CampaignExecutor:
         construction: a run that can produce every constrained objective counts exactly as
         it did.
         """
+        # The exemption's own counter. Tracked separately because the two say different
+        # things: `_stagnant` means "work that could have progressed did not", and this means
+        # "nothing that could progress has been attempted". They need different stop reasons,
+        # or a reader cannot tell a search that stalled from a chain that was never able to
+        # score.
+        if rec.could_reach_the_front:
+            self._unproductive = 0
+        else:
+            self._unproductive += 1
+
         ids = {n.id for n in pareto_front(self.tree.live(), self.spec.objectives)}
         if ids != self._last_front_ids:
             self._last_front_ids, self._stagnant = ids, 0
@@ -776,6 +801,17 @@ class CampaignExecutor:
         if self._note_progress(rec):
             self.request_stop(
                 f"stagnation: front unchanged over {self._stagnant} informed attempts")
+        elif (self.spec.max_unproductive_runs
+                and self._unproductive >= self.spec.max_unproductive_runs):
+            # A distinct reason, deliberately. "Stagnation" would say the search stalled;
+            # this says nothing capable of scoring was ever attempted, which is a different
+            # defect with a different fix - almost always a chain that cannot produce a
+            # constrained objective. Exempting these runs from the stagnation counter (G1) is
+            # correct, but an exemption with no bound is fail-open, and on an allocation that
+            # is measured in GPU-hours.
+            self.request_stop(
+                f"{self._unproductive} consecutive runs could not produce a constrained "
+                f"objective, so none could reach the front")
         elif blown := self.budget.exhausted():
             self.request_stop(f"budget exhausted: {blown}")
 

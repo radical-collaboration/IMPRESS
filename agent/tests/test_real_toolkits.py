@@ -24,6 +24,7 @@ from impress_a.core.decision import CampaignObservation, ExperimentIntent
 from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
+from impress_a.core.results import RunOutcome, RunState, TaskOutcome
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.policy.specifier import SpecEvidence
@@ -1191,3 +1192,43 @@ async def test_the_specifier_exploits_by_adding_a_refinement_objective(reg):
     spec.apply(rev)
     assert (await sp.revise(spec, ev)).is_empty, \
         "one open refinement at a time, or the Spec grows without bound and never completes"
+
+
+async def test_a_refinement_objective_is_not_satisfied_by_its_parents_own_measurement(reg):
+    """Bound to NEW evidence, or it satisfies itself the moment it exists.
+
+    `DataRegistry.satisfies` counts hits against everything realized so far, and the parent's
+    measurement is by definition already among them - so a default `n=1` rule is met at
+    creation. That also defeats the open-refinement cap, because an objective satisfied
+    immediately is not an open one, so the next signal adds another and the Spec grows every
+    cycle. `n = hits + 1` is what "one MORE design over the threshold" has to mean.
+    """
+    goal = _real_goal()
+    sp = ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+
+    node = DesignNode()
+    for name, value in (("shape_complementarity", 0.56), ("complex_plddt", 0.95),
+                        ("ligand_iptm", 0.9), ("total_score", -300.0)):
+        node.properties[name] = Property(name=name, value=value,
+                                         source=PropertySource(name="t"))
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal=goal.text,
+                              objectives=goal.objectives, toolkit=view_of(reg, CHAIN),
+                              spec=spec, pareto_front=[node])
+    # The parent's own numbers are on the record, exactly as they would be in a real campaign.
+    data = DataRegistry()
+    data.ingest(RunOutcome(run_id="r1", graph_id="g1", state=RunState.DONE, nodes=[node.id],
+                           tasks=[TaskOutcome(task_id="t1", tool="filter_shape",
+                                              metrics={"shape_complementarity": 0.56})]))
+    ev = SpecEvidence(obs, data)
+
+    rev = await sp.revise(spec, ev)
+    added = rev.new_objectives[0]
+    assert added.satisfied_when.n == 2, (
+        "one existing hit, so satisfaction needs a second - otherwise the objective is met "
+        "before any new work runs")
+    spec.apply(rev)
+    assert not data.satisfies(added.satisfied_when), \
+        "the parent's measurement alone must not satisfy a refinement of it"
+    assert [o.id for o in spec.open_objectives() if o.parent_node] == [added.id], \
+        "and it stays OPEN, so the one-at-a-time cap actually binds"

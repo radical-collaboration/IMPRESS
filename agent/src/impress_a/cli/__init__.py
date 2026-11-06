@@ -13,7 +13,10 @@ from typing import Any
 
 import yaml
 
+from ..compose.composer import Composer
+from ..compose.interlock import TrustLedger
 from ..compose.validate import SiteCaps
+from ..core.decision import ExperimentIntent
 from ..core.pareto import Objective
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
@@ -34,7 +37,7 @@ POLICIES = reasoners.CLASSES
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
-SUBCOMMANDS = ("run", "tools", "models", "preflight")
+SUBCOMMANDS = ("run", "tools", "models", "preflight", "trust")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -144,6 +147,102 @@ def _halves_of(policy: Any):
     from ..policy.legacy import DecideAsRoles
     pair = DecideAsRoles(policy)
     return pair.specifier, pair.planner
+
+
+def _git_sha() -> str:
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+                             text=True, timeout=5, cwd=str(Path(__file__).resolve().parents[3]))
+        sha = out.stdout.strip() if out.returncode == 0 else ""
+        dirty = subprocess.run(["git", "status", "--porcelain", "-uno"], capture_output=True,
+                               text=True, timeout=5,
+                               cwd=str(Path(__file__).resolve().parents[3]))
+        return f"{sha}{'-dirty' if dirty.stdout.strip() else ''}" if sha else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _signatures_for(spec: CampaignSpec, widths: list[int]) -> list[tuple[str, list[str], int]]:
+    """The pattern signatures a campaign will actually compose, one per replica width.
+
+    Computed by composing the campaign's own chain rather than guessed, because the signature
+    is a hash of graph shape and **includes replica multiplicity** - asserting at width 1 does
+    not trust width 4, which is the whole of backlog A10. `--replicas` therefore takes the
+    widths the campaign will run, and a campaign that will fan out to 4 must say so here.
+    """
+    reg = Registry().load()
+    composer = Composer(reg)
+    out = []
+    for width in widths:
+        intent = ExperimentIntent(goal=spec.goal, stages=list(spec.stages),
+                                  params=dict(spec.params), replicas=width)
+        graph = composer.compose(intent, run_label="trust-assert")
+        tools = sorted({n.tool for n in graph.nodes.values()})
+        out.append((graph.pattern_signature(), tools, width))
+    return out
+
+
+def trust(spec_path: str | None, do_assert: bool, revoke: str | None, reason: str,
+          widths: list[int]) -> int:
+    """Grant, list or withdraw trust for the composition patterns a campaign runs.
+
+    A pre-loaded Toolkit of Tasks proven elsewhere should not spend an allocation re-earning
+    trust at runtime, and for a wide pattern it *cannot*: promotion counts consecutive clean
+    runs, and replica multiplicity is part of the signature, so width 4 can never reach three
+    clean runs under a realistic budget while the one-instance-in-flight rule serialises it.
+
+    What this does not do is pretend the trust was earned. The ledger records an `asserted`
+    event with who, why and the commit, and every listing distinguishes it - because a figure
+    derived from an asserted admission has to be reportable as such.
+    """
+    ledger_dir = Path(os.environ.get("IMPRESS_A_TRUST_DIR", "")
+                      or (Path(load_spec(spec_path).root) / "_trust" if spec_path
+                          else "campaigns/_runs/_trust"))
+    api = os.environ.get("IMPRESS_A_GPU_API", "cuda")
+    led = TrustLedger.load(ledger_dir / f"{api}.jsonl")
+    print(f"\n  trust ledger: {(ledger_dir / f'{api}.jsonl').resolve()}")
+
+    if revoke:
+        ok = led.revoke(revoke, reason=reason or "revoked from the command line")
+        print(f"  {'revoked' if ok else 'not trusted, nothing to revoke'}: {revoke}")
+        return 0 if ok else 1
+
+    if do_assert:
+        if not spec_path:
+            print("  --assert needs a campaign spec: the signature is computed from its chain")
+            return 1
+        if not reason.strip():
+            print("  --assert needs --reason: it is the justification on the record, and what "
+                  "a later reader will ask for")
+            return 1
+        spec = load_spec(spec_path)
+        if not spec.stages:
+            print("  that campaign declares no stages, so there is no chain to assert")
+            return 1
+        sha = _git_sha()
+        for sig, tools, width in _signatures_for(spec, widths):
+            led.assert_trusted(sig, tools, reason=reason, by=os.environ.get("USER", ""),
+                               git_sha=sha)
+            print(f"  asserted {sig}  replicas={width}  ({', '.join(tools)})")
+        print(f"  reason: {reason}")
+        if sha:
+            print(f"  git:    {sha}")
+
+    rows = [("signature", "trust", "clean", "demotions", "tools")]
+    for sig in sorted(led.patterns):
+        r = led.patterns[sig]
+        rows.append((sig, "asserted" if r.asserted else "earned" if r.trusted else "-",
+                     str(r.clean_runs), str(r.demotions), ",".join(r.tools)))
+    widths_ = [max(len(c) for c in col) for col in zip(*rows, strict=True)]
+    print()
+    for n, row in enumerate(rows):
+        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths_, strict=True)).rstrip())
+        if n == 0:
+            print("  " + "  ".join("-" * w for w in widths_))
+    if len(rows) == 1:
+        print("  (no patterns known at this site yet)")
+    return 0
 
 
 def print_models() -> int:
@@ -578,6 +677,17 @@ def main(argv: list[str] | None = None) -> int:
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
+    tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
+    tr.add_argument("spec", nargs="?", default=None)
+    tr.add_argument("--assert", dest="do_assert", action="store_true",
+                    help="grant trust to the patterns this campaign composes")
+    tr.add_argument("--revoke", default=None, metavar="SIGNATURE")
+    tr.add_argument("--reason", default="",
+                    help="why (required for --assert; it is the record)")
+    tr.add_argument("--replicas", type=int, action="append", default=None, metavar="N",
+                    help="replica width to assert at, repeatable. The signature includes "
+                         "replica multiplicity, so width 1 does not cover width 4 "
+                         "(backlog A10). Default: the campaign's own `replicas`")
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
@@ -586,6 +696,11 @@ def main(argv: list[str] | None = None) -> int:
                                         planner=a.planner))
     if a.cmd == "models":
         return print_models()
+    if a.cmd == "trust":
+        widths = a.replicas
+        if widths is None:
+            widths = [max(1, load_spec(a.spec).replicas)] if a.spec else [1]
+        return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec) if a.spec else None)
     reg = Registry().load(a.toolkits)

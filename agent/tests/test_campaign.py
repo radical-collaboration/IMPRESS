@@ -873,6 +873,8 @@ async def test_a_truncated_chain_does_not_count_toward_stagnation(reg, tmp_path)
     assert "max_cycles" in res.stop_reason, (
         f"the allocation should be what ends it, not the counter: {res.stop_reason}")
     assert res.cycles == s.max_cycles, "every cycle it was given was used"
+    # The exemption is bounded, not open - see the test below. Four cycles is under the
+    # default `max_unproductive_runs`, so this campaign ends where it was told to.
 
 
 async def test_stagnation_still_counts_a_chain_that_could_have_moved_the_front(reg, tmp_path):
@@ -1041,3 +1043,73 @@ async def test_an_unbounded_objective_never_completes_the_spec(reg, tmp_path):
 
     assert res.stop_reason != "every spec objective satisfied"
     assert "max_cycles" in res.stop_reason
+
+
+async def test_the_stagnation_exemption_is_bounded(reg, tmp_path):
+    """An exemption with no counter is fail-open, and on HPC that is a whole allocation.
+
+    G1 is right that a run which could not have reached the front is not evidence of
+    stagnation - but if NO run can, the stagnation counter never advances and a campaign whose
+    chain can never produce a constrained objective runs at full speed to its cycle limit. The
+    first version of the G1 fix did exactly that, and the test above locked it in.
+
+    The stop reason is deliberately distinct: "stagnation" would say the search stalled, where
+    this says nothing capable of scoring was ever attempted. Different defect, different fix -
+    almost always a chain that cannot produce a constrained objective rather than an unlucky
+    one.
+    """
+    s = spec("t-unproductive", max_cycles=20, stagnation_limit=99, concurrency=1)
+    s.max_unproductive_runs = 3
+    s.root = str(tmp_path)
+    res = await CampaignManager(
+        s, ThresholdPolicy(stages=["mock_generate", "mock_design"], max_cycles=99,
+                           target_front=99), reg).run()
+
+    assert "could not produce a constrained objective" in res.stop_reason, res.stop_reason
+    assert not res.stop_reason.startswith("stagnation:"), \
+        "a chain that can never score is not a stalled search"
+    assert res.cycles <= s.max_unproductive_runs + 1
+    assert res.cycles < s.max_cycles, "it did not burn the allocation"
+
+
+async def test_a_productive_run_resets_the_unproductive_counter(reg, tmp_path):
+    """The bound counts CONSECUTIVE unproductive runs, so exploration between exploits is free.
+
+    Without this the backstop would be a cap on total exploration, which is a search-shaping
+    knob - and that is exactly what G1 ruled out.
+    """
+    s = spec("t-unproductive-reset", max_cycles=6, stagnation_limit=99, concurrency=1)
+    s.max_unproductive_runs = 2
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+
+    ex._unproductive = 1
+    ex._note_progress(_rec(could_reach=True))
+    assert ex._unproductive == 0, "a run that could have scored clears the backstop"
+    ex._note_progress(_rec(could_reach=False))
+    ex._note_progress(_rec(could_reach=False))
+    assert ex._unproductive == 2
+
+
+def _rec(could_reach: bool):
+    from types import SimpleNamespace
+    return SimpleNamespace(informed_by=0, could_reach_the_front=could_reach)
+
+
+async def test_available_tools_is_narrowed_to_the_campaigns_stages(reg, tmp_path):
+    """One list, derived from the other - because this one goes into model B's prompt.
+
+    `policy/oracle.py` renders `available_tools` verbatim, so the registry's full list told a
+    real campaign that the mock toolkit was available. That is the mock-chain-on-a-GPU hazard
+    in the half the typed `toolkit` view did not cover, and two lists describing the same thing
+    disagree eventually.
+    """
+    s = spec("t-narrowed", stages=["mock_generate", "mock_fold"])
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    obs = mgr.observe()
+
+    assert obs.available_tools == ["mock_fold", "mock_generate"]
+    assert obs.toolkit is not None and obs.toolkit.ids == obs.available_tools
+    assert "mock_noodle" not in obs.available_tools, \
+        "a tool the campaign did not enable must not be offered to a reasoner"
