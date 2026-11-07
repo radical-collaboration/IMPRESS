@@ -34,19 +34,9 @@ decision quality" had no parameter axis at all.
 
 **How a parameter is chosen, and why from prose.** The only thing a spec says about what
 raising a parameter buys is its `trades` sentence, and `ParamCard` carries it for exactly this.
-Read across every shipped tool, that prose uses a small and consistent vocabulary:
-
-    quality vs wall-clock | accuracy vs wall-clock | convergence vs cpu-hours
-    coverage vs GPU-hours | sampling vs cpu-hours  | diversity vs recovery
-    candidates per pass   | samples per call       | per-lineage draw
-
-The first group is what a refinement wants: more of the same draw, computed harder. The second
-is breadth, and breadth is deliberately NOT this planner's parameter axis - it comes from
-`replicas` and from the internal sampling the specs already set to 8 where the adapter selects
-from the ensemble. `rfd3_design`'s own spec says `num_designs` stays at 1 because its adapter
-still keeps index 0, so a planner that escalated "coverage" would pay N times for one design.
-The third group is identity, never tuned: a planner that moved `seed` would break the
-independence of the lineages it is being credited for.
+`_knobs.py` holds the reading - which sentence means quality, breadth, diversity or lineage
+identity, and why only the first two may be moved - shared with the other planner halves,
+because what a parameter means is a property of the Toolkit rather than of a control model.
 
 So: **exploring changes no parameter, refining escalates the quality knobs.** A rule-driven arm
 has no business inventing a parameter vector from no evidence, and it is the same explore/exploit
@@ -60,22 +50,14 @@ chain and so cannot change what the Stage can measure.
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from ...core.decision import ValidationFailure
 from ...core.spec import Deferral, Spec, SpecObjective, Stage, TaskMapping
-from ...core.toolkit import ParamCard, TaskCard, ToolkitView
+from ...core.toolkit import TaskCard, ToolkitView
 from ..explicit import SELF_CONSISTENCY
 from ..planner import BasePlanner, PlanningContext
-
-#: `trades` words meaning "raising this computes the same draw harder". The refinement axis.
-QUALITY_TERMS = ("quality", "accuracy", "convergence")
-
-#: `trades` words meaning "raising this draws more". Deliberately not tuned here: breadth is
-#: `replicas` plus the internal sampling the specs already declare, and an adapter that keeps
-#: index 0 turns a raise into an N-times bill for one design (`rfd3_design`'s own comment).
-BREADTH_TERMS = ("coverage", "sampling", "samples", "candidates", "diversity", "passes")
+from ._knobs import kind_of, step_up, tunable
 
 #: How many escalation steps span a parameter's declared headroom. Four, so a refinement
 #: campaign reaches the declared maximum in four refinements rather than in one jump - the
@@ -294,48 +276,22 @@ class ThresholdPlanner(BasePlanner):
         Empty while exploring, which is not an omission: the campaign's own `params` and the
         spec's declared defaults are the right values for a first draw, and a rule-driven arm
         inventing a parameter vector from no evidence would be noise attributed to a decision.
+
+        On a refinement, one step up every quality knob the tool declares. Which parameters
+        those are comes from `_knobs.kind_of`, so breadth and lineage identity are left alone
+        for the reasons recorded there - and a parameter whose `trades` sentence says nothing,
+        or says two things, keeps its declared value.
         """
         if not refining:
             return {}
         out: dict[str, Any] = {}
         for name, param in card.parameters.items():
-            if name in card.frozen:
+            if not tunable(param, card.frozen, name) or kind_of(param) != "quality":
                 continue
-            value = self._escalate(param)
+            value = step_up(param, self.refinements, self.escalation_steps)
             if value is not None:
                 out[name] = value
         return out
 
-    def _escalate(self, param: ParamCard) -> Any:
-        """One step up a quality knob, or None if this parameter is not one.
 
-        `None` for: a frozen name (handled by the caller), a breadth or identity parameter, a
-        non-numeric one, a parameter with no declared maximum or no default to move from, and
-        one already at its maximum. Each of those is a parameter a raise would either corrupt
-        or waste, and saying nothing about it leaves the declared value in force.
-        """
-        trades = (param.trades or "").lower()
-        if not any(term in trades for term in QUALITY_TERMS):
-            return None
-        if any(term in trades for term in BREADTH_TERMS):
-            # A sentence naming both - "sampling vs quality" - is ambiguous, and a planner
-            # resolving an ambiguity in a spec by guessing is how a GPU bill doubles.
-            return None
-        if param.type not in ("int", "float") or param.max is None or param.default is None:
-            return None
-        try:
-            base = float(param.default)
-        except (TypeError, ValueError):
-            return None
-        headroom = float(param.max) - base
-        if headroom <= 0:
-            return None
-        step = headroom / self.escalation_steps
-        value = min(float(param.max), base + step * self.refinements)
-        if param.type == "int":
-            value = int(min(float(param.max), math.ceil(value)))
-            return value if value > int(base) else None
-        return value if value > base else None
-
-
-__all__ = ["BREADTH_TERMS", "ESCALATION_STEPS", "QUALITY_TERMS", "ThresholdPlanner"]
+__all__ = ["ESCALATION_STEPS", "ThresholdPlanner"]

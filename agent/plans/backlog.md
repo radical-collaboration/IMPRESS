@@ -766,7 +766,23 @@ and what runs. Full evidence, the harmonization options and the hardware follow-
 [`plans/reasoner-models.md`](reasoner-models.md); the items below are what is outstanding from it.
 `policy/registry.py`, `impress-a models` and the `--model replay` fix are **DONE** (`fa0266f`).
 
-**H1. Model A has no LLM, and the slot for one is dead.** `planning/phase1-partB-architecture/02-control-models.md:59-61`
+**H1. Model A has no LLM, and the slot for one is dead.** **MOSTLY DONE** (phase 9). The four
+nodes exist and are compiled, two per half - `hypothesize`/`analyze` on `AgenticSpecifier`,
+`select_tasks`/`parameterize` on `AgenticPlanner` - and `self.reasoner` is read: each node calls
+`policy/reasoning.ask`, which is bounded (two attempts), schema-checked, and **corrective** - the
+rejection is appended to the prompt, and the node's own domain check (is this one of the three
+strategies?) runs *inside* the retry loop, because a check afterwards would reject a model that
+invented a strategy and degrade on the spot without ever telling it what the strategies are.
+Exhausting the attempts falls back to the rule cascade and writes a `reasoner_degraded`
+transition, named the same way model B's `oracle_degraded` is, so one query over `transitions`
+finds every degraded decision in a campaign whatever model made it - which is what the four-arm
+experiment's void rule needs. **Still open:** nothing constructs a client, so `--model A` runs
+the cascades and `llm_calls` is honestly 0; that lands with H2's live client, which is the whole
+reason H1 was sequenced after it. A is no longer behaviourally D, though: it retires an
+objective the Toolkit cannot measure (D names it and leaves it open) and it moves the diversity
+knobs (D never does), both asserted in `tests/test_planner.py`.
+
+The original finding, for the record:  `planning/phase1-partB-architecture/02-control-models.md:59-61`
 specifies "each node is a bounded LLM call with a declared input and output schema", ~3 per cycle,
 parse-retry with corrective feedback, escalation to a degraded policy. In code `_hypothesize`
 (`policy/agentic.py:57`) and `_parameterize` (`:75`) are deterministic threshold cascades, and
@@ -885,8 +901,15 @@ paid for out of the first allocation.
 3. **A1-A3 the first real run** — needs a person, and everything else is speculation until it happens.
 4. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
 5. **F1-F4 docs** — cheap, and the absent ADR is the one a future reader will most want.
-6. **C5-C7 the reasoner's entry points** — the transport is built and tested; without these
-   it can only be reached from `tests/`, and `--model C` keeps reporting a model-D campaign.
+6. ~~**C5-C6 the reasoner's entry points**~~ **DONE** (phases 7 and 9). `impress-a serve` /
+   `impress-a control` exist and are covered by a two-process test, `--model C` under
+   `impress-a run` is refused rather than timing out, and model C now has **two role inboxes**
+   routed by a `role` key inside the directive `steer` already carries - one headless mode
+   (decision 0002) and no new plane operation (ADR 0007). Its planner half defaults to
+   `on_timeout="stop"`, a fallback must be declared to exist, and taking one writes a
+   `caller_timeout` transition naming it, because a fallen-back C arm is byte-for-byte a D
+   campaign. **C7 remains**: the plane has no auth and no TLS, settled for the loopback
+   configuration in ADR 0014 and open for any other.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.

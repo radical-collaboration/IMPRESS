@@ -45,7 +45,8 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 
 ```
 control/    CampaignControlPlane + transport adapters
-policy/     ControlPolicy implementations (the decision frontend)
+policy/     the decision frontend: specifiers/ + planners/ (one module per control
+            model), the reasoning seam, the role wrappers, and the legacy ControlPolicy
 manager.py  the outer loop
 core/       tree · pareto · budget · qc · decision · provenance · artifacts
 compose/    TaskGraph · composer · five gates · self-promoting interlock

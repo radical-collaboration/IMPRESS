@@ -30,7 +30,7 @@ from impress_a.core.spec import ObjectiveStatus, SpecRevision
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.policy.planner import PlanningContext
-from impress_a.policy.planners import ThresholdPlanner
+from impress_a.policy.planners import AgenticPlanner, ThresholdPlanner
 from impress_a.policy.specifier import SpecEvidence
 from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.tools._ensemble import member_index, pair_by_index, select_best
@@ -1580,3 +1580,36 @@ def test_every_real_adapter_recovers_its_inputs_by_port(reg):
 def impress_a_tools_dir() -> str:
     import impress_a.tools
     return str(pathlib.Path(impress_a.tools.__file__).parent)
+
+
+async def test_model_a_also_varies_a_real_tools_parameter(reg):
+    """H3 for model A, which had the same defect and a different shape of it.
+
+    `FourNodePolicy` asked for `diffusion_steps: 170` and `temperature: 0.35` keyed to
+    `mock_generate` and `mock_design`. Against this chain those keys name nothing in the
+    graph, so the composer dropped them silently; and even keyed correctly, 170 is a literal
+    that happens to be inside rfd3's declared range and would be a gate-3 rejection on a tool
+    whose range is narrower. The planner half asks for the same *fractions* of each tool's own
+    declared range, which is the only form in which those numbers survive a chain nobody wrote
+    them for.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+    stage = await AgenticPlanner(stages=CHAIN).plan(
+        spec, _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN))
+
+    varied = {t.tool: t.params for t in stage.runs if t.params}
+    assert varied, "model A varied nothing on the real chain, which is H3 unfixed for A"
+    for tool, params in varied.items():
+        assert tool in CHAIN
+        for name, value in params.items():
+            card = reg.get(tool).parameters[name]
+            assert card.min <= value <= card.max, f"{tool}.{name}={value} outside its range"
+            assert name not in reg.get(tool).frozen_parameters, \
+                f"{tool}.{name} is frozen; gate 3 refuses a graph that proposes it"
+
+    steps = varied["rfd3_design"]["diffusion_steps"]
+    assert steps == 169, (
+        "FourNodePolicy's exploring 170 as a fraction of the 20-200 range it was written "
+        f"against (0.83), rounded to the declared int type; got {steps}")
+    assert varied["ligandmpnn_design"]["temperature"] == 0.35

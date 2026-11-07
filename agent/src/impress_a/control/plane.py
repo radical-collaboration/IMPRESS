@@ -162,12 +162,21 @@ class InProcessControlPlane:
             await asyncio.sleep(0.05)
 
     async def steer(self, campaign_id: str, directive: dict[str, Any]) -> dict[str, Any]:
-        """A directive is validated exactly as any policy's decision would be."""
+        """A directive is validated exactly as any policy's decision would be.
+
+        `RolePair.steer` routes by the directive's `role` key and raises `ValueError` when the
+        addressed half takes no directives. Caught here and returned as a refusal with its
+        reason: an uncaught one would be a 500 over HTTP, which says "this server is broken"
+        where the truth is "this campaign's specifier is not the external one".
+        """
         pol = self.managers[campaign_id].policy
         target = getattr(pol, "inner", pol)
         if not hasattr(target, "steer"):
             return {"accepted": False, "reason": "campaign is not under external control"}
-        target.steer(directive)
+        try:
+            target.steer(directive)
+        except ValueError as refused:
+            return {"accepted": False, "reason": str(refused)}
         self.emit(campaign_id, "steered", {"directive": directive})
         return {"accepted": True}
 

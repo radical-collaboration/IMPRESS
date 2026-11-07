@@ -220,3 +220,45 @@ def test_the_front_target_comes_from_the_spec_when_it_declares_one():
     """
     assert build_policy("D", _spec(), guard=False).target_front == 3
     assert build_policy("D", _spec(target_front=10), guard=False).target_front == 10
+
+
+#: Models whose two halves are their own rather than derived from a `ControlPolicy` by
+#: `DecideAsRoles`. B is the one still derived - its live client is the next item (H2) - and
+#: listing it here is how that stays visible instead of being inferred from a note.
+DECLARES_HALVES = {"A", "C", "D", "null", "replay"}
+
+
+def test_the_models_with_real_halves_are_the_ones_that_say_so():
+    """`--control roles` must not quietly run a model's `decide` cascade.
+
+    `cli.build_roles` derives a pair from `decide` only for a model that declares none, so
+    which models declare them decides what `--model X --control roles` actually executes. A
+    model that gained halves and was not added here would run them while its note still said
+    otherwise; one that lost them would silently fall back to the legacy cascade under a flag
+    that says it is not using it.
+    """
+    declared = {k for k, m in reasoners.MODELS.items()
+                if m.specifier is not None and m.planner is not None}
+    assert declared == DECLARES_HALVES, (
+        f"models declaring halves changed to {sorted(declared)}; update DECLARES_HALVES and "
+        f"the model's own `note`, which `impress-a models` prints")
+    partial = {k for k, m in reasoners.MODELS.items()
+               if (m.specifier is None) != (m.planner is None)}
+    assert partial == set(), (
+        f"{sorted(partial)} declare one half and not the other, which would pair a real half "
+        f"with a legacy adapter - a combination nothing tests and nobody asked for")
+
+
+def test_a_models_note_says_which_half_is_still_derived():
+    """The status column is load-bearing documentation, so B must admit what it is.
+
+    `docs/` described four working control models while two had no LLM behind them, and
+    nothing contradicted it. Model B's halves still come from its `decide`, so its note has to
+    say that a live client is what is missing rather than leaving a reader to assume the
+    phase-9 split reached it.
+    """
+    b = reasoners.MODELS["B"]
+    assert b.specifier is None and b.planner is None, \
+        "B gained real halves; update this test and its note together"
+    assert "no live client" in b.note or "RehearsalOracle" in b.note, b.note
+    assert b.llm_calls == 0, "a model with no live client makes no calls, and must say 0"

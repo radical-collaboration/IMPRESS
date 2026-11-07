@@ -374,10 +374,14 @@ class CampaignExecutor:
         """Install the initial Spec. Returns the applied generation."""
         spec.campaign_id = self.spec.campaign_id
         self.spec_state = spec
+        # The objectives THEMSELVES, not their ids. An id says nothing about what the
+        # campaign was trying to achieve, so a record of ids could not be replayed, and the
+        # experiment's Specifier attribution - "the objectives emitted at campaign start" -
+        # would have nothing to read. Both are the whole reason `specs` provenance exists.
         self._log("specs", {"event": "initial", "generation": spec.generation,
-                            "aims": sorted(spec.aims),
-                            "objectives": {o.id: o.status.value
-                                           for o in spec.objectives.values()}})
+                            "aims": [a.model_dump(mode="json") for a in spec.aims.values()],
+                            "objectives": [o.model_dump(mode="json")
+                                           for o in spec.objectives.values()]})
         return spec.generation
 
     def apply_revision(self, rev: SpecRevision) -> int:
@@ -385,8 +389,9 @@ class CampaignExecutor:
         self.spec_state.apply(rev)
         self._log("specs", {"event": "revision",
                             "generation": self.spec_state.generation,
-                            "new_aims": [a.id for a in rev.new_aims],
-                            "new_objectives": [o.id for o in rev.new_objectives],
+                            "new_aims": [a.model_dump(mode="json") for a in rev.new_aims],
+                            "new_objectives": [o.model_dump(mode="json")
+                                               for o in rev.new_objectives],
                             "deleted": list(rev.deleted),
                             "status_changes": {k: v.value
                                                for k, v in rev.status_changes.items()},
@@ -897,12 +902,21 @@ class CampaignExecutor:
                 directive=TaskDirective.RUN,
                 deployed_at=datetime.now(timezone.utc),
                 commitment=dict(stage.commitment)))
+        # `mappings` carries each task's PARAMETERS, lineage, wiring and seed beside the
+        # tool id. Without it the parameter vector a Planner chose is recorded nowhere -
+        # `graphs` holds `{node: tool}` and nothing else - so the experiment could not
+        # attribute anything to the Planner, and a replay would re-run the same chain with
+        # different numbers and call it the same experiment. `tasks` and `objectives` stay as
+        # they were, because they are the cheap read and something may already depend on them.
         self._log("stages", {"event": "deployed", "stage": stage.id, "run": run_label,
                              "graph": rec.graph.id, "spec_generation": stage.spec_generation,
                              "attempt": stage.attempt,
+                             "parent_node": stage.parent_node,
+                             "rationale": stage.rationale,
                              "tasks": {m.task_id: m.tool for m in stage.runs},
                              "objectives": {m.task_id: list(m.objectives)
                                             for m in stage.runs},
+                             "mappings": [m.model_dump(mode="json") for m in stage.runs],
                              "deferrals": [d.model_dump() for d in stage.deferrals],
                              "cancels": list(stage.cancels)})
 

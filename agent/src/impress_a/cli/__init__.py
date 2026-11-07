@@ -25,7 +25,7 @@ from ..core.pareto import Objective
 from ..core.session import CampaignStopped
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
-from ..policy.wrappers import RuleCorrectionsPolicy
+from ..policy.wrappers import RuleCorrectionsPolicy, StageGuard
 from ..runtime.roles import RolesDriver
 from ..tools.registry import Registry
 
@@ -160,20 +160,31 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
 
 def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 records: list[dict[str, Any]] | None = None,
-                specifier: str | None = None, planner: str | None = None):
+                specifier: str | None = None, planner: str | None = None,
+                spec_records: list[dict[str, Any]] | None = None,
+                stage_records: list[dict[str, Any]] | None = None):
     """The same adapter, for the two halves.
 
-    The guard still wraps the *decision-making* half rather than the pair: while the strangler
-    is in place both halves come from one `ControlPolicy`, so wrapping it once is wrapping both.
-    Phase 9 replaces it with `StageGuard`, which can refuse a Stage directly - including a RUN
-    task that serves no objective, which no policy-level wrapper could see.
+    Two guard shapes, because there are two kinds of half. A pair derived from a
+    `ControlPolicy` is guarded by wrapping that policy once - it is the thing making the
+    decisions, so wrapping it is wrapping both halves. A model with real halves is guarded by
+    `StageGuard` on the planner, which is narrower than its predecessor on purpose: the
+    replica cap now binds in the executor and a task serving no objective is refused by the
+    Reviewer, so what is left to wrap is `forbid_tools` until phase 10's gate 6 takes it over.
+
+    `--no-guard` therefore stops being able to switch off either of the two checks that
+    matter, which it never should have been able to do.
     """
     opts = reasoners.ReasonerOptions(
         stages=list(spec.stages) or None, records=records,
+        spec_records=spec_records, stage_records=stage_records,
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
     if specifier or planner or _declares_halves(specifier or model, planner or model):
-        return reasoners.build_roles(specifier or model, planner or model, opts)
+        pair = reasoners.build_roles(specifier or model, planner or model, opts)
+        if guard:
+            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+        return pair
     pol = build_policy(model, spec, guard, records)
     return reasoners.RolePair(*_halves_of(pol), label=model)
 
@@ -401,7 +412,10 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     """
     opts = reasoners.ReasonerOptions(stages=stages or None)
     if specifier or planner or _declares_halves(specifier or model, planner or model):
-        return reasoners.build_roles(specifier or model, planner or model, opts)
+        pair = reasoners.build_roles(specifier or model, planner or model, opts)
+        if guard:
+            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+        return pair
     pol = reasoners.build(model, opts)
     if guard:
         pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
@@ -448,6 +462,30 @@ def _replay_records(path: str) -> list[dict[str, Any]]:
     if not p.is_file():
         raise FileNotFoundError(f"no decisions.jsonl under {path}")
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+
+
+def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """`(specs, stages)` from a recorded campaign, for the two replay halves.
+
+    Two files rather than one, and executor-written rather than reasoner-written - which is
+    why the halves can replay a campaign run by a model that kept no notes of its own, where
+    `decisions.jsonl` only holds what a model chose to record about itself.
+
+    Read here rather than in the policy layer, for the reason `_replay_records` gives: a
+    policy that touches the filesystem is a policy that can reach past `core`.
+    """
+    root = Path(path)
+    prov = root / "provenance" if (root / "provenance").is_dir() else root
+    out = []
+    for name in ("specs.jsonl", "stages.jsonl"):
+        f = prov / name
+        if not f.is_file():
+            raise FileNotFoundError(
+                f"no {name} under {path}. The replay halves read the executor's own record; "
+                f"a campaign recorded before `specs`/`stages` provenance existed can only be "
+                f"replayed with `--control legacy`")
+        out.append([json.loads(line) for line in f.read_text().splitlines() if line.strip()])
+    return out[0], out[1]
 
 
 def _hms(seconds: float) -> str:
@@ -568,11 +606,19 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
     spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
-        records = _replay_records(replay_from) if replay_from else None
+        # Only the record the chosen path will actually use is loaded. The halves read the
+        # executor's own `specs.jsonl` and `stages.jsonl`; the legacy path reads the
+        # `decisions.jsonl` each model wrote for itself. Loading both would mean a campaign
+        # recorded before `specs`/`stages` provenance existed could not be replayed even
+        # under `--control legacy`, which is the one path that needs nothing from them.
         if spec.control == "roles":
-            policy = build_roles(model, spec, guard, records, specifier, planner)
+            spec_records, stage_records = (
+                _replay_role_records(replay_from) if replay_from else (None, None))
+            policy = build_roles(model, spec, guard, None, specifier, planner,
+                                 spec_records, stage_records)
         else:
-            policy = build_policy(model, spec, guard, records)
+            policy = build_policy(model, spec, guard,
+                                  _replay_records(replay_from) if replay_from else None)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
