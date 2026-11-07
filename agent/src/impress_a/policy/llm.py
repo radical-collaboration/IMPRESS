@@ -45,6 +45,13 @@ log = logging.getLogger(__name__)
 #: `campaigns/` and `sites/`.
 DEFAULT_PROFILES = "models.yaml"
 
+#: Messages kept in one decision's exchange. Two per attempt - the prompt and the reply - so
+#: this bounds `reasoning.ask`'s attempts with room to spare, and bounds a caller that forgets
+#: to reset. A prompt that grows by a decision per cycle is a bill that grows quadratically
+#: with the campaign, and the tokens buy nothing: each decision is answered from the
+#: observation it was given.
+MAX_EXCHANGE = 8
+
 #: Status codes worth another attempt. 429 is rate limiting, 5xx is the endpoint's problem;
 #: a 400 or a 401 will fail identically however many times it is sent, and retrying one wastes
 #: a decision's worth of wall clock while an allocation is held.
@@ -79,11 +86,41 @@ class ModelProfile:
         return self.kind == "openai_compat"
 
 
+#: Vendors barred machine-wide by `~/.claude/CLAUDE.md`, by any route - weights on project
+#: storage, a server inside an allocation, or a hosted API arm. Checked when a profile LOADS,
+#: not only by a test over the repository's own file: `IMPRESS_A_MODELS` can name another one,
+#: and a policy enforced only where someone remembered to look is not enforced.
+BARRED = ("qwen", "deepseek", "glm-", "zhipu", "minimax", "kimi", "moonshot", "01-ai",
+          "baichuan", "internlm", "hunyuan", "ernie", "doubao", "skywork")
+
+
 def load_profiles(path: str | Path = DEFAULT_PROFILES) -> dict[str, ModelProfile]:
-    """Every profile in a `models.yaml`, by name."""
+    """Every profile in a `models.yaml`, by name. Refuses one that cannot be used safely."""
     raw = yaml.safe_load(Path(path).read_text()) or {}
-    return {name: ModelProfile(name=name, **(cfg or {}))
-            for name, cfg in (raw.get("profiles") or {}).items()}
+    out: dict[str, ModelProfile] = {}
+    for name, cfg in (raw.get("profiles") or {}).items():
+        profile = ModelProfile(name=name, **(cfg or {}))
+        _check(profile, path)
+        out[name] = profile
+    return out
+
+
+def _check(profile: ModelProfile, path: str | Path) -> None:
+    """Two refusals at load time, both about what a profile would do with a credential."""
+    haystack = f"{profile.name} {profile.model or ''} {profile.base_url or ''}".lower()
+    for vendor in BARRED:
+        if vendor in haystack:
+            raise LLMError(
+                f"profile {profile.name!r} in {path} names {vendor!r}, which the machine-wide "
+                f"provenance policy in ~/.claude/CLAUDE.md bars by any route")
+    if profile.is_live and profile.api_key_env and profile.base_url:
+        url = profile.base_url.lower()
+        local = any(host in url for host in ("localhost", "127.0.0.1", "[::1]", "0.0.0.0"))
+        if url.startswith("http://") and not local:
+            raise LLMError(
+                f"profile {profile.name!r} would send ${profile.api_key_env} to {url} over "
+                f"plain HTTP. Use https, or drop api_key_env for an endpoint that needs no "
+                f"key - a credential in cleartext off-host is not a configuration choice")
 
 
 def build_oracle(profile: ModelProfile, stages: list[str] | None = None) -> Any:
@@ -119,11 +156,16 @@ class OpenAICompatOracle:
         self.model_id = profile.model or profile.name
         self.prompt_tokens = 0
         self.completion_tokens = 0
-        #: Earlier turns of the current node's exchange. A reasoning model may REQUIRE its own
-        #: `reasoning_content` back on a follow-up - Beam refuses a request whose earlier
-        #: assistant messages lack it - so the corrective retry has to be a real conversation
-        #: rather than a fresh single-turn request. That is the one multi-turn path here, and
-        #: a single-turn probe of the endpoint cannot show it working.
+        #: Earlier turns of the CURRENT decision's exchange. A reasoning model may REQUIRE
+        #: its own `reasoning_content` back on a follow-up - Beam refuses a request whose
+        #: earlier assistant messages lack it - so the corrective retry has to be a real
+        #: conversation rather than a fresh single-turn request. That is the one multi-turn
+        #: path here, and a single-turn probe of the endpoint cannot show it working.
+        #:
+        #: `reasoning.ask` calls `reset()` at the start of every decision, which is what keeps
+        #: this an exchange rather than a transcript: unbounded, it grew by a decision per
+        #: cycle, and since both halves share one client the two interleaved inside it.
+        #: `MAX_EXCHANGE` is the backstop for a caller that does not reset.
         self._history: list[dict[str, Any]] = []
 
         api_key = None
@@ -173,7 +215,7 @@ class OpenAICompatOracle:
         # an allocation is held.
         resp = await self._request(messages, structured=True)
         reply = self._message_from_response(resp)
-        self._history = messages + [reply["message"]]
+        self._history = (messages + [reply["message"]])[-MAX_EXCHANGE:]
         log.info("oracle: %s answered node %s (%d prompt, %d completion tokens)",
                  self.model_id, node, reply["prompt_tokens"], reply["completion_tokens"])
         return reply["payload"]
@@ -314,5 +356,5 @@ def _backoff(failure: Exception, attempt: int) -> float:
     return min(2.0 ** attempt, 30.0)
 
 
-__all__ = ["DEFAULT_PROFILES", "RETRYABLE", "LLMError", "ModelProfile",
+__all__ = ["BARRED", "DEFAULT_PROFILES", "MAX_EXCHANGE", "RETRYABLE", "LLMError", "ModelProfile",
            "OpenAICompatOracle", "build_oracle", "load_profiles"]

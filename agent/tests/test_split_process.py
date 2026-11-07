@@ -36,6 +36,9 @@ from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.explicit import ThresholdPolicy
 from impress_a.policy.legacy import DecideAsRoles
 from impress_a.policy.planner import PlanningContext
+from impress_a.policy.planners import ExternalPlanner, ThresholdPlanner
+from impress_a.policy.registry import RolePair
+from impress_a.policy.specifiers import ExternalSpecifier, ThresholdSpecifier
 from impress_a.runtime.roles import RolesDriver
 from impress_a.tools.registry import Registry
 
@@ -324,3 +327,115 @@ async def test_naming_c_as_either_half_is_refused_too():
     """`--specifier C` is the same hazard wearing a different flag."""
     assert await run_campaign("campaigns/mock-stabilize.yaml", specifier="C") == 1
     assert await run_campaign("campaigns/mock-stabilize.yaml", planner="C") == 1
+
+
+# ---------------------------------------------------------------------------
+# The real halves over the wire. Everything above drives `DecideAsRoles` - a
+# `ControlPolicy` presented as a pair - which proves the transport and nothing about the
+# halves phase 9 actually built.
+# ---------------------------------------------------------------------------
+
+async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_path):
+    """Model D's real Specifier and Planner, in one process and across a socket.
+
+    The parity assertion the plan requires of every move, applied to the thing that now
+    executes: `cli.build_roles` prefers a model's declared halves over the legacy adapter, so
+    `--model D --control roles` runs `ThresholdSpecifier` + `ThresholdPlanner` and the earlier
+    tests here no longer cover what ships.
+    """
+    def pair():
+        return RolePair(ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN))
+
+    local_spec = _spec("t-halves-local", tmp_path, max_cycles=3)
+    local = await CampaignManager(local_spec, pair(), reg).run()
+
+    remote = await _drive_remotely(
+        reg, _spec("t-halves-remote", tmp_path, max_cycles=3),
+        lambda goal: RolesDriver(goal, *_role_halves(), max_turns=3, max_attempts=4,
+                                 concurrency=1))
+
+    assert _shape(remote.tree.nodes.values()) == _shape(local.tree.nodes.values()), \
+        "every node, verdict and metric must match the in-process campaign"
+    assert remote.cycles == local.cycles
+    assert remote.stop_reason == local.stop_reason
+    assert len(remote.front) == len(local.front)
+
+
+def _role_halves():
+    return ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN)
+
+
+async def test_an_external_caller_steers_both_halves_over_the_socket(reg, tmp_path):
+    """Model C end to end, which is the only path model C has.
+
+    **The arrangement is one process, and writing this test is what established that.** The
+    first attempt served the campaign with no reasoner and drove it from a control process,
+    the way arms A, B and D run - and every directive came back
+    `campaign is not under external control`, because `plane.steer` reaches
+    `manager.policy`, which is in the *execution* process, and the halves were in the control
+    process. That is not a transport bug: decision 0002 says model C **is** the headless mode,
+    and the headless mode is one process serving a campaign whose halves are its inboxes.
+    `impress-a serve <spec> --model C` is that arrangement; `impress-a serve <spec>` alone
+    keeps the split for the models whose halves have no inbox.
+
+    Both inboxes are fed through the one `steer` operation with a `role` key, the campaign
+    produces real nodes, and nothing falls back: a C arm that silently became a D arm is
+    byte-for-byte a D campaign and invisible in the log, which the four-arm design names as
+    one of its two dangerous failures.
+    """
+    spec = _spec("t-steered", tmp_path, max_cycles=2)
+    pair = RolePair(ExternalSpecifier(timeout_s=15.0),
+                    ExternalPlanner(stages=CHAIN, timeout_s=15.0, on_timeout="stop"))
+    mgr = CampaignManager(spec, pair, reg)
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+
+    async with ControlPlaneServer(plane) as server:
+        async def caller():
+            """A third party, over HTTP, through the plane's own operation and nothing else."""
+            async with ControlPlaneClient(server.base_url) as api:
+                for _ in range(2):
+                    assert (await api.steer(cid, {"role": "specifier", "kind": "hold"})
+                            )["accepted"] is True
+                    assert (await api.steer(cid, {"role": "planner", "stages": CHAIN,
+                                                  "replicas": 1,
+                                                  "params": {"mock_fold": {"recycles": 5}}})
+                            )["accepted"] is True
+                    await asyncio.sleep(0.3)
+
+        steering = asyncio.create_task(caller())
+        res = await asyncio.wait_for(mgr.run(), timeout=60)
+        await steering
+
+    assert res.tree.nodes, "the caller's directives produced real designs"
+    assert pair.planner.directives >= 1
+    assert pair.planner.rejections == [], "no directive was refused at a gate"
+    timeouts = [r for r in mgr.prov.read("transitions")
+                if r.get("event") == "caller_timeout"]
+    assert timeouts == [], f"arm C must not have fallen back: {timeouts}"
+    # And the caller's parameter actually reached the graph, which is what distinguishes
+    # steering a campaign from watching one.
+    deployed = [r for r in mgr.prov.read("stages") if r.get("event") == "deployed"]
+    assert deployed, "no stage was deployed"
+    recycles = {m["params"].get("recycles") for r in deployed for m in r["mappings"]
+                if m["tool"] == "mock_fold"}
+    assert recycles == {5}, f"the caller's parameters did not reach the tasks: {recycles}"
+
+
+async def test_an_unaddressed_half_is_refused_with_its_reason_over_http(reg, tmp_path):
+    """A directive the campaign cannot route must come back refused, not as a 500.
+
+    `RolePair.steer` raises `ValueError` when the addressed half has no inbox, and a 500 over
+    the wire says "this server is broken" where the truth is "this campaign's specifier is not
+    the external one". It is also what tells a caller its directives are going nowhere -
+    silently dropping them would report an arm as externally steered while it steered itself.
+    """
+    spec = _spec("t-unroutable", tmp_path, max_cycles=1)
+    mgr = CampaignManager(spec, RolePair(*_role_halves()), reg)
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+
+    answer = await plane.steer(cid, {"role": "planner", "stages": CHAIN})
+    assert answer["accepted"] is False
+    assert "takes no external directives" in answer["reason"]
+    assert "threshold-plan" in answer["reason"], "it must say which half refused"

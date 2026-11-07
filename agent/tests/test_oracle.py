@@ -80,6 +80,14 @@ def _obs(reg, stages=CHAIN, front=(), objectives=None):
         stages=list(stages), pareto_front=list(front))
 
 
+def tmp_profiles(doc: str) -> pathlib.Path:
+    """A models.yaml holding `doc` (JSON is valid YAML), in a fresh temporary directory."""
+    import tempfile
+    path = pathlib.Path(tempfile.mkdtemp()) / "models.yaml"
+    path.write_text(doc)
+    return path
+
+
 def _no_openai() -> bool:
     import importlib.util
     return importlib.util.find_spec("openai") is None
@@ -538,3 +546,95 @@ async def test_a_live_client_actually_constructs(monkeypatch):
     assert str(oracle._client.base_url).rstrip("/") == "http://127.0.0.1:1/v1"
     assert oracle._client.max_retries == 0, \
         "retries are ours, with backoff and a log line; the client's would be silent"
+
+
+async def test_one_exchange_per_decision_rather_than_one_per_campaign():
+    """The history is a corrective exchange, not a transcript.
+
+    Nothing ended it, so every decision appended to the last one: by cycle fifty the prompt
+    carried fifty decisions, the bill grew quadratically with the campaign, and - because both
+    halves share one client instance - the Spec and Stage exchanges interleaved inside it. The
+    tokens bought nothing, since each decision is answered from the observation it was given.
+    `reasoning.ask` ends the exchange, because `think` cannot tell a first attempt from a new
+    decision and `ask` can.
+    """
+    from impress_a.policy import reasoning
+    from impress_a.policy.llm import MAX_EXCHANGE
+
+    endpoint = _Endpoint(*[_Resp('{"action": "hold", "rationale": "ok"}')] * 6)
+    oracle = _oracle(endpoint)
+    for _ in range(3):
+        await reasoning.ask(oracle, "spec", "p", SPEC_SCHEMA, required=("action",))
+    assert [len(r["messages"]) for r in endpoint.requests] == [1, 1, 1], \
+        "each decision is one user message, not a growing conversation"
+
+    # Within one decision the retry IS multi-turn, which is the thing being preserved.
+    retrying = _Endpoint(_Resp('{"action": "nonsense"}'),
+                         _Resp('{"action": "hold", "rationale": "ok"}'))
+    oracle = _oracle(retrying)
+    await reasoning.ask(oracle, "spec", "p", SPEC_SCHEMA, required=("action",),
+                        validate=lambda raw: None if raw["action"] == "hold" else
+                        (_ for _ in ()).throw(ValueError("not an action")))
+    assert [len(r["messages"]) for r in retrying.requests] == [1, 3], \
+        "the second attempt carries the first prompt, the reply and the correction"
+
+    # And a caller that never resets is still bounded.
+    unbounded = _Endpoint(*[_Resp('{"action": "hold", "rationale": "ok"}')] * 20)
+    oracle = _oracle(unbounded)
+    for _ in range(20):
+        await oracle.think("spec", "p", SPEC_SCHEMA)
+    assert len(oracle._history) <= MAX_EXCHANGE
+
+
+async def test_a_profile_is_refused_at_load_time_for_what_it_would_do_with_a_key():
+    """Two load-time refusals, both about a credential and both enforced where it is read.
+
+    The vendor policy was checked only by a test over this repository's own `models.yaml`,
+    and `IMPRESS_A_MODELS` can name another file - a policy enforced only where someone
+    remembered to look is not enforced. And a profile naming an `api_key_env` beside a plain
+    `http://` endpoint off-host would put the operator's key on the wire in cleartext, which
+    is not a configuration choice to leave to whoever edits the file.
+    """
+    bad_vendor = tmp_profiles('{"profiles": {"x": {"kind": "openai_compat", '
+                              '"base_url": "https://api.example.com/v1", '
+                              '"model": "Qwen3-Max", "api_key_env": "K"}}}')
+    with pytest.raises(LLMError, match="provenance policy"):
+        load_profiles(bad_vendor)
+
+    cleartext = tmp_profiles('{"profiles": {"x": {"kind": "openai_compat", '
+                             '"base_url": "http://elsewhere.example.com/v1", '
+                             '"model": "m", "api_key_env": "K"}}}')
+    with pytest.raises(LLMError, match="over \\nplain HTTP|plain HTTP"):
+        load_profiles(cleartext)
+
+    # Loopback over http is the in-allocation case and is allowed; so is http with no key.
+    for doc in ('{"profiles": {"x": {"kind": "openai_compat", '
+                '"base_url": "http://localhost:8000/v1", "model": "m", "api_key_env": "K"}}}',
+                '{"profiles": {"x": {"kind": "openai_compat", '
+                '"base_url": "http://elsewhere.example.com/v1", "model": "m"}}}'):
+        assert "x" in load_profiles(tmp_profiles(doc))
+
+
+async def test_the_profiles_file_is_the_packaged_one_unless_an_operator_names_another(
+        tmp_path, monkeypatch):
+    """A `models.yaml` in the working directory used to win, and that is a credential path.
+
+    A profile's `base_url` is where the request goes and its `api_key_env` names the key that
+    goes with it, so a file in whatever directory a job started in could point the operator's
+    own key at someone else's endpoint. On a shared filesystem with a launcher that cd's into
+    a per-job directory, that is not a remote hazard.
+    """
+    from impress_a.cli import _oracle_for
+    from impress_a.runtime.executor import CampaignSpec
+
+    spec = CampaignSpec(campaign_id="c", goal="g", objectives=list(OBJS), stages=CHAIN)
+    planted = tmp_path / "models.yaml"
+    planted.write_text('profiles:\n  rehearsal:\n    kind: rehearsal\n  sneaky:\n'
+                       '    kind: rehearsal\n')
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="unknown model profile"):
+        _oracle_for("sneaky", spec)
+
+    monkeypatch.setenv("IMPRESS_A_MODELS", str(planted))
+    assert _oracle_for("sneaky", spec) is not None, \
+        "an operator naming a file explicitly is a decision; a directory is not"

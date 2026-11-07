@@ -165,7 +165,7 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
                 stage_records: list[dict[str, Any]] | None = None,
-                profile: str | None = None):
+                profile: str | None = None, caller_timeout_s: float | None = None):
     """The same adapter, for the two halves.
 
     Two guard shapes, because there are two kinds of half. A pair derived from a
@@ -182,6 +182,7 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
         oracle=_oracle_for(profile, spec),
+        timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
     if specifier or planner or _declares_halves(specifier or model, planner or model):
@@ -205,18 +206,30 @@ def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
     if not profile:
         return None
     from ..policy.llm import build_oracle, load_profiles
-    path = Path(os.environ.get("IMPRESS_A_MODELS", "")) if os.environ.get(
-        "IMPRESS_A_MODELS") else Path("models.yaml")
-    if not path.is_file():
-        # Beside this package rather than beside the CWD, so a launcher that cd's into a
-        # per-job directory still finds it - which is what `trust_root` had to learn.
-        path = Path(__file__).resolve().parents[3] / "models.yaml"
+    # The PACKAGED file, unless an operator names another one explicitly. It used to try the
+    # current working directory first, and that is a credential path rather than a
+    # convenience: a profile's `base_url` is where the request goes and its `api_key_env`
+    # names the key that goes with it, so a `models.yaml` in whatever directory a job happened
+    # to start in could point the operator's own key at someone else's endpoint. On a shared
+    # filesystem, with a launcher that cd's into a per-job directory, that is not a remote
+    # hazard. `IMPRESS_A_MODELS` stays, because an operator choosing a file is a decision and
+    # a directory a process was started in is not.
+    path = Path(__file__).resolve().parents[3] / "models.yaml"
+    if override := os.environ.get("IMPRESS_A_MODELS"):
+        path = Path(override)
+        log.warning("control model: reading profiles from $IMPRESS_A_MODELS=%s rather than "
+                    "the packaged models.yaml", path)
     profiles = load_profiles(path)
     if profile not in profiles:
         raise ValueError(f"unknown model profile {profile!r}; {path} declares "
                          f"{sorted(profiles)}")
     chosen = profiles[profile]
-    log.info("control model: profile %s (%s, model=%s)", profile, chosen.kind, chosen.model)
+    # The endpoint and the key variable together, because provenance should record which
+    # credential was sent where. A figure attributed to a model is only as good as the record
+    # of what answered.
+    log.info("control model: profile %s from %s (kind=%s, model=%s, endpoint=%s, key=%s)",
+             profile, path, chosen.kind, chosen.model, chosen.base_url or "-",
+             chosen.api_key_env or "none")
     return build_oracle(chosen, stages=list(spec.stages) or None)
 
 
@@ -362,7 +375,9 @@ class _Idle:
 
 
 async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
-                         heartbeat_s: float | None = None) -> int:
+                         heartbeat_s: float | None = None, model: str | None = None,
+                         guard: bool = True, profile: str | None = None,
+                         caller_timeout_s: float | None = None) -> int:
     """Run the execution process and serve it over HTTP.
 
     Backlog C5: the out-of-process split has been reachable from `tests/` and from no shell
@@ -373,6 +388,17 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
     plane has no auth and no TLS, both ends sit on the same compute node, and backlog C7 - where
     it may be reachable from - stays answered by "nowhere else" rather than by a token nobody
     rotates.
+
+    **`--model` is what makes arm C runnable, and leaving it out is the two-process split.**
+    Without it the served campaign has no reasoner, which is right for `impress-a control` to
+    attach to. But `plane.steer` reaches `manager.policy`, which lives in THIS process - so a
+    third party steering a campaign served with no reasoner reaches nothing, and gets
+    `campaign is not under external control` for a campaign whose whole arrangement is
+    external control. That is not a transport problem to fix in the plane: decision 0002 says
+    model C *is* the headless mode, and the headless mode is one process serving a campaign
+    whose halves are its inboxes. So `impress-a serve <spec> --model C` registers the pair
+    here and a caller steers it over HTTP; `impress-a serve <spec>` alone keeps the split for
+    A, B and D, whose halves have no inbox and want a control process instead.
     """
     spec = load_spec(spec_path)
     if err := _check_ligand_smiles(spec):
@@ -382,7 +408,13 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
         os.environ.setdefault(var, val)
     spec.control = "roles"
     reg = Registry().load()
-    mgr = CampaignManager(spec, _Idle(), reg)
+    reasoner: Any = _Idle()
+    if model:
+        reasoner = build_roles(model, spec, guard, profile=profile,
+                               caller_timeout_s=caller_timeout_s)
+        log.info("serving campaign with %s attached: an external caller steers it in place, "
+                 "rather than a control process attaching to it", reasoner.name)
+    mgr = CampaignManager(spec, reasoner, reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
     if heartbeat_s is None:
@@ -973,6 +1005,16 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("spec", nargs="?", default=None)
     sv = sub.add_parser("serve", help="run the execution process and serve it over HTTP")
     sv.add_argument("spec")
+    sv.add_argument("--model", default=None, choices=sorted(POLICIES),
+                    help="attach a reasoner IN this process, so an external caller steers it "
+                         "here (`--model C`). Omitted, the campaign is served with no "
+                         "reasoner for `impress-a control` to attach to")
+    sv.add_argument("--no-guard", action="store_true")
+    sv.add_argument("--model-profile", default=None, metavar="NAME",
+                    help="models.yaml profile naming a live endpoint (--model B)")
+    sv.add_argument("--caller-timeout", type=float, default=None, metavar="SECONDS",
+                    help="how long each half waits for an external directive (--model C). "
+                         "The default suits a scripted sidecar; raise it for a person")
     sv.add_argument("--host", default="127.0.0.1",
                     help="loopback by default: the plane has no auth and no TLS, and both "
                          "ends belong on the same compute node (backlog C7)")
@@ -1008,7 +1050,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "models":
         return print_models()
     if a.cmd == "serve":
-        return asyncio.run(serve_campaign(a.spec, a.host, a.port, a.heartbeat))
+        return asyncio.run(serve_campaign(a.spec, a.host, a.port, a.heartbeat,
+                                          a.model, not a.no_guard, a.model_profile,
+                                          a.caller_timeout))
     if a.cmd == "control":
         return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
                                             a.specifier, a.planner, not a.no_guard,

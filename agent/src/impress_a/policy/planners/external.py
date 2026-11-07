@@ -143,10 +143,13 @@ class ExternalPlanner(BasePlanner):
         if directive.get("kind") == "stop":
             return None
 
-        if directive.get("stages"):
-            self._mechanics.stages = list(directive["stages"])
-        self._mechanics.base_replicas = max(1, int(directive.get("replicas") or 1))
-        stage = await self._mechanics.plan(spec, ctx)
+        # Per call, never assigned back. A caller naming a subset chooses this cycle's
+        # work; it does not permanently narrow the campaign, which is what assigning to the
+        # mechanics' own `stages` did - one directive shrank every later cycle too, and the
+        # campaign kept running while measuring less. See `ThresholdPlanner.plan`.
+        stage = await self._mechanics.plan(
+            spec, ctx, chain=list(directive["stages"]) if directive.get("stages") else None,
+            lineages=max(1, int(directive.get("replicas") or 1)))
         if stage is None:
             return None
 

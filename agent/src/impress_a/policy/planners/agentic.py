@@ -164,8 +164,7 @@ class AgenticPlanner(BasePlanner):
         strategy = state.get("strategy", "explore")
         lineages = int(state.get("lineages") or PROFILES[strategy][0])
 
-        self._mechanics.base_replicas = lineages
-        stage = await self._mechanics.plan(spec, ctx)
+        stage = await self._mechanics.plan(spec, ctx, lineages=lineages)
         if stage is None:
             return {"stage": None}
 

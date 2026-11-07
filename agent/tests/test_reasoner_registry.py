@@ -266,3 +266,31 @@ def test_no_model_claims_a_live_client_it_has_not_been_given():
     b = reasoners.MODELS["B"]
     assert "RehearsalOracle" in b.note, b.note
     assert "models.yaml" in b.note, "the note must say where a live profile comes from"
+
+
+def test_model_c_is_built_to_stop_rather_than_to_fall_back():
+    """The safe default has to be the one the CLI builds, not the one a class declares.
+
+    `ExternalPlanner.__init__` defaulted to `stop` and `ReasonerOptions.on_timeout` defaulted
+    to `fallback`, so every path that went through the registry - which is every path the CLI
+    takes - built the dangerous one. Found by running it: `impress-a serve --model C` logged
+    `external planner: no directive in 5.0s; on_timeout=fallback` and finished the campaign on
+    model D's planner. An arm whose entire claim is that a third party steered it, silently
+    steering itself, is byte-for-byte a model-D campaign and invisible in the result; the
+    four-arm design names it as one of its two dangerous failure modes.
+    """
+    assert reasoners.ReasonerOptions().on_timeout == "stop"
+
+    pair = reasoners.build_roles("C", options=reasoners.ReasonerOptions(stages=["mock_fold"]))
+    assert pair.planner.on_timeout == "stop"
+    assert pair.planner.fallback is None, \
+        "a model-D planner must not even be in arm C's object graph unless asked for"
+
+    asked = reasoners.build_roles("C", options=reasoners.ReasonerOptions(
+        stages=["mock_fold"], on_timeout="fallback"))
+    assert asked.planner.fallback is not None, "an operator who asks for one gets one"
+    assert asked.planner.on_timeout == "fallback"
+
+    legacy = reasoners.build("C", reasoners.ReasonerOptions(stages=["mock_fold"]))
+    assert legacy.on_timeout == "stop", \
+        "the legacy policy too: backlog C6 is exactly a model-C arm that ran D"

@@ -938,8 +938,24 @@ paid for out of the first allocation.
    (decision 0002) and no new plane operation (ADR 0007). Its planner half defaults to
    `on_timeout="stop"`, a fallback must be declared to exist, and taking one writes a
    `caller_timeout` transition naming it, because a fallen-back C arm is byte-for-byte a D
-   campaign. **C7 remains**: the plane has no auth and no TLS, settled for the loopback
-   configuration in ADR 0014 and open for any other.
+   campaign - and the default was wrong until a shell run showed it: `ExternalPlanner`
+   defaulted to `stop` while `ReasonerOptions.on_timeout` defaulted to `fallback`, so every
+   path through the registry, which is every path the CLI takes, built the dangerous one.
+   `impress-a serve --model C` logged `no directive in 5.0s; on_timeout=fallback` and finished
+   on model D's planner. Both defaults are `stop` now, pinned by a test.
+
+   **The arrangement for arm C is one process, and that is a finding rather than a choice.**
+   `plane.steer` reaches `manager.policy`, which lives in the *execution* process - so a
+   campaign served with no reasoner for `impress-a control` to attach to has nothing for a
+   third party to steer, and every directive comes back `campaign is not under external
+   control`. Decision 0002 says model C *is* the headless mode, and the headless mode is one
+   process serving a campaign whose halves are its inboxes: `impress-a serve <spec> --model C`.
+   The two-process split stays for A, B and D, whose halves have no inbox. Verified across two
+   OS processes from a shell, with the caller's `recycles: 6` reaching the deployed tasks.
+
+   **C7 remains**: the plane has no auth and no TLS, settled for the loopback configuration in
+   ADR 0014 and open for any other - and `--model C` raises the stakes, because a directive is
+   now the campaign's parameter vector rather than a suggestion.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.

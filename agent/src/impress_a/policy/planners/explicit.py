@@ -92,7 +92,22 @@ class ThresholdPlanner(BasePlanner):
         self.refinements = 0
 
     # -- planning ------------------------------------------------------------
-    async def plan(self, spec: Spec, ctx: PlanningContext) -> Stage | None:
+    async def plan(self, spec: Spec, ctx: PlanningContext, chain: list[str] | None = None,
+                   lineages: int | None = None) -> Stage | None:
+        """Plan one Stage. `chain` and `lineages` are a caller's choice FOR THIS CALL only.
+
+        Arguments rather than attributes, and that is a correctness matter rather than style.
+        The oracle and external planners used to assign `self._mechanics.stages = reply`
+        before delegating, so one reply naming a subset narrowed the campaign's chain for
+        every later cycle - including the cycles planned by the fallback, which IS this
+        object. A model or a caller could permanently shrink a campaign with one message, and
+        the campaign would keep running, quietly measuring less. A degrade after that point
+        would not restore it either, because there was nothing left holding the original.
+
+        `self.stages` is therefore the campaign's chain and stays that way. A subset is
+        narrowed from it, never written over it, so a tool the campaign never enabled cannot
+        enter by this route whatever a reply says.
+        """
         ready = spec.ready()
         if not ready:
             return None
@@ -100,9 +115,11 @@ class ThresholdPlanner(BasePlanner):
         if view is None or not view.tools:
             return None
 
-        enabled = [t for t in self.stages if t in view]
+        declared = list(chain) if chain else self.stages
+        enabled = [t for t in declared if t in view and t in self.stages]
         if not enabled:
             return None
+        width = max(1, lineages or self.base_replicas)
         ranked = [o.name for o in ctx.observation.objectives]
         chain, wiring, deferrals = self._resolve(ready, ranked, enabled, view)
         if not chain:
@@ -118,7 +135,7 @@ class ThresholdPlanner(BasePlanner):
 
         served = sorted(o.id for o in ready)
         tasks: list[TaskMapping] = []
-        for lineage in range(self.base_replicas):
+        for lineage in range(width):
             ids = {tool: f"l{lineage}_s{i}_{tool}" for i, tool in enumerate(chain)}
             for tool in chain:
                 tasks.append(TaskMapping(
@@ -139,7 +156,7 @@ class ThresholdPlanner(BasePlanner):
             rationale=(f"{self.name}: refine {parent} (escalation {self.refinements})"
                        if refining else
                        f"{self.name}: explore {len(ready)} ready objective(s) "
-                       f"over {self.base_replicas} lineage(s)"))
+                       f"over {width} lineage(s)"))
 
     async def replan(self, stage: Stage, rejection: ValidationFailure,
                      spec: Spec, ctx: PlanningContext) -> Stage | None:

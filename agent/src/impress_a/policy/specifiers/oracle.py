@@ -47,13 +47,38 @@ SPEC_SCHEMA = {
 ACTIONS = ("hold", "refine", "retire")
 
 
-def _a_known_action(raw: dict[str, Any]) -> None:
-    """Checked inside the bounded retry, so a model naming an action is told the three."""
-    action = str(raw.get("action", "")).strip().lower()
-    if action not in ACTIONS:
-        raise ValueError(f"action {action!r} is not one of {ACTIONS}")
-    if action == "refine" and not raw.get("parent_node"):
-        raise ValueError("a refine action must name the parent_node it improves on")
+def _validator(ev: SpecEvidence) -> Any:
+    """Every check on a reply, built against the live state and run INSIDE the retry loop.
+
+    Placement is the whole value of it, and getting it wrong here was a real defect: these
+    checks sat after `reasoning.ask` returned, so a model that named a metric the campaign
+    never declared raised past `revise`, past `_respecify`, and out of the driver's `conduct`
+    - ending the campaign on a reply the model would have corrected if asked. It is the same
+    mistake a test caught in model A's strategy enum, in the one place where the consequence
+    is a dead campaign rather than a degraded decision.
+    """
+    declared = {o.name for o in ev.observation.objectives}
+    front = {n.id for n in ev.observation.pareto_front}
+
+    def check(raw: dict[str, Any]) -> None:
+        action = str(raw.get("action", "")).strip().lower()
+        if action not in ACTIONS:
+            raise ValueError(f"action {action!r} is not one of {ACTIONS}")
+        if action != "refine":
+            return
+        metric = str(raw.get("metric") or "")
+        if metric not in declared:
+            raise ValueError(
+                f"metric {metric!r} is not one this campaign declares ({sorted(declared)}); "
+                f"an objective on a metric no tool reports makes every later Stage refusable")
+        parent = str(raw.get("parent_node") or "")
+        if not parent:
+            raise ValueError("a refine action must name the parent_node it improves on")
+        if parent not in front:
+            raise ValueError(f"parent_node {parent!r} is not on the current front "
+                             f"({sorted(front)})")
+
+    return check
 
 
 class OracleSpecifier(BaseSpecifier):
@@ -87,23 +112,33 @@ class OracleSpecifier(BaseSpecifier):
         try:
             raw = await reasoning.ask(
                 self.oracle, "spec", self._prompt(spec, ev), SPEC_SCHEMA,
-                required=("action", "rationale"), validate=_a_known_action,
+                required=("action", "rationale"), validate=_validator(ev),
                 sink=self.sink, cycle=ev.cycle)
+            return self._to_revision(raw, spec, ev)
         except reasoning.NodeRefused as refused:
             self.degraded = True
             reasoning.degraded(self.sink, "spec", ev.cycle, str(refused),
                                getattr(self.fallback, "name", "?"))
             return await self.fallback.revise(spec, ev)
-        return self._to_revision(raw, spec, ev)
+        except ValueError as unusable:
+            # The validator should have caught this inside the retry, so arriving here means a
+            # check exists in one place and not the other. Degrade rather than raise: a
+            # reply nobody can apply is not a reason to end a campaign that is otherwise
+            # healthy, and the transition says a decision was lost.
+            self.degraded = True
+            reasoning.degraded(self.sink, "spec", ev.cycle, f"unusable reply: {unusable}",
+                               getattr(self.fallback, "name", "?"))
+            return await self.fallback.revise(spec, ev)
 
     def _to_revision(self, raw: dict[str, Any], spec: Spec,
                      ev: SpecEvidence) -> SpecRevision:
-        """A reply as a revision, with every reference checked against the live state.
+        """A reply as a revision.
 
-        A model naming a metric the campaign never declared, or a node that is not on the
-        front, is not corrected and not obeyed: the objective would be unproducible or the
-        parent would have no artifacts, and either way the Reviewer refuses every Stage that
-        follows. `hold` is the honest answer to a reply that cannot be applied.
+        The references were checked by `_validator` inside the bounded retry, where the model
+        could still be told. They are re-checked here rather than assumed, because this method
+        is also the one a test calls directly and because a validator and an applier that
+        disagree is the kind of gap that only shows up as a dead campaign - `revise` turns a
+        `ValueError` from here into a degraded decision rather than letting it escape.
         """
         action = str(raw.get("action", "")).strip().lower()
         if action == "retire":

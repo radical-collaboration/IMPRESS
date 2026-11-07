@@ -65,10 +65,20 @@ class ReasonerOptions:
     #: default, which is the MOCK chain - so a campaign naming real toolkits would load
     #: them, validate them, and then execute mocks.
     stages: list[str] | None = None
-    #: Model C only: how long `decide` blocks on the control plane, and what it does when
+    #: Model C only: how long a half blocks on the control plane, and what it does when
     #: nothing arrives. `hold | fallback | stop`.
+    #:
+    #: **`stop`, and it was `fallback` until a shell run showed what that builds.**
+    #: `impress-a serve --model C` logged `external planner: no directive in 5.0s;
+    #: on_timeout=fallback` and finished the campaign on model D's planner - an arm whose
+    #: entire claim is that a third party steered it, silently steering itself, which is
+    #: byte-for-byte a model-D campaign and invisible in the result. `ExternalPlanner`'s own
+    #: constructor already defaulted to `stop`; this option overrode it, so the safe default
+    #: existed everywhere except the path the CLI takes. The legacy `ExternalPolicy` gets the
+    #: same change for the same reason - backlog C6 is exactly "a model-C arm reported as
+    #: model C that ran D" - and an operator who wants a fallback declares it.
     timeout_s: float = 5.0
-    on_timeout: str = "fallback"
+    on_timeout: str = "stop"
     #: Models A and D.
     max_cycles: int = 6
     target_front: int = 3

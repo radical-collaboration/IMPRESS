@@ -137,9 +137,12 @@ class OraclePlanner(BasePlanner):
     async def _to_stage(self, raw: dict[str, Any], spec: Spec,
                         ctx: PlanningContext) -> Stage | None:
         """The reply as a Stage, wired by model D's mechanics."""
-        self._mechanics.stages = list(raw["stages"])
-        self._mechanics.base_replicas = max(1, min(self.max_lineages, int(raw["replicas"])))
-        stage = await self._mechanics.plan(spec, ctx)
+        # Per call, never assigned back: a reply naming a subset must not narrow the
+        # campaign's chain for the cycles that follow, including the ones its own fallback
+        # plans. See `ThresholdPlanner.plan`.
+        stage = await self._mechanics.plan(
+            spec, ctx, chain=list(raw["stages"]),
+            lineages=max(1, min(self.max_lineages, int(raw["replicas"]))))
         if stage is None:
             return None
         params = raw.get("params") or {}

@@ -21,6 +21,10 @@ model that answered correctly in different words was treated as having failed.
 is told what was wrong with the first. Retrying an identical prompt mostly reproduces the
 identical failure.
 
+**Scoped to one decision.** A reasoner that keeps the earlier turns of an exchange - which a
+reasoning model may require - is told here where one exchange ends, because it cannot
+distinguish a first attempt from a new decision and this function can.
+
 **Refused loudly.** Exhausting the attempts raises `NodeRefused`. The caller then falls back to
 its own deterministic rule and **records the transition**, because the failure mode that
 matters here is the one the precedent had: the exception swallowed and the campaign continuing,
@@ -87,6 +91,15 @@ async def ask(reasoner: Any, node: str, prompt: str, schema: dict[str, str],
     """
     last: Exception | str = "no attempt made"
     text = prompt
+    # One exchange per decision, not one per campaign. The live client keeps the earlier
+    # turns of an exchange because a reasoning model may REQUIRE its own `reasoning_content`
+    # back on a follow-up, and the corrective retry is that follow-up - but nothing was
+    # ending the exchange, so every decision appended to the last one. By cycle fifty the
+    # prompt carried fifty decisions, and because both halves share one client instance the
+    # Spec and Stage exchanges interleaved inside it. Scoped here rather than in the client
+    # because `think` cannot tell a first attempt from a new decision; this function can.
+    if (reset := getattr(reasoner, "reset", None)) is not None:
+        reset()
     for attempt in range(max(1, attempts)):
         try:
             raw = await reasoner.think(node, text, schema)
