@@ -609,12 +609,23 @@ renamed `..._does_not_count_toward_stagnation` and asserts the opposite of what 
 its own docstring said would be the first thing to change. Raising the limit remains the wrong
 fix and was not what happened.
 
-**G2. rfd3 output parsing ignores the metrics rfd3 reports.** See B1 and A4. Switching
-`RFD3DesignAgent` to read the sidecar `*_model_*.json` would give a genuine structural gate
-(`ligand_clashes == 0`), replace our non-DSSP phi/psi estimate with rfd3's own `helix_fraction`/
-`sheet_fraction`, and let us select the *best* model rather than `cif_models[0]`. Deferred
-deliberately until a real run shows what an `out_dir` actually contains - it changes what the gates
-measure, and A1 is still open.
+**G2. rfd3 output parsing ignores the metrics rfd3 reports.** **HALF DONE** (phase 10). The
+adapter reads the sidecar `*_model_*.json` it was already selecting candidates by and had never
+opened, and reports `ca_deviation`, `ligand_clashes`, `helix_fraction` and `sheet_fraction` -
+declared in the spec so a reasoner can see them and the campaign records them.
+
+**Nothing gates on them, and that is the remaining half.** The key names are inferred rather
+than observed: no sidecar from a real `out_dir` has been read. An acceptance gate needs an
+integrity `metrics_reported` partner, so a partner naming a wrong key would fail every real run
+as an INTEGRITY failure - refusing the chain and demoting the pattern on a guess. Backlog A3 is
+the standing lesson about flags nobody has run. `rfd3_agents.SIDECAR_KEYS` holds the candidate
+names and the adapter **logs the sidecar's actual keys**, so one real run resolves it from the
+log; `impress-a validate-tasks` is the run that will. Selecting the best of several models is
+also still open, for the reason the spec records at `num_designs`.
+
+The other half of the original item is settled differently than proposed: the structural gate it
+wanted (`ligand_clashes == 0`) waits on the names above, and the phi/psi estimate stays as the
+integrity floor at 0.3 with upstream's own 0.5 as an acceptance gate beside it.
 
   **Half of it landed early, forced by A4:** *discovery* now reads the sidecar JSON, because a bare
   `*.cif.gz` glob was selecting trajectories. What G2 still asks for is the rest - reading
@@ -743,7 +754,15 @@ coarse as 2.2x. It is variance reduction and not exact pairing: rfd3 is not repr
 coordinates (median Ca RMSD 2.4 A), and the pairing holds only for runs composing the same
 shape with the same parameters.
 
-**G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.**
+**G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.** **The
+measurement half is DONE** (phase 5), and phase 10 added the thing that reads it:
+`impress-a compare` reports `sum(cost_measured) / sum(cost_estimated)` per tool and dimension,
+which is the figure this item asks for, and `impress-a validate-tasks` fails a Task whose ratio
+exceeds 1.0 - above that a declared figure sits below measurement and gate 5 starts refusing
+work that would in fact fit. The GPU-sampling half still needs an allocation: the launcher
+writes `gpusample.csv`, and nothing has yet produced one to read.
+
+The original finding, for the record:
 - **The `cost` field:** each run's ledger `cost` repeats its admission estimate (0.17 in every
   trust run). Measured task time exists only as asyncflow state lines in `campaign.log`, which
   is what `performance_analysis/timeline.py` parses.

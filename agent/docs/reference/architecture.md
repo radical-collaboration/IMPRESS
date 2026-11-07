@@ -52,6 +52,9 @@ core/       tree · pareto · budget · qc · decision · provenance · artifact
 compose/    TaskGraph · composer · five gates · self-promoting interlock
 tools/      ToolSpec · registry · gate library · task agents
 exec/       backend factory · resource normalization · dispatcher · job ledger
+analysis/   per-Task validation and the four-arm scoring harness. May not import
+            `policy` or `control`: a scorer that could reach a reasoner could score a
+            campaign by asking it
 ```
 
 ### Import contract
