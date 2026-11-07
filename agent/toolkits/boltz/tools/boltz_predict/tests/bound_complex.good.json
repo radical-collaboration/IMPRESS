@@ -1,10 +1,13 @@
 {
-  "why": "A co-folded protein+ligand complex that clears all three gates. Both numbers are Boltz's own self-reported confidence, which is exactly the caveat docs/limitations.md records about the real toolkits' QC: passing here means the tool is confident, not that the complex is right. A structural gate on this output is backlog B1.",
+  "why": "A confidently folded, ligand-bound complex. Clears the RAISED acceptance bar (complex_plddt >= 0.75, upstream PROD's 75.0 rescaled) as well as the ligand_iptm bar this project keeps and upstream leaves off. Chosen above 0.75 deliberately: a good fixture that only cleared the old 0.5 would be a quiet example of the gap backlog G4 was about.",
   "failing_gates": [],
   "output": {
     "result": "complex",
     "count": 1,
     "outputs": {},
-    "metrics": {"complex_plddt": 0.82, "ligand_iptm": 0.61}
+    "metrics": {
+      "complex_plddt": 0.82,
+      "ligand_iptm": 0.61
+    }
   }
 }

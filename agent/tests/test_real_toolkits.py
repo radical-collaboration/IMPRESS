@@ -1011,18 +1011,28 @@ def test_packmin_does_not_gate_on_a_relaxed_score(reg):
     Upstream (`small_molecule_binding.py:678`) gates nothing on packmin either.
     """
     def bounds(tool):
-        return {g.params["metric"]: (g.params.get("max"), g.role)
+        # Keyed by (metric, role), not by metric. One metric now carries two gates with
+        # different roles and different bounds - which is decision 0013's whole point - and
+        # keying on the metric alone let the acceptance gate shadow the divergence bound this
+        # test exists to protect.
+        return {(g.params["metric"], g.role): g.params.get("max")
                 for g in reg.get(tool).qc_gates if g.id == "metric_in_range"}
 
-    assert "total_score" not in bounds("packmin"), \
+    assert not [m for m, _ in bounds("packmin") if m == "total_score"], \
         "a bound inside the normal spread of a pre-relax score carries no information"
     assert any(g.id == "metrics_reported" and "total_score" in g.params["metrics"]
                and g.role == "integrity" for g in reg.get("packmin").qc_gates), \
         "packmin must still REPORT a score - a worker that exits without one has broken"
-    assert bounds("fastrelax") == {"total_score": (0.0, "integrity"),
-                                   "fa_rep": (500.0, "integrity")}, \
-        "fastrelax converging is now the only judgement of an exploded pose, so both " \
-        "of its gates must stay integrity"
+
+    relax = bounds("fastrelax")
+    assert relax[("total_score", "integrity")] == 0.0
+    assert relax[("fa_rep", "integrity")] == 500.0, \
+        "fastrelax converging is still the only judgement of an exploded pose, so the WIDE " \
+        "divergence bounds must stay integrity whatever the acceptance thresholds are"
+    assert relax[("total_score", "acceptance")] == -250.0
+    assert relax[("fa_rep", "acceptance")] == 100.0
+    assert relax[("interaction_energy", "acceptance")] == -8.0, \
+        "upstream's own calibrated PROD values, as acceptance gates (backlog G4)"
 
 
 async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
@@ -1613,3 +1623,87 @@ async def test_model_a_also_varies_a_real_tools_parameter(reg):
         "FourNodePolicy's exploring 170 as a fraction of the 20-200 range it was written "
         f"against (0.83), rounded to the declared int type; got {steps}")
     assert varied["ligandmpnn_design"]["temperature"] == 0.35
+
+
+def test_the_fastrelax_worker_computes_interaction_energy_by_selector(reg):
+    """Backlog G4's missing metric, and the one choice in it that could be silently wrong.
+
+    `interaction_energy` is the only number this stage reports that measures BINDING rather
+    than geometry, and it was not computed at all: a converged, well-packed pose that does not
+    bind was indistinguishable from a real binder by anything the campaign measured.
+
+    The port is **selector-based**, matching upstream's own `scripts/fastrelax.py`:
+    `ResiduePropertySelector(LIGAND)` against its complement. A chain-based split
+    (`jump="1"`, or `chains="A"/"B"`) would be correct only if the ligand were its own chain,
+    which is a property of the input rather than of the tool - and wrong silently, by
+    measuring the energy between two halves of the protein.
+
+    Asserted against the worker source because pyrosetta is not installed in the local tier
+    and the real call needs a pose. That is a weaker test than running it, and it is the part
+    that can be checked without hardware: `impress-a validate-tasks` is what proves the
+    number arrives.
+    """
+    from impress_a.tools import rosetta_agents
+
+    worker = rosetta_agents._FASTRELAX_WORKER
+    assert "InteractionEnergyMetric" in worker
+    assert "ResiduePropertySelector(ResidueProperty.LIGAND)" in worker, \
+        "the selector pair must be upstream's own, not a chain or jump split"
+    assert "NotResidueSelector(ligand_sel)" in worker
+    assert "jump" not in worker, \
+        "a jump-based interface is right only if the ligand is its own chain"
+    assert "no LIGAND-property residue in the pose" in worker, \
+        "an empty ligand selection must omit the metric, not compute a confident zero"
+
+
+def test_no_rosetta_metric_is_defaulted_to_zero(reg):
+    """`scores.get("fa_rep", 0.0)` reported a fabricated zero for a term Rosetta had not
+    computed - and 0.0 is a *passing* fa_rep, so a broken score function read as a perfectly
+    packed structure. The invariant is that an adapter omits what it could not read and
+    `metrics_reported` turns that into an integrity failure; a default silently converts "the
+    tool broke" into "the design is good".
+    """
+    from impress_a.tools import rosetta_agents
+
+    for name in ("_PACKMIN_WORKER", "_FASTRELAX_WORKER", "_FILTER_SHAPE_WORKER"):
+        worker = getattr(rosetta_agents, name)
+        # Comments stripped: the rule is about what the worker DOES, and a comment recording
+        # the defect that was fixed is the thing a naive text match trips over - it caught
+        # this test's own explanation of the old `scores.get("fa_rep", 0.0)` on its first run.
+        code = "\n".join(line.split("#", 1)[0] for line in worker.splitlines())
+        assert ", 0.0)" not in code, (
+            f"{name}: a metric defaulted to 0.0. Omit it instead - the presence gate is what "
+            f"catches an unreadable value, and a fabricated zero PASSES a max-bound gate, so "
+            f"a broken score function reads as a perfectly packed structure")
+
+
+def test_every_calibrated_threshold_matches_upstreams_prod_value(reg):
+    """The four numbers, once, with their source - so a later edit has to argue with it.
+
+    Read off `examples/small_molecule_binding/run_small_molecule_binding.py`'s `PROD`
+    instance, which has months of multi-node campaigns behind it:
+    `fastrelax_max_fa_rep=100.0`, `fastrelax_max_score=-250.0` (data range -193 to -510),
+    `fastrelax_max_interact=-8.0` (p75 = -8.8), `interface_min_sc=0.55`,
+    `backbone_min_ss_fraction=0.5`, `fold_min_plddt=75.0`.
+
+    `fold_min_plddt` is the one that needs its rescale stated: it is a 0-100 figure upstream
+    and `complex_plddt` here is the 0-1 one, so 75.0 becomes 0.75. And `fold_min_ligand_iptm`
+    is **None** in PROD - upstream leaves that gate off - so this project is stricter than the
+    reference on exactly one axis, which every T3 figure has to say.
+    """
+    def acceptance(tool, metric):
+        for g in reg.get(tool).qc_gates:
+            if (g.role == "acceptance" and g.id == "metric_in_range"
+                    and g.params.get("metric") == metric):
+                return g.params.get("min"), g.params.get("max")
+        raise AssertionError(f"no acceptance gate on {tool}.{metric}")
+
+    assert acceptance("fastrelax", "fa_rep") == (None, 100.0)
+    assert acceptance("fastrelax", "total_score") == (None, -250.0)
+    assert acceptance("fastrelax", "interaction_energy") == (None, -8.0)
+    assert acceptance("filter_shape", "shape_complementarity")[0] == 0.55
+    assert acceptance("rfd3_design", "ss_fraction")[0] == 0.5
+    assert acceptance("boltz_predict", "complex_plddt") == (0.75, 1.0), \
+        "PROD's fold_min_plddt is 75.0 on a 0-100 scale; complex_plddt is the 0-1 one"
+    assert acceptance("boltz_predict", "ligand_iptm")[0] == 0.4, \
+        "kept, and stricter than PROD, which leaves this gate off entirely"

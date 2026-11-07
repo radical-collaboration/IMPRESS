@@ -125,10 +125,47 @@ for _ in range(max(1, nstruct)):
 
 best.dump_pdb(out_pdb)
 scores = best.scores
-json.dump({
-    "total_score": best_score,
-    "fa_rep": scores.get("fa_rep", 0.0) if hasattr(scores, "get") else 0.0,
-}, open(result_json, "w"))
+metrics = {"total_score": best_score}
+
+# OMITTED, not defaulted. `scores.get("fa_rep", 0.0)` reported a fabricated zero for a term
+# Rosetta had not computed - and 0.0 is a PASSING fa_rep, so a broken score function read as
+# a perfectly packed structure. An adapter omits what it could not read; `metrics_reported`
+# is what turns that into an integrity failure.
+try:
+    metrics["fa_rep"] = float(scores["fa_rep"])
+except Exception as exc:
+    sys.stderr.write("fa_rep unavailable: %r\n" % (exc,))
+
+# Interaction energy between the ligand and everything else - the one number this stage
+# reports that measures BINDING rather than geometry, and it was never computed at all
+# (backlog G4). A converged, well-packed pose that does not bind was indistinguishable from
+# a real binder by anything the campaign measured.
+#
+# SELECTOR-BASED, so it is correct whatever the chain layout is. Upstream's own
+# `scripts/fastrelax.py` uses exactly this pair - ResiduePropertySelector(LIGAND) against
+# its complement - and that is the port: a `Chain chains="A"/"B"` split would only be right
+# if the ligand were its own chain, which is a property of the input rather than of the tool.
+try:
+    from pyrosetta.rosetta.core.simple_metrics.metrics import InteractionEnergyMetric
+    from pyrosetta.rosetta.core.select.residue_selector import (
+        NotResidueSelector, ResiduePropertySelector)
+    from pyrosetta.rosetta.core.chemical import ResidueProperty
+
+    ligand_sel = ResiduePropertySelector(ResidueProperty.LIGAND)
+    if not any(ligand_sel.apply(best)):
+        # No ligand residue: there is no interface to measure, and a number computed against
+        # an empty selection would be a confident zero. Omitted, loudly.
+        raise RuntimeError("no LIGAND-property residue in the pose")
+    metric = InteractionEnergyMetric()
+    metric.set_scorefunction(sfxn)
+    metric.set_residue_selectors(ligand_sel, NotResidueSelector(ligand_sel))
+    metric.apply(best)            # also records it in the pose's energies, as upstream does
+    metrics["interaction_energy"] = float(metric.calculate(best))
+except Exception as exc:
+    sys.stderr.write("interaction_energy unavailable: %r\n" % (exc,))
+phase("interaction_energy")
+
+json.dump(metrics, open(result_json, "w"))
 """
 
 _FILTER_SHAPE_WORKER = r"""

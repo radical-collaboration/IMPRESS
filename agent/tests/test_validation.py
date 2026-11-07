@@ -288,7 +288,14 @@ def test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance
                           ("ligandmpnn_design", "ligand_confidence"),
                           ("filter_shape", "shape_complementarity"),
                           ("boltz_predict", "complex_plddt"),
-                          ("boltz_predict", "ligand_iptm")}, \
+                          ("boltz_predict", "ligand_iptm"),
+                          # Backlog G4: upstream's own calibrated PROD values, verified
+                          # against `run_small_molecule_binding.py`'s PROD instance -
+                          # fa_rep 100.0, score -250.0, interact -8.0, ss_fraction 0.5.
+                          ("fastrelax", "total_score"),
+                          ("fastrelax", "fa_rep"),
+                          ("fastrelax", "interaction_energy"),
+                          ("rfd3_design", "ss_fraction")}, \
         "every other gate - presence, structure, the Rosetta divergence bounds - is integrity"
 
 
@@ -361,12 +368,60 @@ _JOB_22702568 = {
 }
 
 
-def test_replaying_job_22702568_promotes_at_its_third_run(reg, tmp_path):
+#: What the calibrated specs require and neither recorded job measured. Supplying them is a
+#: stated COUNTERFACTUAL, never a measurement: the value is chosen to pass, so that a test
+#: about the trust counter is testing the trust counter. `interaction_energy` was not computed
+#: by any recorded run - the adapter did not compute it at all until phase 10 - and
+#: `num_models` is a count the ledger rows did not carry.
+_AS_IF_MEASURED = {"fastrelax": {"interaction_energy": -12.0},
+                   "rfd3_design": {"num_models": 1}}
+
+
+def _as_if_measured(metrics: dict) -> dict:
+    """A recorded run's metrics, plus the ones the calibrated gates now require."""
+    return {tool: {**values, **_AS_IF_MEASURED.get(tool, {})}
+            for tool, values in metrics.items()}
+
+
+def test_a_recorded_job_cannot_promote_a_pattern_under_the_calibrated_gates(reg, tmp_path):
+    """The point of closing backlog G4, stated as what it costs.
+
+    Neither recorded Delta job computed `interaction_energy` - the one metric fastrelax
+    reports that measures binding rather than geometry - because the adapter did not compute
+    it at all. Under the calibrated gates its absence is an INTEGRITY failure, so a replay of
+    job 22702568's five `6/6 tasks ok` runs demotes the pattern on every one of them.
+
+    That is the correct reading and it is the finding: those runs were never evidence that the
+    chain worked, because the chain was not measuring what the campaign was for. A gate that
+    only noticed a LOW interaction energy would have let this pass as five clean runs.
+    """
     from types import SimpleNamespace
 
-    runs = [_results(reg, m) for m in _JOB_22702568.values()]
-    assert [r.all_gates_passed for r in runs] == [False, True, False, False, True], \
-        "the old rule's verdicts, reproduced from the recorded metrics"
+    ex = _executor_with_memory_ledger(tmp_path)
+    for run_id, metrics in _JOB_22702568.items():
+        failed = ex._record_evidence(SimpleNamespace(signature="sig"), _results(reg, metrics))
+        assert failed is True, f"{run_id}: a run that never measured binding is not clean"
+    assert not ex.trust.is_trusted("sig")
+
+
+def test_the_promotion_rule_still_promotes_at_the_third_clean_run(reg, tmp_path):
+    """Decision 0013's arithmetic, unchanged by the calibration.
+
+    Replayed with `_as_if_measured`, which is a stated counterfactual rather than data: the
+    recorded runs did not measure `interaction_energy`, and a passing value is supplied so
+    that what is under test is the trust counter rather than the gate inventory. The original
+    prediction - failure/clean/failure/failure/clean under the OLD every-gate rule, promoting
+    nothing, and promotion at r0003 under 0013 - still holds for the same five runs.
+    """
+    from types import SimpleNamespace
+
+    runs = [_results(reg, _as_if_measured(m)) for m in _JOB_22702568.values()]
+    assert [r.all_gates_passed for r in runs] == [False] * 5, (
+        "NOT ONE of the five passes every gate now. Under the old every-gate rule two of "
+        "them did (r0002, r0005), and the difference is the fold bar: at 0.5 their 0.678 and "
+        "0.561 passed, and at upstream's own 0.75 neither does. Five runs this project "
+        "recorded as `6/6 tasks ok` contain no design the reference would have accepted, "
+        "which is the gap backlog G4 was about, priced")
 
     ex = _executor_with_memory_ledger(tmp_path)
     promoted_at = None
@@ -438,8 +493,11 @@ def test_replaying_job_22726105_stays_trusted_once_promoted(reg, tmp_path):
     ex.trust.on_clean_run("sig")      # the site ledger going in: one clean run (22702568 r0005)
     trusted_after = {}
     for run_id, metrics in _JOB_22726105.items():
+        # `_as_if_measured` for the reason given at its definition: this job did not compute
+        # `interaction_energy` either, and what is under test here is that a promoted pattern
+        # is no longer demoted by a pre-relax score - not the gate inventory.
         assert ex._record_evidence(SimpleNamespace(signature="sig"),
-                                   _results(reg, metrics)) is False, \
+                                   _results(reg, _as_if_measured(metrics))) is False, \
             f"{run_id}: every tool worked and every relax converged"
         trusted_after[run_id] = ex.trust.is_trusted("sig")
     assert trusted_after == {"r0001": False, "r0002": True, "r0003": True,

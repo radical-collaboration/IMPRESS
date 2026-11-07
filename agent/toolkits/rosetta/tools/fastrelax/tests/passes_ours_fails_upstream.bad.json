@@ -1,0 +1,15 @@
+{
+  "why": "BACKLOG G4, CLOSED. This file was `.good.json` and said in its own `why` that it would have to move here: it passes the divergence bounds (total_score max 0.0, fa_rep max 500.0) and fails every one of upstream's calibrated PROD values (-250.0, 100.0, -8.0). It now fails three acceptance gates and no integrity gate, which is the correct reading - the tool worked and the design is weak - so `acceptance_only` is set and the pattern's trust is untouched (decision 0013). `interaction_energy` is present and far above its bound: without it the fixture would fail `metrics_reported` as an INTEGRITY failure, which would say the tool broke, and the whole value of this file is that it says the opposite.",
+  "acceptance_only": true,
+  "failing_gates": [
+    "metric_in_range[total_score] (acceptance)",
+    "metric_in_range[fa_rep] (acceptance)",
+    "metric_in_range[interaction_energy]"
+  ],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": -12.0, "fa_rep": 480.0, "interaction_energy": -1.4}
+  }
+}

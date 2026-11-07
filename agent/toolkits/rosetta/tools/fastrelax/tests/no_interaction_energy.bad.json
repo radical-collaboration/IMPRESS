@@ -1,0 +1,16 @@
+{
+  "why": "The adapter could not compute interaction_energy and OMITTED it, which is the required behaviour - a fabricated 0.0 would pass the -8.0 acceptance gate's sibling check and read as a weak design rather than a broken measurement. `metrics_reported` is what catches it, as an INTEGRITY failure, so the pattern loses its clean run: a tool that cannot compute the one metric measuring binding has not done its job, however good the geometry looks. Every other number here is excellent, which is the point: nothing but the presence check would notice. The acceptance gate on the same metric fails too - a missing value is outside every range - and that is why the acceptance threshold cannot be the thing that catches this: on its own it would say the design was weak.",
+  "failing_gates": [
+    "metrics_reported",
+    "metric_in_range[interaction_energy]"
+  ],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {
+      "total_score": -402.7,
+      "fa_rep": 61.3
+    }
+  }
+}

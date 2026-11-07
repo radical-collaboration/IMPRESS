@@ -14,12 +14,15 @@ scope - `Registry.load()` and `Validator.dry_run()` must work with none of them 
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from ._subprocess import run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
+
+log = logging.getLogger(__name__)
 
 
 def _container_env() -> dict[str, str]:
@@ -40,6 +43,69 @@ def _container_env() -> dict[str, str]:
            if k not in ("PYTHONPATH", "PYTHONUSERBASE", "PYTHONDONTWRITEBYTECODE")}
     env["PYTHONNOUSERSITE"] = "1"
     return env
+
+
+#: Candidate key names for each metric rfd3's sidecar may carry, best guess first.
+#:
+#: **These names are UNVERIFIED and that is why nothing gates on them.** No sidecar from a real
+#: `out_dir` has been read - the file's existence selected the candidate and its contents were
+#: never opened - so the names below are inferred from rfd3's own naming elsewhere, not
+#: observed. Backlog A3 is the standing lesson: RFD3 was invoked with `--config`/`--out`,
+#: flags its real Hydra CLI does not have, and "checked against the documentation" is not
+#: "executed".
+#:
+#: So this reads what it recognises, reports it, and **omits what it does not find** - which
+#: is the required behaviour for an unreadable metric anyway (a fabricated 0.0 turns "the tool
+#: broke" into "the design is weak"). An unrecognised sidecar is logged WITH ITS KEYS, so one
+#: real run resolves this from the log rather than from another guess.
+#:
+#: Declaring the metrics without gating them is deliberate and has a precedent in this file's
+#: own spec: an acceptance `metric_in_range` requires an integrity `metrics_reported` partner,
+#: so a gate on a key name that turns out to be wrong would fail every real run as an
+#: INTEGRITY failure - a wrong guess would not merely be useless, it would refuse the chain
+#: and demote the pattern. The gates land when the names are confirmed.
+SIDECAR_KEYS: dict[str, tuple[str, ...]] = {
+    "ca_deviation": ("ca_deviation", "ca_rmsd", "rmsd_ca", "backbone_rmsd"),
+    "ligand_clashes": ("ligand_clashes", "num_ligand_clashes", "clashes", "n_clashes"),
+    "helix_fraction": ("helix_fraction", "frac_helix", "ss_helix"),
+    "sheet_fraction": ("sheet_fraction", "frac_sheet", "ss_sheet"),
+}
+
+
+def _sidecar_metrics(cif: Path) -> dict[str, float]:
+    """Numbers rfd3 wrote about this design, from the `*_model_*.json` beside it.
+
+    Flat keys and one level of nesting are both searched, because a metadata file that groups
+    its numbers under `metrics` is at least as likely as one that does not - and neither
+    shape has been seen.
+    """
+    import json as _json
+
+    meta = cif.with_name(cif.name[: -len(".cif.gz")] + ".json")
+    try:
+        raw = _json.loads(meta.read_text())
+    except (OSError, ValueError) as unreadable:
+        log.warning("rfd3_design: sidecar %s unreadable (%s); reporting no sidecar metrics",
+                    meta.name, unreadable)
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    flat: dict[str, Any] = dict(raw)
+    for value in raw.values():
+        if isinstance(value, dict):
+            flat.update(value)
+
+    found: dict[str, float] = {}
+    for name, candidates in SIDECAR_KEYS.items():
+        for key in candidates:
+            if isinstance(flat.get(key), (int, float)) and not isinstance(flat[key], bool):
+                found[name] = float(flat[key])
+                break
+    unknown = sorted(set(flat) - {k for keys in SIDECAR_KEYS.values() for k in keys})
+    log.info("rfd3_design: sidecar %s gave %s; keys not recognised: %s",
+             meta.name, sorted(found), unknown)
+    return found
 
 
 def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
@@ -170,9 +236,15 @@ class RFD3DesignAgent(TaskAgent):
         cif_gz_to_pdb(cif_models[0], best_pdb)
         ss_fraction = secondary_structure_fraction(best_pdb)
 
+        metrics = {"ss_fraction": ss_fraction, "num_models": len(cif_models)}
+        # The sidecar is what selected this candidate, and until now nothing read what was
+        # inside it - backlog G2's remaining half. rfd3 writes its own per-design numbers
+        # there, so a campaign that only measures secondary structure is ignoring the one
+        # file the tool wrote about its own output.
+        metrics.update(_sidecar_metrics(cif_models[0]))
         return {
             "result": "backbone",
             "count": len(cif_models),
             "outputs": {"backbone": best_pdb},
-            "metrics": {"ss_fraction": ss_fraction, "num_models": len(cif_models)},
+            "metrics": metrics,
         }

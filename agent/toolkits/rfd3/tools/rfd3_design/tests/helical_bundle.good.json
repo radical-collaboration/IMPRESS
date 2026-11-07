@@ -1,10 +1,17 @@
 {
-  "why": "Four models, a well-formed helical backbone, both gates clear. The count matters: `diffusion_batch_size` is set from num_designs, and a run that silently produced one model where four were requested is what `count_matches_request` would catch - a gate this spec does not reference (backlog B3).",
+  "why": "A designed helical bundle. Clears the 0.3 integrity floor and the 0.5 acceptance bar, and carries the sidecar numbers the adapter now reads from the `*_model_*.json` it was already selecting candidates by (backlog G2's remaining half). Those four are DECLARED but ungated: their key names are inferred rather than observed, and an acceptance gate needs a `metrics_reported` partner, so a partner naming a wrong key would fail every real run as an integrity failure. Carried here so the shape is exercised before the gates exist.",
   "failing_gates": [],
   "output": {
     "result": "backbone",
     "count": 4,
     "outputs": {},
-    "metrics": {"ss_fraction": 0.71, "num_models": 4}
+    "metrics": {
+      "ss_fraction": 0.71,
+      "num_models": 4,
+      "ca_deviation": 0.42,
+      "ligand_clashes": 0.0,
+      "helix_fraction": 0.66,
+      "sheet_fraction": 0.05
+    }
   }
 }

@@ -35,8 +35,19 @@ metrics: [complex_plddt, ligand_iptm, ensemble_size, ensemble_paired]
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metrics_reported, params: {metrics: [complex_plddt, ligand_iptm]}}
-  - {id: metric_in_range, role: acceptance, params: {metric: complex_plddt, min: 0.5, max: 1.0}}
-  - {id: metric_in_range, role: acceptance, params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
+  # 0.75, raised from 0.5 to match upstream's calibrated `PROD` (backlog G4). The rescale is
+  # the thing to notice: `PROD`'s `fold_min_plddt: 75.0` applies to a 0-100 figure and this
+  # metric is `complex_plddt * 100.0`, so 75.0 there is 0.75 here. Every recorded run of this
+  # project sits below it - 0.426 / 0.486 / 0.507, including job 22692304's best - which is
+  # why phase 8 built the refinement loop: at 0.5 the gate was passing designs the reference
+  # would have rejected, and the campaign's own objectives were slacker than its target.
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: complex_plddt, min: 0.75, max: 1.0}}
+  # Kept, and STRICTER THAN PROD on this one axis: upstream leaves `ligand_iptm` ungated
+  # deliberately. Every T3 figure has to say so, because a design this project calls passing
+  # would clear one more bar than a design the reference calls passing.
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
 # Measured on job 22692304 - the first run in which this tool executed at all: 57.8s
 # = 0.0160 h. Declared 0.15 was 9.3x that, the same literature guess the other five
 # carried, and it was left alone in 77a0363 precisely because there was nothing to

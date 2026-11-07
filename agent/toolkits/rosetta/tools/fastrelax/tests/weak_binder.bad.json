@@ -1,0 +1,11 @@
+{
+  "why": "THE INTERACTION_ENERGY GATE'S REASON FOR EXISTING. A converged, well-packed pose that does not bind: total_score and fa_rep both clear upstream's PROD thresholds comfortably, and the ligand contributes almost nothing to the interface. Before this metric was computed such a design was indistinguishable from a real binder by anything the campaign measured, and the Pareto front would have ranked it on geometry alone. It fails one acceptance gate and no integrity gate, so `acceptance_only`: the tool is fine and the design is not.",
+  "acceptance_only": true,
+  "failing_gates": ["metric_in_range[interaction_energy]"],
+  "output": {
+    "result": "structure",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"total_score": -341.0, "fa_rep": 74.2, "interaction_energy": -2.1}
+  }
+}

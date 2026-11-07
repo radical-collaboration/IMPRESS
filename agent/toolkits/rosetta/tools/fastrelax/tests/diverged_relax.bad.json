@@ -1,10 +1,20 @@
 {
-  "why": "FastRelax diverged instead of converging: total_score is large and positive and fa_rep is far beyond its ceiling, the signature of a structure that was clashing before relax and stayed clashing through it. Both metric gates fire.",
-  "failing_gates": ["metric_in_range[total_score]", "metric_in_range[fa_rep]"],
+  "why": "FastRelax diverged instead of converging: total_score is large and positive and fa_rep is far beyond its ceiling, the signature of a structure that was clashing before relax and stayed clashing through it. Both divergence bounds fire as INTEGRITY failures, and so does `metrics_reported` - a diverged relax has no interface to measure, so the adapter omits interaction_energy rather than reporting a number for a pose that blew up. The acceptance gates fail too, which is true but not the finding: this run is broken, not weak, and only the integrity failures count against the pattern's trust.",
+  "failing_gates": [
+    "metric_in_range[total_score] (integrity)",
+    "metric_in_range[fa_rep] (integrity)",
+    "metrics_reported",
+    "metric_in_range[total_score] (acceptance)",
+    "metric_in_range[fa_rep] (acceptance)",
+    "metric_in_range[interaction_energy]"
+  ],
   "output": {
     "result": "structure",
     "count": 1,
     "outputs": {},
-    "metrics": {"total_score": 1523.4, "fa_rep": 2780.0}
+    "metrics": {
+      "total_score": 1523.4,
+      "fa_rep": 2780.0
+    }
   }
 }

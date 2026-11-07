@@ -629,11 +629,41 @@ each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a camp
   G2 changes *which* file the agent reads for its metrics, while this changes whether a file
   nothing reads is written at all, so flipping it early costs G2 nothing.
 
-**G4. The fastrelax gates are far looser than upstream's calibrated ones.** Ours:
-`total_score max: 0.0`, `fa_rep max: 500.0`, no `interaction_energy` at all. Upstream PROD:
-`total_score < -250.0`, `fa_rep < 100.0`, `interaction_energy < -8.0`. `interaction_energy` is the
-one that actually measures binding and our worker does not compute it (`rosetta_agents.py:88-91`).
-`toolkits/rosetta/SKILL.md` already admits these are uncalibrated.
+**G4. The fastrelax gates are far looser than upstream's calibrated ones.** **DONE** (phase 10).
+Every number verified against `run_small_molecule_binding.py`'s own `PROD` instance rather than
+against the plan's copy of it: `fastrelax_max_fa_rep=100.0`, `fastrelax_max_score=-250.0` (data
+range -193 to -510), `fastrelax_max_interact=-8.0` (p75 -8.8), `interface_min_sc=0.55`,
+`backbone_min_ss_fraction=0.5`, `fold_min_plddt=75.0`. They land as **acceptance** gates beside
+the existing wide divergence bounds, which stay integrity - two gates on one metric with
+different roles is what decision 0013 is for, and `+1500` meaning "the tool broke" must not be
+the same sentence as `-12` meaning "the design fell short". `complex_plddt` rises 0.5 -> 0.75
+(PROD's 75.0 is a 0-100 figure; this metric is the 0-1 one), and `ligand_iptm >= 0.4` is kept and
+is **stricter than PROD**, which leaves that gate off - every T3 figure has to say so.
+
+`interaction_energy` is computed now, ported from upstream's own `scripts/fastrelax.py`:
+`InteractionEnergyMetric` over `ResiduePropertySelector(LIGAND)` against its complement.
+Selector-based rather than `jump="1"` or `chains="A"/"B"`, because which chain a ligand is in is
+a property of the input and a chain split would silently measure the energy between two halves
+of the protein instead. An empty ligand selection omits the metric rather than computing a
+confident zero.
+
+**What closing it cost, which is the finding.** A replay of job 22702568 - five runs recorded
+`6/6 tasks ok` - now **fails integrity on every one**, because none of them computed
+`interaction_energy`: those runs were never evidence that the chain worked, since the chain was
+not measuring what the campaign was for. And with the fold bar at upstream's own 0.75, **not one
+of the five contains a design the reference would have accepted** (two passed at 0.5). Both are
+pinned as tests. Also fixed while there: `scores.get("fa_rep", 0.0)` fabricated a zero for a term
+Rosetta had not computed, and 0.0 is a *passing* fa_rep, so a broken score function read as a
+perfectly packed structure.
+
+**rfd3's two new metrics are declared and ungated, deliberately.** `ca_deviation` and
+`ligand_clashes` are read from the sidecar `*_model_*.json` the adapter was already selecting
+candidates by and had never opened (G2's remaining half), but the key names are **inferred rather
+than observed** - no sidecar from a real out_dir has been read. An acceptance gate needs an
+integrity `metrics_reported` partner, so a partner naming a wrong key would fail every real run as
+an integrity failure: a wrong guess would not merely be useless, it would refuse the chain and
+demote the pattern. Backlog A3 is the standing lesson about flags nobody has run. The adapter logs
+the sidecar's actual keys, so one real run resolves it; the gates land then.
 
 **G5. `filter_shape` may be measuring the wrong interface.** Ours hardcodes
 `<ShapeComplementarity name="sc" jump="1"/>` with the default scorefunction
