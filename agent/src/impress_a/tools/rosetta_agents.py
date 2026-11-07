@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ._subprocess import first_dep_output, run_cmd, workdir_for
+from ._subprocess import input_path, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
 _PACKMIN_WORKER = r"""
@@ -211,7 +211,7 @@ def _ligand_params_arg(params: dict[str, Any]) -> str:
 
 class PackMinAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        structure = first_dep_output(req.inputs, "structure")
+        structure = input_path(req, "structure")
         if not structure:
             raise RuntimeError("packmin: no upstream 'structure' output found")
         work = workdir_for(req, "packmin")
@@ -230,7 +230,7 @@ class PackMinAgent(TaskAgent):
 
 class FastRelaxAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        structure = first_dep_output(req.inputs, "structure")
+        structure = input_path(req, "structure")
         if not structure:
             raise RuntimeError("fastrelax: no upstream 'structure' output found")
         work = workdir_for(req, "fastrelax")
@@ -251,7 +251,7 @@ class FastRelaxAgent(TaskAgent):
 
 class FilterShapeAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        structure = first_dep_output(req.inputs, "structure")
+        structure = input_path(req, "structure")
         if not structure:
             raise RuntimeError("filter_shape: no upstream 'structure' output found")
         work = workdir_for(req, "filter_shape")

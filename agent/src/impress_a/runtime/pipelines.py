@@ -39,7 +39,7 @@ from typing import Any
 
 from impress import ImpressBasePipeline
 
-from ..exec.dispatch import node_task
+from ..exec.dispatch import gpu_for, node_task
 
 
 class ControlPipeline(ImpressBasePipeline):
@@ -63,10 +63,17 @@ class ControlPipeline(ImpressBasePipeline):
 class StagePipeline(ImpressBasePipeline):
     """One Stage's DAG, as an IMPRESS pipeline.
 
-    `config` carries `graph`, `registry`, `invocation`, `workdir` and `done` - a future the
-    Runner awaits. Passing the future in is what lets the Runner collect results it did not
-    construct the pipeline for: `ImpressManager.submit_new_pipelines` builds the instance
-    internally and hands it back only as a dict key.
+    `config` carries `graph`, `registry`, `invocation`, `workdir`, `gpus_per_node`,
+    `backend_kind` and `done` - a future the Runner awaits. Passing the future in is what lets
+    the Runner collect results it did not construct the pipeline for:
+    `ImpressManager.submit_new_pipelines` builds the instance internally and hands it back
+    only as a dict key.
+
+    `gpus_per_node` and `backend_kind` are carried for the same reason the `Dispatcher` takes
+    them: without them this path registers every GPU task unpinned, so a width-4 Stage can put
+    four tasks on one device while three sit idle. That was backlog A10 on the Dispatcher, and
+    it was reintroduced here by omission - the Runner is the path a Delta campaign selects with
+    `runner: impress`.
     """
 
     def register_pipeline_tasks(self) -> None:
@@ -74,6 +81,8 @@ class StagePipeline(ImpressBasePipeline):
         reg = self.config["registry"]
         invocation = self.config.get("invocation") or graph.id
         workdir = self.config.get("workdir")
+        gpus = int(self.config.get("gpus_per_node") or 1)
+        backend_kind = self.config.get("backend_kind") or "concurrent"
         self._order = graph.topo_order()
         for tid, node in graph.nodes.items():
             # The SAME factory the Dispatcher uses, deliberately. Two implementations of the
@@ -85,7 +94,8 @@ class StagePipeline(ImpressBasePipeline):
                 dep_order=tuple(node.deps),
                 wiring=tuple((port, *ref.split(".", 1)) if "." in ref else (port, ref, "")
                              for port, ref in node.inputs.items()),
-                workdir=workdir, seed_inputs=node.seed_inputs)
+                workdir=workdir, seed_inputs=node.seed_inputs,
+                gpu_index=gpu_for(node.lineage, gpus), backend_kind=backend_kind)
             setattr(self, tid, task)
 
     async def run(self) -> None:

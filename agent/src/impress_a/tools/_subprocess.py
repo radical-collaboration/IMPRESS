@@ -12,6 +12,7 @@ pyrosetta, the LigandMPNN/RFD3 checkoutss) is installed.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shlex
 from pathlib import Path
@@ -96,36 +97,45 @@ async def run_cmd(cmd: list[str], cwd=None, env=None,
     return stdout, stderr
 
 
-def first_dep_output(inputs: dict, port: str):
-    """Find an upstream output by the port name it was produced under. **Deprecating.**
+def input_path(req: Any, port: str):
+    """The file an upstream wired to this adapter's own declared input `port`.
 
-    This scans, and scanning is why a node with two typed inputs mis-wired silently: the
-    dispatcher used to key inputs `dep0..depN` positionally, so an adapter had no way to ask
-    which dependency it was handed and took the first whose `outputs` happened to contain the
-    name it wanted. With one upstream dep that is always right; with two it is a coin toss
-    that type-checks at composition.
+    Replaces `first_dep_output`, which **scanned**: the dispatcher used to key inputs
+    `dep0..depN` positionally, so an adapter had no way to ask which dependency it was handed
+    and took the first whose `outputs` happened to contain the name it wanted. With one
+    upstream that is always right; with two it is a coin toss that type-checks at composition.
+    It also meant an adapter asked for an upstream *output* port name while declaring an
+    *input* port name, and the two coincided here by luck - `ligandmpnn_design` consumes
+    `backbone` and rfd3 emits `backbone`, so nothing noticed.
 
-    `TaskRequest.input_ref(port)` resolves by the adapter's own DECLARED input port instead,
-    using the wiring the composer computed and gate 1 type-checked. The five real adapters
-    migrate to it in phase 9 and this goes with `ExperimentIntent` in phase 11.
-
-    Until then it **raises rather than guesses** when more than one dependency could satisfy
-    the request. A wrong artifact silently accepted is the `*.cif.gz` trajectory bug in
-    another form - plausible output, wrong provenance, discovered much later.
+    `TaskRequest.input_ref` resolves by the declared port, using the wiring the composer
+    computed and gate 1 type-checked. What this adds is the last step an adapter actually
+    wants: the thing to open. `ArtifactRef.located` is a property, so it is unavailable once
+    the handle has crossed a process boundary as plain data - which is why the dict form is
+    handled rather than assumed away.
     """
-    hits = [v for v in inputs.values()
-            if isinstance(v, dict) and port in (v.get("outputs") or {})]
-    if len(hits) > 1:
-        raise ValueError(
-            f"{len(hits)} dependencies could supply {port!r}; this helper cannot tell which "
-            f"was wired. Use `TaskRequest.input_ref({port!r})`, which resolves by declared "
-            f"input port rather than by scanning.")
-    if not hits:
+    ref = req.input_ref(port)
+    if ref is None:
         return None
-    produced = hits[0]["outputs"][port]
-    # Upstream hands over a typed handle rather than a bare string; what an adapter wants is
-    # the thing to open.
-    return getattr(produced, "located", produced)
+    if isinstance(ref, dict):
+        return ref.get("path") if ref.get("path") is not None else ref.get("value")
+    return getattr(ref, "located", ref)
+
+
+def child_env(req: Any, base: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a real tool's child process should run with.
+
+    Merges `TaskRequest.gpu_env` - the pinning `exec/dispatch.node_task` resolved where the
+    backend was known - into `base`, defaulting to this process's own environment because the
+    env passed to `create_subprocess_exec` REPLACES the child's rather than extending it, so
+    passing only the pinning would strip PATH, MPNN_DIR and BOLTZ_CACHE.
+
+    Empty `gpu_env` under Dragon and whenever nothing is pinned, so an adapter never has to
+    ask which case it is in: there the placement policy pins, and a `CUDA_VISIBLE_DEVICES`
+    set here would name a device Dragon never gave the process.
+    """
+    return {**(base if base is not None else dict(os.environ)),
+            **(getattr(req, "gpu_env", None) or {})}
 
 
 def workdir_for(req: Any, prefix: str) -> Path:

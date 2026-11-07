@@ -35,6 +35,7 @@ from impress_a.core.pareto import Direction, Objective
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.explicit import ThresholdPolicy
 from impress_a.policy.legacy import DecideAsRoles
+from impress_a.policy.planner import PlanningContext
 from impress_a.runtime.roles import RolesDriver
 from impress_a.tools.registry import Registry
 
@@ -204,14 +205,25 @@ async def test_execution_drains_and_stops_when_contact_is_lost(reg, tmp_path):
 
     async with ControlPlaneServer(plane) as server:
         async def control():
-            """Submit one Stage, then go silent - the shape of a control process that died."""
+            """Submit one Stage, then go silent - the shape of a control process that died.
+
+            Driven through the session rather than through `RolesDriver`, and that is the
+            whole point: a driver that runs out of turns calls `session.stop` on its way out,
+            which is a control process saying goodbye. Letting it do that here made the test a
+            race between its own stop and the liveness timeout - the campaign ended with
+            `max_cycles=1 reached` whenever the Stage finished inside the timeout, which is
+            most of the time on mock tools. A process that died makes no further calls at all.
+            """
             async with ControlPlaneClient(server.base_url) as api:
                 session = RemoteSession(api, cid)
                 obs = await session.observe()
                 goal = Goal(text=obs.goal, objectives=list(obs.objectives))
                 spec_half, plan_half = _halves()
-                driver = RolesDriver(goal, spec_half, plan_half, max_turns=1)
-                await driver.conduct(session)
+                campaign_spec = await spec_half.initial_spec(goal)
+                await session.publish_spec(campaign_spec)
+                stage = await plan_half.plan(
+                    campaign_spec, PlanningContext(goal, await session.observe()))
+                await session.submit_stage(stage)
 
         task = asyncio.create_task(control())
         res = await asyncio.wait_for(mgr.run(), timeout=60)

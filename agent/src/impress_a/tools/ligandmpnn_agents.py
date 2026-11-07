@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ._ensemble import member_index, select_best
-from ._subprocess import first_dep_output, run_cmd, workdir_for
+from ._subprocess import child_env, input_path, run_cmd, workdir_for
 from .agent import TaskAgent, TaskRequest
 
 # LigandMPNN writes confidence into its FASTA headers, e.g.:
@@ -138,7 +138,7 @@ class LigandMPNNDesignAgent(TaskAgent):
         if not mpnn_dir:
             raise RuntimeError("MPNN_DIR is not set - see scripts/delta_env_setup.sh")
 
-        backbone_pdb = first_dep_output(req.inputs, "backbone")
+        backbone_pdb = input_path(req, "backbone")
         if not backbone_pdb:
             raise RuntimeError("ligandmpnn_design: no upstream 'backbone' output found")
 
@@ -200,7 +200,7 @@ class LigandMPNNDesignAgent(TaskAgent):
         # cwd=$MPNN_DIR: every other relative path inside `run.py` and its bundled
         # openfold resolves the same way the checkpoints do. `--out_folder` and
         # `--pdb_path` are absolute, so nothing lands in the checkout.
-        await run_cmd(cmd, cwd=root,
+        await run_cmd(cmd, cwd=root, env=child_env(req),
                       timeout_s=float(self.spec.resources.walltime_s))
 
         fastas = sorted(out.glob("seqs/*.fa")) or sorted(out.glob("**/*.fa"))

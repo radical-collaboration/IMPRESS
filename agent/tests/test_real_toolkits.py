@@ -464,16 +464,20 @@ async def test_ligandmpnn_passes_absolute_checkpoints_and_runs_in_the_checkout(
 
     captured: dict[str, object] = {}
 
-    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
-        captured["cmd"], captured["cwd"] = cmd, cwd
+    async def fake_run_cmd(cmd, cwd=None, env=None, timeout_s=None):
+        captured["cmd"], captured["cwd"], captured["env"] = cmd, cwd, env
         return "", ""
 
     monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    # Keyed by this tool's own DECLARED input port, with the upstream output port recorded -
+    # which is what `exec/dispatch.node_task` builds from the composer's typed wiring. The
+    # `dep0` form this replaces was the positional keying that made a two-input node mis-wire.
     req = TaskRequest(
         tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
-        inputs={"dep0": {"outputs": {
+        input_ports={"backbone": "backbone"},
+        inputs={"backbone": {"outputs": {
             "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
     await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
 
@@ -534,15 +538,15 @@ async def test_boltz_agent_passes_no_kernels(reg, tmp_path, monkeypatch):
 
     captured: dict[str, list[str]] = {}
 
-    async def fake_run_cmd(cmd, timeout_s=None):
-        captured["cmd"] = cmd
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["cmd"], captured["env"] = cmd, env
         return "", ""
 
     monkeypatch.setattr(boltz_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("boltz_predict")(reg.get("boltz_predict"))
-    req = TaskRequest(tool="boltz_predict",
-                      inputs={"dep0": {"outputs": {"structure": str(pdb)}}})
+    req = TaskRequest(tool="boltz_predict", input_ports={"structure": "structure"},
+                      inputs={"structure": {"outputs": {"structure": str(pdb)}}})
     params = agent.parameterize(TaskRequest(
         tool="boltz_predict", params={"ligand_smiles": "CC(=O)Oc1ccccc1C(=O)O"}))
     await agent.run(req, params)
@@ -781,16 +785,20 @@ async def test_ligandmpnn_runs_run_py_through_the_numpy_alias_shim(reg, monkeypa
 
     captured: dict[str, Any] = {}
 
-    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
-        captured["cmd"], captured["cwd"] = cmd, cwd
+    async def fake_run_cmd(cmd, cwd=None, env=None, timeout_s=None):
+        captured["cmd"], captured["cwd"], captured["env"] = cmd, cwd, env
         return "", ""
 
     monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    # Keyed by this tool's own DECLARED input port, with the upstream output port recorded -
+    # which is what `exec/dispatch.node_task` builds from the composer's typed wiring. The
+    # `dep0` form this replaces was the positional keying that made a two-input node mis-wire.
     req = TaskRequest(
         tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
-        inputs={"dep0": {"outputs": {
+        input_ports={"backbone": "backbone"},
+        inputs={"backbone": {"outputs": {
             "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
     await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
 
@@ -1524,3 +1532,51 @@ async def test_a_refinement_stage_still_measures_every_campaign_objective(reg):
     reported = {m for t in stage.runs for m in reg.get(t.tool).metrics}
     missing = sorted({o.name for o in goal.objectives} - reported)
     assert missing == [], f"the refinement cannot be ranked on {missing}"
+
+
+def test_every_real_adapter_recovers_its_inputs_by_port(reg):
+    """No adapter may scan the dependency payloads for an artifact.
+
+    `first_dep_output` searched them for one whose `outputs` happened to contain the name it
+    wanted, which is right only while a node has exactly one upstream dependency: with two
+    typed inputs it returned whichever came first, and that type-checks at composition and
+    mis-wires at runtime. Worse, an adapter asked for an upstream *output* port while
+    declaring an *input* port, and the two coincided here by luck - `ligandmpnn_design`
+    consumes `backbone` and rfd3 emits `backbone`, so nothing ever disagreed.
+
+    Checked two ways, because the mechanical one alone would pass a scan written by hand:
+    every port name an adapter asks `input_path` for must be a port that tool DECLARES, and
+    the scanning helper must be gone from the package entirely.
+    """
+    import ast
+
+    src = pathlib.Path(impress_a_tools_dir())
+    offenders, checked = [], 0
+    for path in sorted(src.glob("*_agents.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        declared: set[str] = set()
+        for tool_id in reg.ids():
+            spec = reg.get(tool_id)
+            if spec.entry.rsplit(".", 2)[-2] == path.stem:
+                declared |= set(spec.inputs)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id == "first_dep_output":
+                offenders.append(f"{path.name}:{node.lineno}: still scans")
+            if node.func.id == "input_path" and len(node.args) == 2:
+                port = node.args[1]
+                if isinstance(port, ast.Constant):
+                    checked += 1
+                    if port.value not in declared:
+                        offenders.append(
+                            f"{path.name}:{node.lineno}: asks for {port.value!r}, which no "
+                            f"tool in this module declares as an input port "
+                            f"({sorted(declared)})")
+    assert offenders == [], "\n".join(offenders)
+    assert checked == 5, f"{checked} port lookups found; the real adapters have five"
+
+
+def impress_a_tools_dir() -> str:
+    import impress_a.tools
+    return str(pathlib.Path(impress_a.tools.__file__).parent)

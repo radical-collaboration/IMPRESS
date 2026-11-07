@@ -169,8 +169,14 @@ An output your spec does not declare is a **load-bearing error**, not something 
 nothing downstream could consume it and the composer never type-checked it, so `post_process` raises
 rather than let a spec bug surface later as a missing input.
 
-To consume an upstream artifact, `_subprocess.first_dep_output(req.inputs, port)` returns the thing
-to open. Write files under `_subprocess.workdir_for(req, prefix)` — which defaults to the process
+To consume an upstream artifact, `_subprocess.input_path(req, port)` returns the thing to open,
+resolved by **your own declared input port** — the wiring the composer computed and gate 1
+type-checked. It replaces a helper that scanned the dependency payloads for a matching output name,
+which is right only while a node has exactly one upstream: with two typed inputs it returned
+whichever dependency came first, and that type-checks at composition and mis-wires at runtime. If
+your tool launches a child process, pass `env=_subprocess.child_env(req)` so it inherits the GPU
+pinning for its lineage — the env a concurrent backend pins with, and empty under Dragon, where the
+placement policy does it instead. Write files under `_subprocess.workdir_for(req, prefix)` — which defaults to the process
 CWD, where the launcher has already put you — never `tempfile.mkdtemp()`, whose result is local to
 one node and unreachable from wherever the next task runs.
 

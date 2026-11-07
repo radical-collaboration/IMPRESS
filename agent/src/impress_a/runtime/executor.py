@@ -1270,7 +1270,9 @@ class CampaignExecutor:
             self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
         log.info("engine: %s backend ready", self.spec.backend)
         if self.spec.runner == "impress":
-            self.dispatcher = StageRunner(self.flow, self.reg, workdir=None)
+            self.dispatcher = StageRunner(
+                self.flow, self.reg, self.spec.backend, workdir=None,
+                gpus_per_node=self.spec.site.gpus_per_node)
             await self.dispatcher.start()
             log.info("execution loop: impress ImpressManager (one pipeline per stage)")
         else:

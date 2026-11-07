@@ -294,9 +294,19 @@ local services merges a template's env and applies the placement policy afterwar
 var there looks like pinning and does nothing, and Dragon needs
 `Policy(gpu_affinity=[gpu_index])` on the process template instead.
 
-**Still open:** the five real adapters do not yet apply `gpu_index` to their own child
-environments - that lands with their migration to `TaskRequest.input_ref` in phase 9 - and
-`replicas > 1` has still never executed on hardware. Nothing here has seen a GPU.
+*Pinning, completed in phase 9.* The adapters now apply it, and two things changed on the way.
+The assignment is no longer the adapter's to interpret: `exec/dispatch.node_task` resolves it to
+an environment where the backend is known and puts the result on `TaskRequest.gpu_env`, which an
+adapter merges through `_subprocess.child_env(req)` without asking which case it is in. An adapter
+deciding for itself would have to know its backend, and setting `CUDA_VISIBLE_DEVICES=2` inside a
+process Dragon had already restricted to one device points it at a device it was never given. And
+the **Runner path had no pinning at all** - `StagePipeline` registered every task without a
+`gpu_index`, so this item was fixed on the Dispatcher and reintroduced by omission on the path a
+Delta campaign selects with `runner: impress`. `gpu_for` is now shared by both loops, for the same
+reason `node_task` is.
+
+**Still open:** `replicas > 1` has still never executed on hardware. Nothing here has seen a GPU,
+so the pinning is asserted against the factory's own arguments and not against `nvidia-smi`.
 
 **A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
 `rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
