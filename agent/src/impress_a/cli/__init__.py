@@ -44,7 +44,7 @@ POLICIES = reasoners.CLASSES
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
 SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
-               "trust")
+               "trust", "validate-tasks")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -487,6 +487,46 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     if guard:
         pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
     return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+async def validate_tasks_command(spec_path: str, out: str | None = None) -> int:
+    """`impress-a validate-tasks <spec>`: run each Task once and report every check.
+
+    Exits non-zero if any Task fails an **integrity** row, because that is the exit code the
+    experiment's step 1 gates on: `impress-a trust --assert` cites this run as its reason, and
+    asserting trust on the strength of a run nobody checked would be asserting trust on
+    untested Tasks.
+
+    An acceptance row that fails does NOT fail the run. A weak design is not a broken Task
+    (decision 0013), and a validation pass that demanded good designs would refuse a working
+    chain on its first mediocre draw.
+    """
+    from ..analysis.validate_tasks import validate_tasks
+
+    spec = load_spec(spec_path)
+    if err := _check_ligand_smiles(spec):
+        log.error("%s", err)
+        return 1
+    for var, val in _thread_caps(spec).items():
+        os.environ.setdefault(var, val)
+
+    out_dir = Path(out) if out else Path(spec.root) / spec.campaign_id / "validation"
+    log.info("validating %d task(s) of %s; writing to %s",
+             len(spec.stages), spec.campaign_id, out_dir)
+    report = await validate_tasks(spec, Registry().load(), out_dir)
+
+    print(report.table())
+    failed = [t.tool for t in report.tasks if not t.ok]
+    weak = [t.tool for t in report.tasks if t.ok and any(not r.ok for r in t.rows)]
+    print(f"\n  {len(report.tasks) - len(failed)}/{len(report.tasks)} task(s) clean on "
+          f"every integrity row")
+    if weak:
+        print(f"  acceptance rows fell short on: {', '.join(weak)} - a weak design is not a "
+              f"broken Task, so this does not fail the run")
+    if failed:
+        print(f"  FAILED: {', '.join(failed)}")
+    print(f"  report: {out_dir / 'validate_tasks.json'}")
+    return 0 if report.ok else 1
 
 
 def print_models() -> int:
@@ -1031,6 +1071,12 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--no-guard", action="store_true")
     ct.add_argument("--model-profile", default=None, metavar="NAME",
                     help="models.yaml profile naming a live endpoint (--model B)")
+    vt = sub.add_parser("validate-tasks",
+                        help="execute each Task in a campaign's chain once and check it")
+    vt.add_argument("spec")
+    vt.add_argument("--out", default=None, metavar="DIR",
+                    help="where to write validate_tasks.json and the per-Task table "
+                         "(default: <root>/<campaign>/validation)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
@@ -1058,6 +1104,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
                                             a.specifier, a.planner, not a.no_guard,
                                             a.model_profile))
+    if a.cmd == "validate-tasks":
+        return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":
         widths = a.replicas
         if widths is None:

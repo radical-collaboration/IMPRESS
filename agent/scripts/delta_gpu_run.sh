@@ -254,7 +254,16 @@ mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
 export IMPRESS_A_RUN_ROOT="${WORKDIR}"
 
-# ── Model ────────────────────────────────────────────────────────────
+# ── Command and model ────────────────────────────────────────────────
+# Which subcommand this allocation is for. `run` is a campaign; `validate-tasks` executes each
+# Task of the chain once and checks it, which is step 1 of the four-arm experiment and what
+# `impress-a trust --assert` cites as its reason.
+#
+# A switch here rather than a second launcher, because everything above this line - the Cray PE
+# module case, the FAB_LIB autodetect, dragon-config, the ssh/tcp/network-config combination,
+# SLURM_OVERLAP, the per-job directory, the manifest, the EXIT trap - was bought one burned
+# allocation at a time, and two copies of it would be two things to keep in step.
+IMPRESS_A_COMMAND="${IMPRESS_A_COMMAND:-run}"
 MODEL="${IMPRESS_A_MODEL:-D}"
 GIT_SHA="$(git -C "${IMPRESS_A_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DIRTY=false
@@ -265,11 +274,33 @@ _manifest "job_id=${RUN_ID}" "campaign=${CAMPAIGN_STEM}" "campaign_path=${CAMPAI
           "model=${MODEL}" "nodes=${SLURM_NNODES:-1}" "git_sha=${GIT_SHA}" \
           "git_dirty=${GIT_DIRTY}" "started=$(date -Iseconds)"
 echo "Campaign:          ${CAMPAIGN}"
-echo "Model:             ${MODEL}"
+echo "Command:           ${IMPRESS_A_COMMAND}"
+if [ "${IMPRESS_A_COMMAND}" = "run" ]; then
+    echo "Model:             ${MODEL}"
+else
+    echo "Model:             (none - a validation pass has no reasoner)"
+fi
 echo "Working directory: ${WORKDIR}"
 
 RUNNER="${IMPRESS_A_DIR}/scripts/delta_run_campaign.py"
-RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" )
+
+case "${IMPRESS_A_COMMAND}" in
+    run)
+        RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" )
+        ;;
+    validate-tasks)
+        # No --model: there is no reasoner in a validation pass. The chain comes from the
+        # spec and each Task runs once, so what is being tested is the toolkit rather than
+        # any decision about it.
+        RUNNER_ARGS=( validate-tasks "${CAMPAIGN}" --out "${WORKDIR}/validation" )
+        ;;
+    *)
+        echo "ERROR: IMPRESS_A_COMMAND must be 'run' or 'validate-tasks', got "
+        echo "       '${IMPRESS_A_COMMAND}'"
+        exit 1
+        ;;
+esac
+_manifest "command=${IMPRESS_A_COMMAND}"
 
 # Stale Dragon dictionary-orchestrator files from a previous run in this directory.
 rm -f ddict_orc*

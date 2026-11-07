@@ -1032,6 +1032,20 @@ paid for out of the first allocation.
 
 ## Verification that applies to any item
 
+**`impress-a validate-tasks <spec>` on an allocation, before trusting a toolkit.** It executes
+each Task of the chain once, in dependency order, through the ordinary composer and dispatcher,
+and checks: it ran; it is not from the `mock` toolkit; the `[phase]` breakdown is there, so
+import time is separable from work; every declared output port produced, with its declared
+`ArtifactType`, on disk, above a size floor; every declared metric reported and **finite**;
+integrity gates passed, with acceptance reported separately; measured wall time within the
+declared `walltime_s`; and `cost_measured / cost_estimated <= 1.0` per dimension.
+
+It is the only check shaped like all four defects that reached real hardware - what a tool
+writes, whether it can import, where the bytes live, and an estimate that refuses work - none
+of which a dry run can find, because "checked against the binary" is not "executed". Exits
+non-zero on any integrity row, which is the gate `impress-a trust --assert` cites as its reason.
+
+
 `pytest tests -q` green, no allocation. `ruff check src tests` **must report nothing** — the one
 number worth stating, and it is zero rather than a budget, so any finding is a regression. It was
 quoted as 41 until H6 found that no configuration produced that number. The import

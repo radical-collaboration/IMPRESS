@@ -61,7 +61,15 @@ ALLOWED = {
     # contract exists for: no policy reaches a tool adapter, no compose reaches exec, and core
     # still imports nothing internal.
     "cli": frozenset({"control", "manager", "runtime", "policy", "compose", "tools",
-                      "core"}),
+                      "core", "analysis"}),
+    # `analysis` is downstream of everything and must reach no reasoner. The rule that
+    # matters is the ABSENCE of `policy` and `control`: a scorer that could reach a reasoner
+    # could score a campaign by asking it, and the comparison's whole method is that figures
+    # come from provenance, the ledgers and the artifacts on disk - never from an arm's own
+    # bookkeeping. `validate_tasks` genuinely executes a chain, so it needs `exec`, `compose`
+    # and `tools`; `compare_arms` will use `core` alone, which this row permits without
+    # requiring.
+    "analysis": frozenset({"runtime", "exec", "compose", "tools", "core"}),
     "__main__": frozenset({"cli"}),
 }
 
@@ -137,6 +145,9 @@ def test_the_import_contract_holds():
         "a policy that can reach a tool adapter stops emitting abstract intent"
     assert "exec" not in ALLOWED["compose"], \
         "compose reaching exec would make the validation path need a backend"
+    assert ALLOWED["analysis"].isdisjoint({"policy", "control"}), \
+        "a scorer that can reach a reasoner can score a campaign by asking it, and every " \
+        "figure the comparison publishes is supposed to come from the executor's own record"
 
     bad = [f"{p.relative_to(SRC.parent)}:{ln}: {a} must not import {b}"
            for p, ln, a, b in _edges() if b not in ALLOWED[a]]

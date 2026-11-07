@@ -22,6 +22,12 @@ pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
 
 impress-a tools                                      # list registered tools
 impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
+impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and check it, ON
+#   hardware. Exits non-zero if any Task fails an INTEGRITY row; an acceptance row that falls
+#   short does not fail it (a weak design is not a broken Task). This is what justifies
+#   `impress-a trust --assert`, whose --reason cites the job id.
+#   On Delta: sbatch --partition=gpuA40x4-interactive --time=00:40:00 \
+#                    scripts/delta_validate_tasks.sh campaigns/<spec>.yaml
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
 #   --control roles          the Specifier/Planner halves rather than the legacy `decide`
