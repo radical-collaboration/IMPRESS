@@ -44,7 +44,7 @@ POLICIES = reasoners.CLASSES
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
 SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
-               "trust", "validate-tasks")
+               "trust", "validate-tasks", "compare")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -487,6 +487,41 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     if guard:
         pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
     return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def compare_command(dirs: list[str], control: str = "D", theta: float | None = None,
+                    t_cut_h: float | None = None, chain: str | None = None,
+                    json_out: str | None = None) -> int:
+    """`impress-a compare <dir>...`: the four-arm comparison, scored and reported.
+
+    Exits non-zero when the comparison must not be published - an arm that ran a mock tool,
+    an arm that degraded to a fallback, or arms that disagree on the spec, the seed salt or
+    the git sha. Those are not caveats for the discussion: each one means the figures measure
+    two things at once, and the exit code is what stops a script publishing them anyway.
+    """
+    import dataclasses
+
+    from ..analysis.compare_arms import T_CUT_H, compare, load_arm, mde
+
+    arms = [load_arm(d) for d in dirs]
+    tools = tuple(t.strip() for t in chain.split(",")) if chain else ()
+    result = compare(arms, tools, control, theta, t_cut_h or T_CUT_H)
+
+    print(result.report())
+    counts = [f.distinct_t2 for f in result.figures]
+    if (smallest := mde(counts)) is not None:
+        print(f"\n  smallest detectable rate ratio at these counts: {smallest:.2f}x. "
+              f"The honest claim is the interval, not the p-value; one allocation per arm "
+              f"gives no degrees of freedom for overdispersion.")
+    if json_out:
+        Path(json_out).write_text(
+            json.dumps({"figures": [dataclasses.asdict(f) for f in result.figures],
+                        "contrasts": [dataclasses.asdict(c) for c in result.contrasts],
+                        "blocked": result.blocked}, indent=2, default=str) + "\n")
+        print(f"  figures: {json_out}")
+    if not result.publishable:
+        print("\n  NOT PUBLISHABLE - see the reasons above")
+    return 0 if result.publishable else 1
 
 
 async def validate_tasks_command(spec_path: str, out: str | None = None) -> int:
@@ -1071,6 +1106,22 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--no-guard", action="store_true")
     ct.add_argument("--model-profile", default=None, metavar="NAME",
                     help="models.yaml profile naming a live endpoint (--model B)")
+    cp = sub.add_parser("compare",
+                        help="score several arms of one experiment against the control")
+    cp.add_argument("dirs", nargs="+", metavar="DIR",
+                    help="one campaign run directory per arm")
+    cp.add_argument("--control", default="D",
+                    help="the model every other arm's cost is justified against")
+    cp.add_argument("--theta", type=float, default=None, metavar="F",
+                    help="amino-acid identity above which two designs are one cluster "
+                         "(default: the pre-registered 0.90)")
+    cp.add_argument("--t-cut", type=float, default=None, metavar="HOURS",
+                    help="the common scoring window, from each arm's FIRST TASK START")
+    cp.add_argument("--chain", default=None, metavar="T1,T2,...",
+                    help="tools a complete design must have run; a lineage missing one "
+                         "cannot reach T1 on the gates of the stages it did run")
+    cp.add_argument("--json", default=None, metavar="FILE",
+                    help="also write every figure as JSON")
     vt = sub.add_parser("validate-tasks",
                         help="execute each Task in a campaign's chain once and check it")
     vt.add_argument("spec")
@@ -1104,6 +1155,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
                                             a.specifier, a.planner, not a.no_guard,
                                             a.model_profile))
+    if a.cmd == "compare":
+        return compare_command(a.dirs, a.control, a.theta, a.t_cut, a.chain, a.json)
     if a.cmd == "validate-tasks":
         return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":
