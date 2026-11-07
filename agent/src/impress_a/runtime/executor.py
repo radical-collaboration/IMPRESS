@@ -89,6 +89,12 @@ class CampaignSpec:
     # `objectives`, because `Objective` declares a metric target and says nothing about how
     # many designs satisfying it are wanted; the count is a property of the Goal.
     target_front: int = 0
+    # `real` | `mock` | `any`. Gate 6 (backlog E1): refuses a graph whose tools come from the
+    # wrong side. `sites/*.yaml` has carried this switch, read by no code, since before the
+    # mock-chain-on-a-GPU run it would have prevented; it lives here because `cli.load_spec`
+    # reads this file and a key nobody reads is how it stayed inert. `any` keeps every
+    # existing campaign working, and a campaign that cares declares it.
+    tool_delivery: str = "any"
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
     # Backstop for runs exempted from the stagnation counter. A run that could not reach the
@@ -238,7 +244,8 @@ class CampaignExecutor:
         trust_dir = Path(spec.trust_root) if spec.trust_root else Path(spec.root) / "_trust"
         self.trust = TrustLedger.load(trust_dir / f"{spec.site.gpu_api}.jsonl")
         self.composer = Composer(self.reg, seed_salt=spec.seed_salt)
-        self.validator = Validator(self.reg, spec.site, self.budget)
+        self.validator = Validator(self.reg, spec.site, self.budget,
+                                   tool_delivery=spec.tool_delivery)
         self.reviewer = StageReviewer(self.validator, self.budget)
         self.cycle = 0
         # The APPLIED Spec. A Specifier authors revisions; this is the only writer, so `specs`

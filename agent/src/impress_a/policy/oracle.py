@@ -257,13 +257,15 @@ class OraclePolicy(BasePolicy):
 
     async def on_rejected(self, decision: Decision,
                           failure: ValidationFailure) -> Decision:
-        """Shrink first - a cost rejection is a sizing problem, not a reasoning failure."""
+        """Shrink BREADTH first - a cost rejection is a sizing problem, not a reasoning one.
+
+        Never the chain: see `ThresholdPolicy.on_rejected` for job 22675512, where dropping
+        the tail took the only producer of two of four objectives off the graph. This one did
+        it silently, without even the warning that one carried.
+        """
         if failure.gate in ("budget", "interlock") and isinstance(decision, ComposeAndRun):
             if decision.intent.replicas > 1:
                 decision.intent.replicas -= 1
-                return decision
-            if len(decision.intent.stages) > 2:
-                decision.intent.stages = decision.intent.stages[:-1]
                 return decision
         if self.fallback is not None:
             return await self.fallback.on_rejected(decision, failure)

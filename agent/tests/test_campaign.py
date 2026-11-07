@@ -291,6 +291,37 @@ async def _watch_inflight(mgr):
     return seen, sets
 
 
+def _trust_the_chain(mgr, reg, widths=(1, 2, 3)) -> list[str]:
+    """Assert trust for the chain at each width a policy might ask for.
+
+    Needed because an untrusted pattern is held to **one instance in flight**, deliberately,
+    so a campaign whose every submission is one novel shape cannot overlap anything - which
+    makes a concurrency test impossible to write without either trusting something or
+    accepting a defect.
+
+    And a defect is what these tests used to rely on. `on_rejected` answered the interlock's
+    one-instance rejection by **truncating the chain**, which produces a different shape with
+    a different signature - so the second instance was admitted as a different pattern, and
+    the rule the test next asserted was being defeated by the correction that got it there.
+    Removing the truncation (job 22675512, where it took the only producer of two of four
+    objectives off the graph) made that visible: both tests stopped admitting anything at all.
+
+    Replica multiplicity enters the signature, so each width is its own pattern and each has
+    to be asserted (backlog A10).
+    """
+    from impress_a.compose.composer import Composer
+    from impress_a.compose.interlock import PatternRecord
+
+    sigs = []
+    for width in widths:
+        sig = Composer(reg).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=width), "probe"
+        ).pattern_signature()
+        mgr.trust.patterns[sig] = PatternRecord(signature=sig, trusted=True, clean_runs=3)
+        sigs.append(sig)
+    return sigs
+
+
 async def test_concurrency_holds_several_experiments_in_flight(reg, tmp_path):
     """The whole point: submission no longer blocks the reasoner.
 
@@ -300,6 +331,7 @@ async def test_concurrency_holds_several_experiments_in_flight(reg, tmp_path):
     s = spec("t-conc", max_cycles=6)
     s.root, s.concurrency = str(tmp_path), 3
     mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    _trust_the_chain(mgr, reg)
     seen, sets = await _watch_inflight(mgr)
     res = await mgr.run()
 
@@ -323,6 +355,11 @@ async def test_untrusted_patterns_are_never_concurrent_with_themselves(reg, tmp_
     s = spec("t-interlock-conc", max_cycles=6)
     s.root, s.concurrency = str(tmp_path), 3
     mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    # Width 2 and 3 only. The policy explores at 3 and exploits at 2, so trusting those two
+    # lets experiments overlap at all - and leaving width 1 untrusted means an UNTRUSTED
+    # pattern is in play for the rule below to bite on, which is the only way this test can
+    # observe the thing it is about.
+    _trust_the_chain(mgr, reg, widths=(2, 3))
     _, sets = await _watch_inflight(mgr)
     await mgr.run()
 

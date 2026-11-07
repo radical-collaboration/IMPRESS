@@ -28,6 +28,15 @@ backend_shutdown_timeout_s: 300
 # allocation, and the alternative is a campaign that quietly stops replanning while holding
 # four GPUs - which is the same shape of waste as the hung teardown above.
 control_liveness_timeout_s: 120
+# Validation gate 6 (backlog E1): refuse any graph containing a tool from the `mock`
+# toolkit. A mock chain completes `6/6 tasks ok` with plausible metrics on a GPU
+# allocation and says nothing about the designs being invented, and `mock_noodle`
+# reports a confident `designability` for a structure with no secondary structure -
+# so a mock run on real hardware does not merely waste the allocation, it produces
+# numbers a reader would act on. A gate rather than the guard wrapper, because
+# `--no-guard` must not be able to switch off "is this real".
+tool_delivery: real
+
 max_cycles: 20
 stagnation_limit: 4
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}

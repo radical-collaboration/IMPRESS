@@ -373,8 +373,13 @@ _JOB_22702568 = {
 #: about the trust counter is testing the trust counter. `interaction_energy` was not computed
 #: by any recorded run - the adapter did not compute it at all until phase 10 - and
 #: `num_models` is a count the ledger rows did not carry.
+#: `sc_selector_mode` is the exception: it is not a counterfactual but a FACT about these
+#: runs. 0.0 says their shape complementarity came from the historical `jump="1"` filter, so
+#: those numbers are not comparable with a calibrated run's - which is the point of recording
+#: the mode at all (backlog G5).
 _AS_IF_MEASURED = {"fastrelax": {"interaction_energy": -12.0},
-                   "rfd3_design": {"num_models": 1}}
+                   "rfd3_design": {"num_models": 1},
+                   "filter_shape": {"sc_selector_mode": 0.0}}
 
 
 def _as_if_measured(metrics: dict) -> dict:
@@ -752,3 +757,109 @@ async def test_the_reviewer_marks_a_budget_refusal_transient(reg):
 
     failure = rev.affordable(graph)
     assert failure is not None and failure.gate == "budget" and failure.transient is True
+
+
+# ---------------------------------------------------------------------------
+# Gate 6: tool delivery (backlog E1).
+# ---------------------------------------------------------------------------
+
+def test_gate_6_refuses_a_mock_tool_under_tool_delivery_real(reg):
+    """Backlog E1, finally wired - and a gate rather than a guard, deliberately.
+
+    `sites/*.yaml` carried a `tool_delivery` switch read by no code from the day it was
+    written, and it is the switch that would have refused the documented mock-chain-on-a-GPU
+    run. A mock chain completes `6/6 tasks ok` with plausible metrics and invented designs;
+    `mock_noodle` goes further and reports a confident `designability` for a structure with no
+    secondary structure, so such a run does not merely waste an allocation - it produces
+    numbers a reader would act on.
+
+    A gate and not `RuleCorrectionsPolicy(forbid_tools=...)` because `--no-guard` must not be
+    able to switch off "is this real".
+    """
+    budget = BudgetLedger(limits={"gpu_hours": 100.0, "cpu_hours": 100.0})
+    site = SiteCaps(gpu_api="cuda", gpus_per_node=4)
+    mock_graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["mock_generate", "mock_design"], replicas=1), "r")
+    real_graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["rfd3_design", "ligandmpnn_design"], replicas=1),
+        "r")
+
+    # `any` is the default, so every existing campaign is unaffected.
+    for graph in (mock_graph, real_graph):
+        assert Validator(reg, site, budget)._g6_delivery(graph) is None
+
+    failure = Validator(reg, site, budget, tool_delivery="real")._g6_delivery(mock_graph)
+    assert failure is not None and failure.gate == "tool_delivery"
+    assert failure.detail["offending_tools"] == ["mock_design", "mock_generate"]
+    assert Validator(reg, site, budget,
+                     tool_delivery="real")._g6_delivery(real_graph) is None
+
+    # And the other way, so a mock test tier cannot accidentally reach a real tool.
+    assert Validator(reg, site, budget,
+                     tool_delivery="mock")._g6_delivery(real_graph) is not None
+    assert Validator(reg, site, budget,
+                     tool_delivery="mock")._g6_delivery(mock_graph) is None
+
+
+def test_gate_6_reads_the_declared_toolkit_not_the_tool_id(reg):
+    """A name beginning `mock_` is a convention; the toolkit a spec declares is a fact.
+
+    A real tool named `mock_affinity_predictor` would be refused by a prefix check, and a
+    mock one named `fast_screen` would be admitted. `ToolSpec.toolkit` is what the registry
+    loaded it under.
+    """
+    mock_tools = {t for t in reg.ids() if reg.get(t).toolkit == "mock"}
+    assert mock_tools, "precondition: the mock toolkit is loaded"
+    assert all(reg.get(t).toolkit != "mock" for t in reg.ids() if t not in mock_tools)
+    # The one that would break a prefix check in the other direction, if it ever exists.
+    assert not [t for t in reg.ids()
+                if t.startswith("mock_") and reg.get(t).toolkit != "mock"]
+
+
+def test_every_delta_campaign_declares_real_tool_delivery():
+    """The gate is worth nothing on a campaign that does not ask for it.
+
+    Checked here rather than left to review, because the failure it prevents is a GPU
+    allocation producing invented designs and the cost of forgetting is one allocation.
+    """
+    import yaml
+
+    from impress_a.cli import load_spec
+
+    for path in sorted(pathlib.Path("campaigns").glob("delta-*.yaml")):
+        doc = yaml.safe_load(path.read_text())
+        assert doc.get("tool_delivery") == "real", f"{path.name} does not declare it"
+        assert load_spec(str(path)).tool_delivery == "real", \
+            f"{path.name}: declared but did not reach the spec"
+
+
+def test_no_policy_answers_a_rejection_by_truncating_its_chain():
+    """Job 22675512, refused by construction - and it was defeating a second rule too.
+
+    Dropping the tail to fit a budget took `boltz_predict` off that campaign's chain, solely
+    because it is listed last, and `boltz_predict` is the only producer of `complex_plddt` and
+    `ligand_iptm` - two of its four objectives. The run was unwinnable from the moment it was
+    admitted and the admitted graph records `rejected: null`.
+
+    Removing it exposed the second effect, which nothing had noticed: truncation produces a
+    different SHAPE, so it also produced a different pattern signature - and an instance
+    refused by the interlock's one-instance-in-flight rule was then admitted as a different
+    pattern. Two concurrency tests in `test_campaign.py` were passing because of it.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from impress_a.policy.explicit import ThresholdPolicy
+    from impress_a.policy.oracle import OraclePolicy
+
+    for cls in (ThresholdPolicy, OraclePolicy):
+        # The whole function, dedented and parsed. A docstring is a `Constant` and never a
+        # `Subscript`, so there is no need to cut it out - and cutting it out by splitting on
+        # triple quotes is what broke this test's first version.
+        tree = ast.parse(textwrap.dedent(inspect.getsource(cls.on_rejected)))
+        slices = [n for n in ast.walk(tree) if isinstance(n, ast.Subscript)
+                  and isinstance(n.slice, ast.Slice)]
+        assert slices == [], (
+            f"{cls.__name__}.on_rejected slices a sequence - the only thing it used to slice "
+            f"was `intent.stages[:-1]`, and dropping a stage is what this forbids")

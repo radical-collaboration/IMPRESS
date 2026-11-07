@@ -3,5 +3,10 @@ scheduler: none
 backend: {kind: concurrent, config: {workers: 4, executor: process}}
 gpu: {vendor: none, api: cuda, per_node: 1}
 filesystems: {shared: ./campaigns/_runs, scratch: /tmp}
-tool_delivery: {default: mock}
+# MOVED TO THE CAMPAIGN SPEC, where something reads it. This key was inert from the
+# day it was written (backlog E1) - and it is the switch that would have refused the
+# documented mock-chain-on-a-GPU run. It is now `tool_delivery: mock` on a campaign
+# spec, enforced by validation gate 6; kept here as the value to copy, not as a
+# setting. A key in a file nobody reads is worse than no key: it reads as a control.
+tool_delivery: {copy_to_campaign_spec: mock}
 p5_governor: {max_concurrency: {colabfold_msa: 1, rcsb: 4}}

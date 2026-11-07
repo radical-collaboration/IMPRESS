@@ -9,7 +9,16 @@
 # This campaign does it in one allocation. Identical science to delta-small-molecule-smoke -
 # same chain, same target, same parameters - differing only in how many cycles it runs.
 #
-# max_cycles: 6, not 4. Three clean runs promote, and a fourth is needed to be the first
+# # Validation gate 6 (backlog E1): refuse any graph containing a tool from the `mock`
+# toolkit. A mock chain completes `6/6 tasks ok` with plausible metrics on a GPU
+# allocation and says nothing about the designs being invented, and `mock_noodle`
+# reports a confident `designability` for a structure with no secondary structure -
+# so a mock run on real hardware does not merely waste the allocation, it produces
+# numbers a reader would act on. A gate rather than the guard wrapper, because
+# `--no-guard` must not be able to switch off "is this real".
+tool_delivery: real
+
+max_cycles: 6, not 4. Three clean runs promote, and a fourth is needed to be the first
 # graph ADMITTED as trusted. The extra two are slack for a cycle that fails QC, which resets
 # the counter to zero (`TrustLedger.on_failure`): `filter_shape` returned 0.524 in job
 # 22684607 and 0.591 in 22692304 against a 0.55 bound, so a failing cycle is a real

@@ -42,19 +42,45 @@ were never the defect; the storage was.
 - Rosetta energies are lower-is-better and can be large negative numbers; the
   `total_score`-based QC gates here only enforce an upper bound, not a lower one - a very
   negative score is not itself suspicious.
-- **Only `fastrelax` bounds `total_score`, and it judges both stages.** `fastrelax` gates at
-  `max: 0.0` and `fa_rep <= 500`, both integrity: a relax that cannot reach a negative score,
-  or leaves heavy repulsion, has not converged - and that is also how an exploded `packmin`
-  pose shows up. `packmin` bounds nothing on its own score (it must still *report* one). It
+- **`fastrelax` now gates twice on the same two metrics, with different roles.** The wide
+  bounds - `total_score <= 0.0`, `fa_rep <= 500` - stay **integrity**: they are divergence
+  detectors, and a relax that cannot reach a negative score or leaves heavy repulsion has not
+  converged. Beside them sit **acceptance** gates at upstream's own calibrated `PROD` values
+  (`total_score <= -250.0`, `fa_rep <= 100.0`, `interaction_energy <= -8.0`), which say the
+  design fell short rather than that the tool broke. Only the integrity half counts against a
+  pattern's trust (decision 0013), and the distinction is load-bearing: `+1500` and `-12` are
+  different findings and used to be the same sentence.
+- **`interaction_energy` is the only number this toolkit reports that measures binding.** It
+  is computed from `InteractionEnergyMetric` over the ligand residue property against its
+  complement - upstream's own selector pair. If the pose has no LIGAND-property residue the
+  metric is **omitted**, which `metrics_reported` turns into an integrity failure: a
+  confident zero would read as a weak design. The commonest cause of that is a missing
+  `-extra_res_fa`, which drops the ligand entirely.
+- **`filter_shape` measures the ligand against everything else, not jump 1.** It used
+  `jump="1"`, which is the protein-ligand interface only by luck of chain order - otherwise it
+  is a shape complementarity between two parts of the protein, in exactly the range a real
+  interface produces. Upstream splits by chain, which is right only when the ligand is its own
+  chain. **`sc_selector_mode` records which:** 0.0 is the old jump filter, 1.0 the selector
+  pair, so a number recorded before phase 10 and one recorded after are visibly not
+  comparable. Every number this project recorded before then is mode 0.0.
+- **This also changes what an old run means.** A replay of job 22702568's five `6/6 tasks ok`
+  runs now fails integrity on every one, because none of them computed `interaction_energy`;
+  and at upstream's fold bar none of the five contains a design the reference would have
+  accepted. Both are pinned as tests in `tests/test_validation.py`.
+- **A metric that cannot be read is omitted, never defaulted.** `scores.get("fa_rep", 0.0)`
+  was reporting a fabricated zero, and 0.0 is a *passing* fa_rep - so a broken score function
+  read as a perfectly packed structure. `tests/test_real_toolkits.py` refuses any `, 0.0)`
+  default in the three workers. `packmin` bounds nothing on its own score (it must still *report* one). It
   is pack+min with no constraints, so its score measures how much relaxing is left, not
   breakage. Both bounds it once had were wrong: `max: 0.0` failed a healthy +145.3 (job
   22684607), and `max: 1000.0` demoted a trusted pattern over a +1064.5 pose that relaxed
   normally to -336.0 (job 22726105 r0004). Fifteen real packmin scores (jobs 22702568,
   22726105, 22728140) span -95.8 to +1064.5, and every one relaxed: fastrelax -503.1 to -200.1,
   `fa_rep` 71–196. Upstream gates nothing on packmin either.
-- `filter_shape`'s `shape_complementarity` gate threshold (`min: 0.55`) is a starting
-  point copied from common interface-design practice, not calibrated against this
-  project's own designs yet - expect to retune after the first live campaign.
+- `filter_shape`'s `shape_complementarity` acceptance threshold is `min: 0.55`, which is
+  upstream's own `interface_min_sc` and is calibrated against its campaigns rather than
+  against this project's designs - of which there are too few to calibrate anything. Retune
+  from a distribution, never from one run.
 - Each tool subprocess calls `pyrosetta.init()` independently; do not try to reuse a
   PyRosetta session across calls to save init time - that is what the old pipeline's
   packmin/fastrelax/filter_shape being separate scripts already encodes.

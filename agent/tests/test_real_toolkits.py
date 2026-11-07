@@ -1625,6 +1625,17 @@ async def test_model_a_also_varies_a_real_tools_parameter(reg):
     assert varied["ligandmpnn_design"]["temperature"] == 0.35
 
 
+def _without_comments(worker: str) -> str:
+    """A worker's code with its comments removed.
+
+    Every rule asserted against a worker's source is about what it DOES, and these workers
+    carry comments naming the defect each fix replaced - `jump="1"`, `scores.get("fa_rep",
+    0.0)` - so a naive text match trips over the explanation of the thing it is checking for.
+    Both of these tests caught their own documentation on the first run.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in worker.splitlines())
+
+
 def test_the_fastrelax_worker_computes_interaction_energy_by_selector(reg):
     """Backlog G4's missing metric, and the one choice in it that could be silently wrong.
 
@@ -1645,7 +1656,7 @@ def test_the_fastrelax_worker_computes_interaction_energy_by_selector(reg):
     """
     from impress_a.tools import rosetta_agents
 
-    worker = rosetta_agents._FASTRELAX_WORKER
+    worker = _without_comments(rosetta_agents._FASTRELAX_WORKER)
     assert "InteractionEnergyMetric" in worker
     assert "ResiduePropertySelector(ResidueProperty.LIGAND)" in worker, \
         "the selector pair must be upstream's own, not a chain or jump split"
@@ -1666,11 +1677,7 @@ def test_no_rosetta_metric_is_defaulted_to_zero(reg):
     from impress_a.tools import rosetta_agents
 
     for name in ("_PACKMIN_WORKER", "_FASTRELAX_WORKER", "_FILTER_SHAPE_WORKER"):
-        worker = getattr(rosetta_agents, name)
-        # Comments stripped: the rule is about what the worker DOES, and a comment recording
-        # the defect that was fixed is the thing a naive text match trips over - it caught
-        # this test's own explanation of the old `scores.get("fa_rep", 0.0)` on its first run.
-        code = "\n".join(line.split("#", 1)[0] for line in worker.splitlines())
+        code = _without_comments(getattr(rosetta_agents, name))
         assert ", 0.0)" not in code, (
             f"{name}: a metric defaulted to 0.0. Omit it instead - the presence gate is what "
             f"catches an unreadable value, and a fabricated zero PASSES a max-bound gate, so "
@@ -1707,3 +1714,36 @@ def test_every_calibrated_threshold_matches_upstreams_prod_value(reg):
         "PROD's fold_min_plddt is 75.0 on a 0-100 scale; complex_plddt is the 0-1 one"
     assert acceptance("boltz_predict", "ligand_iptm")[0] == 0.4, \
         "kept, and stricter than PROD, which leaves this gate off entirely"
+
+
+def test_filter_shape_measures_the_protein_ligand_interface(reg):
+    """Backlog G5: `jump="1"` measures whatever jump 1 happens to be.
+
+    If the ligand is not across jump 1 the number is not wrong in any visible way - it is a
+    shape complementarity between two parts of the protein, in exactly the range a real
+    interface produces. Upstream splits by chain instead, which is right only when the ligand
+    is its own chain, and that is a property of the input rather than of the tool. So the pair
+    is the ligand residue PROPERTY against its complement, the same pair the interaction
+    energy port uses.
+
+    Asserted against the worker source, like the interaction-energy port and for the same
+    reason: pyrosetta is not in the local tier, and the XML is the one part of this that no
+    local test can exercise. `impress-a validate-tasks` is what proves it builds.
+    """
+    from impress_a.tools import rosetta_agents
+
+    worker = rosetta_agents._FILTER_SHAPE_WORKER
+    code = _without_comments(worker)
+    assert 'jump="1"' not in code, "the interface must not be chosen by jump number"
+    assert 'chains="A"' not in code, "nor by chain letter - that is the input's business"
+    assert '<ResidueProperty name="ligand" properties="LIGAND"/>' in worker
+    assert '<Not name="not_ligand" selector="ligand"/>' in worker
+    assert 'residue_selector1="ligand" residue_selector2="not_ligand"' in worker
+    assert 'quick="0"' in worker, \
+        "quick mode is a faster, less accurate SC; upstream sets it explicitly and so must we"
+    assert "weights=\"beta_nov16\"" in worker, "upstream's energy model, declared"
+    assert "Refusing rather than falling back" in worker, (
+        "a fallback to a jump or chain split would keep producing numbers while measuring a "
+        "different interface, and nothing downstream could tell")
+    assert "sc_selector_mode" in worker, \
+        "which interface produced the number must be a reported metric, not a log line"

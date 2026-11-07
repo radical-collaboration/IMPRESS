@@ -540,6 +540,15 @@ fail on the network.
 
 **E1. `sites/*.yaml` is read by no code** — both files say so in their own comments. Its
 `tool_delivery: {real|mock}` switch is exactly what would have prevented the mock-chain-on-a-GPU bug.
+**The switch is DONE** (phase 10): it is `tool_delivery: real` on each Delta campaign spec, enforced
+by validation **gate 6**, which refuses any graph containing a tool whose declared toolkit is
+`mock`. Moved to the campaign spec because `cli.load_spec` already reads that file and a key in
+`sites/` nobody reads is how it stayed inert for so long; `sites/*.yaml` now spells it
+`copy_to_campaign_spec`, so it reads as a value to copy rather than as a control. A **gate** and not
+`RuleCorrectionsPolicy(forbid_tools=...)` because `--no-guard` must not be able to switch off "is
+this real", and it checks the declared toolkit rather than a `mock_` prefix because a prefix is a
+convention. A test asserts every `delta-*.yaml` declares it and that the value reaches the spec.
+**The rest of E1 stands:** nothing else in `sites/*.yaml` is read by any code.
 
 **E2. Cost models are unmeasured literature guesses**, and gate 5 plus the interlock's 10% cap refuse
 graphs against them. Already concrete: the smoke campaign's original budget rejected its own first
@@ -665,12 +674,24 @@ an integrity failure: a wrong guess would not merely be useless, it would refuse
 demote the pattern. Backlog A3 is the standing lesson about flags nobody has run. The adapter logs
 the sidecar's actual keys, so one real run resolves it; the gates land then.
 
-**G5. `filter_shape` may be measuring the wrong interface.** Ours hardcodes
-`<ShapeComplementarity name="sc" jump="1"/>` with the default scorefunction
-(`rosetta_agents.py:104`); upstream uses explicit chain selectors (`residue_selector1="chainA"`,
-`residue_selector2="chainB"`) under `beta_nov16`. `jump="1"` assumes a particular chain/jump
-arrangement in the relaxed pose - if the ligand is not across jump 1 the gate is meaningless
-rather than obviously wrong.
+**G5. `filter_shape` may be measuring the wrong interface.** **DONE** (phase 10), and not by
+copying upstream. Upstream splits by chain (`Chain chains="A"` against `chains="B"`), which is
+right only when the ligand is its own chain - a property of the input, not of the tool. The pair
+is now the ligand **residue property** against its complement, the same pair the
+`interaction_energy` port uses, so it is correct whatever the chain layout is. `quick="0"` is
+explicit because the default is Rosetta's and quick mode is a faster, less accurate SC;
+`beta_nov16` is declared to match upstream's protocol, with the honest note that
+ShapeComplementarity is geometric and takes no scorefunction, so it does not change the number.
+
+A failure to build the selector filter **refuses** rather than falling back: a fallback would
+keep producing numbers while measuring a different interface, and nothing downstream could tell.
+An empty ligand selection refuses too, naming the commonest cause (a missing `-extra_res_fa`,
+which drops the ligand entirely).
+
+**`sc_selector_mode` is reported as a metric** - 0.0 the old jump filter, 1.0 the selector pair -
+so one real run settles this from provenance, and a number recorded before phase 10 cannot be
+compared with one recorded after without noticing. Every number this project has recorded is
+mode 0.0.
 
 **G6. A worker exception that cannot be unpickled hangs the run.** Measured on job 22536706:
 ligandmpnn failed and `run_cmd` raised `SubprocessError`. Dragon pickles a worker's exception into

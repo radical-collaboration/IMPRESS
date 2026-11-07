@@ -98,6 +98,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
         target_front=int(d.get("target_front", 0)),
+        tool_delivery=d.get("tool_delivery", "any"),
         stages=d.get("stages", []) or [],
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently

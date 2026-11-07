@@ -195,13 +195,63 @@ phase("pyrosetta.init")
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 phase("pose_from_pdb")
-xml = ('<SCOREFXNS/><RESIDUE_SELECTORS/>'
-       '<FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>')
-objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
-sc_filter = objs.get_filter("sc")
+
+# WHICH INTERFACE IS MEASURED (backlog G5). This was `jump="1"` with the default
+# scorefunction, and `jump="1"` assumes a particular chain and jump arrangement in the
+# relaxed pose: if the ligand is not across jump 1 the number is not wrong in an obvious way,
+# it is a shape complementarity between two parts of the protein. Upstream splits by chain
+# instead (`Chain chains="A"` against `Chain chains="B"`), which is right only when the ligand
+# is its own chain - a property of the input, not of the tool.
+#
+# So: the ligand RESIDUE PROPERTY against its complement, which is the same pair the
+# interaction_energy port uses and is correct whatever the chain layout is.
+#
+# `quick="0"` is explicit because the default is Rosetta's, not ours, and quick mode is a
+# faster and less accurate SC - upstream sets it too. `beta_nov16` is declared to match
+# upstream's protocol, and the comment is the honest part: ShapeComplementarity is GEOMETRIC
+# and takes no scorefunction, so this does not change the number. It is here so that a filter
+# added later inherits the same energy model rather than Rosetta's default.
+xml = (
+    '<SCOREFXNS><ScoreFunction name="sfxn_clean" weights="beta_nov16"/></SCOREFXNS>'
+    '<RESIDUE_SELECTORS>'
+    '<ResidueProperty name="ligand" properties="LIGAND"/>'
+    '<Not name="not_ligand" selector="ligand"/>'
+    '</RESIDUE_SELECTORS>'
+    '<FILTERS><ShapeComplementarity name="sc" quick="0" verbose="0"'
+    ' residue_selector1="ligand" residue_selector2="not_ligand"/></FILTERS>')
+try:
+    objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
+    sc_filter = objs.get_filter("sc")
+except Exception as exc:
+    # Loudly, never by falling back to a chain split: a fallback would keep producing numbers
+    # while measuring a different interface, and nothing downstream could tell. The remedy is
+    # named because this XML is the one part of the port that no local test can exercise.
+    sys.stderr.write("selector-based ShapeComplementarity could not be built: %r\n" % (exc,))
+    raise RuntimeError(
+        "filter_shape: the selector-based ShapeComplementarity filter failed to build. "
+        "Check the RosettaScripts selector names against this PyRosetta build "
+        "(ResidueProperty, Not) - see backlog G5. Refusing rather than falling back to "
+        "jump=1 or a chain split, which would measure a different interface silently.")
+
+# An empty ligand selection means there is nothing to measure against. SC of a selection
+# against everything-but-nothing is a confident number about the wrong question.
+ligand_sel = objs.get_residue_selector("ligand")
+if not any(ligand_sel.apply(pose)):
+    raise RuntimeError(
+        "filter_shape: no LIGAND-property residue in the pose, so there is no "
+        "protein-ligand interface to measure. Check that -extra_res_fa was passed with the "
+        "ligand .params; without it the ligand is dropped by -ignore_unrecognized_res.")
+
 value = sc_filter.report_sm(pose)
 phase("ShapeComplementarity")
-json.dump({"shape_complementarity": value}, open(result_json, "w"))
+json.dump({
+    "shape_complementarity": value,
+    # Which interface produced the number, as a metric rather than a log line, so one real
+    # run settles G5 from provenance. 1.0 = the ligand-property selector pair above. A future
+    # change that reverts to a jump or chain split must report a different value here, or the
+    # harness cannot tell two campaigns' numbers apart.
+    "sc_selector_mode": 1.0,
+}, open(result_json, "w"))
 """
 
 

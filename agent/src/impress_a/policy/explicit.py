@@ -88,28 +88,26 @@ class ThresholdPolicy(BasePolicy):
 
     async def on_rejected(self, decision: Decision,
                           failure: ValidationFailure) -> Decision:
-        """Shrink and retry on a budget or interlock rejection; otherwise stop."""
+        """Shrink BREADTH on a budget or interlock rejection; otherwise stop.
+
+        **The chain is never truncated.** It used to be, once breadth hit 1: the tail was
+        dropped to fit, which is a cost heuristic that knows nothing about what the graph can
+        then MEASURE. On job 22675512 it dropped `boltz_predict` - solely because the campaign
+        lists it last - and `boltz_predict` is the only producer of `complex_plddt` and
+        `ligand_iptm`, two of that campaign's four objectives. The run was unwinnable from the
+        moment it was admitted and said so nowhere: the admitted graph records
+        `rejected: null`.
+
+        A warning was added at the time and was not enough. Two things changed since: the
+        Reviewer's coverage gate now REFUSES a Stage that cannot produce a ready objective
+        (backlog A8), so a truncated chain is rejected rather than run - and that turns the
+        heuristic from a quiet loss into a guaranteed round trip. Dropping a lineage is the
+        correction that cannot change what a graph measures, because a lineage is a whole
+        chain; at one lineage there is nothing left to give, and stopping is the honest answer.
+        """
         if failure.gate in ("budget", "interlock") and isinstance(decision, ComposeAndRun):
             if decision.intent.replicas > 1:
                 decision.intent.replicas -= 1
-                return decision
-            if len(decision.intent.stages) > 2:
-                # Truncating the tail is a cost heuristic that knows nothing about what
-                # the graph can then MEASURE. On job 22675512 it dropped boltz_predict -
-                # solely because the campaign lists it last - and boltz_predict is the
-                # only producer of complex_plddt and ligand_iptm, two of that campaign's
-                # four objectives. The run was unwinnable from that moment and said so
-                # nowhere: the admitted graph records `rejected: null`. Nothing here can
-                # see the objectives (policy must not import tools or runtime), so this
-                # cannot refuse - but it must not be silent either. The executor warns
-                # about the objectives; this names the stage.
-                dropped = decision.intent.stages[-1]
-                decision.intent.stages = decision.intent.stages[:-1]
-                log.warning(
-                    "correction: dropped stage %r to fit %s (%s). Remaining chain: %s. "
-                    "Any objective only this stage could produce is now unmeasurable.",
-                    dropped, failure.gate, failure.reason,
-                    " -> ".join(decision.intent.stages))
                 return decision
         return Stop(reason=f"rejected at {failure.gate}: {failure.reason}")
 
