@@ -791,7 +791,37 @@ argument - B and C both have one. `_build()` registers two nodes while the modul
 four. So `--model A` is a LangGraph-shaped rule cascade, bit-exact and behaviourally a sibling of D,
 and its only test asserts termination (`tests/test_campaign.py:53`), never a node.
 
-**H2. Model B's live path is never constructed.** `OraclePolicy` defaults to `RehearsalOracle`
+**H2. Model B's live path is never constructed.** **DONE but for a live probe** (phase 9).
+`policy/llm.py` carries `OpenAICompatOracle`, ported from
+`examples/agentic_small_molecule_binding/llm.py` - which has four hardware runs behind it -
+with everything Part B doc 02 sections 3 and 7 ask for: a pinned dated model id, pinned
+sampling (temperature stated on every request, because a comparison cannot hold it constant if
+no request does), `Retry-After` honoured, retryable statuses separated from a 400 that will
+fail identically however often it is sent, and the model's own `reasoning_content` carried back
+for an endpoint that requires it. Async rather than synchronous: the halves run on the control
+process's own loop, which is what phase 7 bought, so no thread is needed. `models.yaml` holds
+one profile per model and `--model-profile` selects it; the extra is now `openai` rather than
+the `litellm` nothing imported, as `plans/reasoner-models.md` specified.
+
+Three defects closed with it, each silent. **The rehearsal returned the mock chain whatever the
+campaign declared** and `_build_b` did not forward `o.stages`: against the six-stage Delta
+chain that is a campaign which validates the real toolkits and then executes mocks, with
+plausible metrics and `6/6 tasks ok`, reported as a model-B result. There is no default chain
+now and a chainless rehearsal refuses by name. **Its stopping conditions were hardcoded** at
+`cycle >= 4` / `front >= 3`, which is X1 by another route. **A reply was brace-sliced** out of
+the text, so a prose answer containing two braces produced a decision from whatever was between
+them; it is parsed, and a reply that is not a JSON object is a schema failure `reasoning.ask`
+tells the model about. And `DECISION_SCHEMA` split in two: `SPEC_SCHEMA` answers in metrics and
+thresholds, `STAGE_SCHEMA` in tools, breadth and parameters, sharing only `rationale` - which a
+test asserts, and which caught `parent_node` being asked of both halves.
+
+**Still open:** no request has reached a real endpoint from this project. The sibling example
+measured `claude-opus-5-5` declining *its* workload through this endpoint
+(`finish_reason=content_filter`, 0 completion tokens, with and without the system prompt);
+whether a request for a JSON decision hits the same filter is unmeasured, so probe it on a
+login node before an allocation depends on it. That probe is the prerequisite gate's H2 row.
+
+The original finding, for the record:  `OraclePolicy` defaults to `RehearsalOracle`
 (`policy/oracle.py:85`) and nothing passes a model, so `--model B` runs the deterministic stand-in.
 `LangChainOracle` (`:65-77`) is built nowhere, brace-slices JSON out of the reply despite a docstring
 claiming structured output, and has none of what Part B doc 02 sections 3 and 7 require: pinned dated

@@ -37,6 +37,15 @@ echo "== installing impress (editable, from $ROOT)"
 echo "== installing impress-a with dev extras (editable)"
 .venv/bin/pip install --quiet -e ".[dev]"
 
+# The live-endpoint client for control model B. An extra rather than a dependency: the default
+# profile is the deterministic rehearsal, which needs nothing, and the whole local test tier
+# runs against a fake endpoint. Installed here anyway because "the client has never been
+# constructed" is how `LangChainOracle` kept a docstring claiming structured output over a
+# brace-slice - `tests/test_oracle.py` builds a real one when this is present and skips when it
+# is not, which is only a useful guard if the development venv has it.
+echo "== installing the oracle extra (control model B's live client)"
+.venv/bin/pip install --quiet -e ".[oracle]"
+
 # Verify rather than trust the order: `impress` is on no index, so if pip went looking for the
 # name and found something, the import below succeeds and returns the wrong module. Failing hard
 # here is the difference between a confusing campaign and a one-line error.

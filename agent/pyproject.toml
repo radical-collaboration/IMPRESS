@@ -33,7 +33,11 @@ dependencies = [
 [project.optional-dependencies]
 # flowgentic is 0.1.0 with no PyPI release; pin to a commit, never a branch.
 agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.git@dd27bd8b7e6edb2995038c9c1cc9b2fec3b7c7e9"]
-oracle = ["litellm"]
+# `openai`, not `litellm`. The extra named litellm and nothing imported it; what model B's
+# live client needs is one OpenAI-compatible /chat/completions call, which is the official
+# client's own surface and the shape every profile in models.yaml speaks. litellm would be a
+# second abstraction over an interface that is already the compatibility layer.
+oracle = ["openai>=1.40"]
 http = ["httpx"]          # the HTTP control-plane adapter
 # `tomli` only below 3.11, where `tomllib` is not in the standard library. It is used by
 # tests/test_toolchain.py to read this file's own [tool.ruff] table, rather than grepping it -

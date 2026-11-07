@@ -1,0 +1,104 @@
+# Model profiles for IMPRESS-A's control model B.
+#
+# Every live profile is an OpenAI-compatible /chat/completions endpoint, so
+# comparing models is a matter of changing --model-profile and nothing else.
+# Ported from examples/agentic_small_molecule_binding/models.yaml, which has
+# hardware results behind it; the measured notes below are that example's and
+# are kept rather than re-derived.
+#
+# WHAT IS DIFFERENT HERE. That example gives the model a toolkit and native
+# tool calls. Model B makes ONE structured decision per signal - a Spec
+# revision, or a Stage - validated against a schema, with a bounded corrective
+# retry and a declared fallback (policy/reasoning.py). So there are no tool
+# schemas, no tool-call parsers, and therefore no `dragon_vllm` profiles: this
+# project has no in-allocation serving path, and adding one to compare four
+# reasoners over one workflow would be a second experiment.
+#
+# api_key_env must be exported by the launcher, and on a multi-node run it must
+# also survive the `dragon -w ssh` hop - Dragon forwards only BASE_ENV_VARNAMES,
+# so put it in ~/.bashrc, the same way MPNN_DIR and BOLTZ_CACHE are handled.
+#
+# Which models may be used at all is settled machine-wide in ~/.claude/CLAUDE.md.
+# The enforcement point is `test_no_profile_names_a_barred_vendor` in
+# tests/test_oracle.py, which asserts rather than warns - a barred vendor fails
+# the suite instead of waiting on review.
+
+profiles:
+
+  # The default, and what `--model B` runs with no profile named. Deterministic,
+  # network-free, and it derives its chain from the campaign's own stages rather
+  # than returning a hardcoded mock chain - which is backlog H2's dangerous half:
+  # a real campaign would have validated the real toolkits and then executed
+  # mocks, reported as a model-B result.
+  rehearsal:
+    kind: rehearsal
+
+  # Claude through Anthropic's OpenAI-compatibility endpoint. That endpoint
+  # takes this request shape but does not expose Claude's own controls
+  # (adaptive thinking, effort, server-side fallbacks); one request shape
+  # across every model is the trade this makes deliberately.
+  #
+  # MEASURED 2026-10-22 in the sibling example: claude-opus-5-5 DECLINES that
+  # workload through this endpoint. Every request came back
+  # finish_reason=content_filter with 0 completion tokens - with the system
+  # prompt and without it, so it was the design task itself and not the
+  # prompt's wording. claude-sonnet-5-5 answered the identical request
+  # normally. Whether IMPRESS-A's decision prompt - which asks for a JSON
+  # object, not a protein design - hits the same filter is UNMEASURED, so
+  # probe it on a login node before an allocation depends on it. The documented
+  # remedy on the native API is the server-side `fallbacks` parameter, which
+  # the compatibility endpoint does not expose.
+  claude-opus:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-opus-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  # The profile to use for a live run until the above is re-probed.
+  claude-sonnet:
+    kind: openai_compat
+    base_url: https://api.anthropic.com/v1/
+    model: claude-sonnet-5-5
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 4096
+
+  # Reflection AI's Beam, through its OpenAI-compatible endpoint. Beta access.
+  #
+  # The model id is VERIFIED against GET /openai/v1/models, which returns
+  # "Beam-501B-A23B". developers.reflection.ai/models documents it as
+  # "Beam-1.0-501B-A23B"; that id is not what the endpoint serves. Check the
+  # live list again before blaming a 404 on the key.
+  #
+  # max_tokens is 32768 rather than 4096, and that is load-bearing. Beam's
+  # reasoning is always on - no effort level disables it - and reasoning tokens
+  # are charged against the same budget as the answer. At 4096 the model can
+  # spend the whole budget thinking and return no answer at all, which here
+  # reads as a schema failure and burns both attempts of the bounded retry.
+  #
+  # It also REQUIRES its own reasoning handed back: a follow-up whose earlier
+  # assistant messages lack `reasoning_content` is refused with
+  # `400 missing_required_parameter`. A single-turn probe therefore passes and
+  # the second turn fails, which is how 144 degraded turns were once reported as
+  # a healthy run. `_message_from_response` carries the field back for exactly
+  # this reason - and model B's corrective retry is the only multi-turn path
+  # here, so that is where it bites.
+  beam:
+    kind: openai_compat
+    base_url: https://api.reflection.ai/openai/v1
+    model: Beam-501B-A23B
+    api_key_env: REFLECTION_API_KEY
+    max_tokens: 32768
+    extra_body:
+      reasoning_effort: medium   # low | medium | high | xhigh | max
+
+  # A model served on or near the cluster. Point base_url at the server. If it
+  # runs inside the allocation it takes a GPU away from the tool pool, which
+  # changes the comparison against the other three arms - size the allocation
+  # for it, and say so in the write-up.
+  local-vllm:
+    kind: openai_compat
+    base_url: http://localhost:8000/v1
+    model: REPLACE-ME
+    api_key_env: null
+    max_tokens: 4096

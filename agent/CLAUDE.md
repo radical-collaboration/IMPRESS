@@ -24,6 +24,11 @@ impress-a tools                                      # list registered tools
 impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
+#   --control roles          the Specifier/Planner halves rather than the legacy `decide`
+#   --specifier X --planner Y    one half from each model (implies --control roles)
+#   --model-profile NAME     a models.yaml profile naming a live endpoint (--model B).
+#                            Omitted, B runs the deterministic rehearsal and says so.
+#   --model C is refused here: it needs `impress-a serve` + `impress-a control` (backlog C6)
 ```
 
 Without the editable install, prefix with `PYTHONPATH=src` and use `python -m impress_a`.

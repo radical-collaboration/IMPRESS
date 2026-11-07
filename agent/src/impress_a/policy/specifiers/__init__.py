@@ -7,6 +7,13 @@ Imports `core` only, like everything else under `policy/` - asserted by
 from .agentic import AgenticSpecifier
 from .explicit import ThresholdSpecifier
 from .external import ExternalSpecifier
+from .oracle import OracleSpecifier
 from .replay import ReplaySpecifier
 
-__all__ = ["AgenticSpecifier", "ExternalSpecifier", "ReplaySpecifier", "ThresholdSpecifier"]
+__all__ = [
+    "AgenticSpecifier",
+    "ExternalSpecifier",
+    "OracleSpecifier",
+    "ReplaySpecifier",
+    "ThresholdSpecifier",
+]

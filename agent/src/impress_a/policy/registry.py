@@ -34,16 +34,18 @@ from typing import Any
 from .agentic import FourNodePolicy
 from .explicit import ReplayPolicy, ThresholdPolicy
 from .external import ExternalPolicy
-from .oracle import OraclePolicy
+from .oracle import OraclePolicy, RehearsalOracle
 from .planners import (
     AgenticPlanner,
     ExternalPlanner,
+    OraclePlanner,
     ReplayPlanner,
     ThresholdPlanner,
 )
 from .specifiers import (
     AgenticSpecifier,
     ExternalSpecifier,
+    OracleSpecifier,
     ReplaySpecifier,
     ThresholdSpecifier,
 )
@@ -201,12 +203,41 @@ def _build_a(o: ReasonerOptions) -> FourNodePolicy:
                           sink=o.sink)
 
 
+def _oracle(o: ReasonerOptions) -> Any:
+    """The model model B talks to: the one declared, or the rehearsal with THIS campaign's
+    chain and stopping numbers.
+
+    Both arguments are backlog H2. `RehearsalOracle` returned the literal mock chain, and
+    `_build_b` did not forward `o.stages`, so `--model B` against the six-stage Delta chain
+    would have validated the real toolkits and then executed mocks - with plausible metrics and
+    `6/6 tasks ok`, reported as a model-B result. Its stopping conditions were hardcoded at
+    `cycle >= 4` and `front >= 3`, which is X1's defect reaching the same place by another
+    route: a four-hour arm stopping itself in twenty minutes.
+    """
+    if o.oracle is not None:
+        return o.oracle
+    return RehearsalOracle(stages=o.stages, max_cycles=o.max_cycles,
+                           target_front=o.target_front)
+
+
 def _build_b(o: ReasonerOptions) -> OraclePolicy:
     # A declared fallback is mandatory for the oracle: an API outage must degrade
     # explicitly, never stall a multi-GPU allocation (Part A risk R7). Built here rather
     # than defaulted inside `OraclePolicy` so it carries the campaign's own chain.
-    return OraclePolicy(model=o.oracle, fallback=o.fallback or _threshold(o),
+    return OraclePolicy(model=_oracle(o), fallback=o.fallback or _threshold(o),
                         sink=o.sink)
+
+
+def _spec_b(o: ReasonerOptions) -> OracleSpecifier:
+    """Model B's Specifier half: one `SPEC_SCHEMA` call per signal."""
+    return OracleSpecifier(oracle=_oracle(o), fallback=o.fallback or _spec_d(o),
+                           sink=o.sink)
+
+
+def _plan_b(o: ReasonerOptions) -> OraclePlanner:
+    """Model B's Planner half: one `STAGE_SCHEMA` call per planning round."""
+    return OraclePlanner(stages=o.stages, oracle=_oracle(o),
+                         fallback=o.fallback or _plan_d(o), sink=o.sink)
 
 
 def _build_c(o: ReasonerOptions) -> ExternalPolicy:
@@ -244,9 +275,16 @@ MODELS: dict[str, ReasonerModel] = {
         letter="B", name="heavyweight LLM oracle", mode="autonomous",
         llm_calls=0, llm_shape="single-call", status="partial",
         cls=OraclePolicy, build=_build_b,
-        note="the policy, prompt, bounded retry and logged degraded transition are "
-             "complete; no live client is constructed, so `--model B` runs "
-             "`RehearsalOracle`, the deterministic stand-in",
+        specifier=_spec_b, planner=_plan_b,
+        note="two halves, two schemas: `SPEC_SCHEMA` answers in the Spec's vocabulary "
+             "(metrics and thresholds, never a tool) and `STAGE_SCHEMA` in the engine's "
+             "(tools, breadth, parameters), so a transcript says which half a model is good "
+             "at. `OpenAICompatOracle` is the live client - pinned dated model id, pinned "
+             "sampling, Retry-After backoff, reasoning carried back for a model that "
+             "requires it - selected by `--model-profile` from models.yaml. With no profile "
+             "named it runs `RehearsalOracle`, which now derives its chain from the campaign "
+             "instead of returning the mock one (backlog H2) and takes its stopping numbers "
+             "from the spec",
         spec_ref="planning/phase1-partB-architecture/02-control-models.md section 3"),
     "C": ReasonerModel(
         letter="C", name="external caller steering", mode="headless",

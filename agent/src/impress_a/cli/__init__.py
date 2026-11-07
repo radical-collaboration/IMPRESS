@@ -120,7 +120,8 @@ def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
 
 
 def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
-                 records: list[dict[str, Any]] | None = None):
+                 records: list[dict[str, Any]] | None = None,
+                 profile: str | None = None):
     """Adapt a `CampaignSpec` into the registry's options, and construct the reasoner.
 
     This function is the adapter and nothing more. `policy/registry.py` owns which models
@@ -149,6 +150,7 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
     # campaign that declares neither keeps the model's own number.
     pol = reasoners.build(model, reasoners.ReasonerOptions(
         stages=list(spec.stages) or None,
+        oracle=_oracle_for(profile, spec),
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front,
         records=records,
@@ -162,7 +164,8 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 records: list[dict[str, Any]] | None = None,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
-                stage_records: list[dict[str, Any]] | None = None):
+                stage_records: list[dict[str, Any]] | None = None,
+                profile: str | None = None):
     """The same adapter, for the two halves.
 
     Two guard shapes, because there are two kinds of half. A pair derived from a
@@ -178,6 +181,7 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     opts = reasoners.ReasonerOptions(
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
+        oracle=_oracle_for(profile, spec),
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
     if specifier or planner or _declares_halves(specifier or model, planner or model):
@@ -187,6 +191,33 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
         return pair
     pol = build_policy(model, spec, guard, records)
     return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
+    """The model model B talks to, from `--model-profile`.
+
+    `None` leaves the registry to build `RehearsalOracle` with the campaign's chain, which is
+    what `--model B` runs with no profile named - and `impress-a models` reports `llm_calls: 0`
+    for exactly that reason. Loaded here rather than in `policy/` because `policy` may import
+    `core` only and reading a YAML file is not `core`'s business either; the same reason
+    `_replay_records` lives here.
+    """
+    if not profile:
+        return None
+    from ..policy.llm import build_oracle, load_profiles
+    path = Path(os.environ.get("IMPRESS_A_MODELS", "")) if os.environ.get(
+        "IMPRESS_A_MODELS") else Path("models.yaml")
+    if not path.is_file():
+        # Beside this package rather than beside the CWD, so a launcher that cd's into a
+        # per-job directory still finds it - which is what `trust_root` had to learn.
+        path = Path(__file__).resolve().parents[3] / "models.yaml"
+    profiles = load_profiles(path)
+    if profile not in profiles:
+        raise ValueError(f"unknown model profile {profile!r}; {path} declares "
+                         f"{sorted(profiles)}")
+    chosen = profiles[profile]
+    log.info("control model: profile %s (%s, model=%s)", profile, chosen.kind, chosen.model)
+    return build_oracle(chosen, stages=list(spec.stages) or None)
 
 
 def _declares_halves(spec_letter: str, plan_letter: str) -> bool:
@@ -372,7 +403,7 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
 
 async def control_campaign(url: str, campaign_id: str, model: str = "D",
                            specifier: str | None = None, planner: str | None = None,
-                           guard: bool = True) -> int:
+                           guard: bool = True, profile: str | None = None) -> int:
     """Run the Spec Loop and Planning Loop in their own process, over the session.
 
     The same `RolesDriver` the in-process path uses, against `RemoteSession` instead of
@@ -389,7 +420,7 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
         session = RemoteSession(client, campaign_id)
         obs = await session.observe()
         goal = Goal(text=obs.goal, objectives=list(obs.objectives))
-        pair = _role_pair(model, specifier, planner, list(obs.stages), guard)
+        pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile)
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         driver = RolesDriver(goal, pair.specifier, pair.planner,
                              max_turns=10_000, concurrency=1)
@@ -401,7 +432,7 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
 
 
 def _role_pair(model: str, specifier: str | None, planner: str | None,
-               stages: list[str], guard: bool):
+               stages: list[str], guard: bool, profile: str | None = None):
     """Build the two halves for a remote driver, from the served campaign's own chain.
 
     `stages` comes from `CampaignObservation.stages` - the campaign's declaration in its own
@@ -410,7 +441,10 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     `mock_design` precedes `mock_generate` and the sequence step would be planned before the
     backbone it consumes.
     """
-    opts = reasoners.ReasonerOptions(stages=stages or None)
+    opts = reasoners.ReasonerOptions(
+        stages=stages or None,
+        oracle=_oracle_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
+                                                 stages=list(stages))))
     if specifier or planner or _declares_halves(specifier or model, planner or model):
         pair = reasoners.build_roles(specifier or model, planner or model, opts)
         if guard:
@@ -566,7 +600,8 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
                        replay_from: str | None = None, control: str | None = None,
-                       specifier: str | None = None, planner: str | None = None) -> int:
+                       specifier: str | None = None, planner: str | None = None,
+                       profile: str | None = None) -> int:
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
@@ -615,10 +650,11 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
             spec_records, stage_records = (
                 _replay_role_records(replay_from) if replay_from else (None, None))
             policy = build_roles(model, spec, guard, None, specifier, planner,
-                                 spec_records, stage_records)
+                                 spec_records, stage_records, profile)
         else:
             policy = build_policy(model, spec, guard,
-                                  _replay_records(replay_from) if replay_from else None)
+                                  _replay_records(replay_from) if replay_from else None,
+                                  profile)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -926,6 +962,9 @@ def main(argv: list[str] | None = None) -> int:
                         "scripts/delta_run_campaign.py")
     r.add_argument("--replay-from", default=None, metavar="DIR",
                    help="provenance directory to replay (--model replay only)")
+    r.add_argument("--model-profile", default=None, metavar="NAME",
+                   help="models.yaml profile naming a live endpoint (--model B). Omitted, B "
+                        "runs the deterministic rehearsal and `impress-a models` says so")
     t = sub.add_parser("tools", help="list registered tools")
     t.add_argument("--toolkits", default=None)
     sub.add_parser("models", help="list the control models and their status")
@@ -947,6 +986,8 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--specifier", default=None, choices=sorted(POLICIES))
     ct.add_argument("--planner", default=None, choices=sorted(POLICIES))
     ct.add_argument("--no-guard", action="store_true")
+    ct.add_argument("--model-profile", default=None, metavar="NAME",
+                    help="models.yaml profile naming a live endpoint (--model B)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
@@ -963,14 +1004,15 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat, a.replay_from,
                                         control=a.control, specifier=a.specifier,
-                                        planner=a.planner))
+                                        planner=a.planner, profile=a.model_profile))
     if a.cmd == "models":
         return print_models()
     if a.cmd == "serve":
         return asyncio.run(serve_campaign(a.spec, a.host, a.port, a.heartbeat))
     if a.cmd == "control":
         return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
-                                            a.specifier, a.planner, not a.no_guard))
+                                            a.specifier, a.planner, not a.no_guard,
+                                            a.model_profile))
     if a.cmd == "trust":
         widths = a.replicas
         if widths is None:

@@ -7,6 +7,13 @@ Imports `core` only, like everything else under `policy/` - asserted by
 from .agentic import AgenticPlanner
 from .explicit import ThresholdPlanner
 from .external import ExternalPlanner
+from .oracle import OraclePlanner
 from .replay import ReplayPlanner
 
-__all__ = ["AgenticPlanner", "ExternalPlanner", "ReplayPlanner", "ThresholdPlanner"]
+__all__ = [
+    "AgenticPlanner",
+    "ExternalPlanner",
+    "OraclePlanner",
+    "ReplayPlanner",
+    "ThresholdPlanner",
+]

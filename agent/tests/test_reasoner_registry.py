@@ -222,13 +222,14 @@ def test_the_front_target_comes_from_the_spec_when_it_declares_one():
     assert build_policy("D", _spec(target_front=10), guard=False).target_front == 10
 
 
-#: Models whose two halves are their own rather than derived from a `ControlPolicy` by
-#: `DecideAsRoles`. B is the one still derived - its live client is the next item (H2) - and
-#: listing it here is how that stays visible instead of being inferred from a note.
-DECLARES_HALVES = {"A", "C", "D", "null", "replay"}
+#: Every shipped model now supplies its own two halves. Kept as a list rather than an
+#: "all of them" assertion so that adding a model is a decision about which it is: a new row
+#: without halves would run the legacy `decide` cascade under `--control roles`, which is what
+#: `DecideAsRoles` exists for and what phase 11 deletes.
+DECLARES_HALVES = {"A", "B", "C", "D", "null", "replay"}
 
 
-def test_the_models_with_real_halves_are_the_ones_that_say_so():
+def test_every_model_supplies_its_own_halves_rather_than_deriving_them():
     """`--control roles` must not quietly run a model's `decide` cascade.
 
     `cli.build_roles` derives a pair from `decide` only for a model that declares none, so
@@ -249,16 +250,19 @@ def test_the_models_with_real_halves_are_the_ones_that_say_so():
         f"with a legacy adapter - a combination nothing tests and nobody asked for")
 
 
-def test_a_models_note_says_which_half_is_still_derived():
-    """The status column is load-bearing documentation, so B must admit what it is.
+def test_no_model_claims_a_live_client_it_has_not_been_given():
+    """The status column is load-bearing documentation, so B must say what it is running.
 
     `docs/` described four working control models while two had no LLM behind them, and
-    nothing contradicted it. Model B's halves still come from its `decide`, so its note has to
-    say that a live client is what is missing rather than leaving a reader to assume the
-    phase-9 split reached it.
+    nothing contradicted it. Model B now has a live client, but nothing *attaches* one unless
+    a profile names it, so `llm_calls` stays 0 and the note has to say which stand-in runs by
+    default - otherwise a reader assumes the phase-9 split made B a live arm.
     """
+    for letter, model in reasoners.MODELS.items():
+        assert model.llm_calls == 0, (
+            f"{letter} claims {model.llm_calls} LLM calls per cycle. Nothing in this "
+            f"repository constructs a client without a `--model-profile`, so raise this only "
+            f"when a default profile makes one")
     b = reasoners.MODELS["B"]
-    assert b.specifier is None and b.planner is None, \
-        "B gained real halves; update this test and its note together"
-    assert "no live client" in b.note or "RehearsalOracle" in b.note, b.note
-    assert b.llm_calls == 0, "a model with no live client makes no calls, and must say 0"
+    assert "RehearsalOracle" in b.note, b.note
+    assert "models.yaml" in b.note, "the note must say where a live profile comes from"
