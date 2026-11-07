@@ -83,6 +83,12 @@ class CampaignSpec:
     max_cycles: int = 10      # runs a decide-style policy is driven through (a Backtrack
                               # is not one); a `conduct` reasoner is bounded by max_runs
     max_runs: int = 0         # submissions; 0 = unbounded. See `max_cycles`.
+    # How many Pareto-front members the campaign is asking for. 0 keeps the reasoner's own
+    # default, which is 3 - a sensible number for the mock demo and an arbitrary cap on a
+    # campaign asked for ten designs. It belongs here rather than being inferred from
+    # `objectives`, because `Objective` declares a metric target and says nothing about how
+    # many designs satisfying it are wanted; the count is a property of the Goal.
+    target_front: int = 0
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
     # Backstop for runs exempted from the stagnation counter. A run that could not reach the
@@ -446,7 +452,7 @@ class CampaignExecutor:
             # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
             # this one is derived from the other.
             budget=self.budget, available_tools=self._toolkit.ids,
-            toolkit=self._toolkit, spec=self.spec_state,
+            toolkit=self._toolkit, stages=list(self.spec.stages), spec=self.spec_state,
             orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)
 
@@ -729,6 +735,40 @@ class CampaignExecutor:
             "replicas": max(1, replicas),
         })
 
+    def _apply_campaign_params(self, stage: Stage) -> None:
+        """Merge the campaign's declared parameters into a Stage, and apply the replica cap.
+
+        The Stage equivalent of `_apply_campaign_defaults`, and it was missing - which is a
+        silent loss rather than a cosmetic one. `params` is where a campaign puts target
+        identity: `boltz_predict.ligand_smiles`, `rfd3_design.input_spec_path`, the contig.
+        A roles-driven Delta campaign therefore ran `boltz_predict` with no ligand, which does
+        not fail - it models no ligand and the front optimises the wrong objective, which is
+        backlog A2 arriving by a new route. `mock-stabilize.yaml` declares no `params` at all,
+        which is why no test saw it.
+
+        Merged here rather than in the Planner for the recorded reason: the ligand and the
+        contig are campaign configuration, not search strategy, and a reasoner that had to
+        learn a tool's parameter names to run a campaign correctly would be one more place for
+        a real campaign to execute something it did not declare.
+
+        The Planner wins on any key it set - this supplies defaults. `replicas` is the other
+        way round, because it is a CAP: how wide a campaign may go is the campaign's call, and
+        a Stage asking wider is trimmed to it. Trimming drops whole lineages, never the tail of
+        a chain: a lineage is a complete chain, so removing one cannot change what the Stage
+        can measure, while truncating the tail is what took the only producer of two of four
+        objectives off job 22675512. It is recorded in `stages` provenance, because a Stage
+        that ran narrower than it was planned should say so.
+        """
+        for task in stage.tasks:
+            if defaults := self.spec.params.get(task.tool):
+                task.params = {**defaults, **task.params}
+        cap = self.spec.replicas
+        if cap and stage.lineages > cap:
+            dropped = sorted({t.lineage for t in stage.runs if t.lineage >= cap})
+            stage.tasks = [t for t in stage.tasks if t.lineage < cap]
+            self._log("stages", {"event": "capped", "stage": stage.id,
+                                 "replicas_cap": cap, "dropped_lineages": dropped})
+
     # -- the session surface -------------------------------------------------
     async def submit_stage(self, stage: Stage) -> str:
         """Admit and dispatch one Stage. Synchronous admission, as `submit` is.
@@ -747,6 +787,7 @@ class CampaignExecutor:
             raise CampaignStopped(self._stop_reason or "campaign has ended")
         await self._await_resume()
         self._apply_cancels(stage)
+        self._apply_campaign_params(stage)
         if not stage.runs:
             stage.status = StageStatus.SETTLED
             self._log("stages", {"event": "cancels_only", "stage": stage.id,

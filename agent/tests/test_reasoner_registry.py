@@ -187,3 +187,36 @@ def test_halves_mix_independently():
 def test_an_unknown_letter_names_the_known_ones():
     with pytest.raises(KeyError, match="unknown control model"):
         reasoners.build_roles("Z")
+
+
+def test_policy_max_cycles_equals_the_spec():
+    """A reasoner must not carry a stopping bound tighter than the campaign's (X1).
+
+    `build_policy` withheld `max_cycles` on the reasoning that `CampaignManager._reasoner`
+    already bounds the driver with it and bounding one thing from two places hides an
+    off-by-one. The consequence was worse than the thing avoided: every model kept
+    `ReasonerOptions.max_cycles`'s default of **6**, so a four-hour arm declaring
+    `max_cycles: 200` would have decided six times in about twenty minutes, stopped itself,
+    and reported a clean campaign having spent roughly 8% of its allocation.
+
+    Checked on both arms that stop themselves this way - A reads `max_cycles` in
+    `agentic.py` and D in `explicit.py` - and in both directions, because a spec asking for
+    fewer cycles than the default must also be honoured.
+    """
+    for letter in ("A", "D"):
+        for cycles in (3, 200):
+            pol = build_policy(letter, _spec(max_cycles=cycles), guard=False)
+            assert pol.max_cycles == cycles, (
+                f"{letter} carries max_cycles={pol.max_cycles} against a spec asking for "
+                f"{cycles}")
+
+
+def test_the_front_target_comes_from_the_spec_when_it_declares_one():
+    """`target_front` is a property of the Goal, not of the demo it was defaulted for.
+
+    A policy stops at `len(pareto_front) >= target_front`, so the shipped 3 is a second
+    silent cap on a campaign asked for ten designs - and unlike `max_cycles` nothing else
+    bounds it. 0 (the default) keeps the model's own number, so no existing campaign moves.
+    """
+    assert build_policy("D", _spec(), guard=False).target_front == 3
+    assert build_policy("D", _spec(target_front=10), guard=False).target_front == 10

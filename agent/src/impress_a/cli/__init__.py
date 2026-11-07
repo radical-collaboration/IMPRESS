@@ -97,6 +97,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         runner=d.get("runner", "dispatcher"),
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
+        target_front=int(d.get("target_front", 0)),
         stages=d.get("stages", []) or [],
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
@@ -132,13 +133,24 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
     which is the mock chain - so a real campaign would validate the real toolkits and
     then execute mocks.
     """
-    # `max_cycles` is deliberately NOT forwarded. `CampaignManager._reasoner` already
-    # bounds the driver with `spec.max_cycles`, and a policy carrying the same number
-    # would bound the same thing twice from two places - which is how an off-by-one
-    # becomes invisible (the driver counted a Backtrack as a cycle for three Delta jobs).
-    # The spec bounds the driver; the policy keeps its own stopping condition.
+    # `max_cycles` IS forwarded now, and the earlier reasoning for withholding it was half
+    # right. Withholding avoided bounding the same thing from two places, which is how an
+    # off-by-one became invisible (the driver counted a Backtrack as a cycle for three Delta
+    # jobs). But it left every model carrying `ReasonerOptions.max_cycles`'s default of 6,
+    # which does not merely duplicate the campaign's bound - it is TIGHTER than it. A 4-hour
+    # arm with `max_cycles: 200` would have made six decisions in about twenty minutes and then
+    # stopped itself, spending roughly 8% of the allocation. That is the worse of the two
+    # failures, and it is silent.
+    #
+    # Forwarding the spec's own value makes the policy's self-stop no tighter than the
+    # campaign's, so the driver remains the authority and a policy can still stop early for its
+    # own reasons. `target_front` comes from the spec for the same reason: 3 is a sensible
+    # default for a demo and an arbitrary cap on a campaign asked for ten designs, and a
+    # campaign that declares neither keeps the model's own number.
     pol = reasoners.build(model, reasoners.ReasonerOptions(
         stages=list(spec.stages) or None,
+        max_cycles=spec.max_cycles,
+        target_front=spec.target_front or reasoners.ReasonerOptions().target_front,
         records=records,
     ))
     if guard:
@@ -156,11 +168,35 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     Phase 9 replaces it with `StageGuard`, which can refuse a Stage directly - including a RUN
     task that serves no objective, which no policy-level wrapper could see.
     """
-    opts = reasoners.ReasonerOptions(stages=list(spec.stages) or None, records=records)
-    if specifier or planner:
+    opts = reasoners.ReasonerOptions(
+        stages=list(spec.stages) or None, records=records,
+        max_cycles=spec.max_cycles,
+        target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
+    if specifier or planner or _declares_halves(specifier or model, planner or model):
         return reasoners.build_roles(specifier or model, planner or model, opts)
     pol = build_policy(model, spec, guard, records)
     return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def _declares_halves(spec_letter: str, plan_letter: str) -> bool:
+    """Whether both requested halves are the model's own rather than derived from `decide`.
+
+    While the strangler is in place most models have no halves of their own, and
+    `DecideAsRoles` presents their `ControlPolicy` as a pair - which is what made
+    `--control roles` a change of vocabulary rather than of behaviour. Model D now has real
+    halves, so the derivation has to stop being unconditional: taking the adapter when a
+    model declares a `ThresholdPlanner` would run the legacy decision cascade under a flag
+    that says otherwise, and the campaign log would name a planner that never planned.
+
+    Both halves, not either: a pair with one real and one derived half would mean a
+    `ThresholdPlanner` planning against a Spec the `LegacySpecifier` wrote, which is a
+    combination nothing has tested and nobody asked for. `--specifier X --planner Y` is the
+    supported way to mix, and it is checked first by the caller.
+    """
+    models = reasoners.MODELS
+    return (spec_letter in models and plan_letter in models
+            and models[spec_letter].specifier is not None
+            and models[plan_letter].planner is not None)
 
 
 def _halves_of(policy: Any):
@@ -342,8 +378,7 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
         session = RemoteSession(client, campaign_id)
         obs = await session.observe()
         goal = Goal(text=obs.goal, objectives=list(obs.objectives))
-        pair = _role_pair(model, specifier, planner, list(obs.toolkit.ids if obs.toolkit
-                                                          else []), guard)
+        pair = _role_pair(model, specifier, planner, list(obs.stages), guard)
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         driver = RolesDriver(goal, pair.specifier, pair.planner,
                              max_turns=10_000, concurrency=1)
@@ -356,9 +391,16 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
 
 def _role_pair(model: str, specifier: str | None, planner: str | None,
                stages: list[str], guard: bool):
-    """Build the two halves for a remote driver, from the served campaign's own chain."""
+    """Build the two halves for a remote driver, from the served campaign's own chain.
+
+    `stages` comes from `CampaignObservation.stages` - the campaign's declaration in its own
+    order - and not from `toolkit.ids`, which holds the same tools sorted by id. A Planner
+    wires each port to the nearest preceding producer, so under alphabetical order
+    `mock_design` precedes `mock_generate` and the sequence step would be planned before the
+    backbone it consumes.
+    """
     opts = reasoners.ReasonerOptions(stages=stages or None)
-    if specifier or planner:
+    if specifier or planner or _declares_halves(specifier or model, planner or model):
         return reasoners.build_roles(specifier or model, planner or model, opts)
     pol = reasoners.build(model, opts)
     if guard:

@@ -26,8 +26,11 @@ from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
 from impress_a.core.results import RunOutcome, RunState, TaskOutcome
+from impress_a.core.spec import ObjectiveStatus, SpecRevision
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
+from impress_a.policy.planner import PlanningContext
+from impress_a.policy.planners import ThresholdPlanner
 from impress_a.policy.specifier import SpecEvidence
 from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.tools._ensemble import member_index, pair_by_index, select_best
@@ -1349,3 +1352,175 @@ def test_rfd3_sampling_stays_at_one_with_its_reason_recorded(reg):
     assert reg.get("rfd3_design").parameters["num_designs"].default == 1
     assert reg.get("boltz_predict").parameters["diffusion_samples"].default == 8, \
         "the tools whose adapters DO select are the ones raised"
+
+
+# ---------------------------------------------------------------------------
+# Model D's Planner half, against the REAL specs. The point of testing it here rather than
+# only on mocks is backlog H3: the defect was that no reasoner could vary a real tool's
+# parameter, and a planner exercised only against `mock_generate` is exactly how that went
+# unnoticed - the shipped policy's hardcoded params named two mock tools and were silently
+# dropped on every real campaign.
+# ---------------------------------------------------------------------------
+
+def _planning_context(view, goal, spec, stages, front=()):
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal=goal.text,
+                              objectives=goal.objectives, toolkit=view, spec=spec,
+                              stages=list(stages), pareto_front=list(front))
+    return PlanningContext(goal, obs)
+
+
+async def _refined_spec(reg, goal, sp):
+    """A Spec mid-campaign: the declared objectives met, one refinement objective open.
+
+    The four declared objectives are closed with an explicit revision rather than through
+    `Specifier.satisfied`, which would need a populated `DataRegistry` - this fixture is for
+    testing the *Planner*, and the Specifier's satisfaction rules have their own tests above.
+    What matters here is the shape of the Spec a Planner is handed on an exploit cycle.
+    """
+    spec = await sp.initial_spec(goal)
+    node = DesignNode()
+    for name, value in (("shape_complementarity", 0.56), ("complex_plddt", 0.95),
+                        ("ligand_iptm", 0.9), ("total_score", -300.0)):
+        node.properties[name] = Property(name=name, value=value,
+                                         source=PropertySource(name="t"))
+    ev = _evidence(view_of(reg, CHAIN), goal, spec, front=[node])
+    spec.apply(SpecRevision(status_changes={
+        oid: ObjectiveStatus.SATISFIED for oid in spec.objectives}))
+    spec.apply(await sp.revise(spec, ev))
+    return spec, node
+
+
+async def test_a_planner_can_vary_a_real_tools_parameter(reg):
+    """Backlog H3, which blocks any claim about decision quality.
+
+    `ThresholdPolicy` emitted `params={"mock_generate": {...}, "mock_design": {...}}` on every
+    arm. Against this chain those keys name tools that are not in the graph, so the composer
+    dropped them without a word and no real tool's parameter was ever varied by any reasoner -
+    which means the four models differed in no parameter at all, and a comparison between them
+    could not have been measuring what it claimed.
+
+    The value has to be real on three counts, so all three are asserted: the tool is one of
+    this chain's own, the parameter is one that tool declares, and the number is inside the
+    declared range rather than merely different.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+
+    varied = {t.tool: t.params for t in stage.runs if t.params}
+    assert varied, "the planner varied nothing on a refinement, which is H3 unfixed"
+    for tool, params in varied.items():
+        assert tool in CHAIN, f"{tool} is not in this campaign's chain"
+        declared = reg.get(tool).parameters
+        for name, value in params.items():
+            assert name in declared, f"{tool}.{name} is not a declared parameter"
+            card = declared[name]
+            assert card.min is None or value >= card.min, f"{tool}.{name}={value} below min"
+            assert card.max is None or value <= card.max, f"{tool}.{name}={value} above max"
+            assert value != card.default, f"{tool}.{name} was not actually varied"
+
+    assert "diffusion_steps" in varied.get("rfd3_design", {}), (
+        "rfd3's `diffusion_steps` trades 'quality vs wall-clock', which is the refinement "
+        "axis this chain offers")
+
+
+async def test_the_planner_leaves_breadth_and_identity_parameters_alone(reg):
+    """Escalating `num_designs` or `seed` would cost GPU-hours or break the lineages.
+
+    `rfd3_design`'s spec says `num_designs` stays at 1 because its adapter still keeps index
+    0, so a planner reading "coverage vs GPU-hours" as an improvement axis pays N times for
+    one design. `seed` is lineage identity: moving it would break the independence of the
+    replicas the arm is being credited for. Both are declared, tunable and in range - so
+    nothing but the `trades` sentence distinguishes them from the knob above.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+
+    asked = {name for t in stage.runs for name in t.params}
+    for forbidden in ("num_designs", "seed", "batch_size", "number_of_batches",
+                      "diffusion_samples", "nstruct"):
+        assert forbidden not in asked, (
+            f"{forbidden} is breadth or identity, not quality - raising it is either an "
+            f"N-times bill for one design or a broken replica")
+
+
+async def test_the_planner_escalates_toward_the_declared_maximum(reg):
+    """One step per refinement, not a jump to the limit.
+
+    The declared max is a limit, not a target: arriving there on the first refinement leaves
+    nothing to escalate and no record of which step helped. It must also never exceed the
+    max, because gate 3 refuses a parameter outside its declared range and a planner whose
+    only move is refused has no moves.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    ctx = _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN, front=[node])
+    card = reg.get("rfd3_design").parameters["diffusion_steps"]
+
+    seen = []
+    for _ in range(8):
+        stage = await planner.plan(spec, ctx)
+        steps = next(t.params["diffusion_steps"] for t in stage.runs
+                     if t.tool == "rfd3_design")
+        seen.append(steps)
+    assert seen == sorted(seen), f"escalation must be monotonic, got {seen}"
+    assert seen[0] > card.default and seen[0] < card.max, (
+        f"the first step must move off {card.default} without reaching {card.max}: {seen[0]}")
+    assert max(seen) == card.max, f"escalation must reach the declared max: {seen}"
+
+
+async def test_the_planner_wires_the_real_chain_by_declared_port(reg):
+    """Typed wiring over the real specs, and the chain in the campaign's own order.
+
+    Nearest-preceding by type is the rule `Composer.compose` applies to a linear chain, so a
+    Stage this planner wires explicitly and a chain the composer wires by position describe
+    the same graph. Asserted against the real ports because the mock chain is uniform and
+    would hide a type error that this one would not.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+    planner = ThresholdPlanner(stages=CHAIN, base_replicas=1)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN))
+
+    assert [t.tool for t in stage.runs] == CHAIN, "the campaign's order, not id order"
+    for task in stage.runs:
+        spec_ = reg.get(task.tool)
+        required = {name for name, p in spec_.inputs.items() if p.required}
+        assert required <= set(task.inputs), (
+            f"{task.tool} left required port(s) {sorted(required - set(task.inputs))} unwired")
+        for port, ref in task.inputs.items():
+            src_id, out_port = ref.split(".", 1)
+            src = next(t for t in stage.runs if t.task_id == src_id)
+            want = spec_.inputs[port].type
+            assert reg.get(src.tool).outputs[out_port].type.unifies_with(want), (
+                f"{task.tool}.{port} wired to {src.tool}.{out_port}, which cannot satisfy "
+                f"{want}")
+
+
+async def test_a_refinement_stage_still_measures_every_campaign_objective(reg):
+    """The minimal chain for one objective makes a child nobody can compare.
+
+    Planning only `filter_shape`'s producers for a `shape_complementarity` refinement
+    produced a node measured on that alone - incomparable with every design on the front, and
+    refused outright by the executor's A8 check, so the refinement was unwinnable from the
+    moment it was planned. That is job 22675512's defect reached by the opposite route: there
+    a chain was truncated to fit a budget, here it was never built.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    ready = spec.ready()
+    assert [o.parent_node for o in ready] == [node.id], "precondition: one refinement objective"
+
+    planner = ThresholdPlanner(stages=CHAIN, base_replicas=1)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+    assert stage.parent_node == node.id
+    reported = {m for t in stage.runs for m in reg.get(t.tool).metrics}
+    missing = sorted({o.name for o in goal.objectives} - reported)
+    assert missing == [], f"the refinement cannot be ranked on {missing}"

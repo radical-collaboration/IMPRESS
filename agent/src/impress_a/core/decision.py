@@ -101,6 +101,15 @@ class CampaignObservation(BaseModel):
     #: The Toolkit as a reasoner may see it: typed ports, parameter ranges, what each
     #: parameter trades, which are frozen and why, and the toolkits' own skill documents.
     toolkit: ToolkitView | None = None
+    #: The campaign's declared chain, in the campaign's own ORDER. `toolkit` carries the same
+    #: tools but keyed and sorted by id, and order is not decoration here: a Planner wires a
+    #: port to the nearest preceding producer, which is the rule the composer applies to a
+    #: linear chain, and alphabetical order makes `mock_design` precede `mock_generate` - so
+    #: the sequence step would be planned before the backbone it consumes. An in-process pair
+    #: receives the chain through `ReasonerOptions.stages`; before this field a pair driving a
+    #: campaign over a socket had no way to learn it at all, which is the parity of evidence
+    #: ADR 0007 requires of every adapter.
+    stages: list[str] = Field(default_factory=list)
     #: The applied Spec. Carried so a Planner plans against objectives the executor has
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).

@@ -774,7 +774,26 @@ model id, sampling parameters, `Retry-After` backoff, 429-vs-529. `pyproject.tom
 per-model profiles already exists in `examples/agentic_small_molecule_binding/llm.py` and has
 hardware results behind it; porting it is the plan's step 1.
 
-**H3. No policy can vary a real tool's parameters.** A and D emit `params` keyed to `mock_generate`
+**H3. No policy can vary a real tool's parameters.** **DONE for model D** (phase 9): its Planner
+half, `policy/planners/explicit.ThresholdPlanner`, chooses parameters from the `ToolkitView`'s own
+`ParamCard`s - so the tool ids and the ranges come from the specs rather than from this file - and
+`tests/test_real_toolkits.py::test_a_planner_can_vary_a_real_tools_parameter` asserts against the
+real six-stage chain that the tool is in the chain, the parameter is one that tool declares, the
+value is inside the declared range, and it differs from the default. Which parameter is read from
+the spec's `trades` sentence, the only prose a reasoner gets: `quality`/`accuracy`/`convergence` is
+the refinement axis, while `coverage`/`sampling`/`candidates` (breadth) and `seed` (lineage
+identity) are deliberately left alone - raising rfd3's `num_designs` pays N times for one design
+while its adapter keeps index 0, and moving `seed` would break the independence of the replicas the
+arm is credited for. **Still open for A, B and C**, whose planner halves are still derived from
+`decide` and still emit the mock keys below. Two gaps found while closing it, both of which would
+have made a real roles-driven campaign wrong rather than merely limited: `submit_stage` applied
+neither the campaign's `params` nor its `replicas` cap (`_apply_campaign_defaults` ran on the intent
+path only), so a Delta campaign on the roles path would have run `boltz_predict` with an empty
+`ligand_smiles` - which models no ligand rather than failing, A2 by a new route - and
+`CampaignObservation` did not carry the campaign's declared chain, so a Planner driving a campaign
+over a socket could not learn its ORDER and would have wired each port to the wrong producer.
+
+The original finding, for the record: A and D emit `params` keyed to `mock_generate`
 and `mock_design` (`policy/agentic.py:84`, `policy/explicit.py:69`), and B's rehearsal the same
 (`policy/oracle.py:60`), even when `stages` is the real six-stage chain. `compose/composer.py:63`
 reads `intent.params.get(tool_id, {})` per composed stage, so those keys are silently dropped. On a
@@ -865,10 +884,21 @@ paid for out of the first allocation.
    could explore with a truncated chain. The characterization test did change, exactly as it
    said it would, and a second test now holds the fix to being additive.
 10. ~~**H6 the lint gate**~~ **DONE** — it was the reason H1-H5 went unnoticed, and it was cheap.
-    Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
-    claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
-    after H2, which is what makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now
-    phases 9 and the experiment of [`control-plane-refactor.md`](control-plane-refactor.md).
+    ~~**H3**~~ **DONE for model D** in phase 9, which is what unblocks any claim about decision
+    quality for the control arm; A, B and C follow with their own planner halves. Then **H2**
+    (the client exists and has hardware behind it), then **H7**. **H1** after H2, which is what
+    makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now phase 9 and the experiment
+    of [`control-plane-refactor.md`](control-plane-refactor.md).
+11. ~~**X1 `max_cycles` was not forwarded to the reasoner**~~ **DONE** (phase 9). Found while
+    planning the four-arm experiment. `build_policy` withheld it on the reasoning that
+    `CampaignManager._reasoner` already bounds the driver and bounding one thing twice hides an
+    off-by-one. The consequence was worse than what it avoided: every model carried
+    `ReasonerOptions.max_cycles`'s default of **6**, so a four-hour arm declaring `max_cycles: 200`
+    would have decided six times in about twenty minutes, stopped itself, and reported a clean
+    campaign having spent roughly 8% of its allocation. `target_front` had the same shape with no
+    second bound at all behind it, and is now a declared `CampaignSpec` field (0 keeps the model's
+    own 3) rather than an inferred one, because how many designs a campaign wants is a property of
+    the Goal and `core.pareto.Objective` says nothing about it.
 
 ## Verification that applies to any item
 

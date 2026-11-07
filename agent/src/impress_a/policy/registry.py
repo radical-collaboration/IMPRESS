@@ -35,6 +35,8 @@ from .agentic import FourNodePolicy
 from .explicit import ReplayPolicy, ThresholdPolicy
 from .external import ExternalPolicy
 from .oracle import OraclePolicy
+from .planners import ThresholdPlanner
+from .specifiers import ThresholdSpecifier
 from .wrappers import NullPolicy
 
 
@@ -115,6 +117,26 @@ def _threshold(o: ReasonerOptions) -> ThresholdPolicy:
                            target_front=o.target_front)
 
 
+def _spec_d(o: ReasonerOptions) -> ThresholdSpecifier:
+    """Model D's real Specifier half.
+
+    Takes nothing from the options: a deterministic `Goal -> Spec` is a function of the Goal
+    and of what the Toolkit can produce, both of which arrive at call time. That is what makes
+    D reproducible end to end, and so the baseline the other three justify their cost against.
+    """
+    return ThresholdSpecifier()
+
+
+def _plan_d(o: ReasonerOptions) -> ThresholdPlanner:
+    """Model D's real Planner half.
+
+    Takes the campaign's chain for the same reason `_threshold` does: without it the planner
+    falls back to whatever the Toolkit happens to hold, and on a real campaign that is the mock
+    toolkit sitting beside the real one.
+    """
+    return ThresholdPlanner(stages=o.stages)
+
+
 def _build_a(o: ReasonerOptions) -> FourNodePolicy:
     return FourNodePolicy(stages=o.stages, max_cycles=o.max_cycles,
                           target_front=o.target_front, reasoner=o.reasoner,
@@ -175,9 +197,14 @@ MODELS: dict[str, ReasonerModel] = {
         letter="D", name="explicit policy", mode="autonomous",
         llm_calls=0, llm_shape="none", status="implemented",
         cls=ThresholdPolicy, build=_threshold,
+        specifier=_spec_d, planner=_plan_d,
         note="the scientific control: reproducible end to end, and the baseline the other "
-             "models must justify their cost against. The bandit, Bayesian-optimization "
-             "and evolutionary variants the specification lists do not exist",
+             "models must justify their cost against. The only model whose two halves are "
+             "its own rather than derived from `decide`: `ThresholdSpecifier` maps the Goal "
+             "onto the Toolkit's output space and `ThresholdPlanner` selects Tasks by output "
+             "type and varies their real parameters (backlog H3). The bandit, "
+             "Bayesian-optimization and evolutionary variants the specification lists do "
+             "not exist",
         spec_ref="planning/phase1-partB-architecture/02-control-models.md section 5"),
     "null": ReasonerModel(
         letter="null", name="no-op baseline", mode="autonomous",
