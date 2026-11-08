@@ -20,9 +20,31 @@
 # to keep in step, and the one that is run less often is the one that rots. So this sets the
 # command and execs that script.
 #
-# Deliberately NOT set here: --nodes, --time, --partition. A validation pass is one width-1
-# chain, so it wants a short interactive allocation rather than the campaign defaults - pass
-# them to sbatch, as the example above does, where they are visible in the submission.
+# The RESOURCE shape, which must be here and cannot be inherited. Slurm parses `#SBATCH` lines
+# out of the file it is handed, at submit time; this script `exec`s `delta_gpu_run.sh` at RUN
+# time, long after that parse, so none of that file's ten directives apply to a job submitted
+# through this one. Without these, the documented command line above fails at submit with
+#
+#   sbatch: error: Jobs requesting no GPU resources must be submitted under CPU type accounts
+#
+# which names the account and not the missing request. Found by running the documented command;
+# it had never been submitted.
+#
+# Same sizing as `delta_gpu_run.sh`, and for the same reason: 4 GPUs already reserves and bills
+# the whole node, so 64 cores and 240G are free at that price, and a validation pass that ran
+# on a narrower shape than the arms would not be validating the arms' hardware. `--output` is
+# load-bearing - the EXIT trap looks for `impress_a_<jobid>.out` by that exact name to move it
+# in beside the manifest.
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=1
+#SBATCH --cpus-per-task=64
+#SBATCH --gpus-per-node=4
+#SBATCH --mem=240G
+#SBATCH --output=impress_a_%j.out
+#
+# Deliberately NOT set here: --time, --partition. A validation pass is one width-1 chain, so it
+# wants a short interactive allocation rather than the campaign defaults - pass them to sbatch,
+# as the example above does, where they are visible in the submission.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

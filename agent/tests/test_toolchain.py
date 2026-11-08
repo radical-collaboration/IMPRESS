@@ -461,3 +461,53 @@ def test_documented_command_lines_parse():
         f"only {seen} documented command lines found; the extractor has stopped matching the "
         f"procedure blocks rather than the procedure having shrunk"
     )
+
+
+def test_every_documented_sbatch_entry_point_requests_its_own_resources():
+    """`#SBATCH` is parsed out of the file sbatch is handed, and nothing else.
+
+    `delta_validate_tasks.sh` is a wrapper: it sets `IMPRESS_A_COMMAND` and `exec`s
+    `delta_gpu_run.sh`, which is the right shape - everything that makes a Delta job work was
+    bought one burned allocation at a time and two copies would be two things to keep in step.
+    But Slurm reads directives at SUBMIT time, out of the submitted file, and the `exec`
+    happens at RUN time. So none of `delta_gpu_run.sh`'s ten directives applied to a job
+    submitted through the wrapper, and the documented step-1 command died at submit with
+
+        sbatch: error: Jobs requesting no GPU resources must be submitted under CPU type
+        accounts
+
+    - a message about the ACCOUNT, for a missing GPU request, on the one step the entire trust
+    assertion cites as its evidence. It had never been submitted.
+
+    So: every script a document tells someone to `sbatch` must itself request what it needs.
+    `--time` and `--partition` are deliberately left to the command line in at least one of
+    them, and are not checked here; the resource shape and `--output` are not choices - the
+    EXIT trap looks for `impress_a_<jobid>.out` by that exact name.
+    """
+    import re
+
+    texts = {p: p.read_text() for p in
+             sorted(pathlib.Path("plans").glob("*.md")) + sorted(pathlib.Path(".").glob("*.md"))
+             + sorted(pathlib.Path("scripts").glob("*.sh"))}
+    entry_points = set()
+    for text in texts.values():
+        # Join `\` continuations FIRST. Every documented submission wraps across three lines,
+        # so a line-bounded match finds only the one-line examples - and silently passes the
+        # wrapper it was written to catch. That is the same shape of mistake as the bug.
+        joined = re.sub(r"\\\n\s*", " ", text)
+        entry_points.update(re.findall(r"sbatch[^\n|]*?(scripts/[\w.-]+\.sh)", joined))
+
+    assert {"scripts/delta_gpu_run.sh", "scripts/delta_validate_tasks.sh"} <= entry_points, (
+        f"the extractor stopped matching the documented submissions; found {entry_points}"
+    )
+    for rel in sorted(entry_points):
+        script = pathlib.Path(rel)
+        assert script.is_file(), f"{rel} is documented for sbatch but does not exist"
+        directives = "\n".join(ln for ln in script.read_text().splitlines()
+                               if ln.startswith("#SBATCH"))
+        for needed in ("--gpus-per-node", "--mem", "--cpus-per-task", "--output"):
+            assert needed in directives, (
+                f"{rel} is documented as `sbatch {rel} ...` but declares no {needed}. "
+                f"Directives are not inherited through `exec` - Slurm has finished parsing "
+                f"before this script runs a line."
+            )

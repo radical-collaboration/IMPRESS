@@ -558,6 +558,35 @@ Both pinned in `tests/test_toolchain.py` (`..._sends_arm_c_to_serve_...`,
 `..._forwards_a_model_profile_...`), each confirmed to fail with the fix reverted. **Unrun on
 hardware.**
 
+**C10. `delta_validate_tasks.sh` could not be submitted.** **RESOLVED** (2026-11-08), found
+by running the pre-registration's own step 1 - the first time that command line had been sent
+to sbatch.
+
+The wrapper sets `IMPRESS_A_COMMAND=validate-tasks` and `exec`s `delta_gpu_run.sh`, which is the
+right shape: everything that makes a Delta job work here was bought one burned allocation at a
+time, and two copies would be two things to keep in step. But **Slurm parses `#SBATCH` out of
+the file it is handed, at submit time**, and the `exec` happens at run time. So none of
+`delta_gpu_run.sh`'s ten directives applied to a job submitted through the wrapper, which
+declared none of its own. The documented command died at submit with
+
+    sbatch: error: Jobs requesting no GPU resources must be submitted under CPU type accounts
+
+- a message naming the ACCOUNT, for a missing GPU request, on the one step the entire trust
+assertion cites as its evidence. A reader would have gone to check their allocations.
+
+The resource shape now lives in the wrapper, mirroring the launcher's and for the same reason:
+4 GPUs already reserves and bills the whole node, so 64 cores and 240G are free at that price,
+and a validation pass on a narrower shape would not be validating the arms' hardware.
+`--output=impress_a_%j.out` is load-bearing - the EXIT trap looks for that exact name.
+`--time` and `--partition` stay on the command line, where the submission shows them.
+
+Pinned by `tests/test_toolchain.py::test_every_documented_sbatch_entry_point_requests_its_own_
+resources`, which reads every `sbatch ... scripts/X.sh` out of the docs and the scripts and
+checks that X.sh declares its own resources. Confirmed to fail against the old wrapper. One
+detail worth keeping: the first version of that test passed against the broken script, because
+every documented submission wraps across three lines with `\` and the regex was line-bounded -
+the same shape of mistake as the bug it was written for.
+
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
 reads a half-populated directory, failing with `CCD component <resname> not found!`. Measured
