@@ -552,8 +552,24 @@ if [ "${_SIDECAR:-}" = "yes" ]; then
         _url="$(cat "${_url_file}")"
         echo "Sidecar:           control --connect ${_url} --campaign ${_cid}" \
              "--model ${_SIDECAR_MODEL}"
-        impress-a control --connect "${_url}" --campaign "${_cid}" \
-                  --model "${_SIDECAR_MODEL}" "${PROFILE_ARGS[@]}"
+        # Retried, because an unattended arm must not be lost to one refused connection.
+        # Local testing saw a single unexplained `httpx.ConnectError` against a URL that was
+        # correct and a port that was listening - not reproducible in several runs since, and
+        # a transient nobody has diagnosed is exactly what an allocation should not be spent
+        # discovering. `serve` writes the URL inside its own `async with`, so the window
+        # between the file appearing and the accept loop running is small but not provably
+        # zero. Five attempts, two seconds apart; after that the arm fails loudly, which is
+        # still better than a C arm reported as steered when nothing steered it.
+        for _try in 1 2 3 4 5; do
+            if impress-a control --connect "${_url}" --campaign "${_cid}" \
+                        --model "${_SIDECAR_MODEL}" "${PROFILE_ARGS[@]}"; then
+                exit 0
+            fi
+            echo "SIDECAR: attempt ${_try} failed; retrying in 2s"
+            sleep 2
+        done
+        echo "ERROR: sidecar could not drive ${_cid} after 5 attempts. Arm C is unsteered."
+        exit 1
     ) &
     _SIDECAR_PID=$!
     echo "Control sidecar:   pid ${_SIDECAR_PID} (model ${_SIDECAR_MODEL}, waiting for the url)"

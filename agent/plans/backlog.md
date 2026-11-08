@@ -625,6 +625,33 @@ submitted`, which runs the resolution block itself in four environments.
 **Not retrospectively fixable:** results recorded before this commit were produced by the
 `/work/hdd` tree. Anything cited from them should say so.
 
+**C12. Arm C's serve/control pair had never been executed.** **RUN, 2026-11-08**, on a login
+node with mock tools - the first time the two processes have talked to each other anywhere.
+Nothing in the suite covers `control_campaign`, and no document carried a worked pairing.
+
+Two clean runs. With a model-D caller: `control` exited 0 and the served campaign stopped on
+"every spec objective satisfied" after 2 cycles - steered, not timed out, which is the
+distinction that matters, since an unsteered arm C stops on the planner's `on_timeout="stop"`
+and reports a plausible campaign either way. With the Beam-backed `--model B` caller the smoke
+will use: exit 0, 8 cycles, 15 nodes, stopping on the untrusted-pattern cost cap (an interlock
+refusal that will not bind in the smoke, where trust is asserted).
+
+Also confirmed: `serve` writes `control_plane.url` at 0600, the campaign id is recoverable from
+that file's parent directory, and it agrees with what `InProcessControlPlane.register` keys on.
+
+**One failure that did not reproduce, recorded rather than dropped.** An earlier attempt died
+with `httpx.ConnectError: All connection attempts failed` against a URL that matched what
+`serve` had printed, on a port later confirmed LISTEN, with no proxy variables set and `curl`
+and `httpx` both reaching that port at +0/2/5/10/20s in a separate probe. Not seen again in
+the runs since. `serve` writes the URL inside its own `async with`, so the window between the
+file appearing and the accept loop running is small but not provably zero.
+
+Undiagnosed, so the sidecar now **retries five times, two seconds apart**, before failing the
+arm. That is insurance and not a fix: an unattended arm must not be lost to one refused
+connection, and a transient nobody has explained is not a thing to spend an allocation
+discovering. If it recurs inside a job, the retry line in the log is the evidence to reopen
+this with.
+
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
 reads a half-populated directory, failing with `CCD component <resname> not found!`. Measured
