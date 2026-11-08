@@ -257,6 +257,35 @@ def test_the_front_target_comes_from_the_spec_when_it_declares_one():
     assert _options_for(_spec(target_front=10)).target_front == 10
 
 
+def test_a_model_profile_reaches_model_as_four_nodes_and_not_only_model_bs_oracle(monkeypatch):
+    """`--model-profile` must fill both seams, or it is inert for half the letters (H1).
+
+    `_options_for` populated `oracle` alone, so a live client reached model B's single-call
+    seam and model A's `reasoner` stayed `None`. `AgenticSpecifier`/`AgenticPlanner` read that
+    slot, find nothing, and run the rule cascade - so `--model A --model-profile beam` was a
+    rule-cascade arm wearing a live arm's name, with no error anywhere to say so. That is the
+    exact failure the flag exists to prevent, arriving by the other door.
+
+    One client in both slots rather than two, because no letter uses both shapes and a second
+    would only be a second connection to the same endpoint. `OpenAICompatOracle` implements
+    `policy/reasoning.NodeReasoner`, which is what makes one object serve both.
+    """
+    from impress_a import cli
+
+    sentinel = object()
+    monkeypatch.setattr(cli, "_client_for", lambda profile, spec: sentinel if profile else None)
+
+    named = cli._options_for(_spec(), profile="beam")
+    assert named.oracle is sentinel, "model B's oracle must come from the profile"
+    assert named.reasoner is sentinel, \
+        "model A's per-node seam must come from the same profile, not stay None"
+    assert named.reasoner is named.oracle, "one client, both slots - not two connections"
+
+    bare = cli._options_for(_spec())
+    assert bare.oracle is None and bare.reasoner is None, \
+        "no profile must leave both seams to the registry's deterministic stand-ins"
+
+
 #: Every shipped model now supplies its own two halves. Kept as a list rather than an
 #: "all of them" assertion so that adding a model is a decision about which it is: a new row
 #: without halves would run the legacy `decide` cascade under `--control roles`, which is what

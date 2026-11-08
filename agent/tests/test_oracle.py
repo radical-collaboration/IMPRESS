@@ -499,13 +499,13 @@ async def test_a_rehearsal_profile_builds_without_a_key_and_a_live_one_refuses_w
 
 async def test_the_cli_refuses_an_unknown_profile_by_name():
     """With the known ones listed: a typo should not look like a missing file."""
-    from impress_a.cli import _oracle_for
+    from impress_a.cli import _client_for
     from impress_a.runtime.executor import CampaignSpec
 
     spec = CampaignSpec(campaign_id="c", goal="g", objectives=list(OBJS), stages=CHAIN)
-    assert _oracle_for(None, spec) is None, "no profile means the registry's rehearsal"
+    assert _client_for(None, spec) is None, "no profile means the registry's rehearsal"
     with pytest.raises(ValueError, match="unknown model profile"):
-        _oracle_for("no-such-profile", spec)
+        _client_for("no-such-profile", spec)
     assert build_oracle(load_profiles(REPO / "models.yaml")["rehearsal"],
                         stages=CHAIN).stages == CHAIN
 
@@ -634,7 +634,7 @@ async def test_the_profiles_file_is_the_packaged_one_unless_an_operator_names_an
     own key at someone else's endpoint. On a shared filesystem with a launcher that cd's into
     a per-job directory, that is not a remote hazard.
     """
-    from impress_a.cli import _oracle_for
+    from impress_a.cli import _client_for
     from impress_a.runtime.executor import CampaignSpec
 
     spec = CampaignSpec(campaign_id="c", goal="g", objectives=list(OBJS), stages=CHAIN)
@@ -643,8 +643,8 @@ async def test_the_profiles_file_is_the_packaged_one_unless_an_operator_names_an
                        '    kind: rehearsal\n')
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="unknown model profile"):
-        _oracle_for("sneaky", spec)
+        _client_for("sneaky", spec)
 
     monkeypatch.setenv("IMPRESS_A_MODELS", str(planted))
-    assert _oracle_for("sneaky", spec) is not None, \
+    assert _client_for("sneaky", spec) is not None, \
         "an operator naming a file explicitly is a decision; a directory is not"

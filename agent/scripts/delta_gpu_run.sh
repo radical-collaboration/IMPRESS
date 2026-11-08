@@ -96,6 +96,14 @@ _finish() {
     if [ -n "${_NVSMI_PID:-}" ]; then
         kill "${_NVSMI_PID}" 2>/dev/null || true
     fi
+    # The arm-C control sidecar, children first. It is a subshell whose child is the
+    # `impress-a control` actually holding the connection, and a non-interactive shell does
+    # not give a background job its own process group - so there is no group to signal and
+    # killing the subshell alone would leave a caller talking to a plane that is going away.
+    if [ -n "${_SIDECAR_PID:-}" ]; then
+        pkill -P "${_SIDECAR_PID}" 2>/dev/null || true
+        kill "${_SIDECAR_PID}" 2>/dev/null || true
+    fi
     # sacct and seff INSIDE the job, which cost a day to learn the other way round: a figure
     # queried afterwards cannot be reproduced, and `impress-a compare` charges every node an
     # arm held from `allocation_nodes` here rather than from the campaign's own clock. A
@@ -204,6 +212,33 @@ export MPNN_DIR="${MPNN_DIR:-${WORK_DIR}/LigandMPNN}"
 export BOLTZ_CACHE="${BOLTZ_CACHE:-${WORK_DIR}/.cache/boltz}"
 mkdir -p "${BOLTZ_CACHE}"
 
+# ── The arm ───────────────────────────────────────────────────────────────────
+# Resolved HERE, above the trust ledger, and that order is load-bearing: the per-arm trust
+# dir below interpolates ${MODEL}, and this block used to sit a hundred lines further down.
+# There is no `set -u`, so an unset MODEL expanded to nothing and every arm of an array
+# silently shared `_trust_arms/<experiment>/` - the one ledger the pre-registration calls
+# mandatory to avoid, since four concurrent processes would each admit an instance of the
+# same untrusted signature and one arm's evidence would subsidise the other three.
+#
+# `sbatch --array=0-3` submits four arms as one job, which is the right device: one
+# submission means one submit time and one priority, and a comparison whose arms queued
+# separately has a confound nobody can remove afterwards.
+#
+# $IMPRESS_A_ARMS sets the order; $IMPRESS_A_MODEL still wins for a single-arm run.
+IMPRESS_A_ARMS="${IMPRESS_A_ARMS:-A,B,C,D}"
+if [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && [ -z "${IMPRESS_A_MODEL:-}" ]; then
+    IFS=',' read -r -a _ARMS <<< "${IMPRESS_A_ARMS}"
+    if [ "${SLURM_ARRAY_TASK_ID}" -ge "${#_ARMS[@]}" ]; then
+        echo "ERROR: array index ${SLURM_ARRAY_TASK_ID} with only ${#_ARMS[@]} arm(s) in"
+        echo "       IMPRESS_A_ARMS=${IMPRESS_A_ARMS}. An index past the end would silently"
+        echo "       run the default arm and be scored as whichever letter the reader assumed."
+        exit 1
+    fi
+    MODEL="${_ARMS[${SLURM_ARRAY_TASK_ID}]}"
+    echo "Array task ${SLURM_ARRAY_TASK_ID} of ${IMPRESS_A_ARMS} -> model ${MODEL}"
+fi
+MODEL="${IMPRESS_A_MODEL:-${MODEL:-D}}"
+
 # The trust ledger is SITE-scoped and must outlive the job. Without this it resolves
 # relative to the per-job WORKDIR we cd into below, so every job started with an empty
 # ledger, promotion counts consecutive clean runs within one file, and nothing could ever
@@ -281,7 +316,7 @@ mkdir -p "${WORKDIR}"
 cd "${WORKDIR}"
 export IMPRESS_A_RUN_ROOT="${WORKDIR}"
 
-# ── Command and model ────────────────────────────────────────────────
+# ── Command ───────────────────────────────────────────────────────────────────
 # Which subcommand this allocation is for. `run` is a campaign; `validate-tasks` executes each
 # Task of the chain once and checks it, which is step 1 of the four-arm experiment and what
 # `impress-a trust --assert` cites as its reason.
@@ -290,26 +325,25 @@ export IMPRESS_A_RUN_ROOT="${WORKDIR}"
 # module case, the FAB_LIB autodetect, dragon-config, the ssh/tcp/network-config combination,
 # SLURM_OVERLAP, the per-job directory, the manifest, the EXIT trap - was bought one burned
 # allocation at a time, and two copies of it would be two things to keep in step.
+#
+# THE ARM PICKS IT, because for arm C there is only one arrangement that exists. `impress-a
+# run --model C` is refused outright (backlog C6): model C means an external caller steers the
+# campaign, and `run` attaches no control plane, so its halves blocked on an inbox nothing fed,
+# timed out and ran the declared fallback - a model-D campaign reported as model C. The refusal
+# is right and the launcher has to meet it: left defaulting to `run`, `sbatch --array=0-3`
+# killed arm C at argparse with the other three already queued, which is one submission spent
+# to discover a flag.
+#
+# An exported IMPRESS_A_COMMAND still wins - that is how `delta_validate_tasks.sh` sets
+# `validate-tasks`, and it is also how arm C can be pointed at a validation pass.
+if [ -z "${IMPRESS_A_COMMAND:-}" ] && [ "${MODEL}" = "C" ]; then
+    IMPRESS_A_COMMAND=serve
+    # No `impress-a ...` spelling in this message: the launcher's argv lines are extracted by
+    # that prefix and checked against the parser, and a sentence is not a command line.
+    echo "Model C -> serve, plus the control sidecar. A C campaign cannot be run (C6)."
+fi
 IMPRESS_A_COMMAND="${IMPRESS_A_COMMAND:-run}"
 
-# The arm, from the array index. `sbatch --array=0-3` submits four arms as one job, which is
-# the right device: one submission means one submit time and one priority, and a comparison
-# whose arms queued separately has a confound nobody can remove afterwards.
-#
-# $IMPRESS_A_ARMS sets the order; $IMPRESS_A_MODEL still wins for a single-arm run.
-IMPRESS_A_ARMS="${IMPRESS_A_ARMS:-A,B,C,D}"
-if [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && [ -z "${IMPRESS_A_MODEL:-}" ]; then
-    IFS=',' read -r -a _ARMS <<< "${IMPRESS_A_ARMS}"
-    if [ "${SLURM_ARRAY_TASK_ID}" -ge "${#_ARMS[@]}" ]; then
-        echo "ERROR: array index ${SLURM_ARRAY_TASK_ID} with only ${#_ARMS[@]} arm(s) in"
-        echo "       IMPRESS_A_ARMS=${IMPRESS_A_ARMS}. An index past the end would silently"
-        echo "       run the default arm and be scored as whichever letter the reader assumed."
-        exit 1
-    fi
-    MODEL="${_ARMS[${SLURM_ARRAY_TASK_ID}]}"
-    echo "Array task ${SLURM_ARRAY_TASK_ID} of ${IMPRESS_A_ARMS} -> model ${MODEL}"
-fi
-MODEL="${IMPRESS_A_MODEL:-${MODEL:-D}}"
 GIT_SHA="$(git -C "${IMPRESS_A_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DIRTY=false
 if [ -n "$(git -C "${IMPRESS_A_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
@@ -332,21 +366,32 @@ _manifest "job_id=${RUN_ID}" "campaign=${CAMPAIGN_STEM}" "campaign_path=${CAMPAI
           "array_task=${SLURM_ARRAY_TASK_ID:-none}" \
           "seed_salt=${IMPRESS_A_SEED_SALT:-none}" \
           "trust_dir=${IMPRESS_A_TRUST_DIR}" \
+          "model_profile=${IMPRESS_A_MODEL_PROFILE:-none}" \
           "prereg_sha=${PREREG_SHA}" "spec_sha=${SPEC_SHA}"
 echo "Campaign:          ${CAMPAIGN}"
 echo "Command:           ${IMPRESS_A_COMMAND}"
-if [ "${IMPRESS_A_COMMAND}" = "run" ]; then
-    echo "Model:             ${MODEL}"
-else
+if [ "${IMPRESS_A_COMMAND}" = "validate-tasks" ]; then
     echo "Model:             (none - a validation pass has no reasoner)"
+else
+    echo "Model:             ${MODEL}"
+    echo "Model profile:     ${IMPRESS_A_MODEL_PROFILE:-none (deterministic halves)}"
 fi
 echo "Working directory: ${WORKDIR}"
 
 RUNNER="${IMPRESS_A_DIR}/scripts/delta_run_campaign.py"
 
+# The live endpoint, when one is named. A profile reaches model A's four nodes and model B's
+# oracle alike - one client, both slots - and model D ignores it, having no seam to fill. Named
+# in the manifest above, because a figure attributed to a model is only as good as the record
+# of what answered.
+PROFILE_ARGS=()
+if [ -n "${IMPRESS_A_MODEL_PROFILE:-}" ]; then
+    PROFILE_ARGS=( --model-profile "${IMPRESS_A_MODEL_PROFILE}" )
+fi
+
 case "${IMPRESS_A_COMMAND}" in
     run)
-        RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" )
+        RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" "${PROFILE_ARGS[@]}" )
         ;;
     serve)
         # Arm C, and the only arrangement arm C has: `plane.steer` reaches `manager.policy`,
@@ -371,8 +416,13 @@ case "${IMPRESS_A_COMMAND}" in
         # is the node being the job's: 4 of 4 GPUs, 64 of 64 cores and 240G of ~249G leaves
         # nothing schedulable beside it. That is an inference from the resource request rather
         # than a guarantee, so `--exclusive` is the flag to add if it ever needs to be one.
+        #
+        # The sidecar below is the other half of the arrangement, and without it arm C is a
+        # served campaign nobody steers: the halves wait `--caller-timeout` and the planner
+        # stops, which is the designed refusal and not a run.
         RUNNER_ARGS=( serve "${CAMPAIGN}" --model "${MODEL}"
                       --caller-timeout "${IMPRESS_A_CALLER_TIMEOUT:-120}" )
+        _SIDECAR=yes
         ;;
     validate-tasks)
         # No --model: there is no reasoner in a validation pass. The chain comes from the
@@ -409,6 +459,52 @@ if command -v nvidia-smi >/dev/null 2>&1; then
                --format=csv,noheader -l 10 > "${WORKDIR}/gpusample.csv" 2>/dev/null &
     _NVSMI_PID=$!
     echo "GPU sampling:      ${WORKDIR}/gpusample.csv (pid ${_NVSMI_PID})"
+fi
+
+# ── Arm C's other half: the control sidecar ───────────────────────────────────
+# `serve --model C` registers the inbox halves and then waits to be steered. Nothing in this
+# job steered it, so arm C would have served a campaign, waited `--caller-timeout`, and
+# stopped on the planner's `on_timeout="stop"` - the designed refusal, correctly reported, and
+# not a run. This is the caller.
+#
+# It is STARTED BEFORE Dragon and polls, because the URL does not exist until `serve` is up:
+# the port is ephemeral (deliberately - see the serve branch above), so the sidecar discovers
+# the plane by reading the 0600 file `serve` writes rather than by being told a number.
+# The file's PARENT DIRECTORY is the campaign id, by construction: `serve` writes
+# `<spec.root>/<spec.campaign_id>/control_plane.url` and the plane registers under that same
+# `spec.campaign_id`, so deriving the id from the path cannot disagree with the server. Parsing
+# the YAML here could.
+#
+# --model B, not --model C. The caller IS the reasoner; `--model C` on this side would build
+# the inbox halves a second time and stop after one `--caller-timeout` with nobody steering the
+# steerer. B is the same Beam-backed oracle arm B runs in-process, so B and C differ in exactly
+# one thing - whether the reasoner sits in the executor's process or drives it over the plane -
+# which is the only contrast arm C can honestly claim.
+if [ "${_SIDECAR:-}" = "yes" ]; then
+    _SIDECAR_MODEL="${IMPRESS_A_SIDECAR_MODEL:-B}"
+    _SIDECAR_WAIT="${IMPRESS_A_SIDECAR_WAIT_S:-1800}"
+    (
+        _url_file=""
+        for _ in $(seq 1 "${_SIDECAR_WAIT}"); do
+            _url_file="$(find "${WORKDIR}" -maxdepth 2 -name control_plane.url -print -quit \
+                         2>/dev/null)"
+            [ -n "${_url_file}" ] && break
+            sleep 1
+        done
+        if [ -z "${_url_file}" ]; then
+            echo "ERROR: sidecar saw no control_plane.url under ${WORKDIR} in ${_SIDECAR_WAIT}s."
+            echo "       Arm C is unsteered; the served campaign will stop on caller timeout."
+            exit 1
+        fi
+        _cid="$(basename "$(dirname "${_url_file}")")"
+        _url="$(cat "${_url_file}")"
+        echo "Sidecar:           control --connect ${_url} --campaign ${_cid}" \
+             "--model ${_SIDECAR_MODEL}"
+        impress-a control --connect "${_url}" --campaign "${_cid}" \
+                  --model "${_SIDECAR_MODEL}" "${PROFILE_ARGS[@]}"
+    ) &
+    _SIDECAR_PID=$!
+    echo "Control sidecar:   pid ${_SIDECAR_PID} (model ${_SIDECAR_MODEL}, waiting for the url)"
 fi
 
 if [ "${SLURM_NNODES:-1}" -gt 1 ]; then

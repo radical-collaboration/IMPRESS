@@ -5,6 +5,18 @@
 arms disagree about it. A comparison whose rules were chosen after the numbers arrived is not a
 comparison.
 
+> **Amendment 1, 2026-11-08, before any arm had run.** Three arms now carry a live client.
+> `--model-profile` reached model B's oracle alone; it now fills model A's per-node seam too
+> (backlog H1's last half), and arm C's caller is an `impress-a control` sidecar driving the
+> served campaign with that same client. The endpoint is Reflection Beam
+> (`Beam-501B-A23B`, the `beam` profile). **D is unchanged and remains the control**: it has no
+> reasoner seam to fill. What this amendment touches is §6's A-vs-D row, §7's arm-C
+> attribution, §9's H2 entry, §10's procedure and §14's first claim; the hypothesis, the tiers,
+> the endpoint, the distinctness rule, the decision rule and every threshold are untouched.
+> Made before the first arm was submitted, which is the only time an amendment is legitimate -
+> afterwards it voids the comparison, and `compare`'s `prereg_sha` guard is what makes that
+> mechanical rather than a matter of trust.
+
 Spec: `campaigns/delta-small-molecule-arms.yaml`, one file, four arms, `--model` the only
 difference. Smoke: `campaigns/delta-small-molecule-arms-smoke.yaml`, identical science.
 
@@ -107,10 +119,16 @@ p-value. A smaller effect needs 2 replicates per arm (32 node-h), which is out o
 - An arm terminating before 80% of usable wall clock for any reason other than its own stop =>
   its yield figure is void.
 - **A and D differing by more than the engine's nondeterminism band => the one-variable claim
-  fails.** A was behaviourally D before phase 9, so this doubles as the only positive control
-  this design has for an uncontrolled variable. A now differs from D in two named ways (it
-  retires an objective the Toolkit cannot measure, and it moves the diversity knobs), so a
-  difference is expected - but a LARGE one is a finding about the harness.
+  fails.** A was behaviourally D before phase 9, so this doubled as the only positive control
+  this design had for an uncontrolled variable. **Amendment 1 retires it as a control.** A now
+  differs from D in three named ways - it retires an objective the Toolkit cannot measure, it
+  moves the diversity knobs, and its four nodes are live calls to Beam - so an A-vs-D
+  difference is the thing being measured rather than a check on the harness. What replaces it
+  as the positive control is the **null arm's absence**: there is none, and this design has no
+  residual check for an uncontrolled variable. Stated plainly rather than papered over. The
+  nearest substitute is arm C against arm B, which share a client and a profile and differ
+  only in process topology; a large B-vs-C gap is a finding about the control plane, not about
+  reasoning.
 - Zero `interaction_energy` values => T2 and T3 are undefined.
 - Arms not co-resident within +/- 30 min => flagged.
 - **An asserted pattern demoting in any arm => the assertion was wrong**, and every figure
@@ -133,6 +151,13 @@ frequency, `replan` behaviour, **admissions-under-scrutiny**, demotions of an as
 and stage pass rates *conditioned on* the parameter vector.
 
 `C_T2`, cost per design and time-to-tenth are **joint and not attributable**.
+
+**Arm C, after amendment 1.** The served process holds the inbox halves and does no reasoning;
+the `impress-a control` sidecar is the reasoner, and it drives with **model B on the same
+`beam` profile arm B runs in-process**. So arm C is not a fourth model - it is arm B's model
+reached over the control plane, and the only difference it can claim is the arrangement.
+Read every arm-C figure that way: a B-vs-C gap is plane latency, directive round-trips and the
+`--caller-timeout` boundary, never decision quality. Reported as such, or not reported.
 
 ## 8. The two dangerous failure modes
 
@@ -157,8 +182,15 @@ counts directives per cycle.
 
 **Blocks the smoke.** X1 (the campaign's `max_cycles` reaches the reasoner) · H3 (a planner
 varies a real tool's parameter) · phase 8's adapter selection, with internal sampling at 8 where
-the adapter selects and the declared cost and walltime honest at that setting · H2's live client
-probed on a **login node**, which costs pennies · C5+C6 (`serve`/`control`, fail-closed C) ·
+the adapter selects and the declared cost and walltime honest at that setting · **H2's live
+client probed on a login node for BOTH live autonomous arms** - `--model B` and `--model A`,
+each against `campaigns/mock-stabilize.yaml`, each showing a live model id every cycle and
+**zero degraded turns**, run long enough to take a corrective retry. One turn is not a probe:
+an endpoint that drops `reasoning_content` passes the first turn and fails the second, which
+is how 144 degraded turns were once reported as a healthy run. A's is the one that matters,
+because its seam has never carried a client · **arm C's sidecar reaching the plane**: `serve`
+writes its URL and `impress-a control` connects, which has no test and no prior execution
+anywhere · C5+C6 (`serve`/`control`, fail-closed C) ·
 G4+G5 (the thresholds, and which interface `filter_shape` measures) · G7 (a recorded seed salt) ·
 G1 (`stagnation_limit > max_cycles`, with the characterization tests untouched) · A10 (GPU
 pinning on **both** execution loops, and the budget raised rather than the cost models retuned) ·
@@ -181,7 +213,13 @@ export WORK_DIR=/work/nvme/<project>/$USER        # MUST be nvme: pyrosetta impo
 export IMPRESS_A_ARMS=A,B,C,D
 export IMPRESS_A_EXPERIMENT=arms-smoke-$(date +%Y%m%d)
 export IMPRESS_A_SEED_SALT=${IMPRESS_A_EXPERIMENT}
+# Amendment 1. The profile reaches arms A, B and C; D has no seam and ignores it. The key must
+# be in the job's environment, not only in the submitting shell.
+export IMPRESS_A_MODEL_PROFILE=beam
+export REFLECTION_API_KEY=...
 impress-a preflight campaigns/delta-small-molecule-arms-smoke.yaml     # deep, login node, 0 FAIL
+impress-a run campaigns/mock-stabilize.yaml --model B --model-profile beam   # H2, both arms
+impress-a run campaigns/mock-stabilize.yaml --model A --model-profile beam
 
 # 1. Per-Task validation on real hardware, BEFORE any arm and before any assertion.
 sbatch --partition=gpuA40x4-interactive --time=00:40:00 \
@@ -206,6 +244,14 @@ sbatch --array=0-3 --partition=gpuA40x4 --time=01:00:00 \
 
 4 node-h / **16 GPU-h**. Do **not** override `--output`: `impress_a_%j.out` expands per array
 task, which is what the EXIT trap looks for.
+
+**Arm C is one array index like the others, and the launcher knows it.** `impress-a run --model
+C` is refused (C6), so `delta_gpu_run.sh` selects `serve` when the arm is C and starts an
+`impress-a control` sidecar beside it; the sidecar waits for the 0600 `control_plane.url` that
+`serve` writes, takes the campaign id from that file's own directory, and drives with
+`--model B --model-profile beam`. Before amendment 1 the procedure above would have had
+argparse kill arm C at launch with the other three already queued. Nothing here needs a second
+submission, which is what keeps one submit time and one priority across the four arms.
 
 **Production** is the same three steps against `delta-small-molecule-arms.yaml`, with
 `--time=04:00:00` and a fresh `IMPRESS_A_EXPERIMENT`. 16 node-h / **64 GPU-h**. The trust
@@ -303,7 +349,15 @@ measured means the batch never reached the device.
 
 The ten-sequence Goal is **probably not reachable** at this allocation size, and the go/no-go
 routes to a plumbing-and-contract comparison if the smoke says so. That is a stated outcome, not
-a surprise. Model A and model B both make zero LLM calls until a live client is attached, so
-until H2's probe passes, an "A vs B" difference is a difference between two rule cascades. And
-one allocation per arm cannot estimate between-allocation variance, which A11 measured at 3.2x
+a surprise.
+
+**Amendment 1 makes A, B and C live**, so an A-vs-B difference is now a difference between two
+*shapes* of use of one model - four bounded per-node calls against one call per half - and not
+between two models. Nothing here compares Beam to another vendor, and no figure from this
+experiment says anything about which model to use; it says how to spend one. A, B and C
+sharing a client is also why their degraded-turn counts must be read together: one endpoint
+hiccup shows up in three arms at once, and a correlated dip is a fact about the endpoint rather
+than about three reasoners.
+
+And one allocation per arm cannot estimate between-allocation variance, which A11 measured at 3.2x
 on wall time alone - so an arm that wins by less than 2.2x has not been shown to win.

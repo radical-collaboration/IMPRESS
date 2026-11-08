@@ -234,7 +234,17 @@ def _placeholders(fragment: str) -> str:
     import re
 
     fragment = re.sub(r"\$\{IMPRESS_A_CALLER_TIMEOUT:-(\d+)\}", r"\1", fragment)
+    # A letter, not a placeholder: `--model` is a `choices=` argument, so these are the one
+    # kind of value the parser does inspect. `${MODEL}` is the arm; `${_SIDECAR_MODEL}` is
+    # the model arm C's caller drives with.
     fragment = re.sub(r"\$\{MODEL\}", "D", fragment)
+    fragment = re.sub(r"\$\{_SIDECAR_MODEL(:-[A-Za-z]+)?\}", "B", fragment)
+    # An array expansion is the EMPTY case: `"${PROFILE_ARGS[@]}"` contributes no words when
+    # no profile is named, which is the form every arm but B and C submits. The populated
+    # form is a flag pair the parser sees spelled out in
+    # `test_the_launcher_forwards_a_model_profile_to_every_reasoning_surface`, because a
+    # placeholder standing in for "zero or two words" could not check either one.
+    fragment = re.sub(r'"?\$\{[A-Za-z_][A-Za-z0-9_]*\[[@*]\]\}"?', "", fragment)
     return re.sub(r"\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}", "placeholder", fragment)
 
 
@@ -263,6 +273,68 @@ def test_the_delta_launcher_command_lines_parse():
                 f"{script}:{line_no} hands the CLI `{' '.join(argv)}`, which it refuses "
                 f"(SystemExit {exc.code}) - every job using this branch would abort at launch"
             ) from None
+
+
+def test_the_launcher_sends_arm_c_to_serve_and_everything_else_to_run():
+    """`impress-a run --model C` is refused, so the launcher must not reach it.
+
+    Model C means an external caller steers the campaign; `run` attaches no control plane and
+    the CLI refuses rather than timing out and reporting a model-D campaign as model C
+    (backlog C6). The launcher used to default `IMPRESS_A_COMMAND` to `run` with no reference
+    to the arm, so `sbatch --array=0-3` would have had argparse kill arm C at launch with the
+    other three arms already queued - one submission spent to discover a flag, and the reader
+    sent to the environment rather than to the cause.
+
+    An exported command still wins, because that is how `delta_validate_tasks.sh` selects
+    `validate-tasks` for any arm.
+    """
+    import subprocess
+
+    text = pathlib.Path("scripts/delta_gpu_run.sh").read_text()
+    # The decision itself, lifted from the file and run, so this cannot pass against a
+    # launcher that no longer makes it. Everything between the arm-C guard and the default.
+    start = text.index('if [ -z "${IMPRESS_A_COMMAND:-}" ]')
+    end = text.index('IMPRESS_A_COMMAND="${IMPRESS_A_COMMAND:-run}"', start)
+    block = text[start:end] + 'IMPRESS_A_COMMAND="${IMPRESS_A_COMMAND:-run}"\n'
+
+    def resolved(model: str, exported: str = "") -> str:
+        script = (f'MODEL={model}\n'
+                  + (f'IMPRESS_A_COMMAND={exported}\n' if exported else "")
+                  + block + 'echo "${IMPRESS_A_COMMAND}"\n')
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                             check=True)
+        return out.stdout.strip().splitlines()[-1]
+
+    assert resolved("C") == "serve", "arm C must serve; `run --model C` is refused"
+    for letter in ("A", "B", "D"):
+        assert resolved(letter) == "run", f"arm {letter} has no control plane to serve"
+    assert resolved("C", "validate-tasks") == "validate-tasks", \
+        "an exported command must still win - delta_validate_tasks.sh depends on it"
+
+
+def test_the_launcher_forwards_a_model_profile_to_every_reasoning_surface():
+    """A profile named for the job must reach the process that does the reasoning.
+
+    Three surfaces take `--model-profile` and all three are reachable from this launcher:
+    `run` (arms A and B), `serve` (arm C's executor) and `control` (arm C's caller, which is
+    where arm C's reasoning actually happens). Forwarding it to some of them would be the
+    quiet failure the flag exists to prevent - a campaign reported as a live arm that ran a
+    rehearsal or a rule cascade.
+    """
+    from impress_a.cli import _parser
+
+    text = pathlib.Path("scripts/delta_gpu_run.sh").read_text()
+    assert 'PROFILE_ARGS=( --model-profile "${IMPRESS_A_MODEL_PROFILE}" )' in text, \
+        "the launcher must build the flag pair from IMPRESS_A_MODEL_PROFILE"
+    for surface in ("run", "serve", "control"):
+        assert f'{surface} ' in text and '"${PROFILE_ARGS[@]}"' in text, \
+            f"{surface} must receive PROFILE_ARGS"
+    # And the populated form parses on each surface, which the launcher's own argv lines
+    # cannot show because an unset array expands to nothing.
+    _parser().parse_args(["run", "spec.yaml", "--model", "A", "--model-profile", "beam"])
+    _parser().parse_args(["serve", "spec.yaml", "--model", "C", "--model-profile", "beam"])
+    _parser().parse_args(["control", "--connect", "http://127.0.0.1:1", "--campaign", "c",
+                          "--model", "B", "--model-profile", "beam"])
 
 
 def test_quick_preflight_skips_the_heavy_probes_and_calls_them_skipped(capsys, monkeypatch):

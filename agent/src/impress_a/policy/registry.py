@@ -232,7 +232,9 @@ MODELS: dict[str, ReasonerModel] = {
              "`select_tasks`/`parameterize` on the Planner - and the `reasoner` seam is "
              "read: each node is a bounded schema-checked call with corrective retry that "
              "falls back to its rule cascade and records a `reasoner_degraded` transition. "
-             "Still `llm_calls: 0` under `--model A`, because nothing attaches a client yet; "
+             "`--model-profile` now fills that seam as well as model B's oracle - one client, "
+             "both slots, since `OpenAICompatOracle` is a `NodeReasoner` (backlog H1's last "
+             "half). `llm_calls: 0` is the figure with NO profile named; "
              "with none attached the cascades run, and A then differs from D in two named "
              "ways (it retires an unmeasurable objective, and it moves the diversity knobs)",
         spec_ref="planning/phase1-partB-architecture/02-control-models.md section 2"),

@@ -495,6 +495,39 @@ the node rather than a token nobody rotates. `--host` exists for a deliberate ch
 plane still has no auth and no TLS - so anything other than loopback is a decision this item
 should be reopened for, not a flag to set casually.
 
+**C9. The Delta launcher could not run arm C, and gave every arm one trust ledger.** **RESOLVED**
+(2026-11-08), both found by reading `scripts/delta_gpu_run.sh` against
+`plans/arms-preregistration.md` §10 rather than by a run.
+
+*Arm C died at launch.* `IMPRESS_A_COMMAND` defaulted to `run` with no reference to the arm, and
+`impress-a run --model C` is refused outright (C6). So the §10 submission - `sbatch --array=0-3`,
+one job, four arms - would have had argparse kill index 2 while the other three queued normally,
+printing a message about the environment. The launcher now selects `serve` when the arm is C and
+starts an `impress-a control` sidecar beside it; an exported command still wins, which is how
+`delta_validate_tasks.sh` keeps working. The sidecar polls for the 0600 `control_plane.url`
+`serve` writes rather than being told a port (the port is ephemeral on purpose - see A9/C7), and
+takes the campaign id from that file's own parent directory, which cannot disagree with the
+server because `InProcessControlPlane.register` keys on the same `spec.campaign_id`. It drives
+with `--model B`, not `--model C`: the caller **is** the reasoner, and C on that side would build
+the inbox halves a second time and stop after one `--caller-timeout` with nobody steering the
+steerer. The refusal message at `cli/__init__.py:742` still prints `--model C` for the control
+line and is wrong about it; left alone here because amending the text would change nothing that
+runs, but it is the one place a reader is told the deadlocking thing.
+
+*Every arm shared one trust ledger.* The per-arm block interpolated `${MODEL}` a hundred lines
+**above** where `MODEL` is resolved from `SLURM_ARRAY_TASK_ID`. There is no `set -u`, so it
+expanded to nothing and all four arms resolved to `_trust_arms/<experiment>/` - exactly the
+shared ledger §10 calls mandatory to avoid, since four concurrent processes would each admit an
+instance of the same untrusted signature, breaking one-instance-in-flight across processes, and
+one arm's evidence would subsidise the other three. Silent in every way: the directory exists,
+`trust --assert` seeds it, and the arms differ only by which ran first. The arm block now sits
+above the ledger block, with the ordering constraint written where someone moving it will read
+it. **Nothing has run under the broken form**, so no recorded result is affected.
+
+Both pinned in `tests/test_toolchain.py` (`..._sends_arm_c_to_serve_...`,
+`..._forwards_a_model_profile_...`), each confirmed to fail with the fix reverted. **Unrun on
+hardware.**
+
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
 reads a half-populated directory, failing with `CCD component <resname> not found!`. Measured
@@ -878,9 +911,20 @@ invented a strategy and degrade on the spot without ever telling it what the str
 Exhausting the attempts falls back to the rule cascade and writes a `reasoner_degraded`
 transition, named the same way model B's `oracle_degraded` is, so one query over `transitions`
 finds every degraded decision in a campaign whatever model made it - which is what the four-arm
-experiment's void rule needs. **Still open:** nothing constructs a client, so `--model A` runs
-the cascades and `llm_calls` is honestly 0; that lands with H2's live client, which is the whole
-reason H1 was sequenced after it. A is no longer behaviourally D, though: it retires an
+experiment's void rule needs.
+
+**RESOLVED** (2026-11-08). `cli._options_for` built the profile's client into `oracle` and left
+`reasoner` at `None`, so `--model-profile` reached model B alone and `--model A --model-profile
+X` ran the rule cascade while reporting nothing wrong - the quiet form of the failure the flag
+exists to prevent, arriving by the other door. One client now fills both slots, which is sound
+because `OpenAICompatOracle` implements `policy/reasoning.NodeReasoner` and no letter uses both
+shapes; a second build would only be a second connection to one endpoint. Same change in
+`_role_pair`, so `impress-a control --model A --model-profile X` is live too. `llm_calls: 0` in
+`impress-a models` now means "with no profile named", which is what it always meant for B.
+Pinned by `tests/test_reasoner_registry.py::test_a_model_profile_reaches_model_as_four_nodes_
+and_not_only_model_bs_oracle`, confirmed to fail with the `reasoner=` assignment removed.
+**Unrun on hardware**; the login-node probe is a prerequisite in
+`plans/arms-preregistration.md` §9, amendment 1. A is no longer behaviourally D, though: it retires an
 objective the Toolkit cannot measure (D names it and leaves it open) and it moves the diversity
 knobs (D never does), both asserted in `tests/test_planner.py`.
 

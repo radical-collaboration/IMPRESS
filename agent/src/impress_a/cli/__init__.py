@@ -173,24 +173,40 @@ def _options_for(spec: CampaignSpec,
 
     Named so a test can assert what reaches the halves without building them, which is what
     backlog X1 is about: the bound a model carries must not be tighter than the campaign's.
+
+    **One client, two slots, and that is deliberate** (backlog H1's last half). `_client_for`
+    is built once and reaches `oracle` - model B's single-call seam - and `reasoner` - model
+    A's four per-node calls - because `OpenAICompatOracle` implements `NodeReasoner` and the
+    same bounded corrective retry in `policy/reasoning.ask` serves both. No campaign uses both
+    slots: a letter picks one shape or the other, so a second client would only be a second
+    connection to the same endpoint. Before this, `reasoner` was left `None` and
+    `--model-profile` reached model B alone, so `--model A --model-profile X` ran the rule
+    cascade and reported no error - the quiet form of the failure the profile was named to
+    prevent.
     """
+    client = _client_for(profile, spec)
     return reasoners.ReasonerOptions(
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
-        oracle=_oracle_for(profile, spec),
+        oracle=client, reasoner=client,
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
 
 
-def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
-    """The model model B talks to, from `--model-profile`.
+def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
+    """The model a live arm talks to, from `--model-profile`.
+
+    Named for the client rather than for model B's slot because it now fills model A's too:
+    `OpenAICompatOracle` implements `policy/reasoning.NodeReasoner`, which is the protocol
+    model A's four nodes call, so one object serves both shapes and `_options_for` puts it in
+    both slots.
 
     `None` leaves the registry to build `RehearsalOracle` with the campaign's chain, which is
     what `--model B` runs with no profile named - and `impress-a models` reports `llm_calls: 0`
-    for exactly that reason. Loaded here rather than in `policy/` because `policy` may import
-    `core` only and reading a YAML file is not `core`'s business either; the same reason
-    `_replay_records` lives here.
+    for exactly that reason. Model A with no profile falls to its rule cascade the same way.
+    Loaded here rather than in `policy/` because `policy` may import `core` only and reading a
+    YAML file is not `core`'s business either; the same reason `_replay_records` lives here.
     """
     if not profile:
         return None
@@ -474,10 +490,13 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     `mock_design` precedes `mock_generate` and the sequence step would be planned before the
     backbone it consumes.
     """
+    client = _client_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
+                                               stages=list(stages)))
+    # Both slots, for the reason `_options_for` gives: a remote driver may be `--model A` as
+    # easily as `--model B`, and filling only one would make `--model-profile` silently
+    # inert for half the letters it is offered for.
     opts = reasoners.ReasonerOptions(
-        stages=stages or None,
-        oracle=_oracle_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
-                                                 stages=list(stages))))
+        stages=stages or None, oracle=client, reasoner=client)
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
