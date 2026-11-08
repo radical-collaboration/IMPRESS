@@ -323,6 +323,7 @@ def test_the_launcher_accepts_exactly_two_commands():
     assert "validate-tasks)" in launcher and "run)" in launcher
     assert "ERROR: IMPRESS_A_COMMAND must be" in launcher, \
         "an unknown command must fail rather than fall through to a campaign"
+    assert "serve)" in launcher, "arm C's arrangement needs its own branch"
     assert '--model' not in launcher.split("validate-tasks)")[1].split(";;")[0], \
         "a validation pass has no reasoner, so passing a model would be meaningless"
     assert 'RUNNER_ARGS=( validate-tasks "${CAMPAIGN}" --out "${WORKDIR}/validation" )' \

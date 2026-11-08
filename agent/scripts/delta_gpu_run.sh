@@ -93,6 +93,23 @@ PY
 }
 _finish() {
     local rc=$?
+    if [ -n "${_NVSMI_PID:-}" ]; then
+        kill "${_NVSMI_PID}" 2>/dev/null || true
+    fi
+    # sacct and seff INSIDE the job, which cost a day to learn the other way round: a figure
+    # queried afterwards cannot be reproduced, and `impress-a compare` charges every node an
+    # arm held from `allocation_nodes` here rather than from the campaign's own clock. A
+    # missing file makes the harness report the allocation as unknown rather than divide by a
+    # guess - which is what once printed "at most nan% of the billed GPU time had a GPU task
+    # running" as a finding.
+    if [ -n "${WORKDIR:-}" ] && [ -d "${WORKDIR}" ] && [ -n "${SLURM_JOB_ID:-}" ]; then
+        if command -v sacct >/dev/null 2>&1; then
+            sacct -j "${SLURM_JOB_ID}" --json > "${WORKDIR}/sacct.json" 2>/dev/null || true
+        fi
+        if command -v seff >/dev/null 2>&1; then
+            seff "${SLURM_JOB_ID}" > "${WORKDIR}/seff.txt" 2>/dev/null || true
+        fi
+    fi
     if [ -n "${_FOUNDRY_TMP:-}" ]; then
         echo "Removing ${_FOUNDRY_TMP}"
         rm -rf "${_FOUNDRY_TMP}" || true
@@ -193,6 +210,16 @@ mkdir -p "${BOLTZ_CACHE}"
 # be promoted - the trusted path (no forced dry-run, no 10% cost cap, concurrent instances
 # of one pattern) had never executed on Delta. Jobs 22684607 and 22692304 each wrote their
 # own copy holding a single run.
+#
+# PER-ARM, when an experiment is named. Sharing one ledger across four concurrent arms would
+# let each admit an instance of the same untrusted signature, breaking one-instance-in-flight
+# ACROSS processes - and one arm's clean runs would subsidise the other three, so the arms
+# would differ by which ran first. `plans/arms-preregistration.md` section 10 seeds each dir
+# identically with `impress-a trust --assert`, so no arm spends allocation re-earning trust on
+# a Toolkit that is already proven.
+if [ -n "${IMPRESS_A_EXPERIMENT:-}" ] && [ -z "${IMPRESS_A_TRUST_DIR:-}" ]; then
+    export IMPRESS_A_TRUST_DIR="${WORK_DIR}/_trust_arms/${IMPRESS_A_EXPERIMENT}/${MODEL}"
+fi
 export IMPRESS_A_TRUST_DIR="${IMPRESS_A_TRUST_DIR:-${WORK_DIR}/_trust}"
 mkdir -p "${IMPRESS_A_TRUST_DIR}"
 
@@ -264,15 +291,48 @@ export IMPRESS_A_RUN_ROOT="${WORKDIR}"
 # SLURM_OVERLAP, the per-job directory, the manifest, the EXIT trap - was bought one burned
 # allocation at a time, and two copies of it would be two things to keep in step.
 IMPRESS_A_COMMAND="${IMPRESS_A_COMMAND:-run}"
-MODEL="${IMPRESS_A_MODEL:-D}"
+
+# The arm, from the array index. `sbatch --array=0-3` submits four arms as one job, which is
+# the right device: one submission means one submit time and one priority, and a comparison
+# whose arms queued separately has a confound nobody can remove afterwards.
+#
+# $IMPRESS_A_ARMS sets the order; $IMPRESS_A_MODEL still wins for a single-arm run.
+IMPRESS_A_ARMS="${IMPRESS_A_ARMS:-A,B,C,D}"
+if [ -n "${SLURM_ARRAY_TASK_ID:-}" ] && [ -z "${IMPRESS_A_MODEL:-}" ]; then
+    IFS=',' read -r -a _ARMS <<< "${IMPRESS_A_ARMS}"
+    if [ "${SLURM_ARRAY_TASK_ID}" -ge "${#_ARMS[@]}" ]; then
+        echo "ERROR: array index ${SLURM_ARRAY_TASK_ID} with only ${#_ARMS[@]} arm(s) in"
+        echo "       IMPRESS_A_ARMS=${IMPRESS_A_ARMS}. An index past the end would silently"
+        echo "       run the default arm and be scored as whichever letter the reader assumed."
+        exit 1
+    fi
+    MODEL="${_ARMS[${SLURM_ARRAY_TASK_ID}]}"
+    echo "Array task ${SLURM_ARRAY_TASK_ID} of ${IMPRESS_A_ARMS} -> model ${MODEL}"
+fi
+MODEL="${IMPRESS_A_MODEL:-${MODEL:-D}}"
 GIT_SHA="$(git -C "${IMPRESS_A_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_DIRTY=false
 if [ -n "$(git -C "${IMPRESS_A_DIR}" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
     GIT_DIRTY=true
 fi
+# `prereg_sha` and `spec_sha` are what `impress-a compare`'s one-variable guard reads: arms
+# that disagree about the pre-registration or the spec are not comparable, and that has to be
+# a refusal rather than a caveat. `seed_salt` because a draw nobody can name is one nobody can
+# repeat (backlog G7), and `trust_dir` because which ledger an arm used decides what scrutiny
+# it ran under.
+PREREG="${IMPRESS_A_DIR}/plans/arms-preregistration.md"
+PREREG_SHA="$( [ -f "${PREREG}" ] && sha256sum "${PREREG}" | cut -d' ' -f1 || echo none )"
+SPEC_SHA="$(sha256sum "${CAMPAIGN}" | cut -d' ' -f1)"
 _manifest "job_id=${RUN_ID}" "campaign=${CAMPAIGN_STEM}" "campaign_path=${CAMPAIGN}" \
           "model=${MODEL}" "nodes=${SLURM_NNODES:-1}" "git_sha=${GIT_SHA}" \
-          "git_dirty=${GIT_DIRTY}" "started=$(date -Iseconds)"
+          "git_dirty=${GIT_DIRTY}" "started=$(date -Iseconds)" \
+          "gpus_per_node=${SLURM_GPUS_PER_NODE:-4}" \
+          "experiment=${IMPRESS_A_EXPERIMENT:-none}" \
+          "arms=${IMPRESS_A_ARMS}" \
+          "array_task=${SLURM_ARRAY_TASK_ID:-none}" \
+          "seed_salt=${IMPRESS_A_SEED_SALT:-none}" \
+          "trust_dir=${IMPRESS_A_TRUST_DIR}" \
+          "prereg_sha=${PREREG_SHA}" "spec_sha=${SPEC_SHA}"
 echo "Campaign:          ${CAMPAIGN}"
 echo "Command:           ${IMPRESS_A_COMMAND}"
 if [ "${IMPRESS_A_COMMAND}" = "run" ]; then
@@ -288,6 +348,16 @@ case "${IMPRESS_A_COMMAND}" in
     run)
         RUNNER_ARGS=( run "${CAMPAIGN}" --model "${MODEL}" )
         ;;
+    serve)
+        # Arm C, and the only arrangement arm C has: `plane.steer` reaches `manager.policy`,
+        # so the halves must be in the process serving the plane. `impress-a serve --model C`
+        # registers them here and a third party steers it over loopback - which is also the
+        # security boundary this configuration can defend, since the plane has no auth and no
+        # TLS (backlog C7). A caller on another host is out of scope.
+        RUNNER_ARGS=( serve "${CAMPAIGN}" --model "${MODEL}"
+                      --port "${IMPRESS_A_PORT:-8711}"
+                      --caller-timeout "${IMPRESS_A_CALLER_TIMEOUT:-120}" )
+        ;;
     validate-tasks)
         # No --model: there is no reasoner in a validation pass. The chain comes from the
         # spec and each Task runs once, so what is being tested is the toolkit rather than
@@ -295,7 +365,7 @@ case "${IMPRESS_A_COMMAND}" in
         RUNNER_ARGS=( validate-tasks "${CAMPAIGN}" --out "${WORKDIR}/validation" )
         ;;
     *)
-        echo "ERROR: IMPRESS_A_COMMAND must be 'run' or 'validate-tasks', got "
+        echo "ERROR: IMPRESS_A_COMMAND must be run | serve | validate-tasks, got "
         echo "       '${IMPRESS_A_COMMAND}'"
         exit 1
         ;;
@@ -304,6 +374,26 @@ _manifest "command=${IMPRESS_A_COMMAND}"
 
 # Stale Dragon dictionary-orchestrator files from a previous run in this directory.
 rm -f ddict_orc*
+
+# A6: the cheap environment check, BEFORE Dragon comes up. Four defects reached real hardware
+# that a preflight would have caught at submit cost, and the deep form is run once on a login
+# node where its 900 s LigandMPNN probe is free. `--quick` here because a GPU allocation is
+# not the place to discover MPNN_DIR is unset.
+if ! impress-a preflight --quick "${CAMPAIGN}"; then
+    echo "ERROR: preflight failed. Fix the environment rather than spending the allocation"
+    echo "       finding out which tool cannot import - see scripts/delta_env_setup.sh."
+    exit 1
+fi
+
+# G8's other half: nothing has ever sampled GPU use, and the figure that matters -
+# GPU-busy share of billed GPU time - was inferred at <= 17% from task timings rather than
+# measured. Batch node only; `_finish` stops it.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used \
+               --format=csv,noheader -l 10 > "${WORKDIR}/gpusample.csv" 2>/dev/null &
+    _NVSMI_PID=$!
+    echo "GPU sampling:      ${WORKDIR}/gpusample.csv (pid ${_NVSMI_PID})"
+fi
 
 if [ "${SLURM_NNODES:-1}" -gt 1 ]; then
     # NOT `dragon -m`. Its slurm launcher builds `srun --nodelist=` from gethostname(),

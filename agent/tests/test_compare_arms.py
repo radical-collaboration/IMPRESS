@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -461,3 +462,113 @@ def test_the_report_names_every_arm_and_marks_the_censored_figures(tmp_path):
     assert "rate ratio" in text
     for arm in ("d", "a"):
         assert arm in text
+
+
+# ---------------------------------------------------------------------------
+# The experiment's own artifacts: the specs, the pre-registration, the launcher.
+# A defect in any of them costs an allocation to find.
+# ---------------------------------------------------------------------------
+
+def test_the_smoke_and_the_arms_spec_differ_only_in_how_long_they_run():
+    """"Identical science" has to be checked, not asserted in a comment.
+
+    A smoke that differs in the science proves nothing about the run it is a smoke for - and
+    the difference would be invisible, because both would complete and both would produce
+    plausible numbers. Only the fields below may differ: how many cycles, what may be spent,
+    and the id that keeps the output trees apart.
+    """
+    import yaml
+
+    repo = Path(__file__).resolve().parents[1]
+    arms = yaml.safe_load((repo / "campaigns/delta-small-molecule-arms.yaml").read_text())
+    smoke = yaml.safe_load(
+        (repo / "campaigns/delta-small-molecule-arms-smoke.yaml").read_text())
+
+    may_differ = {"campaign_id", "max_cycles", "stagnation_limit", "budget"}
+    assert set(arms) == set(smoke), (
+        f"the two specs declare different keys: {set(arms) ^ set(smoke)}")
+    differ = {k for k in arms if arms[k] != smoke[k]}
+    assert differ <= may_differ, (
+        f"the smoke differs from the arms spec in {sorted(differ - may_differ)}, which is "
+        f"science rather than scale - a smoke that differs in the science proves nothing")
+
+    # And the science itself, named rather than left to the set comparison above.
+    for key in ("stages", "params", "objectives", "replicas", "concurrency", "site",
+                "tool_delivery", "target_front", "goal"):
+        assert arms[key] == smoke[key], key
+
+
+def test_both_arm_specs_declare_what_the_one_variable_guard_needs():
+    """An arm whose manifest cannot be compared is an arm that cannot be published.
+
+    `tool_delivery: real` because a mock chain on a GPU allocation produces numbers a reader
+    would act on; `target_front: 10` because the default of 3 is a demo's number and would
+    stop a campaign asked for ten; `stagnation_limit > max_cycles` because the front will
+    likely stay empty and at the shipped limit an arm would end fifteen minutes into four
+    hours. Each is in the pre-registration and each is checkable here.
+    """
+    from impress_a.cli import load_spec
+
+    repo = Path(__file__).resolve().parents[1]
+    for name in ("delta-small-molecule-arms", "delta-small-molecule-arms-smoke"):
+        spec = load_spec(str(repo / "campaigns" / f"{name}.yaml"))
+        assert spec.tool_delivery == "real", name
+        assert spec.target_front == 10, name
+        assert spec.stagnation_limit > spec.max_cycles, (
+            f"{name}: stagnation must not be the stopping rule - it is a dependent variable")
+        assert spec.replicas == 4 and spec.concurrency == 1, name
+        assert dict(spec.params["fastrelax"]).get("nstruct") == 1, (
+            f"{name}: nstruct is 8 SERIAL cpu trajectories, so its declared cost would sit "
+            f"below measurement and validate-tasks would fail the Task. Re-derive the cost "
+            f"model from a measurement first")
+        plddt = next(o for o in spec.objectives if o.name == "complex_plddt")
+        assert plddt.min == 0.75, (
+            f"{name}: an arm must steer by the threshold it is judged on, or the front's "
+            f"feasibility filter is slacker than the acceptance gate")
+
+
+def test_the_launcher_derives_the_arm_from_the_array_index():
+    """One submission, one submit time, one priority - and the arm must not be guessable.
+
+    An index past the end of `IMPRESS_A_ARMS` would silently run the default arm and be
+    scored as whichever letter the reader assumed, which is the quietest possible way to
+    publish the wrong comparison.
+    """
+    launcher = (Path(__file__).resolve().parents[1]
+                / "scripts/delta_gpu_run.sh").read_text()
+    assert "SLURM_ARRAY_TASK_ID" in launcher
+    assert 'IMPRESS_A_ARMS="${IMPRESS_A_ARMS:-A,B,C,D}"' in launcher
+    assert "array index ${SLURM_ARRAY_TASK_ID} with only" in launcher, \
+        "an index past the end must fail rather than fall back to a default arm"
+    for recorded in ("prereg_sha", "spec_sha", "seed_salt", "trust_dir", "experiment",
+                     "gpus_per_node", "array_task"):
+        assert recorded in launcher, f"the manifest must record {recorded}"
+    assert "_trust_arms/${IMPRESS_A_EXPERIMENT}/${MODEL}" in launcher, \
+        "four concurrent arms sharing one trust ledger break one-instance-in-flight"
+    assert 'sacct -j "${SLURM_JOB_ID}" --json' in launcher, \
+        "sacct must be written INSIDE the job; a figure queried afterwards cannot be " \
+        "reproduced, and the harness charges every node from it"
+    assert "nvidia-smi" in launcher and "gpusample.csv" in launcher
+    assert 'impress-a preflight --quick "${CAMPAIGN}"' in launcher
+
+
+def test_the_preregistration_exists_and_states_what_it_must():
+    """Its sha goes in every manifest, so it has to be a file and it has to say the rules.
+
+    Each string below is a rule the comparison cannot be run without, and one that would
+    otherwise be chosen after the numbers arrived.
+    """
+    text = (Path(__file__).resolve().parents[1]
+            / "plans/arms-preregistration.md").read_text()
+    for rule in (
+        "Distinct T2 designs per billed node-hour",   # the endpoint
+        "entirely above 1.3",                         # the decision rule
+        "2.2x",                                       # the MDE, stated before the numbers
+        "expectation of 0",                           # what C_T3 is expected to be
+        "95th percentile",                            # how theta is set
+        "Cα RMSD, not TM-score",                      # the honest substitution
+        "void",                                       # what disqualifies an arm
+        "do not retune the cost models",              # A11
+        "no-go on the yield comparison",              # the escape hatch
+    ):
+        assert rule in text, f"the pre-registration does not state: {rule!r}"
