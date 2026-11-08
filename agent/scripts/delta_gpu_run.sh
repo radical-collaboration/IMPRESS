@@ -354,8 +354,24 @@ case "${IMPRESS_A_COMMAND}" in
         # registers them here and a third party steers it over loopback - which is also the
         # security boundary this configuration can defend, since the plane has no auth and no
         # TLS (backlog C7). A caller on another host is out of scope.
+        # NO --port, and no --host. Both defaults are the hardening:
+        #
+        #   --host 127.0.0.1  the plane has no auth and no TLS (backlog C7), so loopback is
+        #                     the only boundary this configuration can defend. ADR 0014
+        #                     settles C7 for exactly this arrangement and for no other.
+        #   --port 0          an EPHEMERAL port. A fixed one was written here first and that
+        #                     was a regression against the default: it is guessable, it
+        #                     collides with a second serve on the same node, and it would be
+        #                     the one piece of this arrangement an unrelated process could
+        #                     find without looking. The sidecar reads the URL from the file
+        #                     `serve` writes instead of being told a number.
+        #
+        # What this does NOT defend against is another process of the SAME user on this node,
+        # and a token would not either - the same user can read the token. What rules that out
+        # is the node being the job's: 4 of 4 GPUs, 64 of 64 cores and 240G of ~249G leaves
+        # nothing schedulable beside it. That is an inference from the resource request rather
+        # than a guarantee, so `--exclusive` is the flag to add if it ever needs to be one.
         RUNNER_ARGS=( serve "${CAMPAIGN}" --model "${MODEL}"
-                      --port "${IMPRESS_A_PORT:-8711}"
                       --caller-timeout "${IMPRESS_A_CALLER_TIMEOUT:-120}" )
         ;;
     validate-tasks)

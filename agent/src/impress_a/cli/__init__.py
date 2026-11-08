@@ -409,11 +409,24 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
 
     async with ControlPlaneServer(plane, host=host, port=port) as server:
-        # Printed, not only logged: a control process needs the URL, and on Delta the two are
-        # started by the same script from the same job.
+        # Printed AND written to a file, because the port is ephemeral by default and that is
+        # the hardening rather than an inconvenience: a fixed port is guessable, collides with
+        # a second `serve` on the same node, and is the one piece of this arrangement an
+        # unrelated process could find without looking. A sidecar reads the URL; it is not
+        # told a number.
+        #
+        # 0600, and the directory is the job's own run root. The plane has no auth and no TLS
+        # (backlog C7), so loopback plus a URL only the owner can read is the whole boundary -
+        # and a token would add nothing against the one threat that remains, another process
+        # of the same user, since that process could read the token too.
+        url_file = Path(spec.root) / spec.campaign_id / "control_plane.url"
+        url_file.parent.mkdir(parents=True, exist_ok=True)
+        url_file.write_text(f"{server.base_url}\n")
+        url_file.chmod(0o600)
         print(f"campaign {cid} serving on {server.base_url}", flush=True)
-        log.info("serving campaign %s on %s (liveness timeout %.0fs)", cid,
-                 server.base_url, spec.control_liveness_timeout_s)
+        print(f"url written to {url_file}", flush=True)
+        log.info("serving campaign %s on %s (liveness timeout %.0fs, url in %s)", cid,
+                 server.base_url, spec.control_liveness_timeout_s, url_file)
         res = await mgr.run()
     print(f"\n  campaign : {res.campaign_id}\n  cycles   : {res.cycles}"
           f"\n  stop     : {res.stop_reason}\n  nodes    : {len(res.tree)}"

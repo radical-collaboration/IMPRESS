@@ -1026,6 +1026,23 @@ paid for out of the first allocation.
    **C7 remains**: the plane has no auth and no TLS, settled for the loopback configuration in
    ADR 0014 and open for any other - and `--model C` raises the stakes, because a directive is
    now the campaign's parameter vector rather than a suggestion.
+
+   What the loopback configuration actually rests on, since `impress-a serve --model C` makes it
+   load-bearing: **loopback** (`--host` defaults to `127.0.0.1`, and the launcher does not
+   override it), **an ephemeral port** (`--port` defaults to 0; the Delta launcher pinned 8711
+   for one commit, which was a regression against that default - a fixed port is guessable and
+   collides with a second `serve` on the same node), and **the URL in a 0600 file** that a
+   sidecar reads instead of being told a number. All three are asserted in
+   `tests/test_split_process.py`.
+
+   **A token would add nothing to this, and that is worth recording so it is not proposed
+   again.** The one threat loopback does not exclude is another process of the *same user* on
+   the same node, and that process can read a token file as easily as the sidecar can. What
+   rules it out is the node being the job's - 4 of 4 GPUs, 64 of 64 cores and 240G of ~249G
+   leaves nothing schedulable beside it - which is an inference from the resource request rather
+   than a guarantee. `--exclusive` is the flag that would make it one, and a Unix domain socket
+   with 0700 is the stronger fix if the plane ever needs to run where the node is shared; both
+   are what closing C7 properly would involve.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.

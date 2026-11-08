@@ -18,6 +18,7 @@ What the split buys, and what these assert:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import sys
@@ -436,3 +437,77 @@ async def test_an_unaddressed_half_is_refused_with_its_reason_over_http(reg, tmp
     assert answer["accepted"] is False
     assert "takes no external directives" in answer["reason"]
     assert "threshold-plan" in answer["reason"], "it must say which half refused"
+
+
+async def test_serve_binds_loopback_on_an_ephemeral_port_and_writes_the_url(reg, tmp_path):
+    """The whole boundary this arrangement can defend, asserted against a real `serve`.
+
+    The plane has no auth and no TLS (backlog C7), and ADR 0014 settles that for exactly this
+    configuration: both ends on one compute node, bound to loopback. So three things have to
+    hold, and one was briefly broken by the launcher.
+
+    **Loopback**, because a host-reachable plane with no auth is a different proposition.
+    **An ephemeral port**, because a fixed one is guessable, collides with a second `serve` on
+    the same node, and is the one piece of this arrangement an unrelated process could find
+    without looking - the Delta launcher pinned it to 8711 for one commit, which was a
+    regression against this default. **And the URL in a 0600 file**, so a sidecar reads it
+    rather than being told a number.
+
+    What none of this defends against is another process of the SAME user, and a token would
+    not either: the same user can read the token. What rules that out is the node being the
+    job's, which is a property of the resource request rather than of this code.
+    """
+    import os
+    import stat
+
+    from impress_a.cli import serve_campaign
+
+    spec_file = tmp_path / "c.yaml"
+    spec_file.write_text(
+        "campaign_id: t-serve-url\ngoal: g\nbackend: concurrent\n"
+        "backend_config: {workers: 1}\nmax_cycles: 1\nstages: [mock_generate]\n"
+        f"root: {tmp_path / 'runs'}\n"
+        f"trust_root: {tmp_path / 'trust'}\n"
+        "objectives:\n  - {name: ss_fraction, direction: maximize, min: 0.1}\n")
+
+    # No --model, so the campaign is served with no reasoner and ends on the liveness path or
+    # its own cycle bound. What is under test is the socket it opened, not the science.
+    served = asyncio.create_task(serve_campaign(str(spec_file)))
+    url_file = tmp_path / "runs" / "t-serve-url" / "control_plane.url"
+    for _ in range(200):
+        if url_file.is_file():
+            break
+        await asyncio.sleep(0.05)
+    assert url_file.is_file(), "serve must write the URL where a sidecar can read it"
+
+    url = url_file.read_text().strip()
+    assert url.startswith("http://127.0.0.1:"), \
+        f"a plane with no auth must bind loopback, got {url}"
+    port = int(url.rsplit(":", 1)[1].rstrip("/"))
+    assert port not in (0, 8711), (
+        f"port {port} is either unassigned or the fixed one the launcher briefly pinned; an "
+        f"ephemeral port is the hardening")
+    assert stat.S_IMODE(os.stat(url_file).st_mode) == 0o600, \
+        "the url file must be owner-only - it is the whole of what a caller needs"
+
+    served.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await served
+
+
+def test_the_launcher_does_not_pin_the_control_planes_port():
+    """The regression this file's test above describes, pinned at its source.
+
+    `serve`'s own default is an ephemeral port. The launcher passed `--port 8711` for one
+    commit, which replaced a hardening with a guessable constant - and a launcher flag is
+    exactly where such a thing survives, because nothing about the server would look wrong.
+    """
+    import pathlib
+
+    launcher = pathlib.Path("scripts/delta_gpu_run.sh").read_text()
+    serve_branch = launcher.split("    serve)")[1].split(";;")[0]
+    code = "\n".join(line.split("#", 1)[0] for line in serve_branch.splitlines())
+    assert "--port" not in code, \
+        "the launcher must not pin the port: serve's ephemeral default is the hardening"
+    assert "--host" not in code, \
+        "nor the host: loopback is the only boundary a plane with no auth can defend"
