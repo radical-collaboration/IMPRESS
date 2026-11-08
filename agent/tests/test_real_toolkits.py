@@ -1746,3 +1746,48 @@ def test_filter_shape_measures_the_protein_ligand_interface(reg):
         "different interface, and nothing downstream could tell")
     assert "sc_selector_mode" in worker, \
         "which interface produced the number must be a reported metric, not a log line"
+
+
+def test_rfd3_partial_diffusion_would_have_to_drop_length():
+    """A guard that abstains today and fires the moment partial diffusion is declared.
+
+    RFD3's `DesignInputSpecification` validator rejects `length` outright whenever
+    `partial.input`/`partial_t` are set - length is inferred from the input structure in that
+    mode (`ValidationError: ... Length argument must not be provided during partial
+    diffusion`). The committed `ALR_binder_design.json` carries BOTH `partial.input` and
+    `"length": "70-170"`, and that is correct today only because `rfd3_design` declares no
+    `partial_t` and no input port, so partial diffusion cannot be requested.
+
+    The sibling example paid for this: job `21928556`, 3 of 3 pipelines that reached guided
+    feedback crashed on their first attempt, fixed with `partial.pop('length', None)`. Our
+    `_inputs_with_absolute_paths` rewrites `input` paths and nothing else, so it would carry
+    `length` straight through. Backlog C8.
+
+    So this does not assert the fix exists - it asserts that the day someone declares
+    `partial_t`, they cannot also leave `length` in place unnoticed.
+    """
+    import json as _json
+
+    spec_yaml = pathlib.Path("toolkits/rfd3/tools/rfd3_design/spec.yaml").read_text()
+    declares_partial = "partial_t" in spec_yaml
+
+    base = pathlib.Path("campaigns/data/alr/ALR_binder_design.json")
+    carries_length = any(
+        isinstance(entry, dict) and "length" in entry
+        for entry in _json.loads(base.read_text()).values())
+
+    if not declares_partial:
+        # The abstaining branch, pinned so it cannot quietly become vacuous: `length` is the
+        # from-scratch contig and must stay, because from-scratch is the only mode there is.
+        assert carries_length, (
+            f"{base} no longer carries `length`, and nothing declares `partial_t` - so "
+            f"from-scratch diffusion has lost its contig. If partial diffusion was just "
+            f"added, this test's other branch is the one to read")
+        return
+
+    source = pathlib.Path("src/impress_a/tools/rfd3_agents.py").read_text()
+    assert not carries_length or 'pop("length"' in source or "pop('length'" in source, (
+        "rfd3_design now declares `partial_t`, so partial diffusion is reachable, and "
+        f"{base} still carries `length` - RFD3's validator rejects that combination and every "
+        "guided run would fail its input validation. Drop `length` when writing the guided "
+        "spec, as examples/small_molecule_binding's _write_guided_rfd3_json does (backlog C8)")

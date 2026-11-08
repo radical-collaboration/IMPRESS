@@ -415,6 +415,38 @@ reconciles what a previous process left open — but nothing *resumes* a campaig
 reasoner's problem: with C5 the reasoner is a separate process that can die and come back, and
 `RemoteSession.as_completed` holds a stream cursor it cannot currently persist.
 
+**C8. Refinement is reachable generically but not for rfd3, so partial diffusion is unreachable.**
+The generic half of phase 8 landed: a `Stage` carrying `parent_node` has its root task's input
+ports satisfied from that `DesignNode.artifacts`, matched by declared TYPE, and
+`test_campaign.py::test_a_refinement_stage_starts_from_its_parents_artifacts` proves it on
+`mock_design`. The rfd3 half did not. `toolkits/rfd3/tools/rfd3_design/spec.yaml` declares
+**no inputs at all** (only `outputs.backbone`) and no `partial_t`, so there is no port for a
+parent structure to arrive on and no way to ask RFD3 for partial diffusion. The reference's
+`num_refine_cycles: 2` / `rfd3_partial_t: 10.0` therefore has no equivalent here, and the
+measured consequence is already on the record: `complex_plddt` 0.426 / 0.486 / 0.507 against a
+0.75 bound, 0 of 3.
+
+  This is **not** blocking the four-arm experiment, and the specs are honest about it:
+  `delta-small-molecule-arms{,-smoke}.yaml` keep `rfd3_design.num_designs: 1` with the reason
+  recorded in the spec, the trust assertion covers widths 1 and 4 and **no refinement variant**,
+  and `plans/arms-preregistration.md` §14 pre-registers the Goal as probably unreachable. What
+  the item protects against is reading the prereg's "best-of-N plus refinement" sentence - which
+  describes the *reference* - as a mechanism these arms have.
+
+  **When this lands, `length` must be dropped from the guided spec.** RFD3's
+  `DesignInputSpecification` validator rejects `length` outright whenever `partial.input` /
+  `partial_t` are set (`ValidationError: ... Length argument must not be provided during partial
+  diffusion`) - length is inferred from the input structure in that mode. The committed
+  `campaigns/data/alr/ALR_binder_design.json` carries both `partial.input` and
+  `"length": "70-170"`, which is correct and safe **today** precisely because partial diffusion
+  is unreachable: that `length` is the from-scratch contig. The sibling example learned this by
+  losing a production run - job `21928556`, 3 of 3 pipelines that reached guided feedback crashed
+  on their first attempt - and fixed it in `_write_guided_rfd3_json()` with `partial.pop('length',
+  None)`. `_inputs_with_absolute_paths` in `tools/rfd3_agents.py` rewrites `input` paths and
+  nothing else, so it would carry `length` straight through.
+  `test_real_toolkits.py::test_rfd3_partial_diffusion_would_have_to_drop_length` is a guard that
+  abstains while `partial_t` is undeclared and fails the moment it is added without the drop.
+
 **C3. P5 network-service governor** — caching, per-service concurrency caps, `Retry-After` backoff.
 
 **C4. Cancellation cannot reclaim a running GPU.** Measured, not unknown: queued work is reclaimed,

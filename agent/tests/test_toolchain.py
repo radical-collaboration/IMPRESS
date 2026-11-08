@@ -140,3 +140,192 @@ def test_no_campaign_spec_sets_a_key_the_loader_ignores():
             else:
                 assert got == value, (
                     f"{path.name}: {key}={value!r} did not reach the spec (got {got!r})")
+
+
+def _documented_command_lines(doc: pathlib.Path) -> list[tuple[int, list[str]]]:
+    """Every `impress-a` invocation inside a ```bash block, as argv.
+
+    Line continuations are joined first, then a leading run of `NAME=value` environment
+    assignments is dropped - the procedure sets `IMPRESS_A_TRUST_DIR` that way on the same
+    line as the command. Only fenced blocks are read: prose names commands in fragments
+    (`impress-a run --model C`, `impress-a compare`) that were never meant to be complete.
+    """
+    import shlex
+
+    text, fenced, joined = doc.read_text(), False, []
+    for n, raw in enumerate(text.splitlines(), start=1):
+        if raw.strip().startswith("```"):
+            fenced = raw.strip().startswith("```bash")
+            continue
+        if not fenced:
+            continue
+        line = raw.split("#", 1)[0].rstrip()
+        if joined and joined[-1][1].endswith("\\"):
+            prev_n, prev = joined.pop()
+            joined.append((prev_n, prev[:-1] + " " + line.strip()))
+        else:
+            joined.append((n, line.strip()))
+
+    out = []
+    for n, line in joined:
+        if "impress-a" not in line:
+            continue
+        toks = shlex.split(line.rstrip("\\"), comments=False)
+        while toks and "=" in toks[0] and not toks[0].startswith("-"):
+            toks.pop(0)
+        if toks and toks[0] == "impress-a":
+            out.append((n, toks[1:]))
+    return out
+
+
+def _launcher_command_lines(script: pathlib.Path) -> list[tuple[int, list[str]]]:
+    """Every argv the launcher hands the CLI, in both the forms it uses.
+
+    `impress-a preflight --quick "${CAMPAIGN}"` is invoked directly; `RUNNER_ARGS=( run ... )`
+    is passed to `delta_run_campaign.py`, which forwards it to the same parser. Both are argv
+    the CLI has to accept, and a `${VAR}` stands in for a value the parser never inspects.
+    """
+    import re
+    import shlex
+
+    text = script.read_text()
+    out: list[tuple[int, list[str]]] = []
+
+    joined, lines = [], text.splitlines()
+    for n, raw in enumerate(lines, start=1):
+        line = raw.split("#", 1)[0].rstrip()
+        if joined and joined[-1][1].rstrip().endswith("\\"):
+            prev_n, prev = joined.pop()
+            joined.append((prev_n, prev.rstrip()[:-1] + " " + line.strip()))
+        else:
+            joined.append((n, line))
+
+    # A RUNNER_ARGS=( ... ) array may span lines; close it before parsing.
+    buf: list[str] = []
+    buf_n = 0
+    for n, line in joined:
+        if buf:
+            buf.append(line)
+            if ")" in line:
+                merged = " ".join(buf)
+                body = merged.split("(", 1)[1].rsplit(")", 1)[0]
+                out.append((buf_n, shlex.split(_placeholders(body))))
+                buf = []
+            continue
+        if re.match(r"\s*RUNNER_ARGS=\(", line):
+            if ")" in line.split("(", 1)[1]:
+                body = line.split("(", 1)[1].rsplit(")", 1)[0]
+                out.append((n, shlex.split(_placeholders(body))))
+            else:
+                buf, buf_n = [line], n
+            continue
+        if "impress-a " in line:
+            frag = line[line.index("impress-a "):]
+            # The call sits inside shell syntax - `if ! impress-a ... ; then`, `cmd && cmd`.
+            # Cut at the first operator, or the argv picks up `; then` as a positional.
+            for op in (";", "&&", "||", "|", ">"):
+                frag = frag.split(op, 1)[0]
+            out.append((n, shlex.split(_placeholders(frag))[1:]))
+    return out
+
+
+def _placeholders(fragment: str) -> str:
+    """`${CAMPAIGN}` -> a value. The parser type-checks ints, so widths must stay numeric."""
+    import re
+
+    fragment = re.sub(r"\$\{IMPRESS_A_CALLER_TIMEOUT:-(\d+)\}", r"\1", fragment)
+    fragment = re.sub(r"\$\{MODEL\}", "D", fragment)
+    return re.sub(r"\$\{[A-Za-z_][A-Za-z0-9_]*(:-[^}]*)?\}", "placeholder", fragment)
+
+
+def test_the_delta_launcher_command_lines_parse():
+    """The launcher gates every Delta job on a command line the CLI must accept.
+
+    `scripts/delta_gpu_run.sh` ran `impress-a preflight --quick "${CAMPAIGN}"` and `--quick`
+    did not exist, so argparse exited 2, the `if !` caught it, and the script printed
+    "preflight failed" and exited 1 - aborting EVERY arm at launch, before Dragon, for a
+    reason that named the environment rather than the flag. It would have burned a submission
+    per arm to discover, and the message would have sent the reader to `delta_env_setup.sh`.
+
+    The markdown procedure and this launcher are two separate surfaces; only this one holds
+    `RUNNER_ARGS`, and only this one runs unattended.
+    """
+    from impress_a.cli import _parser
+
+    script = pathlib.Path("scripts/delta_gpu_run.sh")
+    found = _launcher_command_lines(script)
+    assert len(found) >= 4, f"extractor matched only {len(found)} launcher argv lines"
+    for line_no, argv in found:
+        try:
+            _parser().parse_args(argv)
+        except SystemExit as exc:
+            raise AssertionError(
+                f"{script}:{line_no} hands the CLI `{' '.join(argv)}`, which it refuses "
+                f"(SystemExit {exc.code}) - every job using this branch would abort at launch"
+            ) from None
+
+
+def test_quick_preflight_skips_the_heavy_probes_and_calls_them_skipped(capsys, monkeypatch):
+    """A skipped probe must not read as a pass, and must not shell out.
+
+    The bound matters: pyrosetta 120s + LigandMPNN's import chain 900s + its `--help` 300s is
+    1320s of subprocess inside an allocation whose whole purpose for this call is to fail in
+    seconds. So the test asserts no subprocess ran, rather than that it ran quickly.
+    """
+    import subprocess
+
+    from impress_a import cli
+
+    monkeypatch.setenv("MPNN_DIR", str(pathlib.Path.cwd()))
+    calls = []
+    real = subprocess.run
+
+    def spy(cmd, *a, **kw):
+        calls.append(cmd)
+        return real(cmd, *a, **kw)
+
+    # `preflight` does `import subprocess` in its own body, which binds the module object -
+    # so patching the attribute on the stdlib module is what the function actually sees.
+    monkeypatch.setattr(subprocess, "run", spy)
+    cli.preflight(cli.load_spec("campaigns/delta-small-molecule-arms-smoke.yaml"), quick=True)
+    out = capsys.readouterr().out
+
+    assert "(quick)" in out
+    for heavy in ("import pyrosetta", "mpnn_run.py", "run.py"):
+        assert not any(heavy in " ".join(map(str, c)) for c in calls), \
+            f"--quick shelled out to {heavy}"
+    assert "skipped by --quick" in out
+    for probe in ("pyrosetta", "ligandmpnn imports"):
+        assert probe in out.split("skipped by --quick")[1], f"{probe} not named as skipped"
+        assert f"[ok  ] {probe}" not in out, f"{probe} was skipped but reported ok"
+
+
+def test_documented_command_lines_parse():
+    """A documented step that argparse refuses is exit code 2 with an allocation held.
+
+    `impress-a trust --list` appeared in both the plan and the pre-registration - the frozen
+    document whose sha goes into every arm's `manifest.json` - and the flag did not exist. The
+    listing was printed unconditionally, so the behaviour was right and only the command line
+    was wrong, which is precisely the kind of gap no test was looking at: the CLI's own tests
+    call `trust()` directly and never go through the parser.
+
+    Checked by parsing, not running: `_parser()` builds the command line and executes nothing.
+    """
+    from impress_a.cli import _parser
+
+    docs = sorted(pathlib.Path("plans").glob("*.md")) + sorted(pathlib.Path(".").glob("*.md"))
+    seen = 0
+    for doc in docs:
+        for line_no, argv in _documented_command_lines(doc):
+            seen += 1
+            try:
+                _parser().parse_args(argv)
+            except SystemExit as exc:  # argparse exits 2 on an unknown flag
+                raise AssertionError(
+                    f"{doc}:{line_no} documents `impress-a {' '.join(argv)}`, which the CLI "
+                    f"refuses (SystemExit {exc.code})"
+                ) from None
+    assert seen >= 4, (
+        f"only {seen} documented command lines found; the extractor has stopped matching the "
+        f"procedure blocks rather than the procedure having shrunk"
+    )

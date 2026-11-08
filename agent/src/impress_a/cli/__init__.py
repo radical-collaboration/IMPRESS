@@ -797,12 +797,25 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     return 0
 
 
-def preflight(spec: CampaignSpec | None = None) -> int:
+def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     """Check a real toolkit's environment BEFORE anything is queued.
 
     Every real adapter raises on a missing env var - but only once a task is running,
     which on HPC means inside the allocation, after the queue wait. Run this on the
     login node instead.
+
+    `quick` keeps the tier-1 checks - env vars, paths, executables, storage, the registry,
+    `ml_collections` - and skips every probe that shells out to import a heavy science stack
+    (pyrosetta, and LigandMPNN's import chain and `--help` contract), which together bound at
+    1320s. That is the form `scripts/delta_gpu_run.sh` runs inside the allocation before
+    Dragon comes up: the question there is whether `$MPNN_DIR` is unset, not whether torch can
+    page off Lustre, and the answer has to arrive in seconds. The deep form runs once on a
+    login node, where the 900s probe is free and its printed elapsed time is the early warning
+    for `ligandmpnn_design`'s declared `walltime_s`.
+
+    A skipped probe is reported as skipped and never as `ok` or as undetermined - `None` means
+    a probe ran and reached no conclusion, and letting it also mean "not attempted" is how the
+    warn column stops being worth reading.
     """
     import shutil
     import subprocess
@@ -820,6 +833,7 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # a FAIL, while a pyrosetta *timeout* is undetermined. The moment `warn` starts meaning
     # "a failure we would rather not block on", this column is worth nothing.
     checks: list[tuple[str, bool | None, str]] = []
+    skipped: list[str] = []
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
@@ -857,21 +871,24 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         found = shutil.which(exe)
         checks.append((exe, bool(found), found or f"not on PATH - needed by {what}"))
 
-    # PyRosetta in a subprocess: importing it here would initialise a process-global
+    # Tier 2. PyRosetta in a subprocess: importing it here would initialise a process-global
     # singleton in the very interpreter that has to stay clean for P2 fan-out.
-    try:
-        out = subprocess.run([sys.executable, "-c", "import pyrosetta"],
-                             capture_output=True, timeout=120, check=False)
-        ok = out.returncode == 0
-        checks.append(("pyrosetta", ok,
-                       "importable" if ok
-                       else out.stderr.decode().strip().splitlines()[-1:][0]
-                       if out.stderr else "import failed"))
-    except subprocess.TimeoutExpired:
-        checks.append(("pyrosetta", None, ("timed out after 120s - a loaded login node "
-                                           "can take that long to import it; re-run")))
-    except (OSError, subprocess.SubprocessError) as e:
-        checks.append(("pyrosetta", False, f"could not check: {e}"))
+    if quick:
+        skipped.append("pyrosetta")
+    else:
+        try:
+            out = subprocess.run([sys.executable, "-c", "import pyrosetta"],
+                                 capture_output=True, timeout=120, check=False)
+            ok = out.returncode == 0
+            checks.append(("pyrosetta", ok,
+                           "importable" if ok
+                           else out.stderr.decode().strip().splitlines()[-1:][0]
+                           if out.stderr else "import failed"))
+        except subprocess.TimeoutExpired:
+            checks.append(("pyrosetta", None, ("timed out after 120s - a loaded login node "
+                                               "can take that long to import it; re-run")))
+        except (OSError, subprocess.SubprocessError) as e:
+            checks.append(("pyrosetta", False, f"could not check: {e}"))
 
     # $WORK_DIR must be on NVMe, not HDD. This is the whole point of the migration and it
     # is invisible otherwise: an HDD path works perfectly, just ~8x slower, and the cost
@@ -916,7 +933,9 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # paging off Lustre (measured ~360s wall for 9s of CPU on a login node). That is also
     # why the elapsed time is printed - it is the early warning for ligandmpnn_design's
     # walltime_s, which this measurement is what set.
-    deep = stages is None or "ligandmpnn_design" in stages
+    deep = (stages is None or "ligandmpnn_design" in stages) and not quick
+    if quick and os.environ.get("MPNN_DIR"):
+        skipped.append("ligandmpnn imports")
     if (mpnn := os.environ.get("MPNN_DIR")) and deep:
         from ..tools.ligandmpnn_agents import MPNN_SHIM
         t0 = time.monotonic()
@@ -944,7 +963,9 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # does not have, and that survived review because nobody had run it. So the flag is checked
     # against the installed `run.py --help` rather than trusted.
     mpnn_dir = os.environ.get("MPNN_DIR")
-    if stages and "ligandmpnn_design" in stages and mpnn_dir:
+    if quick and stages and "ligandmpnn_design" in stages and mpnn_dir:
+        skipped.append("ligandmpnn batch flags")
+    if stages and "ligandmpnn_design" in stages and mpnn_dir and not quick:
         run_py = Path(mpnn_dir) / "run.py"
         if run_py.is_file():
             try:
@@ -1002,7 +1023,7 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
 
-    print("\n  preflight\n")
+    print(f"\n  preflight{' (quick)' if quick else ''}\n")
     for name, ok, detail in checks:
         mark = "ok  " if ok else "warn" if ok is None else "FAIL"
         print(f"    [{mark}] {name:20s} {detail}")
@@ -1011,12 +1032,22 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     print(f"\n  {len(checks) - len(failed) - len(unknown)}/{len(checks)} ok"
           + (f", {len(unknown)} undetermined ({', '.join(unknown)})" if unknown else "")
           + (f" - missing: {', '.join(failed)}" if failed else ""))
+    if skipped:
+        print(f"  {len(skipped)} skipped by --quick ({', '.join(skipped)})"
+              f" - not checked here, and NOT a pass; run the deep form on a login node")
     if stages:
         print(f"  (a campaign using {', '.join(stages)} needs the entries above)")
     return 1 if failed else 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> argparse.ArgumentParser:
+    """The command line, built apart from `main` so it can be parsed without being run.
+
+    Two committed documents spell out the Delta procedure as shell, and a flag that argparse
+    refuses turns a documented step into exit code 2 at the point where an allocation is
+    already held. `test_documented_command_lines_parse` walks those documents through this
+    parser, which it can only do if building it executes nothing.
+    """
     ap = argparse.ArgumentParser(prog="impress-a")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run a campaign")
@@ -1048,6 +1079,10 @@ def main(argv: list[str] | None = None) -> int:
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
+    pf.add_argument("--quick", action="store_true",
+                    help="tier-1 checks only - skip the pyrosetta and LigandMPNN import "
+                         "probes, which bound at 1320s together. What the Delta launcher runs "
+                         "inside the allocation before Dragon comes up")
     sv = sub.add_parser("serve", help="run the execution process and serve it over HTTP")
     sv.add_argument("spec")
     sv.add_argument("--model", default=None, choices=sorted(POLICIES),
@@ -1101,6 +1136,9 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
                     help="grant trust to the patterns this campaign composes")
+    tr.add_argument("--list", dest="do_list", action="store_true",
+                    help="list what this site knows. The listing is printed either way; the "
+                         "flag exists so the documented procedure runs verbatim")
     tr.add_argument("--revoke", default=None, metavar="SIGNATURE")
     tr.add_argument("--reason", default="",
                     help="why (required for --assert; it is the record)")
@@ -1108,7 +1146,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="replica width to assert at, repeatable. The signature includes "
                          "replica multiplicity, so width 1 does not cover width 4 "
                          "(backlog A10). Default: the campaign's own `replicas`")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = _parser().parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat, a.replay_from,
@@ -1134,7 +1176,7 @@ def main(argv: list[str] | None = None) -> int:
             widths = [max(1, load_spec(a.spec).replicas)] if a.spec else [1]
         return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
-        return preflight(load_spec(a.spec) if a.spec else None)
+        return preflight(load_spec(a.spec) if a.spec else None, a.quick)
     reg = Registry().load(a.toolkits)
     for tid in reg.ids():
         s = reg.get(tid)
