@@ -17,15 +17,20 @@ observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analy
 **Only the reasoner differs between control models.** Everything below the policy layer is shared,
 which is what makes frontends pluggable rather than parallel implementations.
 
-There are two ways to be a reasoner, and the second is the reason the first still works unchanged:
+There are two ways to be a reasoner:
 
-- **`decide(obs) -> Decision`** — answer one question at a time. Models A, B, C and D all do this, and
-  `policy.driver.SequentialPolicyDriver` plays the part the manager's loop used to play: observe, ask,
-  submit, wait, repeat.
-- **`conduct(session)`** — drive yourself. The reasoner runs as its own coroutine and reaches the
-  executor through `core.session.CampaignSession`: submit as many experiments as it wants, then collect
-  them with `as_completed` in the order they finish. This is what makes a federation of task agents
-  generating an ensemble in parallel expressible at all.
+- **a Specifier and a Planner** - two halves, with separate contracts. The Specifier turns the
+  caller's `Goal` into a mutable `Spec` of atomic objectives and revises it as data arrives; the
+  Planner maps the objectives that are ready onto Tasks and emits a candidate `Stage`.
+  `runtime.roles.RolesDriver` runs both as the Listener, Specifier, Planner and Deployer over one
+  `CampaignSession`. **This replaced `decide(obs) -> Decision`**, which answered "what should the
+  campaign be trying to achieve" and "which tool should run next" in a single call - so no
+  transcript could say which half of a control model earned its cost, which is exactly what the
+  four-arm comparison needs to say.
+- **`conduct(session)`** - drive yourself. The reasoner runs as its own coroutine and reaches the
+  executor through `core.session.CampaignSession`: submit as many experiments as it wants, then
+  collect them with `as_completed` in the order they finish. This is what makes a federation of
+  task agents generating an ensemble in parallel expressible at all.
 
 The executor owns all campaign state and is its **only writer**; it also decides termination, because
 budget, stagnation and repeated failure are facts about state a reasoner cannot see. A reasoner may
@@ -46,7 +51,7 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 ```
 control/    CampaignControlPlane + transport adapters
 policy/     the decision frontend: specifiers/ + planners/ (one module per control
-            model), the reasoning seam, the role wrappers, and the legacy ControlPolicy
+            model), the reasoning seam, and the role wrappers
 manager.py  the outer loop
 core/       tree · pareto · budget · qc · decision · provenance · artifacts
 compose/    TaskGraph · composer · five gates · self-promoting interlock

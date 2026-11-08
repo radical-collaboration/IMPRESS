@@ -3,20 +3,19 @@
 The point of these tests is that `MODELS`'s `status` column is load-bearing documentation.
 `docs/` described four working control models while two of them had no LLM behind them, and
 nothing contradicted it. A status field is only worth having if something checks it, so the
-first test here fails a model that claims `implemented` while still inheriting
-`BasePolicy`'s `NotImplementedError`.
+first test here fails a model whose status does not match what its halves actually do.
 """
 from __future__ import annotations
 
 import pytest
 
-from impress_a.cli import POLICIES, SUBCOMMANDS, build_policy, main
+from impress_a.cli import POLICIES, SUBCOMMANDS, build_roles, main
 from impress_a.core.pareto import Objective
 from impress_a.policy import registry as reasoners
-from impress_a.policy.base import BasePolicy
-from impress_a.policy.explicit import ReplayPolicy, ThresholdPolicy
 from impress_a.policy.planner import Planner
+from impress_a.policy.planners import ThresholdPlanner
 from impress_a.policy.specifier import Specifier
+from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.runtime.executor import CampaignSpec
 
 STATUSES = ("implemented", "partial", "stub")
@@ -36,17 +35,29 @@ def test_every_model_declares_a_known_status_and_mode():
         assert m.llm_calls >= 0
 
 
-def test_a_model_claiming_implemented_actually_implements_decide():
+def test_a_model_claiming_implemented_has_halves_that_do_something():
     """The assertion the status column exists for.
 
-    `BasePolicy.decide` raises `NotImplementedError`. A model that never overrode it is a
-    stub whatever its row says, and this is what stops the row drifting away from the code.
+    It used to check that a model overrode `BasePolicy.decide`, which raised
+    `NotImplementedError`. `decide` is gone (phase 11), so the check is against the halves: a
+    model claiming `implemented` must build both, and neither may be `BaseSpecifier` or
+    `BasePlanner`, whose `initial_spec` and `plan` raise `NotImplementedError` for exactly the
+    reason the old base class did.
     """
+    from impress_a.policy.planner import BasePlanner
+    from impress_a.policy.specifier import BaseSpecifier
+
     for letter, m in reasoners.MODELS.items():
         if m.status != "implemented":
             continue
-        assert m.cls.decide is not BasePolicy.decide, (
-            f"{letter} claims status=implemented but does not override decide()")
+        options = reasoners.ReasonerOptions(stages=["mock_fold"],
+                                            records=[] if letter == "replay" else None)
+        spec_half, plan_half = m.specifier(options), m.planner(options)
+        assert type(spec_half) is not BaseSpecifier, f"{letter}: specifier is the base class"
+        assert type(plan_half) is not BasePlanner, f"{letter}: planner is the base class"
+        assert type(spec_half).initial_spec is not BaseSpecifier.initial_spec, (
+            f"{letter} claims status=implemented and its specifier does not override "
+            f"initial_spec")
 
 
 def test_models_that_are_not_implemented_say_why():
@@ -71,13 +82,13 @@ def test_no_model_claims_an_llm_call_it_cannot_make():
 
 
 def test_cli_policies_is_derived_from_the_registry():
-    assert POLICIES is reasoners.CLASSES
+    assert POLICIES is reasoners.LETTERS
     assert set(POLICIES) == set(reasoners.MODELS)
 
 
-def test_build_rejects_an_unknown_model_and_names_the_known_ones():
+def test_building_an_unknown_model_names_the_known_ones():
     with pytest.raises(KeyError) as e:
-        reasoners.build("Z")
+        reasoners.build_roles("Z")
     assert "Z" in str(e.value)
     for letter in reasoners.MODELS:
         assert letter in str(e.value)
@@ -85,41 +96,62 @@ def test_build_rejects_an_unknown_model_and_names_the_known_ones():
 
 @pytest.mark.parametrize("letter", ["A", "B", "C", "D", "null"])
 def test_every_model_but_replay_builds_from_a_spec_alone(letter):
-    pol = build_policy(letter, _spec(stages=["mock_generate", "mock_score"]))
-    assert hasattr(pol, "decide")
+    pair = build_roles(letter, _spec(stages=["mock_generate", "mock_score"]))
+    assert isinstance(pair.specifier, Specifier)
+    assert isinstance(pair.planner, Planner)
 
 
-def test_the_campaigns_chain_reaches_the_policy():
+def test_the_campaigns_chain_reaches_the_halves():
     """Without this, a real campaign validates real toolkits and then executes mocks."""
     stages = ["rfd3_design", "ligandmpnn_design"]
-    for letter in ("A", "D"):
-        pol = build_policy(letter, _spec(stages=stages), guard=False)
-        assert pol.stages == stages, f"{letter} did not receive the campaign's stages"
+    for letter in ("A", "B", "C", "D"):
+        pair = build_roles(letter, _spec(stages=stages), guard=False)
+        assert pair.planner.stages == stages, (
+            f"{letter}'s planner did not receive the campaign's stages")
 
 
 def test_b_and_c_get_a_model_d_fallback_carrying_the_same_chain():
-    """Degraded mode must not quietly narrow the campaign to the mock chain."""
+    """Degraded mode must not quietly narrow the campaign to the mock chain.
+
+    Model B's halves fall back to model D's when the endpoint will not answer; model C's
+    planner takes one only when `on_timeout="fallback"` is asked for, and the default is
+    `stop` precisely so a silent fall-back cannot happen - so C is checked by the absence.
+    """
     stages = ["rfd3_design", "ligandmpnn_design"]
-    for letter in ("B", "C"):
-        pol = build_policy(letter, _spec(stages=stages), guard=False)
-        assert isinstance(pol.fallback, ThresholdPolicy)
-        assert pol.fallback.stages == stages
+    b = build_roles("B", _spec(stages=stages), guard=False)
+    assert isinstance(b.specifier.fallback, ThresholdSpecifier)
+    assert isinstance(b.planner.fallback, ThresholdPlanner)
+    assert b.planner.fallback.stages == stages
+
+    c = build_roles("C", _spec(stages=stages), guard=False)
+    assert c.planner.on_timeout == "stop"
+    assert c.planner.fallback is None, (
+        "a model-D planner must not be in arm C's object graph unless asked for: a "
+        "fallen-back C arm is byte-for-byte a D campaign")
 
 
 def test_replay_refuses_without_records_instead_of_raising_typeerror():
-    """`build_policy` used to call `cls()`, so `--model replay` died on a positional arg.
+    """`--model replay` with no `--replay-from` is an operator error, reported as one.
 
-    The failure a user saw named `records`, a parameter no flag set.
+    `build_policy` used to call `cls()`, so it died on a positional argument named `records`
+    that no flag set. Both halves refuse by name now.
     """
     with pytest.raises(ValueError, match="replay-from"):
-        build_policy("replay", _spec())
+        build_roles("replay", _spec())
 
 
 def test_replay_builds_when_records_are_supplied():
-    records = [{"decision": {"kind": "stop", "reason": "done"}}]
-    pol = build_policy("replay", _spec(), guard=False, records=records)
-    assert isinstance(pol, ReplayPolicy)
-    assert pol.records == records
+    """Two record sets, because the halves read two executor-written files.
+
+    `specs.jsonl` and `stages.jsonl`, not the `decisions.jsonl` each model wrote for itself -
+    which is why a campaign run by a model that kept no notes can still be replayed.
+    """
+    specs = [{"event": "initial", "generation": 1, "aims": [], "objectives": []}]
+    stages = [{"event": "deployed", "stage": "s1", "mappings": []}]
+    pair = build_roles("replay", _spec(), guard=False,
+                       spec_records=specs, stage_records=stages)
+    assert pair.specifier.records == specs
+    assert pair.planner.records == stages
 
 
 def test_run_reports_a_clear_failure_for_replay_without_a_source(tmp_path, caplog):
@@ -203,12 +235,13 @@ def test_policy_max_cycles_equals_the_spec():
     `agentic.py` and D in `explicit.py` - and in both directions, because a spec asking for
     fewer cycles than the default must also be honoured.
     """
-    for letter in ("A", "D"):
-        for cycles in (3, 200):
-            pol = build_policy(letter, _spec(max_cycles=cycles), guard=False)
-            assert pol.max_cycles == cycles, (
-                f"{letter} carries max_cycles={pol.max_cycles} against a spec asking for "
-                f"{cycles}")
+    # Read off `ReasonerOptions`, which is what the halves are built from - `build_roles`
+    # is the adapter that fills it from the spec, and the bound reaching the options is the
+    # whole of what X1 was about. A half that stops itself reads it from there.
+    from impress_a.cli import _options_for
+
+    for cycles in (3, 200):
+        assert _options_for(_spec(max_cycles=cycles)).max_cycles == cycles
 
 
 def test_the_front_target_comes_from_the_spec_when_it_declares_one():
@@ -218,8 +251,10 @@ def test_the_front_target_comes_from_the_spec_when_it_declares_one():
     silent cap on a campaign asked for ten designs - and unlike `max_cycles` nothing else
     bounds it. 0 (the default) keeps the model's own number, so no existing campaign moves.
     """
-    assert build_policy("D", _spec(), guard=False).target_front == 3
-    assert build_policy("D", _spec(target_front=10), guard=False).target_front == 10
+    from impress_a.cli import _options_for
+
+    assert _options_for(_spec()).target_front == 3
+    assert _options_for(_spec(target_front=10)).target_front == 10
 
 
 #: Every shipped model now supplies its own two halves. Kept as a list rather than an
@@ -291,6 +326,5 @@ def test_model_c_is_built_to_stop_rather_than_to_fall_back():
     assert asked.planner.fallback is not None, "an operator who asks for one gets one"
     assert asked.planner.on_timeout == "fallback"
 
-    legacy = reasoners.build("C", reasoners.ReasonerOptions(stages=["mock_fold"]))
-    assert legacy.on_timeout == "stop", \
-        "the legacy policy too: backlog C6 is exactly a model-C arm that ran D"
+    # There is no legacy policy left to check (phase 11): `ExternalPolicy` went with the
+    # `decide` contract, so the planner half above is the only place this default lives.

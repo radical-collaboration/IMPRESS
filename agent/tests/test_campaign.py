@@ -40,13 +40,11 @@ from impress_a.core.types import ArtifactType
 from impress_a.exec.backend import make_engine
 from impress_a.exec.dispatch import Dispatcher
 from impress_a.manager import CampaignManager, CampaignSpec
-from impress_a.policy.agentic import FourNodePolicy
-from impress_a.policy.explicit import ThresholdPolicy
-from impress_a.policy.external import ExternalPolicy
-from impress_a.policy.legacy import LegacyPlanner
-from impress_a.policy.oracle import OraclePolicy
-from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
-from impress_a.runtime.roles import _intent_for
+from impress_a.policy import registry as reasoners
+from impress_a.policy.planners import ExternalPlanner, ThresholdPlanner
+from impress_a.policy.registry import RolePair
+from impress_a.policy.specifiers import ExternalSpecifier, ThresholdSpecifier
+from impress_a.policy.wrappers import StageGuard
 from impress_a.tools.agent import TaskRequest
 from impress_a.tools.mock_agents import _upstream
 from impress_a.tools.registry import Registry
@@ -67,27 +65,130 @@ def spec(cid, **kw):
                         root=ROOT, **kw)
 
 
+def _pair(stages: list[str] | None = None) -> RolePair:
+    """Model D's two halves, which since phase 11 is what model D *is*.
+
+    `ThresholdPolicy` and the `decide(obs) -> Decision` contract it implemented were deleted
+    with the legacy path. Most of this file's campaigns want "a reasoner that drives a
+    complete campaign deterministically", which is what this is.
+    """
+    return RolePair(ThresholdSpecifier(),
+                    ThresholdPlanner(stages=stages or CHAIN))
+
+
+class _SubmitsAFixedChain:
+    """A `conduct` reasoner that submits one chain, over and over, and judges nothing.
+
+    Needed because `ThresholdPlanner` **refuses** to plan a chain that cannot measure any of
+    the campaign's objectives - it finds no producer, so there is no Stage - which is the
+    right behaviour and leaves the executor-level rules that deal with such a chain with no
+    way to be reached. Those rules are real: a run that could not have moved the front is not
+    evidence of stagnation (backlog G1), the exemption is bounded, and a graph that cannot
+    produce a declared objective is refused (backlog A8).
+
+    So a truncated chain now has to be **deliberate**, and this is what makes it so.
+    """
+
+    name = "submits-a-fixed-chain"
+
+    def __init__(self, stages: list[str], runs: int = 99, replicas: int = 1) -> None:
+        self.stages, self.runs, self.replicas = stages, runs, replicas
+        self.rejections: list = []
+
+    async def conduct(self, session) -> None:
+        from impress_a.core.session import CampaignStopped, SubmissionRejected
+
+        for _ in range(self.runs):
+            try:
+                run = await session.submit(ExperimentIntent(
+                    goal="g", stages=self.stages, replicas=self.replicas))
+            except SubmissionRejected as rejected:
+                self.rejections.append(rejected.failure)
+                continue
+            except CampaignStopped:
+                return
+            try:
+                await session.result(run)
+            except CampaignStopped:
+                return
+
+
+class _SubmitsAFixedStage:
+    """A `conduct` reasoner that submits one hand-built Stage and records the refusal.
+
+    The Stage path is where backlog A8 became a refusal rather than a warning, and reaching it
+    needs a Stage whose tasks cover every READY objective - so the Reviewer's coverage gate
+    passes - while the chain cannot produce the campaign's DECLARED objectives, which is what
+    the A8 check reads. That is the real shape of the failure: a Planner planning faithfully
+    against a Spec that does not cover what the campaign is for.
+
+    `ThresholdPlanner` cannot be used for it, because it refuses to plan a chain with no
+    producer at all - correctly. So the Stage is built here.
+    """
+
+    name = "submits-a-fixed-stage"
+
+    def __init__(self, stages: list[str]) -> None:
+        self.stages = stages
+        self.rejections: list = []
+
+    async def conduct(self, session) -> None:
+        from impress_a.core.session import CampaignStopped, SubmissionRejected
+        from impress_a.core.spec import Aim, Spec, SpecObjective, SpecRevision, Stage, TaskMapping
+
+        aim = Aim(statement="whatever this chain can measure")
+        objective = SpecObjective(aim=aim.id, statement="run the chain",
+                                  targets=["ss_fraction"])
+        spec = Spec()
+        spec.apply(SpecRevision(new_aims=[aim], new_objectives=[objective]))
+        await session.publish_spec(spec)
+
+        for _ in range(3):
+            stage = Stage(spec_generation=spec.generation, tasks=[
+                TaskMapping(task_id=f"l0_s{i}_{tool}", objectives=[objective.id], tool=tool)
+                for i, tool in enumerate(self.stages)])
+            try:
+                await session.submit_stage(stage)
+            except SubmissionRejected as rejected:
+                self.rejections.append(rejected.failure)
+            except CampaignStopped:
+                return
+        await session.stop("submitted all it had")
+
+
 @pytest.fixture(scope="module")
 def reg():
     return Registry().load()
 
 
-@pytest.mark.parametrize("make,name", [
-    (lambda: ThresholdPolicy(), "D"),
-    (lambda: OraclePolicy(fallback=ThresholdPolicy()), "B"),
-    (lambda: FourNodePolicy(), "A"),
-])
-async def test_autonomous_models_reach_termination(reg, make, name):
-    mgr = CampaignManager(spec(f"t-{name}"), make(), reg)
+@pytest.mark.parametrize("letter", ["A", "B", "D"])
+async def test_autonomous_models_reach_termination(reg, letter):
+    """Every autonomous model, as the halves the registry actually builds.
+
+    By letter rather than by class: a model IS its two halves since phase 11, and building
+    them through `build_roles` is what the CLI does - so this exercises the wiring a campaign
+    uses rather than a hand-assembled pair that could drift from it.
+    """
+    options = reasoners.ReasonerOptions(stages=CHAIN, max_cycles=4)
+    mgr = CampaignManager(spec(f"t-{letter}"),
+                          reasoners.build_roles(letter, options=options), reg)
     res = await mgr.run()
     assert res.stop_reason, "must terminate with a stated reason"
-    assert len(res.tree) > 0, f"{name} produced no candidates"
+    assert len(res.tree) > 0, f"{letter} produced no candidates"
     assert res.cycles <= 4
 
 
-async def test_null_policy_stops_immediately(reg):
-    res = await CampaignManager(spec("t-null"), NullPolicy(), reg).run()
+async def test_the_null_model_stops_immediately(reg):
+    """And it needs no special case anywhere, which is the point of the null halves.
+
+    `NullSpecifier` returns an empty Spec, `Spec.complete()` is "nothing is open", so the
+    Listener stops the campaign through the designed path. `NullPolicy` had to return a `Stop`
+    decision, which is a sentence the driver had to recognise.
+    """
+    res = await CampaignManager(spec("t-null"),
+                                reasoners.build_roles("null"), reg).run()
     assert res.cycles == 0 and len(res.tree) == 0
+    assert res.stop_reason == "every spec objective satisfied"
 
 
 async def test_a_campaign_writes_nothing_into_the_cwd(reg, tmp_path, monkeypatch):
@@ -99,7 +200,7 @@ async def test_a_campaign_writes_nothing_into_the_cwd(reg, tmp_path, monkeypatch
     monkeypatch.chdir(cwd)
     s = spec("t-cwd", max_cycles=1)
     s.root = str(root)
-    await CampaignManager(s, ThresholdPolicy(), reg).run()
+    await CampaignManager(s, _pair(), reg).run()
     assert not list(cwd.iterdir()), f"left in the CWD: {sorted(cwd.iterdir())}"
     assert list((root / "t-cwd").glob("asyncflow.session.*"))
 
@@ -123,17 +224,26 @@ async def test_lying_tool_is_caught_by_qc(reg):
     assert res.merged_qc().verdict is QCVerdict.FAIL, "QC must catch it anyway"
 
 
-async def test_guard_corrects_every_decision(reg):
-    guarded = RuleCorrectionsPolicy(ThresholdPolicy(base_replicas=99),
-                                    max_replicas=2, forbid_tools=("mock_noodle",))
-    await CampaignManager(spec("t-guard"), guarded, reg).run()
-    assert guarded.corrections, "guard must have corrected an over-large request"
+async def test_the_guard_corrects_every_stage(reg):
+    """The unconditional external guard, now on the Planner half.
+
+    `RuleCorrectionsPolicy` corrected an `ExperimentIntent`; `StageGuard` corrects a `Stage`,
+    which is a different object with lineages and per-task parameters. It is also narrower on
+    purpose: two of the three corrections its predecessor made are now enforced where nothing
+    can bypass them - the replica cap in the executor, and a task serving no objective at the
+    Reviewer's coverage gate - and `--no-guard` could switch both off.
+    """
+    pair = RolePair(ThresholdSpecifier(),
+                    StageGuard(ThresholdPlanner(stages=CHAIN, base_replicas=99),
+                               forbid_tools=("mock_noodle",), max_lineages=2))
+    await CampaignManager(spec("t-guard"), pair, reg).run()
+    assert pair.planner.refusals, "the guard must have trimmed an over-wide request"
 
 
 async def test_provisional_results_are_marked_suspect(reg):
     """A novel composition pattern runs, but nothing unreviewed is quietly believed."""
     s = spec("t-suspect", max_cycles=1)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     mgr.trust.patterns.clear()
     res = await mgr.run()
     nodes = [n for n in res.tree if n.qc.verdict is not QCVerdict.FAIL]
@@ -141,8 +251,15 @@ async def test_provisional_results_are_marked_suspect(reg):
 
 
 async def test_external_steering_and_post_termination_measurement(reg):
-    pol = ExternalPolicy(timeout_s=8.0, on_timeout="stop")
-    mgr = CampaignManager(spec("t-C", max_cycles=2), pol, reg)
+    """Model C in one process, which is the arrangement model C has.
+
+    `plane.steer` reaches `manager.policy`, so the halves have to be in the process serving
+    the plane - `impress-a serve <spec> --model C`. The directive shape changed with the
+    halves: a `role` key routes it, and the Planner's keys are the engine's vocabulary.
+    """
+    pair = RolePair(ExternalSpecifier(timeout_s=8.0),
+                    ExternalPlanner(stages=CHAIN, timeout_s=8.0, on_timeout="stop"))
+    mgr = CampaignManager(spec("t-C", max_cycles=2), pair, reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
 
@@ -151,10 +268,11 @@ async def test_external_steering_and_post_termination_measurement(reg):
             await asyncio.sleep(0.3)
             obs = await plane.observe(cid)
             assert obs.campaign_id == cid, "caller sees the policy's own observation"
-            await plane.steer(cid, {"kind": "compose_and_run", "stages": CHAIN,
-                                    "replicas": 2})
+            await plane.steer(cid, {"role": "specifier", "kind": "hold"})
+            await plane.steer(cid, {"role": "planner", "stages": CHAIN, "replicas": 2})
         await asyncio.sleep(0.3)
-        await plane.steer(cid, {"kind": "stop", "reason": "caller done"})
+        await plane.steer(cid, {"role": "planner", "kind": "stop",
+                                "reason": "caller done"})
 
     t = asyncio.create_task(caller())
     res = await mgr.run()
@@ -172,7 +290,7 @@ async def test_external_steering_and_post_termination_measurement(reg):
 
 
 async def test_provenance_is_written_and_replayable(reg):
-    mgr = CampaignManager(spec("t-prov"), ThresholdPolicy(), reg)
+    mgr = CampaignManager(spec("t-prov"), _pair(), reg)
     await mgr.run()
     graphs = list(mgr.prov.read("graphs"))
     results = list(mgr.prov.read("results"))
@@ -185,7 +303,7 @@ async def test_provenance_is_written_and_replayable(reg):
 async def test_budget_is_charged_and_bounds_the_campaign(reg):
     s = spec("t-budget", max_cycles=10)
     s.budget = {"gpu_hours": 0.35, "cpu_hours": 3.0}
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
     assert mgr.budget.spent, "cost must be charged"
     assert all(mgr.budget.remaining(d) >= -1e-9 for d in mgr.budget.limits)
@@ -241,7 +359,7 @@ async def test_control_plane_sees_campaign_events_and_jobs(reg, tmp_path):
     # across runs of the suite, which is correct behaviour and useless to assert on.
     s = spec("t-events", max_cycles=2)
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
     res = await mgr.run()
@@ -262,7 +380,7 @@ async def test_control_plane_sees_campaign_events_and_jobs(reg, tmp_path):
 
 async def test_observation_recency_follows_a_cursor_not_the_cycle(reg):
     """`recent` must mean "landed since you last looked"."""
-    mgr = CampaignManager(spec("t-cursor", max_cycles=2), ThresholdPolicy(), reg)
+    mgr = CampaignManager(spec("t-cursor", max_cycles=2), _pair(), reg)
     await mgr.run()
 
     # A fresh observer asking from the beginning sees everything absorbed.
@@ -330,7 +448,7 @@ async def test_concurrency_holds_several_experiments_in_flight(reg, tmp_path):
     """
     s = spec("t-conc", max_cycles=6)
     s.root, s.concurrency = str(tmp_path), 3
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     _trust_the_chain(mgr, reg)
     seen, sets = await _watch_inflight(mgr)
     res = await mgr.run()
@@ -354,7 +472,7 @@ async def test_untrusted_patterns_are_never_concurrent_with_themselves(reg, tmp_
     """
     s = spec("t-interlock-conc", max_cycles=6)
     s.root, s.concurrency = str(tmp_path), 3
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     # Width 2 and 3 only. The policy explores at 3 and exploits at 2, so trusting those two
     # lets experiments overlap at all - and leaving width 1 untrusted means an UNTRUSTED
     # pattern is in play for the rule below to bite on, which is the only way this test can
@@ -375,7 +493,7 @@ async def test_drained_runs_are_still_absorbed_and_still_count_as_evidence(reg, 
     """Work in flight when the loop exits has been paid for; it must not be discarded."""
     s = spec("t-drain", max_cycles=3)
     s.root, s.concurrency = str(tmp_path), 4      # more slots than turns: nothing waits
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     res = await mgr.run()
 
     assert res.runs >= 1, "the campaign must have dispatched something"
@@ -552,7 +670,7 @@ async def test_a_finished_run_survives_the_process_that_ran_it(reg, tmp_path):
     """
     s = spec("t-durable", max_cycles=2)
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     res = await mgr.run()
     assert res.runs >= 1
 
@@ -561,7 +679,7 @@ async def test_a_finished_run_survives_the_process_that_ran_it(reg, tmp_path):
     rid = done[0].run_id
 
     # A NEW manager over the same root - nothing shared but the log on disk.
-    fresh = CampaignManager(s, ThresholdPolicy(), reg)
+    fresh = CampaignManager(s, _pair(), reg)
     recovered = fresh.runs.outcome(rid)
     assert recovered is not None, "the outcome must be readable from the ledger alone"
     assert recovered.run_id == rid
@@ -580,13 +698,17 @@ async def test_reattach_reports_orphans_and_checks_the_control_model(reg, tmp_pa
     """
     s = spec("t-reattach", max_cycles=2)
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
-    fresh = CampaignManager(s, ThresholdPolicy(), reg)
-    report = fresh.runs.reattach(expected_policy="threshold")
+    fresh = CampaignManager(s, _pair(), reg)
+    # The pair's name, which is what `getattr(policy, "name")` now returns: a model is two
+    # halves and the record says which two, because "model B" and "B's specifier with D's
+    # planner" are different campaigns.
+    report = fresh.runs.reattach(expected_policy="threshold-spec+threshold-plan")
     assert report.campaign_id == "t-reattach"
-    assert report.policy == "threshold", "the launching methodology must be on record"
+    assert report.policy == "threshold-spec+threshold-plan", \
+        "the launching methodology must be on record, and that is now both halves"
     assert report.policy_matches
     assert report.completed, "finished runs must be recoverable by id"
     assert not report.orphaned, "a cleanly finished campaign strands nothing"
@@ -725,7 +847,7 @@ async def test_outputs_are_typed_handles_that_survive_the_wire(reg, tmp_path):
 
     s = spec("t-wire", max_cycles=2)
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
     outcomes = list(mgr.executor._outcomes.values())
@@ -747,7 +869,7 @@ async def test_a_front_node_can_be_traced_to_the_structure_it_claims(reg, tmp_pa
     so there was no way from a ranked candidate to the file it is a claim about."""
     s = spec("t-artifacts", max_cycles=2)
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     res = await mgr.run()
 
     assert res.front, "need a ranked candidate to trace"
@@ -773,7 +895,7 @@ def _stagnation_probe(reg, tmp_path, concurrency):
     """An executor with a front that never moves, so only the counting is under test."""
     s = spec("t-stag", max_cycles=99)
     s.root, s.concurrency = str(tmp_path), concurrency
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     return ex
 
 
@@ -864,35 +986,36 @@ async def test_polling_alone_never_advances_stagnation(reg, tmp_path):
         "polling must not be mistaken for a campaign that has run out of ideas"
 
 
-class _RecordsInterpret(ThresholdPolicy):
-    """A model-D policy that writes down every outcome `interpret` is handed."""
+async def test_a_reasoner_ingests_each_collected_run_exactly_once(reg, tmp_path):
+    """Collecting an outcome belongs to whoever decides on it - exactly once.
 
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.interpreted: list[str] = []
+    `interpret` used to be called by the executor, on the executor's own reference to the
+    policy. That worked only while the reasoner shared its process: driven through a remote
+    session the executor holds a placeholder, so the hook fired against the wrong object or
+    not at all, and a policy that accumulated across runs silently stopped accumulating.
 
-    async def interpret(self, results, obs):
-        self.interpreted.append(results.run_id)
-        return await super().interpret(results, obs)
-
-
-async def test_interpret_fires_once_per_collected_run(reg, tmp_path):
-    """The `interpret` hook belongs to whoever collects the outcome - exactly once.
-
-    It used to be called by the executor, on the executor's own reference to the policy.
-    That worked only while the reasoner shared its process; it is now the driver's, at
-    `SequentialPolicyDriver._collect`. This pins BOTH halves of that move: a duplicate
-    means someone restored the executor's call without removing the driver's, and a
-    policy that accumulates across runs would then double-count.
+    `interpret` is gone with the `decide` contract (phase 11) and the fix is structural rather
+    than a hook: the **Listener** collects every outcome and ingests it into its own
+    `DataRegistry`, on its own side of any process boundary, and the executor never reaches
+    into a reasoner at all. That is `policy/driver.py`'s own ruling about who collects an
+    outcome, surviving the driver's deletion. This pins both halves of the move: a duplicate
+    would mean something restored a second ingestion path, and a Specifier counting hits
+    against realized data would then double-count.
     """
-    s = spec("t-interpret", max_cycles=3)
+    s = spec("t-ingest", max_cycles=3)
     s.root = str(tmp_path)
-    pol = _RecordsInterpret()
-    res = await CampaignManager(s, pol, reg).run()
+    pair = _pair()
+    mgr = CampaignManager(s, pair, reg)
+    res = await mgr.run()
+    driver = mgr._roles_driver
 
-    assert pol.interpreted, "interpret was never called - the hook is unwired"
-    assert len(pol.interpreted) == len(set(pol.interpreted)), \
-        f"interpret called twice for the same run: {pol.interpreted}"
+    assert driver is not None and driver.data.realized, \
+        "the reasoner ingested nothing - it is not seeing its own results"
+    runs = [d.from_run for d in driver.data.realized if d.from_run]
+    settled = {r["run"] for r in mgr.prov.read("executions")}
+    assert set(runs) == settled, (
+        f"the reasoner saw {sorted(set(runs))} of the runs the executor settled: "
+        f"{sorted(settled)}")
     assert res.stop_reason
 
 
@@ -921,17 +1044,17 @@ async def test_a_truncated_chain_does_not_count_toward_stagnation(reg, tmp_path)
     s = spec("t-g1", max_cycles=4, stagnation_limit=2, concurrency=1)
     s.root = str(tmp_path)
     res = await CampaignManager(
-        s, ThresholdPolicy(stages=["mock_generate", "mock_design"], max_cycles=99,
-                           target_front=99), reg).run()
+        s, _SubmitsAFixedChain(["mock_generate", "mock_design"], runs=s.max_cycles),
+        reg).run()
 
     assert len(res.tree) > 0, "the runs happened"
     assert all(n.qc.verdict is not QCVerdict.FAIL for n in res.tree), \
         "and QC passed - nothing is wrong with the science"
     assert res.front == [], "the front is still empty: no node carries sc_rmsd or iptm"
     assert not res.stop_reason.startswith("stagnation:"), res.stop_reason
-    assert "max_cycles" in res.stop_reason, (
-        f"the allocation should be what ends it, not the counter: {res.stop_reason}")
-    assert res.cycles == s.max_cycles, "every cycle it was given was used"
+    assert res.cycles == s.max_cycles, (
+        f"every run it was given must be used - the reasoner's own budget is what ends it, "
+        f"not the counter: {res.cycles} of {s.max_cycles}, stopped by {res.stop_reason!r}")
     # The exemption is bounded, not open - see the test below. Four cycles is under the
     # default `max_unproductive_runs`, so this campaign ends where it was told to.
 
@@ -945,130 +1068,82 @@ async def test_stagnation_still_counts_a_chain_that_could_have_moved_the_front(r
     """
     s = spec("t-g1-still-counts", max_cycles=20, stagnation_limit=2, concurrency=1)
     s.root = str(tmp_path)
-    # target_front=99 keeps the policy from stopping first, so the counter is what ends it.
-    res = await CampaignManager(
-        s, ThresholdPolicy(max_cycles=99, target_front=99), reg).run()
+    # A reasoner that never stops itself, so the counter is what ends it.
+    res = await CampaignManager(s, _SubmitsAFixedChain(CHAIN), reg).run()
 
     assert res.stop_reason.startswith("stagnation:"), res.stop_reason
     assert res.cycles < s.max_cycles, "the counter stopped it early, as it should"
 
 
 class _Backtracker:
-    """Runs the mock chain, branching from its first result before run `backtrack_at` -
-    or before every run after the first, when `always` is set."""
+    """A `conduct` reasoner that branches from its first result, then submits once more.
+
+    Was a `decide` policy returning `Backtrack`, which is not a thing any reasoner returns
+    now: backtracking from an earlier node is `session.backtrack` for a `conduct` reasoner and
+    `SpecObjective.parent_node` for a role pair. The two tests it carried were about the
+    deleted driver's own counting - that it charged a backtrack as a cycle (jobs 22702568,
+    22726105 and 22728140 each asked for 6 and ran 5), and that it stopped a policy which only
+    ever backtracked. Neither defect can recur in a driver that does not exist, so what is
+    pinned below is the operation that does: a backtrack branches the tree and spends no run.
+    """
+
     name = "backtracker"
 
-    def __init__(self, backtrack_at: int = 1, always: bool = False):
-        self.backtrack_at, self.always = backtrack_at, always
-        self.first_node: str | None = None
-        self.backtracked_before: set[int] = set()
+    def __init__(self) -> None:
+        self.branched_from: str | None = None
 
-    async def decide(self, obs):
-        from impress_a.core.decision import Backtrack, ComposeAndRun
-        due = self.always or obs.cycle == self.backtrack_at
-        if self.first_node and due and (self.always or obs.cycle not in self.backtracked_before):
-            self.backtracked_before.add(obs.cycle)
-            return Backtrack(node_id=self.first_node, rationale="test")
-        return ComposeAndRun(intent=ExperimentIntent(goal=obs.goal, stages=CHAIN, replicas=1))
-
-    async def interpret(self, outcome, obs):
-        self.first_node = self.first_node or (outcome.nodes[0] if outcome.nodes else None)
-
-    async def on_rejected(self, decision, failure):
-        from impress_a.core.decision import Stop
-        return Stop(reason=f"rejected: {failure.reason}")
+    async def conduct(self, session) -> None:
+        run = await session.submit(ExperimentIntent(goal="g", stages=CHAIN, replicas=1))
+        outcome = await session.result(run)
+        self.branched_from = outcome.nodes[0] if outcome.nodes else None
+        if self.branched_from:
+            await session.backtrack(self.branched_from, "test")
+        await session.result(
+            await session.submit(ExperimentIntent(goal="g", stages=CHAIN, replicas=1)))
+        await session.stop("backtracker done")
 
 
-async def test_a_backtrack_does_not_spend_a_cycle(reg):
-    """max_cycles counts RUNS. Jobs 22702568, 22726105 and 22728140 each asked for 6,
-    backtracked once, and ran 5 - the driver counted the backtrack as a cycle."""
-    s = spec("t-bt-cycles", max_cycles=3)
-    s.stagnation_limit = 3
-    res = await CampaignManager(s, _Backtracker(backtrack_at=1), reg).run()
-    assert res.runs == 3 and res.cycles == 3, (res.runs, res.cycles, res.stop_reason)
-    assert res.stop_reason == "max_cycles=3 reached"
+async def test_a_backtrack_branches_the_tree_and_spends_no_run(reg, tmp_path):
+    """What survives the deleted driver's off-by-one, attached to the operation that remains.
 
+    `max_cycles` counts RUNS, and three Delta jobs asked for 6, backtracked once and ran 5
+    because the driver charged the branch as a cycle. The driver is gone; `session.backtrack`
+    is not, and it must still be free: two submissions and one backtrack is two runs, and the
+    branch has to appear in the tree as a parent edge rather than as a third candidate.
+    """
+    s = spec("t-bt", max_cycles=5, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    reasoner = _Backtracker()
+    res = await CampaignManager(s, reasoner, reg).run()
 
-async def test_a_policy_that_only_backtracks_is_stopped(reg):
-    """Free backtracks must not mean unbounded ones."""
-    s = spec("t-bt-spin", max_cycles=5)
-    res = await CampaignManager(s, _Backtracker(always=True), reg).run()
-    assert res.stop_reason == "policy backtracked twice without running anything between"
-    assert res.runs == 1
+    assert res.runs == 2, f"two submissions, one backtrack: {res.runs} runs"
+    assert reasoner.branched_from, "the reasoner never saw a node to branch from"
+    branched = [r for r in res.tree if r.parent == reasoner.branched_from]
+    assert branched, (
+        f"nothing in the tree descends from {reasoner.branched_from} - a backtrack must "
+        f"branch the population rather than discard it (ADR 0004)")
 
 
 # ---------------------------------------------------------------------------
-# The role pipeline (phase 1 of plans/control-plane-refactor.md).
+# The role pipeline.
 #
-# The strangler's seam. Until a responsibility actually moves, the only thing worth asserting
-# about the Spec Loop + Planning Loop pipeline is that it changes nothing - and that is what
-# makes every later phase's failure attributable to that phase.
+# `test_roles_pipeline_reproduces_the_legacy_campaign` lived here and is DELETED, because its
+# purpose is finished rather than because it became inconvenient. It ran the same policy down
+# both control paths - `legacy` and `roles` - and compared the tree, the front and the stop
+# reason, over five policy shapes. That was the strangler's seam: it is what made every phase's
+# failure attributable to that phase, and it is why the split could be trusted before anything
+# moved. There is one path now, so there is nothing to compare it against.
+#
+# `test_a_stage_round_trips_through_an_intent` is deleted for the same reason: it pinned
+# `LegacyPlanner._render` against `_intent_for`, the pair of adapters that let phase 1 avoid
+# touching `compose/` and `exec/` at all. Both adapters are gone; `submit_stage` composes a
+# Stage directly.
+#
+# What the parity test protected lives on in two places that are not going anywhere:
+# `test_split_process.py::test_a_models_own_halves_reproduce_the_in_process_campaign` compares
+# one process against a socket, and `test_remote_session.py` compares a reasoner inside the
+# process against one outside it.
 # ---------------------------------------------------------------------------
-
-def _roles_shape(nodes):
-    """What a campaign FOUND, not the ids it minted. Mirrors tests/test_remote_session.py."""
-    return [(n.cycle, n.qc.verdict.value,
-             sorted((k, p.value) for k, p in n.properties.items())) for n in nodes]
-
-
-@pytest.mark.parametrize("make_policy, label", [
-    (ThresholdPolicy, "D"),
-    (FourNodePolicy, "A"),
-    (lambda: RuleCorrectionsPolicy(ThresholdPolicy(base_replicas=99), max_replicas=2), "guard"),
-    # The three members of the Decision union that the role interfaces deliberately cannot
-    # express, so each one exercises a different branch of the adapter's named overflow:
-    # NullPolicy stops on its first decision, and _Backtracker branches from an earlier node
-    # before every run after the first - which in the target design is a parent_node on a
-    # SpecObjective rather than a verb, and here must still reproduce exactly.
-    (NullPolicy, "null"),
-    (lambda: _Backtracker(always=True), "backtrack"),
-])
-async def test_roles_pipeline_reproduces_the_legacy_campaign(reg, tmp_path, make_policy, label):
-    """Same policy, both control paths, identical science.
-
-    **Each arm needs its own trust_root, and that is a finding rather than test hygiene.** The
-    trust ledger is site-scoped and spans campaigns by design, so with one ledger the first
-    arm's clean runs promote the pattern and the second arm runs *trusted* - its nodes come
-    back `pass` where the first arm's were `suspect`, with byte-identical metrics. Two
-    campaigns that differ only in which ran first is exactly the confound the four-arm
-    experiment gives each arm its own IMPRESS_A_TRUST_DIR to avoid, and this is the cheapest
-    place to see the mechanism.
-    """
-    out = {}
-    for control in ("legacy", "roles"):
-        s = spec(f"t-par-{label}-{control}", control=control,
-                 trust_root=str(tmp_path / f"trust-{control}"))
-        res = await CampaignManager(s, make_policy(), reg).run()
-        out[control] = (res.cycles, res.stop_reason, len(res.front),
-                        _roles_shape(res.tree.nodes.values()))
-
-    assert out["legacy"][1] == out["roles"][1], "the stop reason must be the same sentence"
-    assert out["legacy"][0] == out["roles"][0], "the same number of runs must be admitted"
-    assert out["legacy"][2] == out["roles"][2], "the front must be the same size"
-    assert out["legacy"][3] == out["roles"][3], "every node, verdict and metric must match"
-
-
-async def test_a_stage_round_trips_through_an_intent(reg):
-    """Scaffolding, pinned: phase 1 must not touch compose/ or exec/.
-
-    `LegacyPlanner` renders a decision as a Stage and the Deployer renders it back, so the
-    executor keeps receiving exactly the intent it always did. Everything `Composer.compose`
-    reads has to survive that round trip - the ordered tool list, the replica count, and the
-    per-tool params whose silent loss is backlog H3.
-    """
-    intent = ExperimentIntent(goal="stabilize", stages=CHAIN, replicas=3,
-                              params={"mock_generate": {"diffusion_steps": 170},
-                                      "mock_design": {"temperature": 0.35}})
-    planner = LegacyPlanner(ThresholdPolicy())
-    stage = planner._render(intent, Spec())
-    back = _intent_for(stage, Goal(text="stabilize"))
-
-    assert back.stages == intent.stages
-    assert back.replicas == intent.replicas
-    assert back.params == intent.params
-    assert len({t.lineage for t in stage.runs}) == 3
-    assert len(stage.runs) == 3 * len(CHAIN)
-
 
 async def test_the_listener_stops_the_campaign_when_every_objective_is_satisfied(reg, tmp_path):
     """The Spec's own stop condition, which no legacy policy could express.
@@ -1077,31 +1152,52 @@ async def test_the_listener_stops_the_campaign_when_every_objective_is_satisfied
     Listener asks to stop - with its own reason, not the policy's. `max_cycles` is high enough
     that reaching it would prove nothing.
     """
-    s = spec("t-spec-complete", control="roles", max_cycles=20,
+    s = spec("t-spec-complete", max_cycles=20,
              trust_root=str(tmp_path / "trust"))
     s.objectives = [Objective(name="iptm", direction=Direction.MAX, min=0.1),
                     Objective(name="sc_rmsd", direction=Direction.MIN, max=99.0)]
-    res = await CampaignManager(s, ThresholdPolicy(max_cycles=20, target_front=99), reg).run()
+    res = await CampaignManager(s, _pair(), reg).run()
 
     assert res.stop_reason == "every spec objective satisfied"
     assert res.cycles >= 1
 
 
-async def test_an_unbounded_objective_never_completes_the_spec(reg, tmp_path):
+async def test_an_unbounded_objective_gets_a_measurement_rule_not_a_vacuous_one(reg, tmp_path):
     """`total_score: minimize` is an optimisation target, never a finish line.
 
     `Objective.satisfied_by` answers True for any value when both bounds are None, which is
-    right for ranking - nothing is pruned - and would be wrong here: it would finish a campaign
-    the moment its first unbounded metric reported anything. This is the bug the parity probe
-    surfaced, and it is the reason `SatisfactionRule.is_bounded` exists.
-    """
-    s = spec("t-spec-unbounded", control="roles", max_cycles=2,
-             trust_root=str(tmp_path / "trust"))
-    s.objectives = [Objective(name="ddg", direction=Direction.MIN)]
-    res = await CampaignManager(s, ThresholdPolicy(max_cycles=2, target_front=99), reg).run()
+    right for ranking - nothing is pruned - and vacuous as a satisfaction rule: a
+    `metric_in_range` with no range would finish a campaign the moment its first unbounded
+    metric reported anything, which is the bug the parity probe surfaced and the reason
+    `SatisfactionRule.is_bounded` exists.
 
-    assert res.stop_reason != "every spec objective satisfied"
-    assert "max_cycles" in res.stop_reason
+    What an unbounded objective gets instead is `metric_present`: it has no finish line, so
+    what the campaign owes it is a MEASUREMENT, without which the front cannot order anything
+    by it. So a campaign whose ONLY objective is unbounded does complete after one cycle -
+    correctly, and that is asserted here rather than left to be discovered - while a bounded
+    one that is never met does not.
+    """
+    goal = Goal(text="g", objectives=[Objective(name="ddg", direction=Direction.MIN)])
+    rules = {o.targets[0]: o.satisfied_when
+             for o in (await ThresholdSpecifier().initial_spec(goal)).objectives.values()}
+    assert rules["ddg"].kind == "metric_present", \
+        "an unbounded objective must not get a range rule with no range in it"
+    assert not rules["ddg"].is_bounded
+
+    s = spec("t-spec-unbounded", max_cycles=2, trust_root=str(tmp_path / "trust"))
+    s.objectives = [Objective(name="ddg", direction=Direction.MIN)]
+    s.root = str(tmp_path)
+    res = await CampaignManager(s, _pair(), reg).run()
+    assert res.stop_reason == "every spec objective satisfied"
+    assert res.cycles == 1, "one measurement is all an unbounded objective can ask for"
+
+    # And the bounded case, which is what "never completes" has to mean.
+    hard = spec("t-spec-hard", max_cycles=2, trust_root=str(tmp_path / "trust2"))
+    hard.objectives = [Objective(name="ddg", direction=Direction.MIN, max=-99.0)]
+    hard.root = str(tmp_path)
+    out = await CampaignManager(hard, _pair(), reg).run()
+    assert out.stop_reason != "every spec objective satisfied"
+    assert "max_cycles" in out.stop_reason
 
 
 async def test_the_stagnation_exemption_is_bounded(reg, tmp_path):
@@ -1121,8 +1217,7 @@ async def test_the_stagnation_exemption_is_bounded(reg, tmp_path):
     s.max_unproductive_runs = 3
     s.root = str(tmp_path)
     res = await CampaignManager(
-        s, ThresholdPolicy(stages=["mock_generate", "mock_design"], max_cycles=99,
-                           target_front=99), reg).run()
+        s, _SubmitsAFixedChain(["mock_generate", "mock_design"]), reg).run()
 
     assert "could not produce a constrained objective" in res.stop_reason, res.stop_reason
     assert not res.stop_reason.startswith("stagnation:"), \
@@ -1140,7 +1235,7 @@ async def test_a_productive_run_resets_the_unproductive_counter(reg, tmp_path):
     s = spec("t-unproductive-reset", max_cycles=6, stagnation_limit=99, concurrency=1)
     s.max_unproductive_runs = 2
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
 
     ex._unproductive = 1
     ex._note_progress(_rec(could_reach=True))
@@ -1155,23 +1250,26 @@ def _rec(could_reach: bool):
     return SimpleNamespace(informed_by=0, could_reach_the_front=could_reach)
 
 
-async def test_available_tools_is_narrowed_to_the_campaigns_stages(reg, tmp_path):
-    """One list, derived from the other - because this one goes into model B's prompt.
+async def test_the_toolkit_a_reasoner_sees_is_narrowed_to_the_campaigns_stages(reg, tmp_path):
+    """Because this is what goes into a model's prompt.
 
-    `policy/oracle.py` renders `available_tools` verbatim, so the registry's full list told a
-    real campaign that the mock toolkit was available. That is the mock-chain-on-a-GPU hazard
-    in the half the typed `toolkit` view did not cover, and two lists describing the same thing
-    disagree eventually.
+    `available_tools` - a flat list of bare ids beside the typed view - was deleted in phase
+    11, and the hazard it carried is why: the oracle rendered it verbatim, so the registry's
+    full list told a real campaign that the mock toolkit was available. That is the
+    mock-chain-on-a-GPU failure in the half the typed view did not cover, and two lists
+    describing the same thing disagree eventually. There is one list now, and it is typed.
     """
     s = spec("t-narrowed", stages=["mock_generate", "mock_fold"])
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     obs = mgr.observe()
 
-    assert obs.available_tools == ["mock_fold", "mock_generate"]
-    assert obs.toolkit is not None and obs.toolkit.ids == obs.available_tools
-    assert "mock_noodle" not in obs.available_tools, \
+    assert obs.toolkit is not None
+    assert obs.toolkit.ids == ["mock_fold", "mock_generate"]
+    assert "mock_noodle" not in obs.toolkit, \
         "a tool the campaign did not enable must not be offered to a reasoner"
+    assert obs.stages == ["mock_generate", "mock_fold"], \
+        "and the campaign's own ORDER, which `toolkit.ids` sorts away"
 
 
 async def test_the_stage_path_refuses_a_chain_that_cannot_produce_an_objective(reg, tmp_path):
@@ -1182,12 +1280,16 @@ async def test_the_stage_path_refuses_a_chain_that_cannot_produce_an_objective(r
     purpose - and phase 11 deletes the warning with the path. So the two differ here, and that
     is the point of a strangler rather than an accident.
     """
-    s = spec("t-a8-gate", control="roles", max_cycles=3,
+    s = spec("t-a8-gate", max_cycles=3,
              trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(stages=["mock_generate", "mock_design"]), reg)
+    reasoner = _SubmitsAFixedStage(["mock_generate", "mock_design"])
+    mgr = CampaignManager(s, reasoner, reg)
     res = await mgr.run()
 
+    assert reasoner.rejections, "the Stage was admitted; A8 is not refusing"
+    assert all(f.gate == "coverage" for f in reasoner.rejections), \
+        [f.gate for f in reasoner.rejections]
     assert list(res.tree.nodes) == [], \
         "nothing should have been admitted, so nothing was absorbed"
     rejected = [r for r in mgr.prov.read("stages") if r.get("event") == "rejected"]
@@ -1205,10 +1307,10 @@ async def test_a_stage_writes_one_durable_task_record_per_deployed_task(reg, tmp
     exposes no lookup by it, which is why the caller's own table is the only index that can
     exist.
     """
-    s = spec("t-taskreg", control="roles", max_cycles=2,
+    s = spec("t-taskreg", max_cycles=2,
              trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
     snap = mgr.executor.tasks.snapshot()
@@ -1230,9 +1332,9 @@ async def test_a_cancel_only_stage_is_not_an_error_but_runs_nothing(reg, tmp_pat
     Composing an empty graph to reject it would turn cancelling orphaned work into a
     rejection, and the Planner would have to avoid asking.
     """
-    s = spec("t-cancel-only", control="roles", trust_root=str(tmp_path / "trust"))
+    s = spec("t-cancel-only", trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     await ex.start()
     try:
         with pytest.raises(SubmissionRejected) as caught:
@@ -1322,9 +1424,9 @@ async def test_deleting_an_objective_makes_its_pending_tasks_cancellable(reg, tm
     list. A task serving one live objective among three dead ones is still wanted, and with one
     objective per task the question could not be asked.
     """
-    s = spec("t-orphan", control="roles", trust_root=str(tmp_path / "trust"))
+    s = spec("t-orphan", trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     await ex.start()
     try:
         aim = Aim(statement="a")
@@ -1363,9 +1465,9 @@ async def test_a_running_task_asked_to_stop_is_recorded_orphaned_not_cancelled(r
     says "we wanted this stopped and could not", rather than CANCELLED, which would claim we
     did.
     """
-    s = spec("t-advisory", control="roles", trust_root=str(tmp_path / "trust"))
+    s = spec("t-advisory", trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     await ex.start()
     try:
         ex.tasks.record_task(TaskRecord(task_id="t-running", campaign_id=s.campaign_id,
@@ -1405,9 +1507,9 @@ async def test_a_task_reports_its_own_wall_clock(reg, tmp_path):
     GPU-busy at most 17% of billed GPU time, CPU efficiency around 42%, three of four GPUs
     never holding work. None of it was attributable to a task.
     """
-    s = spec("t-timed", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s = spec("t-timed", max_cycles=1, trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
     telemetry = list(mgr.prov.read("tasks"))
@@ -1431,9 +1533,9 @@ async def test_declared_and_measured_cost_are_both_recorded_and_distinct(reg, tm
     the measured figure instead would change what admission refuses for every campaign at
     once.
     """
-    s = spec("t-twocosts", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s = spec("t-twocosts", max_cycles=1, trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
     rows = [r for r in mgr.prov.read("tasks") if r.get("wall_s") is not None]
@@ -1455,9 +1557,9 @@ async def test_a_property_names_the_tool_that_reported_it(reg, tmp_path):
     authority, so an assay can supersede an ML prediction only if the prediction says it is
     one.
     """
-    s = spec("t-sources", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s = spec("t-sources", max_cycles=1, trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    mgr = CampaignManager(s, _pair(), reg)
     await mgr.run()
 
     sources = {p.source.name for n in mgr.tree.nodes.values() for p in n.properties.values()}
@@ -1506,9 +1608,9 @@ async def test_a_refinement_stage_starts_from_its_parents_artifacts(reg, tmp_pat
     Matched by declared TYPE, not by name: a parent's artifacts are named for the port that
     produced them and a consumer names them for its own purpose.
     """
-    s = spec("t-refine", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s = spec("t-refine", max_cycles=1, trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     await ex.start()
     try:
         parent = DesignNode()
@@ -1559,8 +1661,8 @@ async def test_a_refinement_naming_an_unknown_node_gets_no_artifacts(reg, tmp_pa
     The composer is not where identity is checked, and raising there would turn a Planner's
     stale reference into a crash rather than a rejection it can answer.
     """
-    s = spec("t-refine-unknown", control="roles", trust_root=str(tmp_path / "trust"))
+    s = spec("t-refine-unknown", trust_root=str(tmp_path / "trust"))
     s.root = str(tmp_path)
-    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    ex = CampaignManager(s, _pair(), reg).executor
     assert ex._artifacts_of("n-does-not-exist") == {}
     assert ex._artifacts_of(None) == {}

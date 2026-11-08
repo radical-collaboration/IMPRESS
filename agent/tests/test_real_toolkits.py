@@ -95,11 +95,11 @@ def test_real_chain_refuses_over_budget(reg):
 def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
     """The headline bug: a real campaign would have run mocks on a GPU allocation.
 
-    `CampaignSpec` had no `stages`, `load_spec` read none, and every policy falls back
+    `CampaignSpec` had no `stages`, `load_spec` read none, and every reasoner falls back
     to its own default chain - which is the mock one. So `sbatch delta_gpu_run.sh`
     loaded the real toolkits, validated them, and then composed `mock_generate...`.
     """
-    from impress_a.cli import build_policy, load_spec
+    from impress_a.cli import build_roles, load_spec
     from impress_a.manager import CampaignManager
 
     spec = load_spec("campaigns/delta-small-molecule-smoke.yaml")
@@ -109,9 +109,9 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
 
     spec.root = str(tmp_path)
     spec.backend, spec.backend_config = "concurrent", {"workers": 1}
-    mgr = CampaignManager(spec, build_policy("D", spec, guard=False), reg)
+    mgr = CampaignManager(spec, build_roles("D", spec, guard=False), reg)
 
-    intent = ExperimentIntent(goal=spec.goal)          # a policy that asks for nothing
+    intent = ExperimentIntent(goal=spec.goal)          # a reasoner that asks for nothing
     merged = mgr.executor._apply_campaign_defaults(intent)
     assert merged.stages == spec.stages
     assert merged.params["rfd3_design"]["input_spec_path"] == \
@@ -120,27 +120,26 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
     assert not any(s.startswith("mock_") for s in merged.stages)
 
 
-def test_campaign_params_defer_to_the_policy_and_replicas_is_a_cap(reg, tmp_path):
-    from impress_a.cli import load_spec
+def test_campaign_params_defer_to_the_reasoner_and_replicas_is_a_cap(reg, tmp_path):
+    from impress_a.cli import build_roles, load_spec
     from impress_a.manager import CampaignManager
-    from impress_a.policy.explicit import ThresholdPolicy
 
     spec = load_spec("campaigns/delta-small-molecule-smoke.yaml")
     spec.root = str(tmp_path)
     spec.replicas = 2
-    ex = CampaignManager(spec, ThresholdPolicy(stages=spec.stages), reg).executor
+    ex = CampaignManager(spec, build_roles("D", spec, guard=False), reg).executor
 
     asked = ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=9,
                              params={"rfd3_design": {"input_spec_path": "/tmp/other.json"}})
     merged = ex._apply_campaign_defaults(asked)
     assert merged.params["rfd3_design"]["input_spec_path"] == "/tmp/other.json", \
-        "the policy wins on keys it set"
+        "the reasoner wins on keys it set"
     assert merged.params["rfd3_design"]["num_designs"] == \
         spec.params["rfd3_design"]["num_designs"], "campaign fills the rest"
     assert merged.replicas == 2, "campaign replicas is a cap on breadth"
     assert ex._apply_campaign_defaults(
         ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=1)).replicas == 1, \
-        "a policy may still ask for fewer"
+        "a reasoner may still ask for fewer"
 
 
 def test_real_tools_get_an_independent_reproducible_seed_per_lineage(reg):

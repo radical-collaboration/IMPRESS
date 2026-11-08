@@ -8,7 +8,8 @@ from impress_a.compose.graph import TaskGraph, TaskNode
 from impress_a.compose.interlock import Scrutiny, TrustLedger
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger
-from impress_a.core.decision import ExperimentIntent
+from impress_a.core.decision import ExperimentIntent, ValidationFailure
+from impress_a.core.pareto import Direction, Objective
 from impress_a.core.spec import (
     Aim,
     Deferral,
@@ -833,7 +834,8 @@ def test_every_delta_campaign_declares_real_tool_delivery():
             f"{path.name}: declared but did not reach the spec"
 
 
-def test_no_policy_answers_a_rejection_by_truncating_its_chain():
+@pytest.mark.asyncio
+async def test_no_planner_answers_a_rejection_by_truncating_its_chain(reg):
     """Job 22675512, refused by construction - and it was defeating a second rule too.
 
     Dropping the tail to fit a budget took `boltz_predict` off that campaign's chain, solely
@@ -845,21 +847,51 @@ def test_no_policy_answers_a_rejection_by_truncating_its_chain():
     different SHAPE, so it also produced a different pattern signature - and an instance
     refused by the interlock's one-instance-in-flight rule was then admitted as a different
     pattern. Two concurrency tests in `test_campaign.py` were passing because of it.
+
+    Checked **behaviourally**, over every planner half rather than the two deleted policies
+    that had an `on_rejected`. The first version of this walked the AST for a slice, which is
+    a proxy for the property and fired on a `reason[:80]` in a rationale string - a test that
+    forbids the shape of the fix rather than the thing being forbidden.
     """
-    import ast
-    import inspect
-    import textwrap
+    from impress_a.core.decision import CampaignObservation
+    from impress_a.core.goal import Goal
+    from impress_a.policy.planner import PlanningContext
+    from impress_a.policy.planners import (
+        AgenticPlanner,
+        ExternalPlanner,
+        OraclePlanner,
+        ThresholdPlanner,
+    )
+    from impress_a.policy.specifiers import ThresholdSpecifier
+    from impress_a.tools.view import view_of
 
-    from impress_a.policy.explicit import ThresholdPolicy
-    from impress_a.policy.oracle import OraclePolicy
+    chain = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
+    objectives = [Objective(name="iptm", direction=Direction.MAX, min=0.5),
+                  Objective(name="ddg", direction=Direction.MIN)]
+    goal = Goal(text="g", objectives=objectives)
+    spec_state = await ThresholdSpecifier().initial_spec(goal)
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal="g", objectives=objectives,
+                              toolkit=view_of(reg, chain), stages=chain, spec=spec_state)
+    ctx = PlanningContext(goal, obs)
 
-    for cls in (ThresholdPolicy, OraclePolicy):
-        # The whole function, dedented and parsed. A docstring is a `Constant` and never a
-        # `Subscript`, so there is no need to cut it out - and cutting it out by splitting on
-        # triple quotes is what broke this test's first version.
-        tree = ast.parse(textwrap.dedent(inspect.getsource(cls.on_rejected)))
-        slices = [n for n in ast.walk(tree) if isinstance(n, ast.Subscript)
-                  and isinstance(n.slice, ast.Slice)]
-        assert slices == [], (
-            f"{cls.__name__}.on_rejected slices a sequence - the only thing it used to slice "
-            f"was `intent.stages[:-1]`, and dropping a stage is what this forbids")
+    for make in (lambda: ThresholdPlanner(stages=chain, base_replicas=3),
+                 lambda: AgenticPlanner(stages=chain),
+                 lambda: OraclePlanner(stages=chain),
+                 lambda: ExternalPlanner(stages=chain, timeout_s=0.01)):
+        planner = make()
+        if isinstance(planner, ExternalPlanner):
+            planner.steer({"stages": chain, "replicas": 3})
+        stage = await planner.plan(spec_state, ctx)
+        assert stage is not None, f"{planner.name} planned nothing to begin with"
+        tools = {t.tool for t in stage.runs}
+
+        answer = await planner.replan(
+            stage, ValidationFailure(gate="budget", transient=True, reason="no room"),
+            spec_state, ctx)
+        if answer is None:
+            continue          # giving up is always allowed; measuring less is not
+        assert {t.tool for t in answer.runs} == tools, (
+            f"{planner.name} dropped {sorted(tools - {t.tool for t in answer.runs})} to fit a "
+            f"budget. Breadth may shrink - a lineage is a whole chain - but the chain may not")
+        assert answer.lineages <= stage.lineages, \
+            f"{planner.name} answered a budget rejection by asking for MORE"

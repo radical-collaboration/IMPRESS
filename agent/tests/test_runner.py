@@ -21,7 +21,9 @@ from impress_a.exec.backend import make_engine
 from impress_a.exec.dispatch import Dispatcher, node_task
 from impress_a.exec.resources import gpu_env, thread_caps
 from impress_a.manager import CampaignManager, CampaignSpec
-from impress_a.policy.explicit import ThresholdPolicy
+from impress_a.policy.planners import ThresholdPlanner
+from impress_a.policy.registry import RolePair
+from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.runtime.pipelines import StagePipeline
 from impress_a.runtime.runner import StageRunner
 from impress_a.tools.registry import Registry
@@ -249,8 +251,9 @@ async def test_both_execution_loops_produce_the_same_campaign(reg, tmp_path):
             budget={"gpu_hours": 2.0, "cpu_hours": 12.0}, max_cycles=3,
             site=SiteCaps(gpu_api="cuda", gpus_per_node=1), backend="concurrent",
             backend_config={"workers": 3}, root=str(tmp_path),
-            trust_root=str(tmp_path / f"trust-{runner}"), control="roles", runner=runner)
-        res = await CampaignManager(s, ThresholdPolicy(), reg).run()
+            trust_root=str(tmp_path / f"trust-{runner}"), runner=runner)
+        pair = RolePair(ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN))
+        res = await CampaignManager(s, pair, reg).run()
         out[runner] = (res.cycles, res.stop_reason, len(res.front),
                        shape(res.tree.nodes.values()))
 

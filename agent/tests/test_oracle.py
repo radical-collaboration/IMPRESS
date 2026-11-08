@@ -140,22 +140,32 @@ async def test_the_rehearsal_derives_its_chain_from_the_campaign(reg):
         await RehearsalOracle().think("stage", "REFINING: []", STAGE_SCHEMA)
 
 
-async def test_the_rehearsals_stopping_numbers_come_from_the_spec(reg):
-    """`cycle >= 4` and `front >= 3` were literals, which is X1 by another route.
+async def test_the_rehearsal_carries_no_stopping_condition_at_all(reg):
+    """`cycle >= 4` and `front >= 3` were literals inside the stand-in, which is X1 again.
 
-    A four-hour arm declaring `max_cycles: 200` would have stopped itself after four
-    decisions, in about fifteen minutes, and reported a clean campaign.
+    A four-hour arm would have stopped itself after four decisions, in about fifteen minutes,
+    and reported a clean campaign. They are **gone** rather than made configurable, because
+    stopping is not a model's call: the Listener asks when the Spec completes and the executor
+    decides, since budget, stagnation and repeated failure are facts about state a reasoner
+    cannot see. A stand-in with a stopping condition of its own is a stand-in that can end a
+    campaign the campaign did not ask to end.
     """
-    oracle = RehearsalOracle(stages=CHAIN, max_cycles=200, target_front=10)
-    obs = _obs(reg, front=[_node(iptm=0.9)] * 4)
-    obs.cycle = 20
-    answer = await oracle.propose("", obs)
-    assert answer["kind"] == "compose_and_run", (
-        f"stopped at cycle 20 of 200 with 4 of 10 front members: {answer}")
+    oracle = RehearsalOracle(stages=CHAIN)
+    assert not hasattr(oracle, "max_cycles")
+    assert not hasattr(oracle, "target_front")
+    assert not hasattr(oracle, "propose"), \
+        "the `DecisionModel` surface went with `OraclePolicy`; keeping an unused method is " \
+        "how a reader comes to believe there are two ways in"
 
-    at_the_limit = _obs(reg, front=[_node(iptm=0.9)] * 10)
-    at_the_limit.cycle = 20
-    assert (await oracle.propose("", at_the_limit))["kind"] == "stop"
+    # Behaviourally, not by scanning the source - which is what the first version did, and it
+    # matched the docstring explaining the defect it was checking for. The fourth test in this
+    # repository to catch its own documentation.
+    front = "FRONT_IDS: []\nMETRICS: [\"iptm\"]\nREFINING: []"
+    for node, schema in (("spec", SPEC_SCHEMA), ("stage", STAGE_SCHEMA)):
+        answer = await oracle.think(node, front, schema)
+        assert "stop" not in str(answer).lower(), (
+            f"the rehearsal asked to {answer} at node {node}: stopping is the Listener's "
+            f"request and the executor's call, never a model's")
 
 
 async def test_the_specifier_refuses_a_metric_the_campaign_never_declared(reg):

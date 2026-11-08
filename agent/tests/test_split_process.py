@@ -33,8 +33,6 @@ from impress_a.control.session import RemoteSession
 from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.manager import CampaignManager, CampaignSpec
-from impress_a.policy.explicit import ThresholdPolicy
-from impress_a.policy.legacy import DecideAsRoles
 from impress_a.policy.planner import PlanningContext
 from impress_a.policy.planners import ExternalPlanner, ThresholdPlanner
 from impress_a.policy.registry import RolePair
@@ -63,7 +61,7 @@ def _spec(cid, tmp_path, **kw):
         budget={"gpu_hours": 40.0, "cpu_hours": 200.0},
         site=SiteCaps(gpu_api="cuda", gpus_per_node=1), backend="concurrent",
         backend_config={"workers": 3}, root=str(tmp_path),
-        trust_root=str(tmp_path / f"trust-{cid}"), stages=CHAIN, control="roles", **kw)
+        trust_root=str(tmp_path / f"trust-{cid}"), stages=CHAIN, **kw)
 
 
 class _Idle:
@@ -112,7 +110,7 @@ async def test_the_roles_drive_a_campaign_over_a_socket(reg, tmp_path):
     `CampaignSession` in phase 1 rather than against the executor.
     """
     local = await CampaignManager(
-        _spec("t-local", tmp_path, max_cycles=3), ThresholdPolicy(), reg).run()
+        _spec("t-local", tmp_path, max_cycles=3), RolePair(*_halves()), reg).run()
 
     # Built with the same bounds `CampaignManager._roles()` gives the in-process driver, so
     # the only difference between the two campaigns is the transport.
@@ -128,8 +126,13 @@ async def test_the_roles_drive_a_campaign_over_a_socket(reg, tmp_path):
 
 
 def _halves():
-    pair = DecideAsRoles(ThresholdPolicy())
-    return pair.specifier, pair.planner
+    """Model D's two halves - which, since phase 11, is what model D *is*.
+
+    These tests used to drive `DecideAsRoles(ThresholdPolicy())`, a `ControlPolicy` presented
+    as a pair, so that the split could be shown to change nothing before anything moved. The
+    strangler is finished and the adapter is gone; the pair is the real one.
+    """
+    return ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN)
 
 
 async def test_the_pump_reaps_while_the_control_side_is_slow(reg, tmp_path):
@@ -330,9 +333,7 @@ async def test_naming_c_as_either_half_is_refused_too():
 
 
 # ---------------------------------------------------------------------------
-# The real halves over the wire. Everything above drives `DecideAsRoles` - a
-# `ControlPolicy` presented as a pair - which proves the transport and nothing about the
-# halves phase 9 actually built.
+# The real halves over the wire, in one process and across a socket.
 # ---------------------------------------------------------------------------
 
 async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_path):
@@ -351,7 +352,7 @@ async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_pa
 
     remote = await _drive_remotely(
         reg, _spec("t-halves-remote", tmp_path, max_cycles=3),
-        lambda goal: RolesDriver(goal, *_role_halves(), max_turns=3, max_attempts=4,
+        lambda goal: RolesDriver(goal, *_halves(), max_turns=3, max_attempts=4,
                                  concurrency=1))
 
     assert _shape(remote.tree.nodes.values()) == _shape(local.tree.nodes.values()), \
@@ -359,10 +360,6 @@ async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_pa
     assert remote.cycles == local.cycles
     assert remote.stop_reason == local.stop_reason
     assert len(remote.front) == len(local.front)
-
-
-def _role_halves():
-    return ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN)
 
 
 async def test_an_external_caller_steers_both_halves_over_the_socket(reg, tmp_path):
@@ -431,7 +428,7 @@ async def test_an_unaddressed_half_is_refused_with_its_reason_over_http(reg, tmp
     silently dropping them would report an arm as externally steered while it steered itself.
     """
     spec = _spec("t-unroutable", tmp_path, max_cycles=1)
-    mgr = CampaignManager(spec, RolePair(*_role_halves()), reg)
+    mgr = CampaignManager(spec, RolePair(*_halves()), reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
 

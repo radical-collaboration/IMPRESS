@@ -11,8 +11,10 @@ never be consulted while work was running. Now:
     reaps runs as they finish;
   * the reasoner runs as its own coroutine and reaches the executor through
     `core.session.CampaignSession`;
-  * `policy.driver.SequentialPolicyDriver` makes a `decide`-style policy look like a
-    reasoner, so control models A-D are unchanged.
+  * a reasoner is either a `conduct` implementation or a Specifier/Planner **pair**, which
+    `runtime.roles.RolesDriver` drives. There is no third kind: the `decide(obs) -> Decision`
+    contract and the driver that adapted it were deleted in phase 11, and with them
+    `CampaignSpec.control`, which used to select between two vocabularies.
 
 `CampaignManager` remains the public entry point and the thing the control plane
 registers. It builds the executor in `__init__` - not in `run()` - because callers
@@ -26,8 +28,6 @@ from typing import Any
 
 from .core.pareto import pareto_front
 from .core.session import CampaignStopped
-from .policy.driver import SequentialPolicyDriver
-from .policy.legacy import DecideAsRoles
 from .runtime.executor import (
     CampaignAborted,
     CampaignExecutor,
@@ -54,6 +54,8 @@ class CampaignManager:
         self.executor = CampaignExecutor(spec, policy, registry)
         self.session = InProcessSession(self.executor)
         self.runs = RunService(self.executor)
+        #: The role driver, once `run()` has built one. See `_roles`.
+        self._roles_driver: Any = None
 
     # -- delegation ----------------------------------------------------------
     # The executor owns campaign state; these keep the long-standing surface working for
@@ -82,30 +84,39 @@ class CampaignManager:
         `CampaignSession` member until phase 3 - a driver that declares what it needs beats one
         that discovers it on the session.
         """
-        pair = self.policy if hasattr(self.policy, "specifier") else DecideAsRoles(self.policy)
-        return RolesDriver(
-            goal_from_spec(self.spec), pair.specifier, pair.planner,
+        # Held, not just returned. The driver carries the Listener's `DataRegistry` - the
+        # reasoner's own view of its results - and that is a thing a caller legitimately
+        # inspects after a campaign, the same way it inspects `mgr.tree` and `mgr.budget`.
+        # It is also the only way to assert that the reasoner saw every run the executor
+        # settled, which is what the deleted `interpret` hook used to be tested through.
+        self._roles_driver = RolesDriver(
+            goal_from_spec(self.spec), self.policy.specifier, self.policy.planner,
             max_turns=self.spec.max_cycles, max_attempts=self.spec.max_attempts,
             concurrency=self.spec.concurrency, publish=self.executor.publish_spec)
+        return self._roles_driver
 
     def _reasoner(self) -> Any:
-        """A policy that implements `conduct` drives itself; anything else is driven.
+        """A reasoner that implements `conduct` drives itself; a role pair is driven.
 
-        `conduct` is checked FIRST, before `control`, and the ordering is load-bearing: a
-        `conduct` reasoner is already a complete reasoner, and the role pipeline is one
-        implementation of one rather than a wrapper every reasoner must wear. Checking
-        `control` first wrapped `impress-a serve`'s deliberately absent reasoner in the legacy
-        adapter and called `decide` on it - a served campaign has no local reasoner by design,
-        which is the whole point of serving it.
+        `conduct` is checked FIRST, and the ordering is load-bearing: a `conduct` reasoner is
+        already a complete reasoner, and the role pipeline is one implementation of one rather
+        than a wrapper every reasoner must wear. Checking the other way round wrapped
+        `impress-a serve`'s deliberately absent reasoner and drove it - a served campaign has
+        no local reasoner by design, which is the whole point of serving it.
+
+        There is no third case any more. `SequentialPolicyDriver` and the `decide` contract it
+        drove are gone (phase 11): a reasoner is either a `conduct` implementation or a
+        Specifier/Planner pair, and `CampaignSpec.control` no longer selects between two
+        vocabularies because there is only one.
         """
-        target = getattr(self.policy, "inner", self.policy)
-        if hasattr(self.policy, "conduct") or hasattr(target, "conduct"):
-            return self.policy if hasattr(self.policy, "conduct") else target
-        if self.spec.control == "roles":
+        if hasattr(self.policy, "conduct"):
+            return self.policy
+        if hasattr(self.policy, "specifier") and hasattr(self.policy, "planner"):
             return self._roles()
-        return SequentialPolicyDriver(
-            self.policy, max_turns=self.spec.max_cycles,
-            max_attempts=self.spec.max_attempts, concurrency=self.spec.concurrency)
+        raise TypeError(
+            f"{type(self.policy).__name__} is neither a `conduct` reasoner nor a "
+            f"Specifier/Planner pair. The `decide(obs) -> Decision` contract was deleted in "
+            f"phase 11; build a pair with `policy.registry.build_roles(letter)`")
 
     async def run(self) -> CampaignResult:
         ex = self.executor

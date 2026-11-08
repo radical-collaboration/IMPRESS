@@ -202,3 +202,92 @@ def test_every_layer_is_in_the_table():
     layers |= {p.stem for p in SRC.glob("*.py") if p.stem != "__init__"}
     missing = sorted(layers - set(ALLOWED))
     assert missing == [], f"not in ALLOWED: {missing}"
+
+
+#: Names the legacy decision path defined, each of which phase 11 deleted. Listed rather than
+#: pattern-matched, because "no module defines `decide`" is a claim about these specific things
+#: and a regex would also catch a future unrelated `decide`.
+DELETED_IN_PHASE_11 = (
+    "ControlPolicy", "BasePolicy", "SequentialPolicyDriver", "DecideAsRoles",
+    "LegacyPlanner", "LegacySpecifier", "ThresholdPolicy", "FourNodePolicy",
+    "OraclePolicy", "ExternalPolicy", "ReplayPolicy", "NullPolicy",
+    "PolicyWrapper", "LoggingPolicy", "RuleCorrectionsPolicy", "LangChainOracle",
+    "DecisionModel",
+)
+
+
+def test_no_module_defines_decide():
+    """The mechanical proof the strangler finished.
+
+    `decide(obs) -> Decision` answered "what should the campaign be trying to achieve" and
+    "which tool should run next" in one call, which is exactly what made it impossible to say
+    which half of a control model earned its cost - and the four-arm comparison's whole claim
+    is that those two seams are separately attributable. A `decide` reappearing anywhere means
+    the two questions have been merged again.
+
+    `interpret` and `on_rejected` go with it: the Listener owns ingestion, and answering a
+    rejection is `Planner.replan`.
+    """
+    offenders = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and \
+                    node.name in ("decide", "interpret", "on_rejected"):
+                offenders.append(
+                    f"{path.relative_to(SRC.parent)}:{node.lineno}: defines {node.name}()")
+    assert offenders == [], "\n".join(offenders)
+
+
+def test_nothing_defines_the_deleted_legacy_names():
+    """Each of these was a class the `decide` contract needed, and each is gone.
+
+    A name reappearing is not necessarily wrong - but it is a decision, and it should fail a
+    test rather than arrive in a diff nobody connects to the phase that removed it. The
+    rulings the deleted modules carried survive elsewhere and are named where they landed:
+    bounded retry per experiment is `Planner.replan`, the concurrency hold is the Deployer's
+    in-flight cap, and the reasoner owning `interpret` is the Listener owning ingestion.
+    """
+    found = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name in DELETED_IN_PHASE_11:
+                found.append(f"{path.relative_to(SRC.parent)}:{node.lineno}: {node.name}")
+    assert found == [], "\n".join(found)
+
+
+def test_the_decision_union_is_gone_and_nothing_imports_it():
+    """`ComposeAndRun`, `Backtrack`, `Stop` and the `Decision` union were what a policy
+    returned. None of them is a thing any reasoner returns now: a Stage is what a Planner
+    emits, a Spec revision is what a Specifier emits, stopping is the executor's call on the
+    Listener's request, and branching from an earlier node is `SpecObjective.parent_node`.
+
+    **Two names survive, each because it is not a decision.** `RequestHuman` is the payload of
+    `CampaignSession.request_human`, a live operation that parks a campaign and records the
+    question; the control plane exposes it.
+
+    And `ExperimentIntent`, which is the one with a reason worth stating:
+    `Composer.compose` takes a chain and a width, which is what computing a trust signature at
+    a declared replica width needs (`impress-a trust --assert`) and what validating a chain
+    needs (`impress-a validate-tasks`). Neither is a policy decision, so ADR 0010's clause
+    about policies emitting abstract intent is amended rather than this type deleted: a
+    `Stage` of `TaskMapping`s is what a reasoner emits, and this is a composer input.
+    """
+    gone = {"Decision", "ComposeAndRun", "Backtrack", "Stop"}
+    offenders = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name in gone:
+                offenders.append(f"{path.relative_to(SRC.parent)}:{node.lineno}: {node.name}")
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in gone:
+                        offenders.append(f"{path.relative_to(SRC.parent)}:{node.lineno}: "
+                                         f"imports {alias.name}")
+    assert offenders == [], "\n".join(offenders)
+
+    from impress_a.core.decision import ExperimentIntent, RequestHuman
+    assert ExperimentIntent is not None, "the composer's input must still exist"
+    assert RequestHuman is not None, "a live session operation's payload must still exist"

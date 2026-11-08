@@ -31,10 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .agentic import FourNodePolicy
-from .explicit import ReplayPolicy, ThresholdPolicy
-from .external import ExternalPolicy
-from .oracle import OraclePolicy, RehearsalOracle
+from .oracle import RehearsalOracle
 from .planners import (
     AgenticPlanner,
     ExternalPlanner,
@@ -49,7 +46,7 @@ from .specifiers import (
     ReplaySpecifier,
     ThresholdSpecifier,
 )
-from .wrappers import NullPlanner, NullPolicy, NullSpecifier
+from .wrappers import NullPlanner, NullSpecifier
 
 
 @dataclass(frozen=True)
@@ -119,18 +116,15 @@ class ReasonerModel:
     llm_calls: int
     #: What the specification asks for: `none | per-node | single-call | external`.
     llm_shape: str
-    #: `implemented | partial | stub`. Asserted against the class in
-    #: `tests/test_reasoner_registry.py` - a model claiming `implemented` whose `decide` is
-    #: still `BasePolicy`'s `NotImplementedError` fails the suite.
+    #: `implemented | partial | stub`. Checked in `tests/test_reasoner_registry.py` against
+    #: what the halves actually do - a claim nobody verifies goes stale quietly, and `docs/`
+    #: described four working control models while two had no LLM behind them.
     status: str
-    cls: type
-    build: Callable[[ReasonerOptions], Any]
-    #: The two halves. `None` means "derive them from `build`", which is what every model
-    #: does while the strangler is in place: `DecideAsRoles` presents a `ControlPolicy` as a
-    #: Specifier/Planner pair, so `--model X --control roles` runs the same decisions through
-    #: the role pipeline. Phase 9 fills these in per model, and the pair stops being derived.
-    specifier: Callable[[ReasonerOptions], Any] | None = None
-    planner: Callable[[ReasonerOptions], Any] | None = None
+    #: The two halves. **Required**, both of them (phase 11): the `decide(obs) -> Decision`
+    #: contract and the `DecideAsRoles` adapter that presented a policy as a pair are gone, so
+    #: a model with no halves is a model that cannot run. `build_roles` is the only builder.
+    specifier: Callable[[ReasonerOptions], Any]
+    planner: Callable[[ReasonerOptions], Any]
     #: Why the status is not `implemented`, or what is true of this model that a reader
     #: would otherwise have to learn from a backlog item. Printed by `impress-a models`.
     note: str = ""
@@ -138,12 +132,6 @@ class ReasonerModel:
     #: (`CLAUDE.md`), but for the control models it is still the only full treatment, so
     #: pointing at it beats pointing at nothing.
     spec_ref: str = ""
-
-
-def _threshold(o: ReasonerOptions) -> ThresholdPolicy:
-    """Model D, and the fallback every other model degrades into."""
-    return ThresholdPolicy(stages=o.stages, max_cycles=o.max_cycles,
-                           target_front=o.target_front)
 
 
 def _spec_d(o: ReasonerOptions) -> ThresholdSpecifier:
@@ -207,12 +195,6 @@ def _plan_replay(o: ReasonerOptions) -> ReplayPlanner:
     return ReplayPlanner(o.stage_records if o.stage_records is not None else o.records)
 
 
-def _build_a(o: ReasonerOptions) -> FourNodePolicy:
-    return FourNodePolicy(stages=o.stages, max_cycles=o.max_cycles,
-                          target_front=o.target_front, reasoner=o.reasoner,
-                          sink=o.sink)
-
-
 def _oracle(o: ReasonerOptions) -> Any:
     """The model model B talks to: the one declared, or the rehearsal with THIS campaign's
     chain and stopping numbers.
@@ -226,16 +208,7 @@ def _oracle(o: ReasonerOptions) -> Any:
     """
     if o.oracle is not None:
         return o.oracle
-    return RehearsalOracle(stages=o.stages, max_cycles=o.max_cycles,
-                           target_front=o.target_front)
-
-
-def _build_b(o: ReasonerOptions) -> OraclePolicy:
-    # A declared fallback is mandatory for the oracle: an API outage must degrade
-    # explicitly, never stall a multi-GPU allocation (Part A risk R7). Built here rather
-    # than defaulted inside `OraclePolicy` so it carries the campaign's own chain.
-    return OraclePolicy(model=_oracle(o), fallback=o.fallback or _threshold(o),
-                        sink=o.sink)
+    return RehearsalOracle(stages=o.stages)
 
 
 def _spec_b(o: ReasonerOptions) -> OracleSpecifier:
@@ -250,28 +223,10 @@ def _plan_b(o: ReasonerOptions) -> OraclePlanner:
                          fallback=o.fallback or _plan_d(o), sink=o.sink)
 
 
-def _build_c(o: ReasonerOptions) -> ExternalPolicy:
-    return ExternalPolicy(timeout_s=o.timeout_s, on_timeout=o.on_timeout,
-                          fallback=o.fallback or _threshold(o), sink=o.sink)
-
-
-def _build_replay(o: ReasonerOptions) -> ReplayPolicy:
-    # Refuse rather than raise `TypeError` from a positional argument nobody passed.
-    # `build_policy` used to call `cls()` for anything that was not A/B/C/D, so
-    # `--model replay` died before the campaign started, with a traceback that named
-    # `records` and not the missing flag.
-    if o.records is None:
-        raise ValueError(
-            "replay needs a recorded decision sequence: pass --replay-from <provenance "
-            "dir>. A replay with no records is a different campaign, not a degraded one")
-    return ReplayPolicy(o.records)
-
-
 MODELS: dict[str, ReasonerModel] = {
     "A": ReasonerModel(
         letter="A", name="four-node agentic loop", mode="autonomous",
         llm_calls=0, llm_shape="per-node", status="partial",
-        cls=FourNodePolicy, build=_build_a,
         specifier=_spec_a, planner=_plan_a,
         note="FOUR nodes now, two per half - `hypothesize`/`analyze` on the Specifier and "
              "`select_tasks`/`parameterize` on the Planner - and the `reasoner` seam is "
@@ -284,7 +239,6 @@ MODELS: dict[str, ReasonerModel] = {
     "B": ReasonerModel(
         letter="B", name="heavyweight LLM oracle", mode="autonomous",
         llm_calls=0, llm_shape="single-call", status="partial",
-        cls=OraclePolicy, build=_build_b,
         specifier=_spec_b, planner=_plan_b,
         note="two halves, two schemas: `SPEC_SCHEMA` answers in the Spec's vocabulary "
              "(metrics and thresholds, never a tool) and `STAGE_SCHEMA` in the engine's "
@@ -299,7 +253,6 @@ MODELS: dict[str, ReasonerModel] = {
     "C": ReasonerModel(
         letter="C", name="external caller steering", mode="headless",
         llm_calls=0, llm_shape="external", status="implemented",
-        cls=ExternalPolicy, build=_build_c,
         specifier=_spec_c, planner=_plan_c,
         note="two role inboxes, routed by a `role` key inside the directive `steer` already "
              "carries, so one headless mode stays one mode (decision 0002) and no plane "
@@ -311,7 +264,6 @@ MODELS: dict[str, ReasonerModel] = {
     "D": ReasonerModel(
         letter="D", name="explicit policy", mode="autonomous",
         llm_calls=0, llm_shape="none", status="implemented",
-        cls=ThresholdPolicy, build=_threshold,
         specifier=_spec_d, planner=_plan_d,
         note="the scientific control: reproducible end to end, and the baseline the other "
              "models must justify their cost against. `ThresholdSpecifier` maps the Goal onto "
@@ -324,7 +276,6 @@ MODELS: dict[str, ReasonerModel] = {
     "null": ReasonerModel(
         letter="null", name="no-op baseline", mode="autonomous",
         llm_calls=0, llm_shape="none", status="implemented",
-        cls=NullPolicy, build=lambda o: NullPolicy(),
         specifier=lambda o: NullSpecifier(), planner=lambda o: NullPlanner(),
         note="stops immediately; a control and a smoke test. The halves need no special "
              "case anywhere: an empty Spec makes `complete()` true, so the Listener stops "
@@ -334,7 +285,6 @@ MODELS: dict[str, ReasonerModel] = {
     "replay": ReasonerModel(
         letter="replay", name="replay a recorded campaign", mode="autonomous",
         llm_calls=0, llm_shape="none", status="partial",
-        cls=ReplayPolicy, build=_build_replay,
         specifier=_spec_replay, planner=_plan_replay,
         note="provenance as an executable artifact, and the halves are strictly better than "
              "the policy: `specs.jsonl` and `stages.jsonl` are EXECUTOR-written, so the "
@@ -345,15 +295,8 @@ MODELS: dict[str, ReasonerModel] = {
         spec_ref="planning/phase1-partB-architecture/02-control-models.md section 5"),
 }
 
-#: The shape `cli.POLICIES` had, derived rather than restated.
-CLASSES: dict[str, type] = {k: m.cls for k, m in MODELS.items()}
-
-
-def build(letter: str, options: ReasonerOptions | None = None) -> Any:
-    """Construct one reasoner. Raises `KeyError` with the known letters on a bad one."""
-    if letter not in MODELS:
-        raise KeyError(f"unknown control model {letter!r}; known: {sorted(MODELS)}")
-    return MODELS[letter].build(options or ReasonerOptions())
+#: The letters `--model` accepts, derived rather than restated. `cli.POLICIES` reads this.
+LETTERS: tuple[str, ...] = tuple(sorted(MODELS))
 
 
 class RolePair:

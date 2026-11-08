@@ -6,7 +6,7 @@ special case (Part B doc 06).
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,30 +32,22 @@ class ExperimentIntent(BaseModel):
     replicas: int = 1
 
 
-class ComposeAndRun(BaseModel):
-    kind: Literal["compose_and_run"] = "compose_and_run"
-    intent: ExperimentIntent
-    rationale: str = ""
-
-
-class Backtrack(BaseModel):
-    kind: Literal["backtrack"] = "backtrack"
-    node_id: str
-    rationale: str = ""
-
-
 class RequestHuman(BaseModel):
+    """A question a campaign cannot answer for itself.
+
+    The one member of the deleted `Decision` union that survives, because it is not a
+    decision: it is the payload of `CampaignSession.request_human`, a live operation that
+    parks a campaign and records the question, and `control/plane.py` exposes it. The others -
+    `ComposeAndRun`, `Backtrack`, `Stop` and the `Decision` union itself - were what a
+    `decide` policy RETURNED, and in this design none of them is anything a reasoner returns:
+    a Stage is what a Planner emits, a Spec revision is what a Specifier emits, stopping is
+    the executor's call on the Listener's request, and branching from an earlier node is
+    `SpecObjective.parent_node`.
+    """
+
     kind: Literal["request_human"] = "request_human"
     question: str
     context: dict[str, Any] = Field(default_factory=dict)
-
-
-class Stop(BaseModel):
-    kind: Literal["stop"] = "stop"
-    reason: str
-
-
-Decision = Union[ComposeAndRun, Backtrack, RequestHuman, Stop]
 
 
 class ValidationFailure(BaseModel):
@@ -94,10 +86,6 @@ class CampaignObservation(BaseModel):
     recent: list[DesignNode] = Field(default_factory=list)
     failures: list[str] = Field(default_factory=list)
     budget: BudgetLedger = Field(default_factory=BudgetLedger)
-    #: Bare tool ids. Superseded by `toolkit` below and removed in phase 11: a reasoner given
-    #: only ids cannot choose by output type, cannot see a parameter's range and cannot know
-    #: which parameters are frozen, so it guesses or hardcodes - which is backlog H3.
-    available_tools: list[str] = Field(default_factory=list)
     #: The Toolkit as a reasoner may see it: typed ports, parameter ranges, what each
     #: parameter trades, which are frozen and why, and the toolkits' own skill documents.
     toolkit: ToolkitView | None = None

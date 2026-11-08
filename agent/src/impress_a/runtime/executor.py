@@ -169,12 +169,6 @@ class CampaignSpec:
     # a policy asks for, so a policy never has to know a tool's parameter names.
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
     replicas: int = 0         # cap on lineages per experiment; 0 = policy decides
-    # Which control vocabulary drives this campaign. `legacy` is the single `decide(obs)`
-    # seam; `roles` is the Spec Loop + Planning Loop pipeline. Both run the same composition,
-    # validation, execution and state, which is what makes the two comparable - see
-    # `test_roles_pipeline_reproduces_the_legacy_campaign`. Phase 11 deletes `legacy` and this
-    # field with it.
-    control: str = "legacy"
 
 
 @dataclass
@@ -463,7 +457,7 @@ class CampaignExecutor:
             # toolkit was available - the mock-chain-on-a-GPU hazard surviving in the half
             # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
             # this one is derived from the other.
-            budget=self.budget, available_tools=self._toolkit.ids,
+            budget=self.budget,
             toolkit=self._toolkit, stages=list(self.spec.stages), spec=self.spec_state,
             orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)

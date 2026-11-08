@@ -25,7 +25,7 @@ from ..core.pareto import Objective
 from ..core.session import CampaignStopped
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
-from ..policy.wrappers import RuleCorrectionsPolicy, StageGuard
+from ..policy.wrappers import StageGuard
 from ..runtime.roles import RolesDriver
 from ..tools.registry import Registry
 
@@ -37,7 +37,10 @@ log = logging.getLogger(__name__)
 # Derived, not restated. The taxonomy lives in `policy/registry.py` so that it is not a
 # CLI detail; this name is kept because `slides/api/run_model.py` reads it to generate the
 # deck's model count, and a deck that disagrees with the code is the drift this avoids.
-POLICIES = reasoners.CLASSES
+#
+# `LETTERS` rather than the old `CLASSES`: a model is no longer a `ControlPolicy` class, so
+# there is no class to name. It is two builders, and the letter is what selects them.
+POLICIES = reasoners.LETTERS
 
 #: The subcommands `main` registers. Declared once because `slides/api/run_model.py` reads
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
@@ -93,7 +96,6 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # `sites/*.yaml`'s `tool_delivery` switch has been doing since it was written (E1),
         # and what `control_liveness_timeout_s: 120` did in all three Delta specs until this
         # line existed.
-        control=d.get("control", "legacy"),
         runner=d.get("runner", "dispatcher"),
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
@@ -120,79 +122,65 @@ def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
             "Boltz will silently model no ligand. Set it to the real target's SMILES.")
 
 
-def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
-                 records: list[dict[str, Any]] | None = None,
-                 profile: str | None = None):
-    """Adapt a `CampaignSpec` into the registry's options, and construct the reasoner.
-
-    This function is the adapter and nothing more. `policy/registry.py` owns which models
-    exist and how each is built; it cannot do this part itself, because `CampaignSpec`
-    lives in `runtime/` and `policy` may import `core` only (ADR 0010, asserted by
-    `tests/test_layering.py`). Putting the spec on the other side of that line is what
-    would make control models stop being swappable.
-
-    `stages` has to reach the policy or every model falls back to its built-in default,
-    which is the mock chain - so a real campaign would validate the real toolkits and
-    then execute mocks.
-    """
-    # `max_cycles` IS forwarded now, and the earlier reasoning for withholding it was half
-    # right. Withholding avoided bounding the same thing from two places, which is how an
-    # off-by-one became invisible (the driver counted a Backtrack as a cycle for three Delta
-    # jobs). But it left every model carrying `ReasonerOptions.max_cycles`'s default of 6,
-    # which does not merely duplicate the campaign's bound - it is TIGHTER than it. A 4-hour
-    # arm with `max_cycles: 200` would have made six decisions in about twenty minutes and then
-    # stopped itself, spending roughly 8% of the allocation. That is the worse of the two
-    # failures, and it is silent.
-    #
-    # Forwarding the spec's own value makes the policy's self-stop no tighter than the
-    # campaign's, so the driver remains the authority and a policy can still stop early for its
-    # own reasons. `target_front` comes from the spec for the same reason: 3 is a sensible
-    # default for a demo and an arbitrary cap on a campaign asked for ten designs, and a
-    # campaign that declares neither keeps the model's own number.
-    pol = reasoners.build(model, reasoners.ReasonerOptions(
-        stages=list(spec.stages) or None,
-        oracle=_oracle_for(profile, spec),
-        max_cycles=spec.max_cycles,
-        target_front=spec.target_front or reasoners.ReasonerOptions().target_front,
-        records=records,
-    ))
-    if guard:
-        pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
-    return pol
-
-
 def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 records: list[dict[str, Any]] | None = None,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
                 stage_records: list[dict[str, Any]] | None = None,
                 profile: str | None = None, caller_timeout_s: float | None = None):
-    """The same adapter, for the two halves.
+    """Adapt a `CampaignSpec` into the registry's options, and build the two halves.
 
-    Two guard shapes, because there are two kinds of half. A pair derived from a
-    `ControlPolicy` is guarded by wrapping that policy once - it is the thing making the
-    decisions, so wrapping it is wrapping both halves. A model with real halves is guarded by
-    `StageGuard` on the planner, which is narrower than its predecessor on purpose: the
-    replica cap now binds in the executor and a task serving no objective is refused by the
-    Reviewer, so what is left to wrap is `forbid_tools` until phase 10's gate 6 takes it over.
+    This function is the adapter and nothing more. `policy/registry.py` owns which models
+    exist and how each half is built; it cannot do this part itself, because `CampaignSpec`
+    lives in `runtime/` and `policy` may import `core` only (ADR 0010, asserted by
+    `tests/test_layering.py`). Putting the spec on the other side of that line is what would
+    make control models stop being swappable.
 
-    `--no-guard` therefore stops being able to switch off either of the two checks that
-    matter, which it never should have been able to do.
+    `stages` has to reach the halves or a model falls back to its built-in default, which is
+    the mock chain - so a real campaign would validate the real toolkits and then execute
+    mocks.
+
+    The guard is `StageGuard` on the planner, and it is narrower than the policy-level
+    wrapper it replaces: the replica cap now binds in the executor and a task serving no
+    objective is refused by the Reviewer, so what is left to wrap is `forbid_tools` until
+    gate 6 takes that over too. `--no-guard` therefore cannot switch off either of the two
+    checks that matter, which it never should have been able to.
     """
-    opts = reasoners.ReasonerOptions(
+    # `max_cycles` and `target_front` are forwarded, and the reasoning for once withholding
+    # them was half right (backlog X1). Withholding avoided bounding the same thing from two
+    # places, which is how an off-by-one went invisible for three Delta jobs. But it left every
+    # model carrying `ReasonerOptions.max_cycles`'s default of 6, which does not merely
+    # duplicate the campaign's bound - it is TIGHTER than it: a four-hour arm declaring
+    # `max_cycles: 200` would have decided six times in about twenty minutes, stopped itself,
+    # and reported a clean campaign on 8% of its allocation. That is the worse of the two
+    # failures, and the silent one. `target_front` is the same shape with nothing else behind
+    # it at all, and 0 keeps the model's own number.
+    opts = _options_for(spec, records, spec_records, stage_records, profile,
+                        caller_timeout_s)
+    pair = reasoners.build_roles(specifier or model, planner or model, opts)
+    if guard:
+        pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    return pair
+
+
+def _options_for(spec: CampaignSpec,
+                 records: list[dict[str, Any]] | None = None,
+                 spec_records: list[dict[str, Any]] | None = None,
+                 stage_records: list[dict[str, Any]] | None = None,
+                 profile: str | None = None,
+                 caller_timeout_s: float | None = None) -> reasoners.ReasonerOptions:
+    """A `CampaignSpec` as the registry's plain-data options. The whole adapter, named.
+
+    Named so a test can assert what reaches the halves without building them, which is what
+    backlog X1 is about: the bound a model carries must not be tighter than the campaign's.
+    """
+    return reasoners.ReasonerOptions(
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
         oracle=_oracle_for(profile, spec),
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
-    if specifier or planner or _declares_halves(specifier or model, planner or model):
-        pair = reasoners.build_roles(specifier or model, planner or model, opts)
-        if guard:
-            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
-        return pair
-    pol = build_policy(model, spec, guard, records)
-    return reasoners.RolePair(*_halves_of(pol), label=model)
 
 
 def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
@@ -407,7 +395,6 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
         return 1
     for var, val in _thread_caps(spec).items():
         os.environ.setdefault(var, val)
-    spec.control = "roles"
     reg = Registry().load()
     reasoner: Any = _Idle()
     if model:
@@ -478,15 +465,10 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
         stages=stages or None,
         oracle=_oracle_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
                                                  stages=list(stages))))
-    if specifier or planner or _declares_halves(specifier or model, planner or model):
-        pair = reasoners.build_roles(specifier or model, planner or model, opts)
-        if guard:
-            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
-        return pair
-    pol = reasoners.build(model, opts)
+    pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
-        pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
-    return reasoners.RolePair(*_halves_of(pol), label=model)
+        pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    return pair
 
 
 def compare_command(dirs: list[str], control: str = "D", theta: float | None = None,
@@ -590,22 +572,6 @@ def print_models() -> int:
     return 0
 
 
-def _replay_records(path: str) -> list[dict[str, Any]]:
-    """Load a recorded decision sequence from a campaign's provenance directory.
-
-    `provenance/decisions.jsonl` is what `LoggingPolicy` and the models that carry their
-    own sink write. Reading it here rather than in `ReplayPolicy` keeps the policy layer
-    off the filesystem, which is the same reason policies never touch `tools`.
-    """
-    p = Path(path)
-    if p.is_dir():
-        p = p / "provenance" / "decisions.jsonl" if (p / "provenance").is_dir() \
-            else p / "decisions.jsonl"
-    if not p.is_file():
-        raise FileNotFoundError(f"no decisions.jsonl under {path}")
-    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
-
-
 def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """`(specs, stages)` from a recorded campaign, for the two replay halves.
 
@@ -613,8 +579,9 @@ def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str
     why the halves can replay a campaign run by a model that kept no notes of its own, where
     `decisions.jsonl` only holds what a model chose to record about itself.
 
-    Read here rather than in the policy layer, for the reason `_replay_records` gives: a
-    policy that touches the filesystem is a policy that can reach past `core`.
+    Read here rather than in the policy layer: a reasoner that touches the filesystem is one
+    that can reach past `core`, which is the import contract `tests/test_layering.py`
+    asserts.
     """
     root = Path(path)
     prov = root / "provenance" if (root / "provenance").is_dir() else root
@@ -625,7 +592,8 @@ def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str
             raise FileNotFoundError(
                 f"no {name} under {path}. The replay halves read the executor's own record; "
                 f"a campaign recorded before `specs`/`stages` provenance existed can only be "
-                f"replayed with `--control legacy`")
+                f"replayed at all - the `decisions.jsonl` path was deleted with "
+                f"the `decide` contract in phase 11")
         out.append([json.loads(line) for line in f.read_text().splitlines() if line.strip()])
     return out[0], out[1]
 
@@ -707,7 +675,7 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
-                       replay_from: str | None = None, control: str | None = None,
+                       replay_from: str | None = None,
                        specifier: str | None = None, planner: str | None = None,
                        profile: str | None = None) -> int:
     t0 = time.monotonic()
@@ -742,27 +710,18 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
             "    impress-a control --connect <url> --campaign <id> --model C",
             reasoners.ReasonerOptions().timeout_s, spec_path)
         return 1
-    if specifier or planner:
-        control = "roles"
-    if control:
-        spec.control = control
     label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
     spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
-        # Only the record the chosen path will actually use is loaded. The halves read the
-        # executor's own `specs.jsonl` and `stages.jsonl`; the legacy path reads the
-        # `decisions.jsonl` each model wrote for itself. Loading both would mean a campaign
-        # recorded before `specs`/`stages` provenance existed could not be replayed even
-        # under `--control legacy`, which is the one path that needs nothing from them.
-        if spec.control == "roles":
-            spec_records, stage_records = (
-                _replay_role_records(replay_from) if replay_from else (None, None))
-            policy = build_roles(model, spec, guard, None, specifier, planner,
-                                 spec_records, stage_records, profile)
-        else:
-            policy = build_policy(model, spec, guard,
-                                  _replay_records(replay_from) if replay_from else None,
-                                  profile)
+        # The replay halves read the executor's own `specs.jsonl` and `stages.jsonl`. The
+        # `decisions.jsonl` each model used to write for itself is no longer a replay source:
+        # `ReplayPolicy` and the `decide` contract it replayed were deleted in phase 11, and
+        # the executor-written records are strictly better anyway - they exist for every model
+        # whether or not it kept notes, and a reasoner cannot write a flattering one.
+        spec_records, stage_records = (
+            _replay_role_records(replay_from) if replay_from else (None, None))
+        policy = build_roles(model, spec, guard, None, specifier, planner,
+                             spec_records, stage_records, profile)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -783,9 +742,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                  _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
         if _m.note:
             log.info("control model %s caveat: %s", _m.letter, _m.note)
-    log.info("control vocabulary: %s%s", spec.control,
-             f" (specifier={specifier or model}, planner={planner or model})"
-             if spec.control == "roles" else "")
+    log.info("halves: specifier=%s planner=%s", specifier or model, planner or model)
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
@@ -1054,15 +1011,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", default="D", choices=sorted(POLICIES))
     # The two halves. `--model X` takes both from one row, which keeps a four-arm comparison
     # one-variable; naming them separately takes one from each, which is what makes it
-    # measurable whether specification or planning is where a model earns its cost. Either
-    # form implies `--control roles`, because a Specifier has nowhere to run in the legacy
-    # single-`decide` path.
+    # measurable whether specification or planning is where a model earns its cost.
+    #
+    # `--control` is gone (phase 11). It chose between the `decide` vocabulary and the role
+    # one, and there is only one now.
     r.add_argument("--specifier", default=None, choices=sorted(POLICIES),
-                   help="Specifier half (implies --control roles)")
+                   help="Specifier half, when it should come from a different model")
     r.add_argument("--planner", default=None, choices=sorted(POLICIES),
-                   help="Planner half (implies --control roles)")
-    r.add_argument("--control", default=None, choices=("legacy", "roles"),
-                   help="control vocabulary (default: the campaign spec's, which is legacy)")
+                   help="Planner half, when it should come from a different model")
     r.add_argument("--no-guard", action="store_true")
     r.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS",
                    help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
@@ -1143,8 +1099,8 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat, a.replay_from,
-                                        control=a.control, specifier=a.specifier,
-                                        planner=a.planner, profile=a.model_profile))
+                                        specifier=a.specifier, planner=a.planner,
+                                        profile=a.model_profile))
     if a.cmd == "models":
         return print_models()
     if a.cmd == "serve":

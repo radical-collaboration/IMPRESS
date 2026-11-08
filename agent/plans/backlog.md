@@ -1049,6 +1049,41 @@ paid for out of the first allocation.
     own 3) rather than an inferred one, because how many designs a campaign wants is a property of
     the Goal and `core.pareto.Objective` says nothing about it.
 
+## The legacy decision path is gone (phase 11)
+
+`decide(obs) -> Decision` and everything that implemented it were deleted: `policy/driver.py`,
+`policy/legacy.py`, `policy/base.py`, the four policy classes, `NullPolicy`, the policy-level
+wrappers, `CampaignSpec.control`, `CampaignObservation.available_tools`, and the `Decision` union
+(`ComposeAndRun`, `Backtrack`, `Stop`). A reasoner is now a Specifier/Planner pair or a `conduct`
+implementation, and `manager._reasoner` raises `TypeError` for anything else -
+`tests/test_layering.py::test_no_module_defines_decide` is the mechanical proof.
+
+**Three rulings the deleted modules carried survive, and here is where each landed.** Bounded
+retry per experiment is `Planner.replan`, bounded by `runtime/roles.py::_deploy` and
+independently by the executor. The concurrency hold is the Deployer's in-flight cap. And
+`_collect`'s rule that the reasoner owns `interpret` is the Listener owning ingestion - which is
+the structural version of it rather than a hook, so the executor never reaches into a reasoner
+at all.
+
+**Two names survive with reasons.** `RequestHuman` is the payload of
+`CampaignSession.request_human`, a live operation. `ExperimentIntent` is the composer's input: a
+chain and a width, which is what `impress-a trust --assert` needs to compute a signature at a
+declared replica width and what `impress-a validate-tasks` needs to run a chain once. ADR 0010 is
+amended accordingly rather than the type deleted.
+
+**Two tests were deleted because their purpose finished**, not because they became inconvenient.
+`test_roles_pipeline_reproduces_the_legacy_campaign` was the strangler's seam - it ran the same
+policy down both control paths over five policy shapes, and it is what made every phase's failure
+attributable to that phase. There is one path now. `test_a_stage_round_trips_through_an_intent`
+pinned the two adapters that let phase 1 avoid touching `compose/` and `exec/`; both are gone.
+What they protected lives in `test_split_process.py` (one process against a socket) and
+`test_remote_session.py` (inside the process against outside it).
+
+**One defect surfaced by the deletion.** Removing the tail truncation showed that it had been
+defeating the interlock's one-instance-in-flight rule: truncation changes the graph's SHAPE, so a
+refused instance was re-admitted as a different pattern. Two concurrency tests were passing
+because of it, and both stopped admitting anything the moment it went.
+
 ## Verification that applies to any item
 
 **`impress-a validate-tasks <spec>` on an allocation, before trusting a toolkit.** It executes

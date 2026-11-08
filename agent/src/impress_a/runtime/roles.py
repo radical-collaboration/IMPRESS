@@ -23,11 +23,16 @@ The four responsibilities, and where each one lives in `conduct`:
 * **Planner** - `plan`/`replan`, with bounded retry per experiment.
 * **Deployer** - `_deploy`: submit, and hold at most `concurrency` experiments open.
 
-Phase 1 keeps two pieces of scaffolding, both named and both deleted later: `_intent_for`,
-which renders a Stage back into the `ExperimentIntent` the executor already accepts (phase 3
-gives the executor `submit_stage` and this goes), and the `LegacyPlanner` overflow attributes,
-which carry the three non-planning members of the old Decision union (phase 11 goes with
-`ControlPolicy`).
+Both pieces of phase 1's scaffolding are gone (phase 11). `_intent_for` rendered a Stage back
+into an `ExperimentIntent` because the executor had no other submit path; `submit_stage` is that
+path now. And the `LegacyPlanner` overflow attributes carried the three non-planning members of
+the old `Decision` union - Stop, Backtrack, RequestHuman - which have no equivalent here because
+in this design they are not decisions a planner makes: stopping is the Listener's request and the
+executor's call, and branching from an earlier node is a `SpecObjective.parent_node`.
+
+So a Planner that returns no Stage has exactly one meaning, and `conduct` acts on it directly:
+there is nothing left to plan. A Specifier that wants the campaign to end says so by leaving no
+objective open, which makes `Spec.complete()` true - the designed path, with no special case.
 """
 from __future__ import annotations
 
@@ -35,33 +40,13 @@ import logging
 from typing import Any
 
 from ..core.data import DataRegistry, TaskFuture
-from ..core.decision import ExperimentIntent
 from ..core.goal import Goal
 from ..core.session import CampaignSession, CampaignStopped, SubmissionRejected
 from ..core.spec import ObjectiveStatus, Spec, SpecRevision, Stage
-from ..policy.legacy import LegacyPlanner
 from ..policy.planner import PlanningContext
 from ..policy.specifier import SpecEvidence
 
 log = logging.getLogger(__name__)
-
-
-def _intent_for(stage: Stage, goal: Goal) -> ExperimentIntent:
-    """Stage -> an equivalent intent. No longer on the submit path; kept for one test.
-
-    `session.submit_stage` is the submit path now, so the executor composes the Stage directly
-    and the round trip this performed is gone. It survives only as the fixture for
-    `test_a_stage_round_trips_through_an_intent`, which is worth keeping as the record that
-    the two paths describe the same graph - phase 11 deletes it with `ExperimentIntent`.
-    """
-    runs = stage.runs
-    tools = [t.tool for t in runs if t.lineage == 0]
-    params: dict[str, Any] = {}
-    for t in runs:
-        if t.params:
-            params.setdefault(t.tool, {}).update(t.params)
-    return ExperimentIntent(goal=goal.text, stages=tools, params=params,
-                            replicas=stage.lineages)
 
 
 class RolesDriver:
@@ -93,7 +78,6 @@ class RolesDriver:
     async def conduct(self, session: CampaignSession) -> None:
         outstanding: list[str] = []
         turn = 0
-        branched = False
         try:
             self.spec = await self.specifier.initial_spec(self.goal)
             await self._publish(session, None)
@@ -110,22 +94,24 @@ class RolesDriver:
                                       last_rejection=obs.last_rejection)
                 stage = await self.planner.plan(self.spec, ctx)
                 if stage is None:
-                    acted = await self._handle_overflow(session, branched)
-                    if acted == "branched":
-                        branched = True
-                        continue
-                    return
+                    # One meaning, and the Planner contract says it: "I have nothing to plan."
+                    # The old union had three other ways to answer - Stop, Backtrack,
+                    # RequestHuman - and none of them is a planning decision in this design:
+                    # stopping is the executor's call on the Listener's request, and branching
+                    # from an earlier node is a `SpecObjective.parent_node`.
+                    return await session.stop(
+                        f"{getattr(self.planner, 'name', 'planner')} planned nothing at "
+                        f"cycle {turn}")
 
                 run_id = await self._deploy(session, stage, ctx, turn)
                 if run_id is None:
                     return
                 turn += 1
-                branched = False
                 outstanding.append(run_id)
 
                 # Hold at most `concurrency` experiments open. At the default of 1 this waits
-                # for each before asking again, which is the serial cycle the legacy driver
-                # preserved and which parity depends on.
+                # for each before asking again, which is the serial cycle the deleted driver
+                # held and which every parity test was written against.
                 while len(outstanding) >= self.concurrency:
                     await self._listen(session, outstanding.pop(0))
 
@@ -142,8 +128,10 @@ class RolesDriver:
         """
         outcome = await session.result(run_id)
         self.data.ingest(outcome)
-        if isinstance(self.planner, LegacyPlanner):
-            await self.planner.after_collect(outcome, await session.observe())
+        # No `after_collect` hook. The old `interpret` existed because a `decide` policy
+        # accumulated state across runs and the executor had to tell it a result had landed;
+        # the Listener owns ingestion now, which is `policy/driver.py`'s own ruling about who
+        # collects an outcome, surviving the driver's deletion.
 
     # -- Specifier -----------------------------------------------------------
     async def _respecify(self, session: CampaignSession, ev: SpecEvidence) -> None:
@@ -188,34 +176,6 @@ class RolesDriver:
                 "the two views of the Spec are no longer the same revision",
                 applied, self.spec.generation)
 
-    # -- Planner overflow (scaffolding) --------------------------------------
-    async def _handle_overflow(self, session: CampaignSession, branched: bool) -> str | None:
-        """Perform whichever non-planning action the wrapped legacy policy asked for."""
-        p = self.planner
-        if not isinstance(p, LegacyPlanner):
-            await session.stop("planner produced no stage and no reason")
-            return None
-        if p.pending_stop is not None:
-            reason, p.pending_stop = p.pending_stop, None
-            await session.stop(reason)
-            return None
-        if p.pending_human is not None:
-            question, context = p.pending_human
-            p.pending_human = None
-            await session.request_human(question, context)
-            return None
-        if p.pending_backtrack is not None:
-            node_id, rationale = p.pending_backtrack
-            p.pending_backtrack = None
-            if branched:
-                await session.stop(
-                    "policy backtracked twice without running anything between")
-                return None
-            await session.backtrack(node_id, rationale)
-            return "branched"
-        await session.stop("planner produced no stage and no reason")
-        return None
-
     # -- Deployer ------------------------------------------------------------
     async def _deploy(self, session: CampaignSession, stage: Stage,
                       ctx: PlanningContext, turn: int) -> str | None:
@@ -230,9 +190,11 @@ class RolesDriver:
             except SubmissionRejected as rejected:
                 nxt = await self.planner.replan(stage, rejected.failure, self.spec, ctx)
                 if nxt is None:
-                    acted = await self._handle_overflow(session, True)
-                    if acted is None:
-                        return None
+                    # `None` from `replan` means "I have no better Stage", which ends the
+                    # campaign with the gate that refused it named - rather than with
+                    # "planned nothing", which would say the planner never tried.
+                    await session.stop(
+                        f"rejected at {rejected.failure.gate}: {rejected.failure.reason}")
                     return None
                 stage = nxt
                 continue
