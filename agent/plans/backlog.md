@@ -188,6 +188,36 @@ their arguments are checked, their environments are not.
 (`overall_confidence` 0.525, `ligand_confidence` 0.496). `MPNN_SHIM` and the pinned `ml-collections`
 both hold on real hardware.
 
+**A6b. The batch-flags probe bypassed the shim and blamed LigandMPNN for it.** **RESOLVED**
+(2026-11-08), found by running the deep preflight on a login node before the smoke - which is
+the first time it had been run since the probe was added.
+
+`preflight` carried two probes of one binary. The imports probe ran `run.py --help` through
+`MPNN_SHIM`; the batch-flags probe, three lines below, ran `run.py` **directly** - which is the
+one thing A6 above establishes you cannot do, since the vendored openfold dies on `np.int`,
+removed in numpy 1.24. The traceback landed on stderr, so `helptext` was non-empty, neither
+flag appeared in it, and the probe reported `installed run.py does not offer --batch_size,
+--number_of_batches - the adapter passes them and would fail inside the job`. Both flags are
+declared at `run.py:846,852` and the adapter is right to pass them.
+
+So the deep preflight returned `12/14 ok` with two FAILs on a correct environment, one of them
+pointing at the wrong component, on a run whose §10 gate is **0 FAIL**. A reader following the
+message would have gone looking at LigandMPNN's version. The neighbouring row said `ligandmpnn
+imports [ok] run.py --help exited 0 in 15s` at the same moment - two probes of one binary
+disagreeing, with no way to tell from the output which to believe.
+
+One shim invocation serves both checks now, which also halves the deep probe's cost, and a
+non-zero exit is **undetermined** rather than a missing flag: a program that did not reach its
+argument parser has said nothing about its arguments. Re-run clean: **14/14 ok, exit 0**, with
+`--batch_size and --number_of_batches both offered`. Pinned by
+`tests/test_toolchain.py::test_the_batch_flag_probe_goes_through_the_shim_and_abstains_on_a_
+crash`, confirmed to fail against the old probe on the invocation itself.
+
+The general lesson is A4's, from inside the tool written to prevent it: *the probe must run
+what the job runs*. A second thing worth keeping - the other FAIL in that same output,
+`boltz not on PATH`, was an artefact of invoking `.venv/bin/impress-a` without activating the
+venv. Real on its face, caused by the harness. The launcher activates, so it never sees it.
+
 **A7. `boltz_predict` has never executed, and a budget correction is why — RESOLVED.** Not a tool failure. The
 `cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
 against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,

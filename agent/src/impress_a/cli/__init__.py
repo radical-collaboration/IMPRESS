@@ -955,6 +955,31 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     deep = (stages is None or "ligandmpnn_design" in stages) and not quick
     if quick and os.environ.get("MPNN_DIR"):
         skipped.append("ligandmpnn imports")
+    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
+    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
+    # does not have, and that survived review because nobody had run it. So the flags are
+    # checked against the installed `run.py --help` rather than trusted.
+    #
+    # ONE invocation, two checks, and THROUGH THE SHIM - which is the whole of what went wrong
+    # before. The flags probe ran `run.py` directly while this probe ran it through
+    # `MPNN_SHIM`, so the two disagreed about the same binary: the shim exits 0 in 15s and the
+    # raw call dies in its vendored openfold on `np.int`, removed in numpy 1.24. That is the
+    # documented reason the shim exists and the adapter never calls run.py directly, so a probe
+    # that bypasses it is not probing what runs. The traceback then went to stderr, `helptext`
+    # was non-empty, and the probe concluded "installed run.py does not offer --batch_size,
+    # --number_of_batches - the adapter passes them and would fail inside the job". Both flags
+    # are declared (`run.py:846,852`). So a FAIL that blocks the smoke, naming the wrong
+    # component, from a probe whose neighbour three lines up had already passed - A4's lesson
+    # arriving from inside the tool meant to prevent it.
+    #
+    # A non-zero exit is now UNDETERMINED rather than a missing flag: a program that did not
+    # reach its argument parser has said nothing about its arguments. `None` is for a probe
+    # that ran and reached no conclusion, which is exactly this.
+    mpnn_flags = ("--batch_size", "--number_of_batches")
+    want_flags = bool(stages) and "ligandmpnn_design" in (stages or ()) \
+        and bool(os.environ.get("MPNN_DIR"))
+    if quick and want_flags:
+        skipped.append("ligandmpnn batch flags")
     if (mpnn := os.environ.get("MPNN_DIR")) and deep:
         from ..tools.ligandmpnn_agents import MPNN_SHIM
         t0 = time.monotonic()
@@ -970,33 +995,14 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                            f"run.py --help exited 0 in {took:.0f}s" if ok
                            else out.stderr.decode().strip().splitlines()[-1:][0]
                            if out.stderr else f"exited {out.returncode} after {took:.0f}s"))
-        except subprocess.TimeoutExpired:
-            checks.append(("ligandmpnn imports", None,
-                           ("no result in 900s - undetermined, NOT a pass; a loaded "
-                            "Lustre mount can do this. Re-run before submitting")))
-        except (OSError, subprocess.SubprocessError) as e:
-            checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
-
-    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
-    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
-    # does not have, and that survived review because nobody had run it. So the flag is checked
-    # against the installed `run.py --help` rather than trusted.
-    mpnn_dir = os.environ.get("MPNN_DIR")
-    if quick and stages and "ligandmpnn_design" in stages and mpnn_dir:
-        skipped.append("ligandmpnn batch flags")
-    if stages and "ligandmpnn_design" in stages and mpnn_dir and not quick:
-        run_py = Path(mpnn_dir) / "run.py"
-        if run_py.is_file():
-            try:
-                helped = subprocess.run(
-                    [sys.executable, str(run_py), "--help"], capture_output=True, text=True,
-                    timeout=300, cwd=mpnn_dir)
-                helptext = helped.stdout + helped.stderr
-                missing = [f for f in ("--batch_size", "--number_of_batches")
-                           if f not in helptext]
-                if not helptext.strip():
+            if want_flags:
+                helptext = out.stdout.decode(errors="replace") + \
+                    out.stderr.decode(errors="replace")
+                missing = [f for f in mpnn_flags if f not in helptext]
+                if not ok:
                     checks.append(("ligandmpnn batch flags", None,
-                                   "`run.py --help` produced no output - undetermined"))
+                                   "run.py never reached its argument parser - undetermined; "
+                                   "see the import row above, which is the same invocation"))
                 elif missing:
                     checks.append(("ligandmpnn batch flags", False,
                                    f"installed run.py does not offer {', '.join(missing)} - "
@@ -1004,11 +1010,16 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                 else:
                     checks.append(("ligandmpnn batch flags", True,
                                    "--batch_size and --number_of_batches both offered"))
-            except subprocess.TimeoutExpired:
-                checks.append(("ligandmpnn batch flags", None,
-                               "`run.py --help` did not answer in 300s - undetermined"))
-            except (OSError, subprocess.SubprocessError) as e:
-                checks.append(("ligandmpnn batch flags", False, f"could not check: {e}"))
+        except subprocess.TimeoutExpired:
+            undetermined = ("no result in 900s - undetermined, NOT a pass; a loaded "
+                            "Lustre mount can do this. Re-run before submitting")
+            checks.append(("ligandmpnn imports", None, undetermined))
+            if want_flags:
+                checks.append(("ligandmpnn batch flags", None, undetermined))
+        except (OSError, subprocess.SubprocessError) as e:
+            checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
+            if want_flags:
+                checks.append(("ligandmpnn batch flags", None, f"could not check: {e}"))
 
     # The `impress` dependency is published on no index, so if pip ever went looking for that
     # name it installed something else - and the failure is silent, because the import succeeds

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import types
 
 import impress
 
@@ -370,6 +371,65 @@ def test_quick_preflight_skips_the_heavy_probes_and_calls_them_skipped(capsys, m
     for probe in ("pyrosetta", "ligandmpnn imports"):
         assert probe in out.split("skipped by --quick")[1], f"{probe} not named as skipped"
         assert f"[ok  ] {probe}" not in out, f"{probe} was skipped but reported ok"
+
+
+def test_the_batch_flag_probe_goes_through_the_shim_and_abstains_on_a_crash(monkeypatch,
+                                                                            capsys, tmp_path):
+    """A tool that never reached its argument parser has said nothing about its arguments.
+
+    This probe ran `run.py` DIRECTLY while the import probe three lines above it ran the same
+    file through `MPNN_SHIM`, so the two disagreed about one binary: the shim exits 0, and the
+    raw call dies in LigandMPNN's vendored openfold on `np.int`, removed in numpy 1.24. That
+    is the documented reason the shim exists and the adapter never calls `run.py` directly.
+
+    The traceback went to stderr, so `helptext` was non-empty and the flags were "not found"
+    in it - and the probe reported `installed run.py does not offer --batch_size,
+    --number_of_batches - the adapter passes them and would fail inside the job`. Both flags
+    are declared (`run.py:846,852`). A FAIL that blocks the whole smoke on §10's zero-FAIL
+    gate, naming the wrong component, from the tool written to stop exactly that.
+
+    Two things pinned: the invocation goes through the shim, and a non-zero exit is `None`
+    rather than `False`.
+    """
+    import subprocess
+
+    from impress_a import cli
+
+    # A real `run.py` on disk, because the old probe gated on `run_py.is_file()` and would
+    # otherwise emit no row at all - which would make this test pass against it for the wrong
+    # reason. The file's contents never matter: every subprocess here is faked.
+    (tmp_path / "run.py").write_text("raise SystemExit(1)\n")
+    monkeypatch.setenv("MPNN_DIR", str(tmp_path))
+    seen: list[list[str]] = []
+
+    # What the raw call actually prints, and the shape that fooled the old probe: output on
+    # stderr, no flag names in it, nothing to do with the flags.
+    crash = "AttributeError: module 'numpy' has no attribute 'int'.\n"
+
+    def fake(cmd, *a, **kw):
+        seen.append([str(c) for c in cmd])
+        # `text=` decides str or bytes, and honouring it is what lets this test run against
+        # either spelling of the probe rather than only against the one it was written for.
+        empty, err = ("", crash) if kw.get("text") else (b"", crash.encode())
+        return types.SimpleNamespace(returncode=1, stdout=empty, stderr=err)
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    cli.preflight(cli.load_spec("campaigns/delta-small-molecule-arms-smoke.yaml"))
+    out = capsys.readouterr().out
+
+    mpnn_calls = [c for c in seen if any("run.py" in part or "mpnn_run" in part for part in c)]
+    assert mpnn_calls, "the probe never invoked LigandMPNN at all"
+    for call in mpnn_calls:
+        assert any("mpnn_run.py" in part for part in call), \
+            f"LigandMPNN invoked outside the shim: {call} - the raw call dies on np.int"
+
+    flags = [ln for ln in out.splitlines() if "ligandmpnn batch flags" in ln]
+    assert flags, "the batch-flags row vanished"
+    assert "[FAIL]" not in flags[0], \
+        "a crash before argparse was reported as a missing flag - the diagnosis names the " \
+        "wrong component and blocks the smoke"
+    assert "[??" in flags[0] or "undetermined" in flags[0].lower(), \
+        f"a crash must read as undetermined, got: {flags[0]}"
 
 
 def test_documented_command_lines_parse():
