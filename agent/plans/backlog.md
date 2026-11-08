@@ -412,10 +412,21 @@ confirms the names". This is that out_dir. Of four guesses, two were right
     ca_deviation    -> metrics.max_ca_deviation            wrong NAME; it is a max, not a mean
     ligand_clashes  -> metrics.n_clashing.ligand_clashes   right name, wrong DEPTH
 
-The flattener went one level, which reached `metrics.*` and stopped one short of
-`n_clashing`. Both fixed, with the observed spellings first in `SIDECAR_KEYS` and the guesses
-kept behind them. `max_ca_deviation` being a maximum matters for anything that later gates on
-it. Pinned by a regression test built from the real file's shape.
+**The second of those was then misdiagnosed, and the re-run caught it.** The dot is part
+of the key: `metrics` is a FLAT dict holding the literal key `"n_clashing.ligand_clashes"`,
+and there is no `n_clashing` object. It was first read as two levels of nesting and "fixed"
+by making the flattener descend twice - which job 23670891 duly failed, still missing
+`ligand_clashes` while `ca_deviation` now came back fine.
+
+The cause of the misreading is worth keeping: the diagnostic was a recursive key-printer that
+joins nested keys with dots, so it renders `{"a": {"b": 1}}` and `{"a.b": 1}` identically. It
+could not answer the question it was being asked, and nothing about its output said so.
+Settled by printing `list(metrics)` instead. The speculative two-level descent was removed
+rather than left in as insurance - an unexercised branch written against a shape nobody has
+seen is the same guesswork that put the wrong names in this file to begin with - and the
+regression test is built from `list(metrics)` on the real file, so a nested fixture cannot
+make it pass again. `max_ca_deviation` being a maximum matters for anything that later gates
+on it.
 
 **G5b. `filter_shape` could not run at all.** PyRosetta rejected the RosettaScripts XML:
 `Element 'ResidueProperty': This element is not expected`. 0 of 1 rows, and the chain stopped

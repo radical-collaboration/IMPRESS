@@ -1828,17 +1828,18 @@ def test_the_rfd3_sidecar_metrics_come_from_the_shape_rfd3_actually_writes(tmp_p
     `metrics_declared_and_finite` integrity row on exactly those two - while `helix_fraction`
     and `sheet_fraction`, guessed in the same breath, came back fine.
 
-    What the file actually holds:
+    What the file actually holds, inside one top-level `metrics` object:
 
-        metrics.max_ca_deviation            the name was wrong - it is a MAX, not a mean
-        metrics.n_clashing.ligand_clashes   the name was right, the DEPTH was wrong
-        metrics.helix_fraction              guessed right
-        metrics.sheet_fraction              guessed right
+        max_ca_deviation            the name was wrong - it is a MAX, not a mean
+        n_clashing.ligand_clashes   the name was right, the SPELLING wrong
+        helix_fraction              guessed right
+        sheet_fraction              guessed right
 
-    So this fixture is the observed shape, trimmed, and it is the regression test for both
-    kinds of mistake at once: a renamed key and a key one level deeper than the flattener
-    reached. A one-level flatten reaches `metrics.*` and stops, which is why one sibling was
-    found and the other was not.
+    **The dot in `n_clashing.ligand_clashes` is part of the key, not a path.** `metrics` is
+    flat; there is no `n_clashing` object. That was misread once in the other direction, and
+    the fixture below is written from `list(metrics)` on the real file precisely so the
+    distinction is pinned: a test built from a nested fixture would pass against a lookup
+    that descends and fail against the file that exists.
     """
     import gzip
 
@@ -1848,24 +1849,24 @@ def test_the_rfd3_sidecar_metrics_come_from_the_shape_rfd3_actually_writes(tmp_p
     cif.write_bytes(gzip.compress(b"# not read by _sidecar_metrics\n"))
     cif.with_name("ALR_binder_design_partial_0_model_0.json").write_text(json.dumps({
         "metrics": {
-            "max_ca_deviation": 0.06670212745666504,
+            "max_ca_deviation": 0.053571462631225586,
             "n_chainbreaks": 0,
-            "n_clashing": {
-                "interresidue_clashes_w_sidechain": 0,
-                "ligand_clashes": 0,
-                "ligand_min_distance": 2.9610626697540283,
-            },
+            "n_clashing.interresidue_clashes_w_sidechain": 0,
+            "n_clashing.interresidue_clashes_w_backbone": 0,
+            "n_clashing.ligand_clashes": 0,
+            "n_clashing.ligand_min_distance": 2.9610626697540283,
             "helix_fraction": 0.7112676056338029,
             "sheet_fraction": 0.0,
+            "num_residues": 142,
         },
         "seed": 1602315461,
     }))
 
     got = _sidecar_metrics(cif)
-    assert got["ca_deviation"] == pytest.approx(0.0667, abs=1e-4), \
+    assert got["ca_deviation"] == pytest.approx(0.0536, abs=1e-4), \
         "ca_deviation must be read from `max_ca_deviation`"
     assert got["ligand_clashes"] == 0.0, \
-        "ligand_clashes is nested under `n_clashing`; a one-level flatten misses it"
+        "`n_clashing.ligand_clashes` is one key with a dot in it, not a nested lookup"
     assert got["helix_fraction"] == pytest.approx(0.7113, abs=1e-4)
     assert got["sheet_fraction"] == 0.0
     # Every metric the spec declares, so the integrity gate that failed on hardware passes.

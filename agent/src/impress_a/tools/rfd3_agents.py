@@ -70,19 +70,27 @@ def _container_env() -> dict[str, str]:
 #:
 #:   helix_fraction  metrics.helix_fraction            guessed right
 #:   sheet_fraction  metrics.sheet_fraction            guessed right
-#:   ca_deviation    metrics.max_ca_deviation          guessed WRONG - it is a max, not a mean,
-#:                                                     and the name says so
-#:   ligand_clashes  metrics.n_clashing.ligand_clashes guessed the name right and the DEPTH
-#:                                                     wrong - two levels down, under a group
+#:   ca_deviation    max_ca_deviation            guessed WRONG - it is a max, not a mean, and
+#:                                               the name says so
+#:   ligand_clashes  n_clashing.ligand_clashes   guessed the name right and the SPELLING
+#:                                               wrong - see below
+#:
+#: **The dot is part of the key, not a path.** `metrics` holds a flat dict whose key is the
+#: literal string `"n_clashing.ligand_clashes"`; there is no `n_clashing` object to descend
+#: into, and `raw["metrics"]["n_clashing"]` is absent. This was misread once in the other
+#: direction - a diagnostic that printed nested keys joined by dots renders both shapes
+#: identically, so it could not answer the question it was being asked. Job 23670891 settled
+#: it by listing `metrics`' own keys.
 #:
 #: The real names are listed first so the observed spelling wins; the guesses stay behind them
 #: because another rfd3 build may differ and a candidate that is never present costs nothing.
-#: `metrics.max_ca_deviation` being a maximum matters for anything that later gates on it: it
-#: is the worst atom in the design, not the typical one.
+#: `max_ca_deviation` being a maximum matters for anything that later gates on it: it is the
+#: worst atom in the design, not the typical one.
 SIDECAR_KEYS: dict[str, tuple[str, ...]] = {
     "ca_deviation": ("max_ca_deviation", "ca_deviation", "ca_rmsd", "rmsd_ca",
                      "backbone_rmsd"),
-    "ligand_clashes": ("ligand_clashes", "num_ligand_clashes", "clashes", "n_clashes"),
+    "ligand_clashes": ("n_clashing.ligand_clashes", "ligand_clashes", "num_ligand_clashes",
+                       "clashes", "n_clashes"),
     "helix_fraction": ("helix_fraction", "frac_helix", "ss_helix"),
     "sheet_fraction": ("sheet_fraction", "frac_sheet", "ss_sheet"),
 }
@@ -91,9 +99,11 @@ SIDECAR_KEYS: dict[str, tuple[str, ...]] = {
 def _sidecar_metrics(cif: Path) -> dict[str, float]:
     """Numbers rfd3 wrote about this design, from the `*_model_*.json` beside it.
 
-    Flat keys and one level of nesting are both searched, because a metadata file that groups
-    its numbers under `metrics` is at least as likely as one that does not - and neither
-    shape has been seen.
+    Flat keys and one level of nesting are both searched. The shape has now been SEEN - jobs
+    23670171 and 23670891 both wrote a top-level `metrics` object holding flat keys, some of
+    whose names contain a dot - so the nesting that matters is exactly one level deep and the
+    dotted names are looked up whole. The top-level branch stays for a file that does not
+    group at all.
     """
     import json as _json
 
@@ -107,19 +117,16 @@ def _sidecar_metrics(cif: Path) -> dict[str, float]:
     if not isinstance(raw, dict):
         return {}
 
-    # TWO levels of nesting, not one. The real file puts its numbers under `metrics`, and
-    # groups some of them again: `metrics.n_clashing.ligand_clashes` is where the clash count
-    # actually lives, so a one-level flatten reached `metrics.*` and stopped one short - which
-    # is why `ligand_clashes` came back absent on job 23670171 while `helix_fraction`, its
-    # sibling one level up, came back fine. A deeper key wins over a shallower one of the same
-    # name, because the grouped spelling is the observed one.
+    # ONE level, which is what the real file needs. A second level was added here briefly on
+    # the belief that `n_clashing` was a nested object; it is not - the key is the literal
+    # string `"n_clashing.ligand_clashes"` and the dot is part of the name (see SIDECAR_KEYS).
+    # Taken out again rather than left in as insurance, because an unexercised branch written
+    # against a shape nobody has seen is the same guesswork that put the wrong key names in
+    # this file to begin with.
     flat: dict[str, Any] = dict(raw)
     for value in raw.values():
         if isinstance(value, dict):
             flat.update(value)
-            for inner in value.values():
-                if isinstance(inner, dict):
-                    flat.update(inner)
 
     found: dict[str, float] = {}
     for name, candidates in SIDECAR_KEYS.items():
