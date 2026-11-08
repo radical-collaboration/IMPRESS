@@ -352,8 +352,13 @@ routes to a plumbing-and-contract comparison if the smoke says so. That is a sta
 a surprise.
 
 **Amendment 1 makes A, B and C live**, so an A-vs-B difference is now a difference between two
-*shapes* of use of one model - four bounded per-node calls against one call per half - and not
-between two models. Nothing here compares Beam to another vendor, and no figure from this
+*shapes* of use of one model, and not between two models. **Measured on the login-node probe,
+both shapes cost two calls per cycle.** Model A has four nodes but only two of them call the
+model - `hypothesize` and `select_tasks`; `analyze` and `parameterize` are deterministic and act
+on the strategy the node before them chose. So the difference is what is asked, not how often:
+A splits a strategy choice from a task selection and derives the rest by rule, while B answers
+`SPEC_SCHEMA` and `STAGE_SCHEMA`. An A-vs-B gap is a finding about prompt decomposition at equal
+call cost. Nothing here compares Beam to another vendor, and no figure from this
 experiment says anything about which model to use; it says how to spend one. A, B and C
 sharing a client is also why their degraded-turn counts must be read together: one endpoint
 hiccup shows up in three arms at once, and a correlated dip is a fact about the endpoint rather

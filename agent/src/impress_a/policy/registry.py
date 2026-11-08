@@ -228,10 +228,14 @@ MODELS: dict[str, ReasonerModel] = {
         letter="A", name="four-node agentic loop", mode="autonomous",
         llm_calls=0, llm_shape="per-node", status="partial",
         specifier=_spec_a, planner=_plan_a,
-        note="FOUR nodes now, two per half - `hypothesize`/`analyze` on the Specifier and "
-             "`select_tasks`/`parameterize` on the Planner - and the `reasoner` seam is "
-             "read: each node is a bounded schema-checked call with corrective retry that "
-             "falls back to its rule cascade and records a `reasoner_degraded` transition. "
+        note="FOUR nodes, two per half - `hypothesize`/`analyze` on the Specifier and "
+             "`select_tasks`/`parameterize` on the Planner - of which **TWO call the model**: "
+             "`hypothesize` and `select_tasks`. Each of those is a bounded schema-checked "
+             "call with corrective retry that falls back to its rule cascade and records a "
+             "`reasoner_degraded` transition. `analyze` and `parameterize` are deterministic "
+             "and always were: they act on the strategy the node before them chose. Measured "
+             "on Beam 2026-11-08, A costs 2 calls per cycle - the same as B, not twice it. "
+             "This note used to say every node was a call, which it has never been. "
              "`--model-profile` now fills that seam as well as model B's oracle - one client, "
              "both slots, since `OpenAICompatOracle` is a `NodeReasoner` (backlog H1's last "
              "half). `llm_calls: 0` is the figure with NO profile named; "

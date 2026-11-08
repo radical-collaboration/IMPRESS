@@ -953,8 +953,26 @@ shapes; a second build would only be a second connection to one endpoint. Same c
 `impress-a models` now means "with no profile named", which is what it always meant for B.
 Pinned by `tests/test_reasoner_registry.py::test_a_model_profile_reaches_model_as_four_nodes_
 and_not_only_model_bs_oracle`, confirmed to fail with the `reasoner=` assignment removed.
-**Unrun on hardware**; the login-node probe is a prerequisite in
-`plans/arms-preregistration.md` §9, amendment 1. A is no longer behaviourally D, though: it retires an
+**PROBED on a login node, 2026-11-08**, against Reflection Beam (`Beam-501B-A23B`) on
+`campaigns/mock-stabilize.yaml` and on a copy with thresholds raised so the campaign could not
+stop early: exit 0 both times, a live model id on every call, **zero `reasoner_degraded`
+transitions** and zero corrective retries. The seam carries a client. Unrun on *hardware*; that
+is the smoke.
+
+**And the probe corrected the record.** Only **two** of model A's four nodes ever call the
+model: `hypothesize` and `select_tasks`. `_analyze` (`policy/specifiers/agentic.py:139`) and
+`_parameterize` (`policy/planners/agentic.py:161`) make no `reasoning.ask` call at all - they
+act on the strategy the node before them chose. The registry note claimed "each node is a
+bounded schema-checked call", which has never been true, and it was believed well enough to be
+written into the pre-registration's amendment as "A makes ~4 calls per cycle to B's ~2". The
+measurement is **2 per cycle for both**: 3 `hypothesize` + 3 `select_tasks` over 3 cycles for A,
+8 spec + 8 stage over 8 cycles for B. Corrected in the note and in prereg §14. Not a code defect
+- the two-call shape is a reasonable design - but an A-vs-B contrast at *equal* call cost is a
+different claim from one at double, and the figure was wrong in the direction that flatters the
+experiment. **What is still unexercised:** both halves' corrective-retry path, since nothing was
+rejected; a rejection has still never been seen against a live endpoint.
+
+A is no longer behaviourally D, though: it retires an
 objective the Toolkit cannot measure (D names it and leaves it open) and it moves the diversity
 knobs (D never does), both asserted in `tests/test_planner.py`.
 
