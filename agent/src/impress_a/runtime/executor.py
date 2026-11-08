@@ -1194,7 +1194,18 @@ class CampaignExecutor:
                 if task.task_id in rec.graph.nodes else None,
                 "metrics": task.metrics,
                 "qc": task.qc.verdict.value,
-                "failed_gates": [g.gate for g in task.qc.failed()],
+                # `QCReport.failed()` returns provenance-shaped DICTS, not gate objects - its
+                # docstring says so, and the other caller (line ~506) records them whole. This
+                # read `g.gate` and crashed the executor with `AttributeError: 'dict' object
+                # has no attribute 'gate'` the first time a task actually failed a gate.
+                #
+                # It survived every previous run because the comprehension never dereferences
+                # an EMPTY list: `failed_gates: []` is what a passing task logs, and until a
+                # real campaign had a gate fail on hardware, nothing else had ever been in it.
+                # `impress-a validate-tasks` could not find it either - a validation pass whose
+                # Tasks all pass their integrity rows produces exactly the empty case. So the
+                # code that reports a QC failure was the thing that could not survive one.
+                "failed_gates": [g["gate"] for g in task.qc.failed()],
                 "cost_estimated": task.cost, "cost_measured": task.cost_measured,
                 "started_at": usage.get("started_at"),
                 "finished_at": usage.get("finished_at"),

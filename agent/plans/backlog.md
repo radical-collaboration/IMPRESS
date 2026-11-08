@@ -466,6 +466,40 @@ means the next slower task blocks the smoke again. `filter_shape` left at **0.01
 deliberately not adjusted: it has still never produced a cost measurement, so there is nothing
 to derive a figure from, and the re-run is what will say.
 
+**G9. The code that reports a QC failure could not survive one.** **RESOLVED**
+(2026-11-08). Found by the first four-arm smoke, job 23671024: all four arms died inside
+their allocation with
+
+    executor.py:1197  "failed_gates": [g.gate for g in task.qc.failed()],
+    AttributeError: 'dict' object has no attribute 'gate'
+
+`QCReport.failed()` returns provenance-shaped **dicts** - its own docstring says "in the form
+provenance records them", and the executor's other caller (`:506`) records them whole. This
+one reached for an attribute.
+
+**Why nothing caught it, which is the part worth keeping.** A list comprehension over an
+EMPTY list never dereferences, and `failed_gates: []` is what a passing task logs. So the line
+was exercised constantly and the bug was unreachable until a task actually failed a gate on
+hardware. Every campaign-tier test, every prior Delta run and - decisively -
+`impress-a validate-tasks` all produced the empty case. **The clean validation that authorised
+this smoke was structurally incapable of finding it**: a validation pass whose Tasks all pass
+their integrity rows has nothing to put in that list. One gate failure in a real campaign, and
+the executor takes the campaign down while reporting it.
+
+Cost: four arms x ~4 minutes, about 1.1 GPU-h, and the arms had already produced real work -
+arm A ran `rfd3_design` at **width 4 with four distinct lineages, seeds and metrics** (A10's
+independence invariant, executing for the first time) and a full `ligandmpnn_design` stage
+before it died.
+
+Pinned by `tests/test_core.py::test_the_failed_gate_list_is_logged_in_the_shape_failed_
+actually_returns`, asserted against `failed()`'s contract rather than through a campaign, so it
+holds whatever the executor does around it.
+
+**The general lesson, and it is not the first time in this pass:** the failure path is the
+untested path, and a green validation run is evidence about the success path only. Worth a
+sweep for other attribute access on `failed()`-shaped data; there are only two callers today
+and the other is correct.
+
 ## B. Silent-failure defences — unmet for the real toolkits
 
 The project's central claim is that these tools fail *silently*. For the real toolkits that defence
