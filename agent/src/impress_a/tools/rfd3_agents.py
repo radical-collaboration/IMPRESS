@@ -64,8 +64,24 @@ def _container_env() -> dict[str, str]:
 #: so a gate on a key name that turns out to be wrong would fail every real run as an
 #: INTEGRITY failure - a wrong guess would not merely be useless, it would refuse the chain
 #: and demote the pattern. The gates land when the names are confirmed.
+#: The sidecar key each declared metric is read from. **Observed, not inferred** since job
+#: 23670171 - the first real `*_model_*.json` this project has read. Two of the four original
+#: guesses were right and two were wrong, which is about the hit rate a guess deserves:
+#:
+#:   helix_fraction  metrics.helix_fraction            guessed right
+#:   sheet_fraction  metrics.sheet_fraction            guessed right
+#:   ca_deviation    metrics.max_ca_deviation          guessed WRONG - it is a max, not a mean,
+#:                                                     and the name says so
+#:   ligand_clashes  metrics.n_clashing.ligand_clashes guessed the name right and the DEPTH
+#:                                                     wrong - two levels down, under a group
+#:
+#: The real names are listed first so the observed spelling wins; the guesses stay behind them
+#: because another rfd3 build may differ and a candidate that is never present costs nothing.
+#: `metrics.max_ca_deviation` being a maximum matters for anything that later gates on it: it
+#: is the worst atom in the design, not the typical one.
 SIDECAR_KEYS: dict[str, tuple[str, ...]] = {
-    "ca_deviation": ("ca_deviation", "ca_rmsd", "rmsd_ca", "backbone_rmsd"),
+    "ca_deviation": ("max_ca_deviation", "ca_deviation", "ca_rmsd", "rmsd_ca",
+                     "backbone_rmsd"),
     "ligand_clashes": ("ligand_clashes", "num_ligand_clashes", "clashes", "n_clashes"),
     "helix_fraction": ("helix_fraction", "frac_helix", "ss_helix"),
     "sheet_fraction": ("sheet_fraction", "frac_sheet", "ss_sheet"),
@@ -91,10 +107,19 @@ def _sidecar_metrics(cif: Path) -> dict[str, float]:
     if not isinstance(raw, dict):
         return {}
 
+    # TWO levels of nesting, not one. The real file puts its numbers under `metrics`, and
+    # groups some of them again: `metrics.n_clashing.ligand_clashes` is where the clash count
+    # actually lives, so a one-level flatten reached `metrics.*` and stopped one short - which
+    # is why `ligand_clashes` came back absent on job 23670171 while `helix_fraction`, its
+    # sibling one level up, came back fine. A deeper key wins over a shallower one of the same
+    # name, because the grouped spelling is the observed one.
     flat: dict[str, Any] = dict(raw)
     for value in raw.values():
         if isinstance(value, dict):
             flat.update(value)
+            for inner in value.values():
+                if isinstance(inner, dict):
+                    flat.update(inner)
 
     found: dict[str, float] = {}
     for name, candidates in SIDECAR_KEYS.items():

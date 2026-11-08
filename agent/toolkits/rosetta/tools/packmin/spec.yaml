@@ -36,9 +36,15 @@ qc_gates:
   #
   # What stays: the score must be REPORTED. A worker that exits without one has broken.
   - {id: metrics_reported, params: {metrics: [total_score]}}
-# Measured on job 22684607 (NVMe, 1 node): 15.9s = 0.0044 h. Declared 0.2 was
-# 45x that - a literature guess, and on the gpu dimension those guesses summed
-# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
-# 0.02 keeps ~5x headroom: one run is one sample, and this figure feeds a gate
-# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
-cost_model: {unit: invocation, cost: {cpu_hours: 0.02}}
+# COST IS CPU-HOURS, WHICH IS WALL x CORES - and this figure was computed as wall alone.
+# That is a units error, not a stale measurement, and it ran through every cpu_hours tool in
+# this toolkit: each comment divided seconds by 3600, called the result cpu_hours, and then
+# multiplied by a headroom factor that was therefore 4x smaller than it looked. The
+# executor measures the ratio the right way, so `impress-a validate-tasks` on job 23670171
+# failed fastrelax at measured/declared = 2.38 - a declared figure BELOW measurement, which
+# is the direction that makes gate 5 and the untrusted-pattern cap refuse work that fits.
+# Measured: 14.6s x 4 cores = 0.0162 cpu-h (job 23670171). Declared 0.06 = 3.7x.
+# Not a failing row - it measured 0.81, inside the bound. Corrected anyway,
+# because it is the SAME units error and 1.14x of real headroom means the next
+# slower task fails validation and blocks the smoke again.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.06}}

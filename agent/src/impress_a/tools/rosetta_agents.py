@@ -206,36 +206,56 @@ phase("pose_from_pdb")
 # So: the ligand RESIDUE PROPERTY against its complement, which is the same pair the
 # interaction_energy port uses and is correct whatever the chain layout is.
 #
-# `quick="0"` is explicit because the default is Rosetta's, not ours, and quick mode is a
-# faster and less accurate SC - upstream sets it too. `beta_nov16` is declared to match
-# upstream's protocol, and the comment is the honest part: ShapeComplementarity is GEOMETRIC
-# and takes no scorefunction, so this does not change the number. It is here so that a filter
-# added later inherits the same energy model rather than Rosetta's default.
-xml = (
-    '<SCOREFXNS><ScoreFunction name="sfxn_clean" weights="beta_nov16"/></SCOREFXNS>'
-    '<RESIDUE_SELECTORS>'
-    '<ResidueProperty name="ligand" properties="LIGAND"/>'
-    '<Not name="not_ligand" selector="ligand"/>'
-    '</RESIDUE_SELECTORS>'
-    '<FILTERS><ShapeComplementarity name="sc" quick="0" verbose="0"'
-    ' residue_selector1="ligand" residue_selector2="not_ligand"/></FILTERS>')
+# `quick=False` is explicit because the default is Rosetta's, not ours, and quick mode is a
+# faster and less accurate SC - upstream sets it too. No scorefunction is built: this used to
+# declare `beta_nov16` so that a filter added later would inherit the same energy model, but
+# ShapeComplementarity is GEOMETRIC and takes no scorefunction, so it was decoration on a
+# construction that is now a Python call with nowhere to put it. A filter that needs an energy
+# model can build one where it is used.
+#
+# BUILT THROUGH THE PYTHON API, NOT A ROSETTASCRIPTS XML STRING. The XML was rejected outright
+# by this PyRosetta build's schema - `Element 'ResidueProperty': This element is not expected`
+# - so `filter_shape` could not run at all, 0 of 1 rows, and the chain stopped there with
+# `boltz_predict` never reached. It failed the same way it would on any build whose selector
+# schema differs, which is precisely the risk the old code's own comment named and could not
+# test: "this XML is the one part of the port that no local test can exercise."
+#
+# The Python route removes the schema from the path entirely, and it is the SAME pair of
+# selectors `interaction_energy` already builds this way a few lines above - so the two ports
+# now agree by construction rather than by two spellings being kept in step. Confirmed on job
+# 23670171's own relaxed pose: 1 ligand residue selected, SC = 0.612.
+from pyrosetta.rosetta.core.chemical import ResidueProperty as _ResidueProperty
+from pyrosetta.rosetta.core.select.residue_selector import (
+    NotResidueSelector as _NotResidueSelector,
+)
+from pyrosetta.rosetta.core.select.residue_selector import (
+    ResiduePropertySelector as _ResiduePropertySelector,
+)
+from pyrosetta.rosetta.protocols.simple_filters import (
+    ShapeComplementarityFilter as _ShapeComplementarityFilter,
+)
+
 try:
-    objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
-    sc_filter = objs.get_filter("sc")
+    ligand_sel = _ResiduePropertySelector(_ResidueProperty.LIGAND)
+    sc_filter = _ShapeComplementarityFilter()
+    # Properties on this build, not `set_*` methods. Checked rather than assumed, because the
+    # whole reason this code changed is a contract that was assumed and was wrong.
+    sc_filter.selector1(ligand_sel)
+    sc_filter.selector2(_NotResidueSelector(ligand_sel))
+    sc_filter.quick(False)
 except Exception as exc:
     # Loudly, never by falling back to a chain split: a fallback would keep producing numbers
-    # while measuring a different interface, and nothing downstream could tell. The remedy is
-    # named because this XML is the one part of the port that no local test can exercise.
+    # while measuring a different interface, and nothing downstream could tell.
     sys.stderr.write("selector-based ShapeComplementarity could not be built: %r\n" % (exc,))
     raise RuntimeError(
         "filter_shape: the selector-based ShapeComplementarity filter failed to build. "
-        "Check the RosettaScripts selector names against this PyRosetta build "
-        "(ResidueProperty, Not) - see backlog G5. Refusing rather than falling back to "
-        "jump=1 or a chain split, which would measure a different interface silently.")
+        "Check ResiduePropertySelector/NotResidueSelector and ShapeComplementarityFilter's "
+        "selector1/selector2/quick against this PyRosetta build - see backlog G5. "
+        "Refusing rather than falling back to jump=1 or a chain split, which would "
+        "measure a different interface silently.")
 
 # An empty ligand selection means there is nothing to measure against. SC of a selection
 # against everything-but-nothing is a confident number about the wrong question.
-ligand_sel = objs.get_residue_selector("ligand")
 if not any(ligand_sel.apply(pose)):
     raise RuntimeError(
         "filter_shape: no LIGAND-property residue in the pose, so there is no "

@@ -10,6 +10,7 @@ and each toolkit's SKILL.md Pitfalls).
 """
 from __future__ import annotations
 
+import json
 import pathlib
 from pathlib import Path
 from typing import Any
@@ -967,11 +968,21 @@ def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
     declared figures deliberately sit a few multiples above what was measured and this
     test must not tighten toward equality.
     """
-    measured_h = measured_s / 3600
-    declared = reg.get(tool).cost_model.cost[dim]
+    # CPU-HOURS ARE WALL x CORES. This line read `measured_s / 3600` and so carried the same
+    # units error as the specs it was checking - which is why it passed while
+    # `impress-a validate-tasks` on job 23670171 failed `fastrelax` at measured/declared =
+    # 2.38. The executor has always measured the ratio the right way; the spec comments, and
+    # this test, were the two places that did not, so they agreed with each other and with
+    # nothing that runs. GPU dimensions stay wall-based: the declared figure is device-time,
+    # and `cores` is the CPU request.
+    spec = reg.get(tool)
+    cores = spec.resources.cores if dim == "cpu_hours" else 1
+    measured_h = measured_s * cores / 3600
+    declared = spec.cost_model.cost[dim]
     assert declared >= measured_h, \
-        f"{tool} declares {declared} {dim} but measured {measured_h:.4f} - an estimate " \
-        "below the real cost lets a campaign overrun its budget"
+        f"{tool} declares {declared} {dim} but measured {measured_h:.4f} " \
+        f"({measured_s}s x {cores} cores) - an estimate below the real cost makes gate 5 " \
+        "and the untrusted-pattern cap refuse work that fits"
     assert declared <= measured_h * 10, \
         f"{tool} declares {declared} {dim} against {measured_h:.4f} measured " \
         f"({declared / measured_h:.0f}x). Over-estimating by this much is what got " \
@@ -1726,8 +1737,19 @@ def test_filter_shape_measures_the_protein_ligand_interface(reg):
     energy port uses.
 
     Asserted against the worker source, like the interaction-energy port and for the same
-    reason: pyrosetta is not in the local tier, and the XML is the one part of this that no
-    local test can exercise. `impress-a validate-tasks` is what proves it builds.
+    reason: pyrosetta is not in the local tier. `impress-a validate-tasks` is what proves it
+    builds.
+
+    **The selectors are built through the Python API now, not a RosettaScripts XML string.**
+    The XML was rejected outright by the PyRosetta build on Delta - `Element
+    'ResidueProperty': This element is not expected` - so `filter_shape` ran 0 of 1 rows on
+    job 23670171 and the chain stopped there with `boltz_predict` never reached. The old
+    version of this test asserted the XML spelling, which is the one thing it could check and
+    was never evidence that the schema would accept it; the previous docstring said as much
+    ("the XML is the one part of this that no local test can exercise"). The Python route has
+    no schema in it, and it is the same pair of calls the interaction-energy port already
+    makes, so the two ports agree by construction instead of by two spellings kept in step.
+    Confirmed against job 23670171's own relaxed pose: 1 ligand residue, SC = 0.612.
     """
     from impress_a.tools import rosetta_agents
 
@@ -1735,12 +1757,16 @@ def test_filter_shape_measures_the_protein_ligand_interface(reg):
     code = _without_comments(worker)
     assert 'jump="1"' not in code, "the interface must not be chosen by jump number"
     assert 'chains="A"' not in code, "nor by chain letter - that is the input's business"
-    assert '<ResidueProperty name="ligand" properties="LIGAND"/>' in worker
-    assert '<Not name="not_ligand" selector="ligand"/>' in worker
-    assert 'residue_selector1="ligand" residue_selector2="not_ligand"' in worker
-    assert 'quick="0"' in worker, \
+    assert "XmlObjects" not in code, (
+        "the RosettaScripts schema rejected this build's selector names; building the filter "
+        "in Python removes the schema from the path")
+    assert "ResiduePropertySelector(_ResidueProperty.LIGAND)" in code, \
+        "the ligand is selected by residue PROPERTY, whatever the chain layout is"
+    assert "NotResidueSelector(ligand_sel)" in code, "against its own complement"
+    assert "sc_filter.selector1(" in code and "sc_filter.selector2(" in code, \
+        "both sides of the interface must be set explicitly"
+    assert "sc_filter.quick(False)" in code, \
         "quick mode is a faster, less accurate SC; upstream sets it explicitly and so must we"
-    assert "weights=\"beta_nov16\"" in worker, "upstream's energy model, declared"
     assert "Refusing rather than falling back" in worker, (
         "a fallback to a jump or chain split would keep producing numbers while measuring a "
         "different interface, and nothing downstream could tell")
@@ -1791,3 +1817,56 @@ def test_rfd3_partial_diffusion_would_have_to_drop_length():
         f"{base} still carries `length` - RFD3's validator rejects that combination and every "
         "guided run would fail its input validation. Drop `length` when writing the guided "
         "spec, as examples/small_molecule_binding's _write_guided_rfd3_json does (backlog C8)")
+
+
+def test_the_rfd3_sidecar_metrics_come_from_the_shape_rfd3_actually_writes(tmp_path):
+    """Every declared metric must be readable from a real `*_model_*.json`, at its real depth.
+
+    The spec declared `ca_deviation` and `ligand_clashes` with the key names GUESSED, and said
+    so: "the key names are inferred rather than observed ... the gates land when one real
+    out_dir confirms the names". Job 23670171 is that out_dir, and it failed the
+    `metrics_declared_and_finite` integrity row on exactly those two - while `helix_fraction`
+    and `sheet_fraction`, guessed in the same breath, came back fine.
+
+    What the file actually holds:
+
+        metrics.max_ca_deviation            the name was wrong - it is a MAX, not a mean
+        metrics.n_clashing.ligand_clashes   the name was right, the DEPTH was wrong
+        metrics.helix_fraction              guessed right
+        metrics.sheet_fraction              guessed right
+
+    So this fixture is the observed shape, trimmed, and it is the regression test for both
+    kinds of mistake at once: a renamed key and a key one level deeper than the flattener
+    reached. A one-level flatten reaches `metrics.*` and stops, which is why one sibling was
+    found and the other was not.
+    """
+    import gzip
+
+    from impress_a.tools.rfd3_agents import _sidecar_metrics
+
+    cif = tmp_path / "ALR_binder_design_partial_0_model_0.cif.gz"
+    cif.write_bytes(gzip.compress(b"# not read by _sidecar_metrics\n"))
+    cif.with_name("ALR_binder_design_partial_0_model_0.json").write_text(json.dumps({
+        "metrics": {
+            "max_ca_deviation": 0.06670212745666504,
+            "n_chainbreaks": 0,
+            "n_clashing": {
+                "interresidue_clashes_w_sidechain": 0,
+                "ligand_clashes": 0,
+                "ligand_min_distance": 2.9610626697540283,
+            },
+            "helix_fraction": 0.7112676056338029,
+            "sheet_fraction": 0.0,
+        },
+        "seed": 1602315461,
+    }))
+
+    got = _sidecar_metrics(cif)
+    assert got["ca_deviation"] == pytest.approx(0.0667, abs=1e-4), \
+        "ca_deviation must be read from `max_ca_deviation`"
+    assert got["ligand_clashes"] == 0.0, \
+        "ligand_clashes is nested under `n_clashing`; a one-level flatten misses it"
+    assert got["helix_fraction"] == pytest.approx(0.7113, abs=1e-4)
+    assert got["sheet_fraction"] == 0.0
+    # Every metric the spec declares, so the integrity gate that failed on hardware passes.
+    assert {"ca_deviation", "ligand_clashes", "helix_fraction", "sheet_fraction"} <= set(got)

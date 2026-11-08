@@ -397,6 +397,64 @@ runs: `22684607/campaigns/_runs/_trust/cuda.jsonl` with 0 clean events and
   five trusted nodes so far missed an acceptance threshold, at a ~31% acceptance rate, so this
   wants more trusted draws, not code. `plans/next-run-sustained-trust.md`.
 
+**G2b / G5b / A11b. What `validate-tasks` found on real hardware (job 23670171).**
+**RESOLVED in code 2026-11-08, re-run pending.** The first per-Task validation this project
+has run. Three tools failed integrity rows; two passed clean (`ligandmpnn_design` 9/9,
+`packmin` 9/9). None of the three was visible to a dry run, and none was introduced by the
+deployment work - they were waiting.
+
+**G2b. `rfd3_design` declared two metrics it never reported** - `ca_deviation`,
+`ligand_clashes` - failing `metrics_declared_and_finite`. The spec said this would happen:
+"the key names are inferred rather than observed ... the gates land when one real out_dir
+confirms the names". This is that out_dir. Of four guesses, two were right
+(`helix_fraction`, `sheet_fraction`, both reported fine) and two wrong:
+
+    ca_deviation    -> metrics.max_ca_deviation            wrong NAME; it is a max, not a mean
+    ligand_clashes  -> metrics.n_clashing.ligand_clashes   right name, wrong DEPTH
+
+The flattener went one level, which reached `metrics.*` and stopped one short of
+`n_clashing`. Both fixed, with the observed spellings first in `SIDECAR_KEYS` and the guesses
+kept behind them. `max_ca_deviation` being a maximum matters for anything that later gates on
+it. Pinned by a regression test built from the real file's shape.
+
+**G5b. `filter_shape` could not run at all.** PyRosetta rejected the RosettaScripts XML:
+`Element 'ResidueProperty': This element is not expected`. 0 of 1 rows, and the chain stopped
+there - `boltz_predict` was never reached, which is why it also shows 0/1. The adapter refused
+loudly rather than falling back to a jump or chain split, which is the behaviour the port was
+built to have and the reason this is a clean diagnosis rather than a plausible wrong number.
+
+Its own comment had named the gap exactly: "this XML is the one part of the port that no local
+test can exercise". The filter is now built through the **Python API** -
+`ResiduePropertySelector(LIGAND)`, `NotResidueSelector`, `selector1`/`selector2`/`quick` - the
+same pair of calls `interaction_energy` already makes, so the two ports agree by construction
+rather than by two spellings being kept in step, and no schema is in the path. Verified on job
+23670171's own relaxed pose: 1 ligand residue selected, **SC = 0.612**, which also clears T2's
+`shape_complementarity >= 0.55`. The `beta_nov16` scorefunction went with the XML: SC is
+geometric and takes no scorefunction, so it was decoration.
+
+**A11b. The rosetta toolkit's cpu cost models were a UNITS ERROR, not stale numbers.**
+`fastrelax` failed `cost_ratio[cpu_hours]` at measured/declared = 2.38 - a declared figure
+*below* measurement, the direction that makes gate 5 and the untrusted-pattern cap refuse work
+that fits. The cause: every comment computed `wall_seconds / 3600` and called it cpu_hours,
+while the executor measures wall x cores. So the believed headroom was `cores` times smaller
+than it read:
+
+    fastrelax   believed ~4x   actually 0.52x   -> measured 2.38, FAIL
+    packmin     believed ~5x   actually 1.14x   -> measured 0.81, passed by luck
+    filter_shape believed ~4x  actually ~2x     -> never executed
+
+`tests/test_real_toolkits.py::test_cost_models_are_within_an_order_of_magnitude_of_measurement`
+was a **third** instance of the same error - it parametrised wall seconds and divided by 3600 -
+so the specs and the test agreed with each other and with nothing that runs. Corrected to
+`wall x cores` for cpu dimensions; gpu dimensions stay wall-based, since the declared figure
+is device-time and `cores` is the CPU request.
+
+`fastrelax` 0.03 -> **0.25** (3.5x measured, matching the 3.2x wall-time swing A11 records).
+`packmin` 0.02 -> **0.06** (3.7x) although its row passed, because 1.14x of real headroom
+means the next slower task blocks the smoke again. `filter_shape` left at **0.01** and
+deliberately not adjusted: it has still never produced a cost measurement, so there is nothing
+to derive a figure from, and the re-run is what will say.
+
 ## B. Silent-failure defences — unmet for the real toolkits
 
 The project's central claim is that these tools fail *silently*. For the real toolkits that defence

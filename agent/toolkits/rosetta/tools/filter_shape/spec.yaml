@@ -34,9 +34,17 @@ qc_gates:
      params: {metrics: [shape_complementarity, sc_selector_mode]}}
   - {id: metric_in_range, role: acceptance,
      params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
-# Measured on job 22684607 (NVMe, 1 node): 10.2s = 0.0028 h. Declared 0.05 was
-# 18x that - a literature guess, and on the gpu dimension those guesses summed
-# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
-# 0.01 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
-# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
+# COST IS CPU-HOURS, WHICH IS WALL x CORES - and this figure was computed as wall alone.
+# That is a units error, not a stale measurement, and it ran through every cpu_hours tool in
+# this toolkit: each comment divided seconds by 3600, called the result cpu_hours, and then
+# multiplied by a headroom factor that was therefore 2x smaller than it looked. The
+# executor measures the ratio the right way, so `impress-a validate-tasks` on job 23670171
+# failed fastrelax at measured/declared = 2.38 - a declared figure BELOW measurement, which
+# is the direction that makes gate 5 and the untrusted-pattern cap refuse work that fits.
+# Measured: never executed before job 23670171 - the XML route refused to build. Declared 0.01 = unverified.
+# LEFT AT 0.01 and deliberately not adjusted: this tool has still never produced
+# a cost measurement, so there is nothing to derive a figure from. A local probe
+# put the SC computation at a few seconds, which at 2 cores leaves this roughly
+# 3-4x - but that is an estimate, and the re-run is what will say. If it comes
+# back over 1.0, raise it from THAT measurement.
 cost_model: {unit: invocation, cost: {cpu_hours: 0.01}}
