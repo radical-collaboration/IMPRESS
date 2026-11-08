@@ -152,7 +152,59 @@ if [ -z "${WORK_DIR:-}" ]; then
     exit 1
 fi
 
-IMPRESS_A_DIR="${IMPRESS_A_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# ── Which checkout this job runs ──────────────────────────────────────────────
+# Two things conspire here, and together they ran the wrong source tree for every job this
+# project has submitted.
+#
+# 1. `${BASH_SOURCE[0]}` IS NOT THE REPO under sbatch. Slurm copies the submitted script to
+#    the compute node as `/var/spool/slurmd/job<ID>/slurm_script`, so the computed fallback
+#    resolves to `/var/spool/slurmd` - which has no `.venv` and no `scripts/`.
+# 2. `sbatch` exports the submitting environment by default, so an `IMPRESS_A_DIR` in the
+#    operator's `~/.bashrc` wins over the fallback. That is what made 1 invisible: every run
+#    took the inherited value, and `~/.bashrc` named a DIFFERENT CHECKOUT. Job 22692304's own
+#    log records it - `dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py`
+#    - so the launcher, the runner, the campaign spec and the package were all that tree's,
+#    while the job was submitted from, and attributed to, this one.
+#
+# Nothing warned. `git_sha` in the manifest is the OTHER repo's HEAD, which makes it detectable
+# afterwards by a reader who already suspects it, and that is not a defence.
+#
+# So: prefer the submission, require the result to look like this project, and refuse a
+# disagreement rather than pick a winner. A job that cannot say which checkout it is running
+# must not run - the whole four-arm comparison is an argument about code, and an arm that ran
+# another tree is not a result that can be corrected later.
+_from_source="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
+if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/scripts/delta_gpu_run.sh" ]; then
+    _submitted="${SLURM_SUBMIT_DIR}"
+elif [ -f "${_from_source}/scripts/delta_gpu_run.sh" ]; then
+    _submitted="${_from_source}"      # run directly, not through sbatch
+else
+    _submitted=""
+fi
+if [ -n "${IMPRESS_A_DIR:-}" ] && [ -n "${_submitted}" ] && \
+   [ "$(cd "${IMPRESS_A_DIR}" 2>/dev/null && pwd)" != "${_submitted}" ]; then
+    echo "ERROR: \$IMPRESS_A_DIR names a different checkout than the one this job was"
+    echo "       submitted from. One of them is not the code you think is running."
+    echo "         IMPRESS_A_DIR    ${IMPRESS_A_DIR}"
+    echo "         submitted from   ${_submitted}"
+    echo "       \$IMPRESS_A_DIR is commonly exported from ~/.bashrc and inherited by sbatch,"
+    echo "       which is how a job runs another tree's launcher, runner, specs and package"
+    echo "       while being attributed to this one. Unset it, or point it at the checkout"
+    echo "       you are submitting."
+    exit 1
+fi
+IMPRESS_A_DIR="${IMPRESS_A_DIR:-${_submitted}}"
+if [ -z "${IMPRESS_A_DIR}" ] || [ ! -f "${IMPRESS_A_DIR}/scripts/delta_gpu_run.sh" ]; then
+    echo "ERROR: cannot locate the IMPRESS-A checkout."
+    echo "       \$IMPRESS_A_DIR is unset and neither \$SLURM_SUBMIT_DIR nor this script's own"
+    echo "       path resolves to one. Under sbatch the script is a COPY in the node's spool"
+    echo "       directory, so its path says nothing about where the repo is."
+    echo "         SLURM_SUBMIT_DIR  ${SLURM_SUBMIT_DIR:-<unset>}"
+    echo "         BASH_SOURCE dir   ${_from_source:-<unresolvable>}"
+    echo "       Submit from the checkout, or export IMPRESS_A_DIR."
+    exit 1
+fi
+echo "Checkout:          ${IMPRESS_A_DIR}"
 
 # WORK_DIR is taken as-is: it IS the per-user directory, which is the whole point of
 # replacing $SCRATCH (see the header). No _scratch_base.sh, no $USER appending, no way for

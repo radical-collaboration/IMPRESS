@@ -511,3 +511,48 @@ def test_every_documented_sbatch_entry_point_requests_its_own_resources():
                 f"Directives are not inherited through `exec` - Slurm has finished parsing "
                 f"before this script runs a line."
             )
+
+
+def test_the_launcher_refuses_a_checkout_that_is_not_the_one_submitted():
+    """A job that cannot say which tree it is running must not run.
+
+    Two things conspired. `${BASH_SOURCE[0]}` is not the repo under sbatch - Slurm copies the
+    submitted script to `/var/spool/slurmd/job<ID>/slurm_script` - so the computed fallback
+    resolves to the node's spool directory. And `sbatch` exports the submitting environment,
+    so an `IMPRESS_A_DIR` in `~/.bashrc` wins over that fallback. The second hid the first:
+    every job took the inherited value, which named a DIFFERENT CHECKOUT. Job 22692304's own
+    log records `dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py` -
+    that tree's launcher, runner, campaign spec and package, under this project's name.
+
+    Nothing warned. `git_sha` in the manifest is the other repo's HEAD, which is detectable
+    afterwards only by a reader who already suspects it. For a four-arm comparison - an
+    argument about code - an arm that ran another tree is not a result to be corrected later.
+
+    So the launcher refuses a disagreement rather than picking a winner, and refuses equally
+    when it can locate no checkout at all.
+    """
+    import subprocess
+
+    text = pathlib.Path("scripts/delta_gpu_run.sh").read_text()
+    start = text.index('_from_source="$(cd ')
+    block = text[start:text.index('echo "Checkout:', start)] + 'echo "RESOLVED=${IMPRESS_A_DIR}"'
+    repo = str(pathlib.Path.cwd())
+
+    def run(env: dict[str, str], cwd: str = repo):
+        return subprocess.run(["bash", "-c", block], capture_output=True, text=True,
+                              cwd=cwd, env={"PATH": "/usr/bin:/bin", **env})
+
+    stale = run({"IMPRESS_A_DIR": "/nonexistent/other-checkout", "SLURM_SUBMIT_DIR": repo})
+    assert stale.returncode == 1, "an inherited IMPRESS_A_DIR from another tree was accepted"
+    assert "different checkout" in stale.stdout
+
+    clean = run({"SLURM_SUBMIT_DIR": repo})
+    assert clean.returncode == 0 and f"RESOLVED={repo}" in clean.stdout, \
+        f"the submission directory must be used when nothing is inherited: {clean.stdout}"
+
+    agreeing = run({"IMPRESS_A_DIR": repo, "SLURM_SUBMIT_DIR": repo})
+    assert agreeing.returncode == 0, "an IMPRESS_A_DIR naming the submitted tree is fine"
+
+    lost = run({}, cwd="/tmp")
+    assert lost.returncode == 1 and "cannot locate" in lost.stdout, \
+        "with no submission dir and no repo under BASH_SOURCE, the launcher must refuse"

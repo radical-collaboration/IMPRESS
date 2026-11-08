@@ -581,11 +581,49 @@ and a validation pass on a narrower shape would not be validating the arms' hard
 `--time` and `--partition` stay on the command line, where the submission shows them.
 
 Pinned by `tests/test_toolchain.py::test_every_documented_sbatch_entry_point_requests_its_own_
-resources`, which reads every `sbatch ... scripts/X.sh` out of the docs and the scripts and
-checks that X.sh declares its own resources. Confirmed to fail against the old wrapper. One
+resources`, which reads every documented submission out of the docs and the scripts and checks that
+the named script declares its own resources. Confirmed to fail against the old wrapper. One
 detail worth keeping: the first version of that test passed against the broken script, because
 every documented submission wraps across three lines with `\` and the regex was line-bounded -
 the same shape of mistake as the bug it was written for.
+
+**C11. Every submitted job has run a different checkout than the one submitted.**
+**RESOLVED** (2026-11-08). The most serious thing this deployment pass found, and it was
+invisible by construction.
+
+Two causes, and the second hid the first. `${BASH_SOURCE[0]}` **is not the repo under
+sbatch**: Slurm copies the submitted script to the compute node as
+`/var/spool/slurmd/job<ID>/slurm_script`, so `delta_gpu_run.sh`'s computed fallback resolves
+to `/var/spool/slurmd`, which has no `.venv` and no `scripts/`. That never surfaced, because
+`sbatch` exports the submitting environment and `~/.bashrc` carried
+`export IMPRESS_A_DIR=/work/hdd/bdyk/hooten1/impress_a` - a DIFFERENT CHECKOUT - which the
+`${IMPRESS_A_DIR:-...}` default preferred. Job 22692304's own `slurm.out` records it:
+`dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py`, with that tree's
+campaign spec. The launcher, the runner, the spec and the package were all the other repo's.
+
+So **every result this project has recorded was produced by a tree nobody was reading**, and
+`git_sha` in those manifests is that repo's HEAD rather than this one's - detectable
+afterwards only by a reader who already suspects it. For the four-arm comparison, which is an
+argument about code, an arm that ran another tree is not a result that can be corrected later;
+it is a void arm that would not have been named void.
+
+Found when `delta_validate_tasks.sh` failed at 7s with exit 127 - the `exec` of its sibling
+looked in the spool directory (C10's cousin, same root). Had the wrapper worked, the job would
+have run the old tree silently.
+
+The launcher now prefers `$SLURM_SUBMIT_DIR`, requires the result to contain
+`scripts/delta_gpu_run.sh`, and **refuses outright** when an inherited `$IMPRESS_A_DIR`
+disagrees with the submission rather than picking a winner - a job that cannot say which
+checkout it runs must not run. It also refuses when it can locate no checkout at all, instead
+of proceeding with a path under `/var/spool`. The wrapper resolves its sibling the same way.
+`~/.bashrc` was repointed at this checkout as well (and `IMPRESS_A_VENV` with it), so the
+default is right and the guard is the backstop rather than the only defence.
+
+Pinned by `tests/test_toolchain.py::test_the_launcher_refuses_a_checkout_that_is_not_the_one_
+submitted`, which runs the resolution block itself in four environments.
+
+**Not retrospectively fixable:** results recorded before this commit were produced by the
+`/work/hdd` tree. Anything cited from them should say so.
 
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and

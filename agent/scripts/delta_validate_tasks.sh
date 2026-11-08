@@ -47,7 +47,33 @@
 # as the example above does, where they are visible in the submission.
 set -euo pipefail
 
+# NOT `dirname "${BASH_SOURCE[0]}"` alone. Under sbatch this file is a COPY at
+# `/var/spool/slurmd/job<ID>/slurm_script`, so its own path points at the node's spool
+# directory and the `exec` below died with
+#
+#   /var/spool/slurmd/job23669777/slurm_script: line 58:
+#   /var/spool/slurmd/job23669777/delta_gpu_run.sh: No such file or directory
+#
+# seven seconds in, exit 127 - on the only way this script is ever meant to be used. The
+# submission directory is where the repo actually is; `delta_gpu_run.sh` then does the same
+# resolution again, and refuses if an inherited $IMPRESS_A_DIR disagrees with it.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "${HERE}/delta_gpu_run.sh" ]; then
+    for _candidate in "${IMPRESS_A_DIR:-}" "${SLURM_SUBMIT_DIR:-}"; do
+        if [ -n "${_candidate}" ] && [ -f "${_candidate}/scripts/delta_gpu_run.sh" ]; then
+            HERE="${_candidate}/scripts"
+            break
+        fi
+    done
+fi
+if [ ! -f "${HERE}/delta_gpu_run.sh" ]; then
+    echo "ERROR: cannot find delta_gpu_run.sh next to this script or under"
+    echo "       \$IMPRESS_A_DIR / \$SLURM_SUBMIT_DIR. Submit from the checkout."
+    echo "         this script   ${BASH_SOURCE[0]}"
+    echo "         IMPRESS_A_DIR ${IMPRESS_A_DIR:-<unset>}"
+    echo "         SUBMIT_DIR    ${SLURM_SUBMIT_DIR:-<unset>}"
+    exit 1
+fi
 export IMPRESS_A_COMMAND=validate-tasks
 
 # The exit code is the gate. `delta_gpu_run.sh` propagates the runner's status, and
