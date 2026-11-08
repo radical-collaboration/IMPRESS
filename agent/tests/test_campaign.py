@@ -4,6 +4,7 @@ Real manager, real policy, real composer, real validator, real state and provena
 with ConcurrentExecutionBackend and mock tools. Exercises every layer above the substrate.
 """
 import asyncio
+import json
 
 import pytest
 
@@ -1666,3 +1667,48 @@ async def test_a_refinement_naming_an_unknown_node_gets_no_artifacts(reg, tmp_pa
     ex = CampaignManager(s, _pair(), reg).executor
     assert ex._artifacts_of("n-does-not-exist") == {}
     assert ex._artifacts_of(None) == {}
+
+
+async def test_a_failed_gate_reaches_tasks_provenance_through_the_executor(reg):
+    """A campaign that FAILS a gate must survive reporting it.
+
+    The gap this closes is more useful than the bug that revealed it.
+    `test_lying_tool_is_caught_by_qc` is the only test that produces a QC FAIL, and it drives
+    `Dispatcher` directly - so `_log_task_telemetry` never runs for it. Every test that does
+    go through the executor uses tools that pass. The result was a `failed_gates` expression
+    exercised on every task in the suite and never once on a non-empty list, which is how
+    `[g.gate for g in task.qc.failed()]` survived to the four-arm smoke and took all four arms
+    down with `AttributeError: 'dict' object has no attribute 'gate'` (backlog G9).
+
+    `impress-a validate-tasks` could not have closed this either: a validation pass whose
+    Tasks pass their integrity rows produces the same empty list.
+
+    So this runs `mock_noodle` - which completes successfully, reports a confident
+    `designability` and has no secondary structure - at the HEAD of a real chain through a
+    real `CampaignManager`. It stands in for `mock_generate`: same `Backbone` output, no
+    inputs, so the planner can cover the campaign's objectives and actually deploy. A
+    noodle-only chain plans nothing and reaps nothing, which is the first way this test was
+    written and would have passed against the bug. The test
+    asserts the gate name lands in `tasks` provenance. Asserting the NAMES rather than merely
+    that nothing raised: a bare non-crash would also pass if the field were silently dropped.
+    """
+    import pathlib as _pathlib
+
+    chain = ["mock_noodle", "mock_design", "mock_fold", "mock_score"]
+    mgr = CampaignManager(spec("t-failed-gates", max_cycles=1), _pair(chain), reg)
+    await mgr.run()
+
+    found = list(_pathlib.Path(ROOT).glob("t-failed-gates/**/tasks.jsonl"))
+    assert found, f"no tasks provenance under {ROOT}/t-failed-gates"
+    rows = [json.loads(ln) for ln in found[0].read_text().splitlines() if ln.strip()]
+    assert rows, "tasks.jsonl is empty"
+
+    failing = [r for r in rows if r.get("qc") == "fail"]
+    assert failing, "mock_noodle must fail its gate - that is the whole point of the fixture"
+    assert any(r["failed_gates"] for r in failing), \
+        "a failing task recorded an EMPTY failed_gates list - the names were dropped"
+    names = {g for r in failing for g in r["failed_gates"]}
+    assert all(isinstance(n, str) for n in names), \
+        "gate names, not objects or dicts - the harness reads these without a schema"
+    assert "has_secondary_structure" in names, \
+        f"the gate that catches a noodle must be named; got {names}"

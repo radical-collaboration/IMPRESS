@@ -495,10 +495,24 @@ Pinned by `tests/test_core.py::test_the_failed_gate_list_is_logged_in_the_shape_
 actually_returns`, asserted against `failed()`'s contract rather than through a campaign, so it
 holds whatever the executor does around it.
 
+**The coverage gap behind it, which is the more useful finding.**
+`test_lying_tool_is_caught_by_qc` is the only test in the suite that produces a QC FAIL, and
+it drives `Dispatcher` directly - so `_log_task_telemetry` never runs for it. Every test that
+DOES go through the executor uses tools that pass. So the expression was exercised on every
+task in the suite and never once on a non-empty list.
+
+Closed by
+`tests/test_campaign.py::test_a_failed_gate_reaches_tasks_provenance_through_the_executor`,
+which runs `mock_noodle` at the HEAD of a real chain - same `Backbone` output as
+`mock_generate`, no inputs - through a real `CampaignManager`, and asserts the gate NAMES land
+in `tasks` provenance. The chain matters: a noodle-only campaign plans nothing and reaps
+nothing, which is how the first draft of this test was written and would have passed against
+the bug. Asserting names rather than absence-of-crash matters for the same reason - a silent
+drop of the field would also not raise. Confirmed to reproduce the exact `AttributeError`.
+
 **The general lesson, and it is not the first time in this pass:** the failure path is the
-untested path, and a green validation run is evidence about the success path only. Worth a
-sweep for other attribute access on `failed()`-shaped data; there are only two callers today
-and the other is correct.
+untested path, and a green validation run is evidence about the success path only. There are
+only two callers of `failed()` today and the other is correct.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 
