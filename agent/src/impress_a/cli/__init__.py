@@ -47,7 +47,7 @@ POLICIES = reasoners.LETTERS
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
 SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
-               "trust", "validate-tasks", "compare")
+               "trust", "validate-tasks", "compare", "mock-lab")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -1234,6 +1234,27 @@ def _parser() -> argparse.ArgumentParser:
     vt.add_argument("--out", default=None, metavar="DIR",
                     help="where to write validate_tasks.json and the per-Task table "
                          "(default: <root>/<campaign>/validation)")
+    ml = sub.add_parser("mock-lab",
+                        help="run the mock chain across a knob grid and draw the figures")
+    ml.add_argument("--out", default="campaigns/_runs/_analysis", metavar="DIR",
+                    help="where the run directories, tables and figures go "
+                         "(default: under the gitignored campaign run root)")
+    ml.add_argument("--stage", default="all",
+                    choices=("all", "sweep", "collect", "figures"),
+                    help="run one stage only; `collect` and `figures` re-read an existing "
+                         "lab, so a figure can be fixed without re-running 90 campaigns")
+    ml.add_argument("--repeats", type=int, default=3, metavar="N",
+                    help="independent seed salts per sweep point. The arms are never "
+                         "repeated: they are what the activity runs by hand")
+    ml.add_argument("--only", action="append", default=None, metavar="NAME",
+                    help="`arms`, `sweeps`, an arm name or a knob name; repeatable")
+    ml.add_argument("--model", default="D", help="the reasoner every cell is driven by")
+    ml.add_argument("--jobs", type=int, default=4, metavar="N",
+                    help="sweep cells at a time. The four arms always run one at a time, "
+                         "because every wall-clock figure comes from them")
+    ml.add_argument("--base-spec", default=None, metavar="FILE",
+                    help="the campaign each cell overrides (default: "
+                         "campaigns/mock-small-molecule-binding.yaml)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
@@ -1272,6 +1293,13 @@ def main(argv: list[str] | None = None) -> int:
                                             a.model_profile))
     if a.cmd == "compare":
         return compare_command(a.dirs, a.control, a.theta, a.t_cut, a.chain, a.json)
+    if a.cmd == "mock-lab":
+        # Imported here rather than at module scope: the figures stage pulls in matplotlib,
+        # which is an optional extra, and `impress-a run` must not need it.
+        from ..analysis.mock_lab import BASE_SPEC
+        from ..analysis.mock_lab import main as mock_lab_main
+        return mock_lab_main(a.out, a.stage, a.repeats, a.only, a.model, a.jobs,
+                             a.base_spec or BASE_SPEC)
     if a.cmd == "validate-tasks":
         return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":

@@ -39,6 +39,11 @@ agentbridge = ["flowgentic @ git+https://github.com/stride-research/flowgentic.g
 # second abstraction over an interface that is already the compatibility layer.
 oracle = ["openai>=1.40"]
 http = ["httpx"]          # the HTTP control-plane adapter
+# Figures for the mock knob lab (`impress-a mock-lab`). An EXTRA, not a dependency: the lab's
+# sweep and collect stages write CSVs with the standard library and numpy, which this project
+# already has, and only `analysis/mock_figures.py` imports matplotlib. A campaign host has no
+# reason to carry a plotting stack, and a laptop running the activity installs it in one line.
+figures = ["matplotlib>=3.8"]
 # `tomli` only below 3.11, where `tomllib` is not in the standard library. It is used by
 # tests/test_toolchain.py to read this file's own [tool.ruff] table, rather than grepping it -
 # a text match would be satisfied by the word `false` appearing in a comment.

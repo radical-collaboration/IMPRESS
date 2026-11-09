@@ -1444,6 +1444,49 @@ count only readings from tasks whose node passed - and the decision it needs is 
 SUSPECT node's readings count, which is a question about trust and not about plumbing. Opened
 with the reproduction above so the fix can be tested without an allocation.
 
+**G15. An ABORTED campaign leaves provenance that says it completed.** Found by the mock
+knob lab, whose `hopeless` arm aborts on purpose. `Executor._fail_all` writes
+
+    {"event": "campaign_ended", "reason": "completed"}
+
+because `stop_reason` carries its default - nothing requested a stop, the executor raised
+`CampaignAborted` instead - and no `terminated` record is written at all, since that is
+written on the normal path. So the only durable trace of `CampaignAborted: 3 consecutive
+all-failed runs` is the process's stderr.
+
+Why that matters beyond tidiness: **`analysis/compare_arms.py` scores from provenance on
+purpose** - "never from an arm's own bookkeeping" is the first line of its docstring - and
+provenance alone cannot distinguish an arm that aborted from one that finished. An aborted
+Delta arm would be scored as a completed one with fewer cycles. `analysis/mock_lab.collect`
+works around it by deriving `aborted` from the subprocess exit code and recovering the reason
+from the captured log, which is only available because the lab launched the process itself;
+a scorer handed a run directory has neither.
+
+The fix is small and local: set `stop_reason` before raising, and write a `terminated` record
+on the abort path with the reason and the cycles completed. Not done here because it changes
+what the single writer of campaign state records at the end of every campaign, and the arms
+pre-registered in `plans/arms-preregistration.md` are scored off exactly those records.
+`tests/test_mock_lab.py::test_abort_reason_takes_the_last_exception_line` pins the workaround
+so the fix has something to replace.
+
+**G16. About one first cycle in eight stalls for an extra ~1.0s inside asyncflow's dispatch
+loop.** Measured on the laptop surrogate, where a cycle is otherwise ~0.11s: over 8 runs of
+the same spec the first cycle's execute window came back 0.118, 0.114, **1.110**, 0.116,
+0.104, 0.117, 0.115, 0.113 s. It is not the knob setting and not the tools - the union of
+task spans is ~2ms in every one of those runs.
+
+`radical/asyncflow/workflow_manager.py` line ~1358: the run-component loop waits on its
+`_component_change_event` with `timeout=1.0`, so when the first batch of tasks is registered
+just after the loop enters `asyncio.wait`, nothing wakes it until the timeout expires. One
+second, once, at the head of a campaign.
+
+**Harmless on hardware and worth knowing anyway.** A Delta stage takes minutes, so 1s is
+noise; on the mock tier it is 90% of the first cycle, which is why every wall-clock figure
+the lab draws says so in its caption. It is also the kind of latency that would matter if the
+engine were ever used for many short tasks. Upstream, not ours: record it here so the next
+person measuring agent overhead on short tasks does not spend the afternoon looking for it in
+`exec/dispatch.py`.
+
 
 ## H. Reasoner models
 

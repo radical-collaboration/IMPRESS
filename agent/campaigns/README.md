@@ -263,3 +263,18 @@ cycles 0   stop: rejected at interlock: provisional pattern capped at 10% of ava
   changing what satisfaction counts would change how the pre-registered Delta arms stop.
 - **A surrogate chain under `tool_delivery: real` is refused on purpose.** Gate 6, and the
   reason these tools live in the `mock` toolkit at all.
+
+## 6. Running the knobs as a sweep instead of by hand
+
+The three experiments above are the knobs one at a time, typed. `impress-a mock-lab` is the
+same campaigns run across a grid, with the executor's own provenance flattened into CSVs and
+six figures drawn from them - four arms and five swept knobs, in about half a minute:
+
+```bash
+pip install -e ".[figures]"     # once; the sweep and collect stages do not need it
+impress-a mock-lab
+```
+
+It writes to `campaigns/_runs/_analysis`. `docs/reference/mock-lab.md` has what each table
+and figure holds, which of its numbers mean anything, and the three defects the sweep found
+in the engine around the surrogate (backlog G14, G15, G16).
