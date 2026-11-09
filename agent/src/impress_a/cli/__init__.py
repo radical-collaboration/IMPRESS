@@ -468,7 +468,11 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
     async with client:
         session = RemoteSession(client, campaign_id)
         obs = await session.observe()
-        goal = Goal(text=obs.goal, objectives=list(obs.objectives))
+        # `target_front` from the observation, which is the only thing a remote caller has.
+        # Dropping it here would make the served arm stop at one design while the in-process
+        # arms ran to ten - a difference between arms that is not the model (backlog G11).
+        goal = Goal(text=obs.goal, objectives=list(obs.objectives),
+                    target_front=obs.target_front)
         pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile)
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         driver = RolesDriver(goal, pair.specifier, pair.planner,

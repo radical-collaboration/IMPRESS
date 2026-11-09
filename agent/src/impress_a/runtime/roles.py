@@ -214,5 +214,9 @@ def goal_from_spec(spec: Any) -> Goal:
     cycle bounds - and none of that is the Goal. Keeping them apart is what makes
     `Goal -> Spec` a statement about the science rather than about the engine.
     """
+    # `target_front` crosses, because it is success criteria rather than a loop knob - how
+    # many designs over the bar the caller asked for, not how the engine gets there. Without
+    # it the Specifier marks an objective satisfied on the FIRST design that clears it, and a
+    # campaign asked for ten stops at one (backlog G11).
     return Goal(text=spec.goal, objectives=list(spec.objectives),
-                budget=dict(spec.budget))
+                budget=dict(spec.budget), target_front=spec.target_front)

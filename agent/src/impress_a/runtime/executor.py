@@ -485,6 +485,7 @@ class CampaignExecutor:
             # this one is derived from the other.
             budget=self.budget,
             toolkit=self._toolkit, stages=list(self.spec.stages), spec=self.spec_state,
+            target_front=self.spec.target_front,
             orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)
 

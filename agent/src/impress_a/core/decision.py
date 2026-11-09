@@ -98,6 +98,14 @@ class CampaignObservation(BaseModel):
     #: campaign over a socket had no way to learn it at all, which is the parity of evidence
     #: ADR 0007 requires of every adapter.
     stages: list[str] = Field(default_factory=list)
+    #: How many designs over every bounded bar the campaign asked for; 0 means one is enough.
+    #: Carried for the same reason `stages` is: an external caller builds its `Goal` from this
+    #: observation and from nothing else, so without this field a served campaign's Specifier
+    #: would use the default while an in-process one used the spec's. For the four-arm
+    #: experiment that is a difference between arms which is not the model - arm C would stop
+    #: at one design while A, B and D ran to ten - which is precisely the confound
+    #: `impress-a compare`'s one-variable guard exists to refuse (backlog G11).
+    target_front: int = 0
     #: The applied Spec. Carried so a Planner plans against objectives the executor has
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).

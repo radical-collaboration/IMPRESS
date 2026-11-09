@@ -539,8 +539,9 @@ It needed a property on `CampaignManager` too - `__getattr__` delegates reads of
 and nothing delegates writes, so a bare assignment would have landed on the manager while the
 executor kept its default, leaving the bound disarmed for arm C as well.
 
-**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **OPEN - needs a
-decision.** Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
+**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **RESOLVED** in code
+on `agent/stopping-rules`, **unrun on hardware**. Doc:
+[stopping-rules](stopping-rules.md). Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
 That was CORRECT behaviour, and the diagnosis is the interesting part.
 
 `ThresholdSpecifier` translates each declared objective into a `SatisfactionRule` and leaves
@@ -560,6 +561,29 @@ stopping rules disagree and the laxer one wins - backlog X1's shape, inverted.
 Prereg section 3 pre-registers `C_T3 = 0`, on the evidence that `complex_plddt` measured
 0.426 / 0.486 / 0.507 across every run this project had recorded - "0 of 3". **Those three
 runs came from the `/work/hdd` checkout** (C11), so that baseline describes different code.
+
+**The cure, and what it turned out to be.** `target_front` did not merely fail to reach the
+rule - it was read by **no code anywhere**: parsed into `CampaignSpec`, forwarded into
+`ReasonerOptions`, consumed by nothing. Both Delta arm specs had declared `target_front: 10`
+since they were written and it had never done anything. Section E's category, surviving because
+the field existed in two places and so looked wired.
+
+It now lives on the `Goal`, which `core/goal.py`'s own docstring argues for: the Goal carries
+what success means and not how the campaign is driven, and "ten designs" is success criteria
+rather than a loop knob. That placement also lets `ThresholdSpecifier` read it while `_spec_d`
+keeps its ruling that a deterministic `Goal -> Spec` takes nothing from the options.
+`SatisfactionRule.n` is set from it on **bounded** objectives only - an unbounded objective
+ranks, and ten readings of a number nobody has to beat say nothing more than one. Campaigns
+declaring no target are unaffected, because `CampaignSpec.target_front` defaults to 0.
+
+It also crosses the control plane as `CampaignObservation.target_front`. A remote caller builds
+its `Goal` from the observation and nothing else, so without that field arm C would stop at one
+design while A, B and D ran to ten - a difference between arms that is not the model, and one
+`impress-a compare`'s one-variable guard cannot see, since every arm would still complete with
+plausible numbers.
+
+**What `n` is not:** it counts READINGS over the bar (`len(metrics(metric)) >= n`), not distinct
+designs. The endpoint clusters sequences; this does not. A stopping condition, not a score.
 The pre-registered expectation should be read against this before the next smoke, and the
 tier arithmetic in sections 12-13 rests on the same numbers.
 
@@ -619,8 +643,17 @@ ports satisfied from that `DesignNode.artifacts`, matched by declared TYPE, and
 **no inputs at all** (only `outputs.backbone`) and no `partial_t`, so there is no port for a
 parent structure to arrive on and no way to ask RFD3 for partial diffusion. The reference's
 `num_refine_cycles: 2` / `rfd3_partial_t: 10.0` therefore has no equivalent here, and the
-measured consequence is already on the record: `complex_plddt` 0.426 / 0.486 / 0.507 against a
-0.75 bound, 0 of 3.
+measured consequence was taken to be on the record: `complex_plddt` 0.426 / 0.486 / 0.507
+against a 0.75 bound, 0 of 3.
+
+  **Those three numbers no longer support that conclusion** (C11, and G11's own evidence). All
+  three runs were produced by the `/work/hdd` checkout, so they describe different code; and on
+  the current tree arm C of job 23671367 measured `complex_plddt` **0.904**, one for one over
+  the same bound, with rfd3 refinement still unreachable. So whatever is wrong here, those
+  three numbers are not the measurement of it. The argument that partial diffusion is
+  unreachable stands on the spec declaring no inputs and no `partial_t`, which is checkable by
+  reading the file; the fold-quality consequence is unmeasured. The pre-registration quotes
+  the same three numbers in sections 3 and 13 and has not yet been re-derived.
 
   This is **not** blocking the four-arm experiment, and the specs are honest about it:
   `delta-small-molecule-arms{,-smoke}.yaml` keep `rfd3_design.num_designs: 1` with the reason

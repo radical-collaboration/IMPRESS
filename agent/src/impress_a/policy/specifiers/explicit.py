@@ -59,19 +59,42 @@ class ThresholdSpecifier(BaseSpecifier):
     async def initial_spec(self, goal: Goal) -> Spec:
         aim = Aim(statement=goal.text or "satisfy every declared objective")
         objectives: list[SpecObjective] = []
+        # How many designs over the bar the caller asked for. 0 - the default for every
+        # campaign that declares nothing - keeps the old "one is enough", so no existing
+        # campaign moves.
+        wanted = max(1, goal.target_front)
         for obj in goal.objectives:
             bounded = obj.min is not None or obj.max is not None
             objectives.append(SpecObjective(
                 aim=aim.id,
                 statement=f"{obj.direction.value} {obj.name}"
-                          + ("" if bounded else " (ranks; no threshold to meet)"),
+                          + ("" if bounded else " (ranks; no threshold to meet)")
+                          + (f" x{wanted}" if bounded and wanted > 1 else ""),
                 targets=[obj.name],
-                # A bounded objective is met when a design clears the threshold. An unbounded
-                # one has no finish line - it ranks - so what the campaign owes it is a
-                # MEASUREMENT, without which the front cannot order anything by it.
+                # A bounded objective is met when `n` designs clear the threshold. An
+                # unbounded one has no finish line - it ranks - so what the campaign owes it
+                # is a MEASUREMENT, without which the front cannot order anything by it.
+                #
+                # `n` IS WHERE THE GOAL'S COUNT LANDS, and it only applies to the bounded
+                # ones. A campaign declaring `target_front: 10` was asking for ten designs
+                # meeting every threshold, and got a Spec satisfied by the FIRST design that
+                # cleared each one - so arm C of the first four-arm smoke ran 24 tasks and
+                # stopped at cycle 0, correctly, on "every spec objective satisfied"
+                # (backlog G11). Raising it on an unbounded objective would be meaningless:
+                # ten readings of a number nobody has to beat say nothing more than one, and
+                # `tests/test_campaign.py` rules on exactly that.
+                #
+                # What `n` counts is READINGS, not distinct designs:
+                # `DataRegistry.satisfies` is `len(metrics(metric)) >= n`, one row per
+                # (task, metric) per ingested outcome. The experiment's endpoint is distinct
+                # T2 designs after sequence clustering, which is a different and smaller
+                # number. At one scoring task per lineage the two track closely enough to
+                # stop on, but this rule is a stopping condition and not a score - the
+                # harness is what scores.
                 satisfied_when=SatisfactionRule(
                     kind="metric_in_range" if bounded else "metric_present",
-                    metric=obj.name, min=obj.min, max=obj.max),
+                    metric=obj.name, min=obj.min, max=obj.max,
+                    n=wanted if bounded else 1),
             ))
         spec = Spec()
         spec.apply(SpecRevision(new_aims=[aim], new_objectives=objectives,

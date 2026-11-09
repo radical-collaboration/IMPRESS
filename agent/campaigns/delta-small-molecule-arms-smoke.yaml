@@ -66,8 +66,18 @@ tool_delivery: real
 # the shipped limit an arm would end about fifteen minutes into a four-hour allocation.
 max_cycles: 6
 stagnation_limit: 7
-# Ten is the target; the rate is the endpoint. 0 would leave each model its own default of 3,
-# which is a demo's number and an arbitrary cap on a campaign asked for ten.
+# Ten is the target; the rate is the endpoint. It sets `SatisfactionRule.n` on every BOUNDED
+# objective, so the Spec is satisfied when ten designs clear each bar rather than one - which
+# is what the Goal asks for and what the endpoint counts. 0 means "one is enough".
+#
+# Until backlog G11 this value reached NOTHING: it was parsed, forwarded into
+# `ReasonerOptions`, and read by no code anywhere, so a campaign declaring ten stopped on the
+# first design that cleared every bar. Arm C of the first four-arm smoke did exactly that -
+# 24 tasks, cycle 0, "every spec objective satisfied".
+#
+# What `n` counts is READINGS over the bar, not distinct designs: the harness clusters
+# sequences and this rule does not. At one scoring task per lineage the two track closely
+# enough to stop on, but the stopping rule is not the score.
 # 10 here too, so the smoke cannot stop for a reason the production run would not.
 target_front: 10
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
