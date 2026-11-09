@@ -1,14 +1,56 @@
 # A laptop campaign that mocks the small-molecule binding toolkit
 
-**Status:** **planned, nothing implemented** · **Branch:** `agent/mock-smb-campaign`, cut from
-`agent/stopping-rules` at `25550f7` · **Items:** none yet; open one when work starts
+**Status:** **IMPLEMENTED** · **Branch:** `agent/mock-smb-campaign`, cut from
+`agent/stopping-rules` at `25550f7` · **Items opened:** G14 (a FAILed node can satisfy the
+Spec), found by this campaign and deliberately left unfixed
 
-**Handoff.** This document was written at the end of a session that ran out of room to build
-it. Nothing below has been executed: no spec has been loaded by the registry, no agent has
-been run, no campaign has been composed. The draft code in *Appendix A* is **unverified** and
-is embedded here rather than committed to its real path precisely so it cannot be mistaken for
-working code, and cannot break the `mock` toolkit's all-or-nothing load. Start by verifying,
-not by trusting.
+**What was built**, against the design below:
+
+- `toolkits/mock/tools/mock_{rfd3_design,mpnn_design,packmin,fastrelax,filter_shape,boltz_predict}/spec.yaml`
+- `src/impress_a/tools/mock_smb_agents.py` - the draft in *Appendix A*, **corrected**; see
+  "Where the draft was wrong" below
+- `toolkits/mock/SKILL.md` - the surrogate chain beside the self-consistency one
+- `campaigns/mock-small-molecule-binding.yaml`, `campaigns/README.md`
+- `tests/test_mock_smb.py` - 20 tests, including a spec-by-spec mirror check against the
+  real specs
+
+Measured: registry 18 tools, zero errors · `impress-a preflight` 3/3 ok, 8 n/a · the campaign
+runs in **0.9 s** on a laptop · `pytest tests -q` 437 passed · `ruff check src tests` clean.
+Every before/after number in `campaigns/README.md` was measured from a run, after clearing
+the trust ledger.
+
+**Where the draft in *Appendix A* was wrong**, kept because the plan said to start by
+verifying rather than trusting, and both were real:
+
+1. **Two agents reached two stages upstream for a metric.** `MockFastRelaxAgent` and
+   `MockBoltzPredictAgent` both read `overall_confidence`, which only `mock_mpnn_design`
+   reports - and `TaskRequest.inputs` carries a node's IMMEDIATE dependencies only. Both
+   would have silently taken `_inherit`'s default forever, with nothing failing: the chain
+   runs, every stage passes, and `temperature` stops reaching the binding objective. Fixed
+   by passing the quality signal hand to hand, and `MockFastRelaxAgent._quality` inverts
+   packmin's own formula to recover it. `test_every_stage_moves_when_the_stage_above_it_moves`
+   asserts each link separately for exactly this reason.
+2. **The gains were calibrated per stage rather than end to end.** A chain is a product of
+   slopes, so the draft's comfortable-looking coefficients multiplied out to a last stage
+   that barely moved: `difficulty: 0.6` failed the FIRST stage outright and still left
+   `complex_plddt` at 0.81, well over its 0.75 bar. Re-derived together, and the per-stage
+   noise cut to match - packmin's +/-25 alone put the shape score's spread across its own
+   acceptance bar at the defaults.
+
+Also needed, and not anticipated by the plan:
+
+3. **`_soft_cap`.** Hard clamps made the front degenerate: the refinement path escalates
+   parameters on every other cycle, and an eight-cycle run returned three front members at
+   `shape_complementarity` 0.950 and `complex_plddt` 0.980 to the digit - two objectives that
+   could no longer order anything.
+4. **`impress-a preflight` had to learn which stages a campaign actually runs.** It reported
+   five FAILs against this campaign (`$FOUNDRY_SIF_PATH`, `$MPNN_DIR`, `$BOLTZ_CACHE`,
+   pyrosetta, `ml_collections`) and then printed "a campaign using mock_rfd3_design, ...
+   needs the entries above", which is false. Checks are now scoped by `_CHECK_OWNERS`; with
+   no spec given, every check still runs.
+5. **`test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance`**
+   enumerated every registered spec despite its name, so the mirrored acceptance gates broke
+   it. Scoped to `toolkit != "mock"`, which is what it always meant.
 
 ## Why
 
@@ -193,9 +235,11 @@ Recorded because they cost most of the time available:
   registered worktree marked `locked`, which `git worktree prune` skips until
   `.git/worktrees/<name>/locked` is removed.
 
-## Appendix A — draft agents module, UNVERIFIED
+## Appendix A — draft agents module, UNVERIFIED (SUPERSEDED)
 
-Never imported, never run, never loaded by the registry. Written against the specs described
+**Superseded by `src/impress_a/tools/mock_smb_agents.py`, which corrects two defects in it -
+see the status block above. Kept as written, because what the draft got wrong is the useful
+part of this record.** Never imported, never run, never loaded by the registry. Written against the specs described
 above; treat every constant as a guess that has not been checked against a composed graph. The
 calibration intent is that the **defaults pass** — so a first run succeeds and the knobs have
 somewhere to move — and that `difficulty` is what takes that away.
@@ -381,7 +425,10 @@ __all__ = ["MockBoltzPredictAgent", "MockFastRelaxAgent", "MockFilterShapeAgent"
            "MockMPNNDesignAgent", "MockPackMinAgent", "MockRFD3DesignAgent"]
 ```
 
-## Appendix B — draft spec, UNVERIFIED
+## Appendix B — draft spec, UNVERIFIED (SUPERSEDED)
+
+Shipped, with the `difficulty` comment rewritten against measurement: the acceptance
+shortfall band is ~0.5-0.75 and the integrity floor is crossed above ~0.75.
 
 `mock_rfd3_design` only, because it is the one carrying the novel `difficulty` parameter; the
 other five follow the five-step recipe above from their real counterparts.

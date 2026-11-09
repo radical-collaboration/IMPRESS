@@ -110,6 +110,39 @@ def load_spec(path: str | Path) -> CampaignSpec:
         max_runs=int(d.get("max_runs", 0)))
 
 
+#: Which real tool each environment check exists for. Every entry names tools, never
+#: toolkits, because what a campaign declares is a stage list.
+_CHECK_OWNERS: dict[str, tuple[str, ...]] = {
+    "$WORK_DIR": ("rfd3_design", "ligandmpnn_design", "packmin", "fastrelax",
+                  "filter_shape", "boltz_predict"),
+    "$FOUNDRY_SIF_PATH": ("rfd3_design",),
+    "$MPNN_DIR": ("ligandmpnn_design",),
+    "$BOLTZ_CACHE": ("boltz_predict",),
+    "boltz CCD cache": ("boltz_predict",),
+    "apptainer": ("rfd3_design",),
+    "boltz": ("boltz_predict",),
+    "pyrosetta": ("packmin", "fastrelax", "filter_shape"),
+    "ml_collections": ("ligandmpnn_design",),
+}
+
+
+def _check_applies(stages: list[str] | None, owners: tuple[str, ...]) -> bool:
+    """Does any tool this check exists for appear in the campaign?
+
+    `stages` is `None` when preflight was given no campaign at all, and then every check
+    applies: the question there is what this machine can run, not what one spec needs.
+
+    Scoping matters because of the surrogate chain. `campaigns/mock-small-molecule-binding.yaml`
+    runs six `toolkit: mock` stand-ins on a laptop and needs no Apptainer image, no LigandMPNN
+    checkout, no Boltz weights and no PyRosetta - and before this, preflight reported five
+    FAILs against it and then printed "a campaign using mock_rfd3_design, ... needs the
+    entries above", which is false. A FAIL the reader cannot act on, under a sentence that is
+    wrong, is how the FAIL column stops being read - the same erosion the `warn` column's
+    rule guards against.
+    """
+    return stages is None or any(tool in stages for tool in owners)
+
+
 def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
     """`boltz_predict` with an empty `ligand_smiles` doesn't fail - it silently models no
     ligand, so the campaign's Pareto front optimizes the wrong objective. Backlog A2.
@@ -868,6 +901,16 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # "a failure we would rather not block on", this column is worth nothing.
     checks: list[tuple[str, bool | None, str]] = []
     skipped: list[str] = []
+    #: Checks this campaign's stages do not reach. Reported as a count rather than as rows,
+    #: because a run of nine `n/a` lines is what the reader would learn to skip past.
+    not_applicable: list[str] = []
+
+    def wanted(name: str) -> bool:
+        if _check_applies(stages, _CHECK_OWNERS[name]):
+            return True
+        not_applicable.append(name)
+        return False
+
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
@@ -875,6 +918,8 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                       ("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
                       ("MPNN_DIR", "ligandmpnn_design (checkout + checkpoints)"),
                       ("BOLTZ_CACHE", "boltz_predict (pre-warmed weights)")):
+        if not wanted(f"${var}"):
+            continue
         val = os.environ.get(var)
         if not val:
             checks.append((f"${var}", False, f"unset - needed by {what}"))
@@ -894,7 +939,7 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # Presence of the weights is not completeness of the CCD dictionary, and the two
     # fail very differently: missing weights fail on the login node, a half-extracted
     # CCD fails inside the allocation, per-lineage, as `CCD component ... not found!`.
-    if cache := os.environ.get("BOLTZ_CACHE"):
+    if (cache := os.environ.get("BOLTZ_CACHE")) and wanted("boltz CCD cache"):
         marked = (Path(cache) / ".mols_complete").exists()
         checks.append(("boltz CCD cache", marked,
                        "extraction proven complete" if marked else
@@ -902,12 +947,16 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                        "step 11 HERE, where there is still internet to repair it"))
 
     for exe, what in (("apptainer", "rfd3_design"), ("boltz", "boltz_predict")):
+        if not wanted(exe):
+            continue
         found = shutil.which(exe)
         checks.append((exe, bool(found), found or f"not on PATH - needed by {what}"))
 
     # Tier 2. PyRosetta in a subprocess: importing it here would initialise a process-global
     # singleton in the very interpreter that has to stay clean for P2 fan-out.
-    if quick:
+    if not _check_applies(stages, _CHECK_OWNERS["pyrosetta"]):
+        not_applicable.append("pyrosetta")
+    elif quick:
         skipped.append("pyrosetta")
     else:
         try:
@@ -945,16 +994,18 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # Tier 1, ~1s, always: the one package `delta_env_setup.sh` was missing. Nothing of ours
     # imports it - LigandMPNN's bundled openfold does, at run.py import time - so it is
     # invisible until stage 2 of a campaign. Cheap enough to never be worth skipping.
-    try:
-        out = subprocess.run([sys.executable, "-c", "import ml_collections"],
-                             capture_output=True, timeout=60, check=False)
-        checks.append(("ml_collections", out.returncode == 0,
-                       "importable - LigandMPNN's openfold needs it" if out.returncode == 0
-                       else "missing; re-run scripts/delta_env_setup.sh step 6"))
-    except (OSError, subprocess.SubprocessError) as e:
-        # Including TimeoutExpired. A preflight that raises tells the operator nothing
-        # about the other eight checks, which is the opposite of what it is for.
-        checks.append(("ml_collections", None, f"could not check: {e}"))
+    if wanted("ml_collections"):
+        try:
+            out = subprocess.run([sys.executable, "-c", "import ml_collections"],
+                                 capture_output=True, timeout=60, check=False)
+            checks.append(("ml_collections", out.returncode == 0,
+                           "importable - LigandMPNN's openfold needs it"
+                           if out.returncode == 0
+                           else "missing; re-run scripts/delta_env_setup.sh step 6"))
+        except (OSError, subprocess.SubprocessError) as e:
+            # Including TimeoutExpired. A preflight that raises tells the operator nothing
+            # about the other eight checks, which is the opposite of what it is for.
+            checks.append(("ml_collections", None, f"could not check: {e}"))
 
     # Tier 2, MINUTES, and only for a campaign that actually runs it: the whole import
     # chain, through the same shim the adapter uses. `run.py` does its work under an
@@ -1080,8 +1131,14 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     if skipped:
         print(f"  {len(skipped)} skipped by --quick ({', '.join(skipped)})"
               f" - not checked here, and NOT a pass; run the deep form on a login node")
+    if not_applicable:
+        print(f"  {len(not_applicable)} n/a for these stages ({', '.join(not_applicable)})"
+              f" - no stage of this campaign uses them")
     if stages:
-        print(f"  (a campaign using {', '.join(stages)} needs the entries above)")
+        # Scoped, not universal: with a spec the rows above are this campaign's
+        # requirements, and `n/a` above says which ones it does not have. Without a spec
+        # every check runs and the question is what this machine can do.
+        print(f"  (scoped to this campaign's stages: {', '.join(stages)})")
     return 1 if failed else 0
 
 

@@ -1,0 +1,112 @@
+# A LAPTOP SURROGATE OF THE SMALL-MOLECULE BINDING CAMPAIGN.
+#
+#   impress-a run campaigns/mock-small-molecule-binding.yaml --model D
+#
+# Finishes in seconds, needs no allocation, and reports NOTHING about any molecule: the six
+# stages are `toolkit: mock` surrogates whose metrics are seeded random draws. What is real is
+# everything around them - the chain's shape, its typed ports, its parameter names, its metric
+# names, and every acceptance threshold, which are copied from the specs the Delta arms run.
+# So a campaign *behaviour* observed here is the behaviour the real campaign would show;
+# a *number* observed here is not a measurement. See campaigns/README.md for the knobs and
+# `toolkits/mock/SKILL.md` for the chain.
+#
+# This file mirrors `delta-small-molecule-arms-smoke.yaml`: same goal, same objectives, same
+# thresholds. It differs in where it runs (`concurrent`, not `dragon`), what it runs
+# (`tool_delivery: mock`), and in a budget sized so that nothing here stops for money.
+campaign_id: mock-small-molecule-binding
+goal: "Design at least ten distinct small-molecule binders meeting every declared threshold"
+
+# KNOB: the backend. `concurrent` is a thread pool in this process - no allocation, no Dragon,
+# no startup bound to arm. `workers: 4` is how many tasks may run at once; the chain is linear
+# so it only matters once `replicas` or `concurrency` exceeds 1.
+backend: concurrent
+backend_config: {workers: 4}
+
+# KNOB: gate 6. `mock` REFUSES a graph containing a real tool, exactly as `real` refuses one
+# containing a surrogate. Setting this to `real` here is the interesting mistake: the campaign
+# is rejected at validation rather than quietly reporting drawn numbers as science.
+tool_delivery: mock
+
+# KNOB: how many runs the campaign may be driven through before it stops. At the defaults the
+# chain passes every gate on its first cycle and the Spec is satisfied immediately, so this
+# bound is not what ends the run - raise `target_front` and it becomes what does.
+max_cycles: 8
+# KNOB: consecutive runs without front progress before the campaign gives up.
+stagnation_limit: 4
+
+# KNOB: how many readings over every bounded objective the Spec asks for before it calls
+# itself satisfied. 1 stops on the first design that clears every bar, which is what makes
+# the default run short. What `n` counts is READINGS, not distinct designs.
+target_front: 1
+
+# A laptop has one GPU at most and the surrogates never touch it; declared because the
+# composer checks a tool's `gpu_portability` against the site's `gpu_api`, and because
+# `allow_external: false` is the honest statement for a run with no network.
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+
+# KNOB: the budget, in the dimensions the cost models declare. Sized not to bind: one pass of
+# this chain declares 0.006 gpu-h and 0.006 cpu-h, so even the interlock's 10%-of-available
+# cap on an untrusted pattern (0.4 / 0.4 here) is ~67x one pass. Shrink both figures to 0.05
+# and the cap becomes what refuses the graph, before a single task runs:
+#   cycles 0, stop: rejected at interlock: provisional pattern capped at 10% of available
+#   gpu_hours (0.006 > 0.005)
+budget:
+  gpu_hours: 4.0
+  cpu_hours: 4.0
+
+# The chain, stated rather than left to a reasoner's built-in default - which is the
+# four-stage self-consistency mock loop, not this.
+stages: [mock_rfd3_design, mock_mpnn_design, mock_packmin, mock_fastrelax,
+         mock_filter_shape, mock_boltz_predict]
+
+# KNOBS: tool parameters. Every one of these exists on the real tool too, except `difficulty`.
+params:
+  mock_rfd3_design:
+    num_designs: 1
+    # KNOB: more steps, more secondary structure. 20 is the floor, 200 the ceiling: across
+    # that range `ss_fraction` moves 0.30 and `complex_plddt` 0.09, so it can pull a chain
+    # back over its bars after `difficulty` has pushed it under.
+    diffusion_steps: 50
+    # KNOB, AND THE ONE WITH NO REAL COUNTERPART: how hard this campaign is. 0.25 passes
+    # everything. Around 0.5 the backbone misses its 0.5 acceptance threshold while staying
+    # over the 0.3 integrity floor - a weak design, trust untouched. Above ~0.75 it goes under
+    # the floor, which is an integrity failure and demotes the pattern. 1.0 is hopeless.
+    difficulty: 0.25
+  mock_mpnn_design:
+    # KNOB: lower recovers more, higher diversifies. 0.0 -> 1.0 costs 0.40 of
+    # `overall_confidence` and 0.26 of `complex_plddt`; at 0.5 about one lineage in ten
+    # starts missing the pLDDT bar, and at 0.6 two thirds do.
+    temperature: 0.2
+    # KNOB: candidates to pick the best of, sublinear as picking best-of-N is. Dropping to
+    # 1 costs 0.11 of `overall_confidence` and 0.07 of `complex_plddt`; 64 buys 0.15 back.
+    batch_size: 8
+    number_of_batches: 1
+  mock_packmin:
+    # KNOB: more cycles, a lower pre-relax energy for fastrelax to start from. 1 -> 5 is
+    # worth 0.08 of `complex_plddt` - the cheapest rescue knob in the chain.
+    cycles: 1
+  mock_fastrelax:
+    # KNOBS: both improve `fa_rep` and `interaction_energy`, as they would on hardware.
+    nstruct: 1
+    relax_cycles: 3
+  mock_boltz_predict:
+    # KNOB: samples to pick the best of. This is the stage carrying the tightest bar
+    # (`complex_plddt >= 0.75`), so this is where a marginal chain is rescued or lost: 1
+    # costs 0.09 of pLDDT, enough that about one lineage in six misses the bar at otherwise
+    # default settings, and 25 buys 0.07 back.
+    diffusion_samples: 8
+
+# KNOBS: the search shape. `replicas: 1` is one lineage per run; raise it to 4 and the pattern
+# signature changes, so the new pattern starts untrusted and its first runs are capped.
+# `concurrency` is experiments in flight, which the executor serialises at 1.
+replicas: 1
+concurrency: 1
+
+# The thresholds are the Delta arms' own, unchanged - which is the point of the surrogate.
+# A node is feasible only if it clears every bounded objective here, and the same figures
+# appear as acceptance gates on the tools, so the front's filter and the QC verdict agree.
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

@@ -1416,6 +1416,35 @@ deliberately **not applied**: the prereg's own header rules that an amendment af
 arm has run voids the comparison, `impress-a compare` enforces it through `prereg_sha`, and all
 four smoke manifests record `c710f017…`.
 
+**G14. A node that FAILED QC can still satisfy the Spec, so a campaign can stop on "every
+spec objective satisfied" with an empty Pareto front.** Found on the laptop surrogate, where
+it costs nothing to see: `campaigns/mock-small-molecule-binding.yaml` with
+`params.mock_rfd3_design.difficulty: 0.55` ends at cycle 1 with
+
+    stop : every spec objective satisfied
+    nodes: 1  front: 0
+
+The one node FAILed `metric_in_range[ss_fraction]` (acceptance), so `core/pareto` correctly
+refuses it the front - a FAIL node is never rankable, which is an invariant. But
+`core/data.DataRegistry.ingest` records **every** task's metrics with no reference to the
+run's QC verdict, and `SatisfactionRule` is answered from that registry: the stages below the
+failure reported `shape_complementarity`, `complex_plddt` and `ligand_iptm` over their bars,
+and those readings satisfied the Spec on their own. The two halves of "is this campaign
+finished" are reading different evidence - the front reads verdicts, the Spec reads numbers.
+
+Why it matters on hardware rather than only here: it is the stopping rule, so a real arm can
+terminate early reporting success and hand back nothing. It is the same *shape* as G11 (a
+stopping condition that does not count what the Goal asks for), and the same shape as the
+mock-chain-on-a-GPU failure (a number recorded without the context that invalidates it).
+
+**Deliberately not fixed on this branch.** Changing what satisfaction counts changes when a
+pre-registered arm stops, and `plans/arms-preregistration.md`'s sha is recorded in every
+smoke manifest. The fix is small - `ingest` knows each task's `qc`, and `satisfies` could
+count only readings from tasks whose node passed - and the decision it needs is whether a
+SUSPECT node's readings count, which is a question about trust and not about plumbing. Opened
+with the reproduction above so the fix can be tested without an allocation.
+
+
 ## H. Reasoner models
 
 The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
