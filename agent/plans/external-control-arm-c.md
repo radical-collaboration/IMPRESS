@@ -97,6 +97,25 @@ out-of-process split, not the inbox halves, and the pre-registration should say 
 **The prereg re-baseline** and **the C11 annotation sweep** stay where `stopping-rules.md`
 left them.
 
+## A detour this run paid for: C11 recurred
+
+The `validate-tasks` pass submitted for this change, job **23680592**, ran
+`dragon -s /work/hdd/.../delta_run_campaign.py run ... --model D` - a 19m49s arm-D campaign on
+four A40s where a validation pass was asked for. `delta_validate_tasks.sh` tried
+`$IMPRESS_A_DIR` before `$SLURM_SUBMIT_DIR`; this session's environment carried a stale
+`/work/hdd` value predating the `~/.bashrc` repoint, and the wrapper exec'd that tree's
+launcher - a copy predating the `validate-tasks` branch, which ignored the exported
+`IMPRESS_A_COMMAND` and used its own `run`/`MODEL=D` defaults.
+
+C11's entry claimed "the wrapper resolves its sibling the same way". It did not, and the
+launcher's refusal could not fire because it is in the file the wrapper declined to run - *a
+check that only exists in the file you failed to reach is not a check*. The precedence is
+reversed, the refusal is duplicated at that hop, and
+`test_the_validate_wrapper_refuses_the_same_disagreement_as_the_launcher` runs the shipped
+script from a directory with no sibling beside it, which is where sbatch actually puts it.
+Confirmed to fail against the old ordering. The four arms of 23675376 and the validation pass
+23675119 all record the right checkout, so this cost one job and no results.
+
 ## Test
 
 **`test_a_remotely_driven_campaign_stops_where_the_campaign_said_to`** (new,

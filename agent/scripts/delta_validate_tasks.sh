@@ -55,16 +55,42 @@ set -euo pipefail
 #   /var/spool/slurmd/job23669777/delta_gpu_run.sh: No such file or directory
 #
 # seven seconds in, exit 127 - on the only way this script is ever meant to be used. The
-# submission directory is where the repo actually is; `delta_gpu_run.sh` then does the same
-# resolution again, and refuses if an inherited $IMPRESS_A_DIR disagrees with it.
+# submission directory is where the repo actually is.
+#
+# $SLURM_SUBMIT_DIR FIRST, AND $IMPRESS_A_DIR REFUSED WHEN IT DISAGREES. The order used to be
+# the other way round, and job 23680592 is what that cost: this session's environment carried
+# a stale `IMPRESS_A_DIR=/work/hdd/bdyk/hooten1/impress_a`, `sbatch --export=ALL` handed it to
+# the job, and this loop exec'd THAT checkout's `delta_gpu_run.sh` - a copy predating the
+# `validate-tasks` branch, so it ignored the `IMPRESS_A_COMMAND` exported below, fell back to
+# its own `run`/`MODEL=D` defaults, and spent 19m49s on four A40s running an arm-D campaign
+# nobody asked for, from `/work/hdd/.../delta_run_campaign.py`.
+#
+# That is C11 happening again rather than being remembered, and the guard added for it could
+# not help: `delta_gpu_run.sh` refuses when an inherited $IMPRESS_A_DIR disagrees with the
+# submission directory, but the guard lives in the copy this loop declined to run. A check
+# that only exists in the file you failed to reach is not a check. So the precedence is
+# reversed here, and a disagreement is fatal at this hop instead of being resolved silently
+# in favour of the variable C11 says not to trust.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "${HERE}/delta_gpu_run.sh" ]; then
-    for _candidate in "${IMPRESS_A_DIR:-}" "${SLURM_SUBMIT_DIR:-}"; do
+    for _candidate in "${SLURM_SUBMIT_DIR:-}" "${IMPRESS_A_DIR:-}"; do
         if [ -n "${_candidate}" ] && [ -f "${_candidate}/scripts/delta_gpu_run.sh" ]; then
             HERE="${_candidate}/scripts"
             break
         fi
     done
+fi
+if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -n "${IMPRESS_A_DIR:-}" ] \
+   && [ -f "${SLURM_SUBMIT_DIR}/scripts/delta_gpu_run.sh" ] \
+   && [ "$(cd "${IMPRESS_A_DIR}" 2>/dev/null && pwd)" \
+        != "$(cd "${SLURM_SUBMIT_DIR}" && pwd)" ]; then
+    echo "ERROR: \$IMPRESS_A_DIR names a different checkout than the one this job was"
+    echo "       submitted from, and a job that runs code from neither of the two is how"
+    echo "       job 23680592 ran a campaign where a validation pass was asked for."
+    echo "         IMPRESS_A_DIR  ${IMPRESS_A_DIR}"
+    echo "         SUBMIT_DIR     ${SLURM_SUBMIT_DIR}"
+    echo "       Unset it, or submit from the checkout it names."
+    exit 1
 fi
 if [ ! -f "${HERE}/delta_gpu_run.sh" ]; then
     echo "ERROR: cannot find delta_gpu_run.sh next to this script or under"

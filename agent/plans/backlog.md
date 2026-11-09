@@ -822,8 +822,30 @@ every documented submission wraps across three lines with `\` and the regex was 
 the same shape of mistake as the bug it was written for.
 
 **C11. Every submitted job has run a different checkout than the one submitted.**
-**RESOLVED** (2026-11-08). The most serious thing this deployment pass found, and it was
-invisible by construction.
+**REOPENED 2026-11-09, RESOLVED AGAIN** on `agent/stopping-rules`. The most serious thing this
+deployment pass found, and it was invisible by construction.
+
+**It recurred the day after it was closed.** Job **23680592** was submitted as
+`sbatch scripts/delta_validate_tasks.sh <smoke spec>` and ran
+`dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py run ... --model D`:
+19m49s on four A40s, an arm-D campaign where a validation pass was asked for. The sentence
+below that reads "the wrapper resolves its sibling the same way" was false. It tried
+`$IMPRESS_A_DIR` **before** `$SLURM_SUBMIT_DIR`, the submitting shell carried a stale
+`/work/hdd` value that predated the `~/.bashrc` repoint, `sbatch --export=ALL` handed it over,
+and the wrapper exec'd that tree's `delta_gpu_run.sh` - a copy predating the `validate-tasks`
+branch, which ignored the exported `IMPRESS_A_COMMAND` and used its own `run`/`MODEL=D`
+defaults.
+
+**The launcher's refusal could not fire, because it is in the file the wrapper declined to
+run.** That is the general lesson and it is worth more than the lost allocation: *a check that
+only exists in the file you failed to reach is not a check*. The wrapper now prefers
+`$SLURM_SUBMIT_DIR` and refuses a disagreeing `$IMPRESS_A_DIR` at its own hop, and
+`tests/test_toolchain.py::test_the_validate_wrapper_refuses_the_same_disagreement_as_the_
+launcher` runs the shipped script from a directory with no sibling beside it - the position
+sbatch actually puts it in - rather than trusting that the two files agree. The four arms of
+job 23675376 and the validation pass 23675119 all record
+`Checkout: /work/nvme/bdyk/hooten1/IMPRESS/agent`, so this recurrence cost one job and no
+results.
 
 Two causes, and the second hid the first. `${BASH_SOURCE[0]}` **is not the repo under
 sbatch**: Slurm copies the submitted script to the compute node as
