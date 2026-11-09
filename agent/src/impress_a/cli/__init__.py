@@ -475,8 +475,16 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
                     target_front=obs.target_front)
         pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile)
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
+        # The campaign's OWN bounds, from the observation. `max_turns=10_000` was here, and
+        # it is not a neutral default: every in-process arm is driven through
+        # `spec.max_cycles` by `manager.py`, so a remotely driven arm ran until its budget or
+        # its wall clock stopped it while the others stopped at six cycles - the same
+        # observation gap as G11's, in the half that says how the campaign is driven rather
+        # than what it is for. 0 means the served campaign declared nothing, and then the old
+        # numbers stand.
         driver = RolesDriver(goal, pair.specifier, pair.planner,
-                             max_turns=10_000, concurrency=1)
+                             max_turns=obs.max_cycles or 10_000,
+                             max_attempts=obs.max_attempts or 4, concurrency=1)
         try:
             await driver.conduct(session)
         except CampaignStopped as stopped:

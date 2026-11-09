@@ -587,6 +587,41 @@ designs. The endpoint clusters sequences; this does not. A stopping condition, n
 The pre-registered expectation should be read against this before the next smoke, and the
 tier arithmetic in sections 12-13 rests on the same numbers.
 
+**G12. Arm C served a campaign that two reasoners drove, and neither finished.** **PARTLY
+RESOLVED** in code on `agent/stopping-rules`, **unrun on hardware**. Doc:
+[external-control-arm-c](external-control-arm-c.md). Evidence: job 23675997.
+
+`impress-a serve --model C` builds model C's inbox halves **in the serving process** and then
+calls `mgr.run()`, so that process drives the campaign and waits to be `steer`ed.
+`impress-a control` is not a steerer: it is the same `RolesDriver` the in-process arms use,
+against a `RemoteSession`, and it drives by calling `submit_stage` over the plane. **Nothing
+shipped calls `plane.steer`.** So job 23675997 ran two reasoners against one executor - the
+sidecar planned and submitted r0001's 24 tasks, all of which passed, and the served driver sat
+at turn 0 waiting for a directive nothing would send, timed out after `--caller-timeout`, and
+stopped the campaign while r0001 was still running.
+
+The first diagnosis - G10's shape, a 120 s patience expiring while a ~180 s cycle ran - was
+wrong, and the stop reason is the proof: it names *cycle 0*, and `RolesDriver` increments
+`turn` the moment a stage is deployed, so a planner that had already placed r0001 could not
+report cycle 0. Raising the timeout would have bought the same stop later. It also explains
+23671367, where arm C stopped at cycle 0 on "every spec objective satisfied": the served
+driver's Specifier saw a Spec the sidecar's run had already satisfied at `n=1`.
+
+**Fixed:** arm C now serves **bare** (`scripts/delta_gpu_run.sh` drops `--model` and
+`--caller-timeout`), so `serve` attaches `_Idle` and the sidecar is the campaign's one and only
+reasoner - which is the two-process split C5 built and the only contrast arm C can honestly
+claim. And `CampaignObservation` gains `max_cycles`/`max_attempts`, because
+`cli.control_campaign` drove with `max_turns=10_000` - a number no campaign declares - while
+every in-process arm uses `spec.max_cycles`; arm C has never survived past cycle 1, so nothing
+could notice. That is G11's observation gap again, in the half that says how a campaign is
+driven rather than what it is for.
+
+**Still open:** model C's own code - the inbox halves, `on_timeout`, directive validation, the
+`steer` route - is exercised by `tests/` and by nothing on Delta, because the steering caller
+does not exist. Writing it carries a design question of its own (what a directive should carry
+that a Stage does not). Until then arm C measures the out-of-process split rather than the
+inbox halves, and the pre-registration should say so.
+
 ## B. Silent-failure defences — unmet for the real toolkits
 
 The project's central claim is that these tools fail *silently*. For the real toolkits that defence

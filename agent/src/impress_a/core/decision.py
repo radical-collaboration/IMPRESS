@@ -106,6 +106,16 @@ class CampaignObservation(BaseModel):
     #: at one design while A, B and D ran to ten - which is precisely the confound
     #: `impress-a compare`'s one-variable guard exists to refuse (backlog G11).
     target_front: int = 0
+    #: How the campaign is DRIVEN, carried for the same reason `target_front` is. A remote
+    #: driver builds itself from this observation and from nothing else, and
+    #: `cli.control_campaign` had no way to learn either number - so it drove with
+    #: `max_turns=10_000` while every in-process arm used the spec's `max_cycles`. In the
+    #: four-arm experiment that is arm C running until its budget or its wall clock ran out
+    #: while A, B and D stopped at six cycles: a difference between arms which is not the
+    #: model, which is what `impress-a compare`'s one-variable guard exists to refuse.
+    #: 0 means "not declared" and leaves the driver's own default, so no existing caller moves.
+    max_cycles: int = 0
+    max_attempts: int = 0
     #: The applied Spec. Carried so a Planner plans against objectives the executor has
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).
