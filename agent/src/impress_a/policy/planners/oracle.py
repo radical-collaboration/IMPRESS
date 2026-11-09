@@ -52,9 +52,21 @@ class OraclePlanner(BasePlanner):
     name = "oracle-plan"
 
     def __init__(self, stages: list[str] | None = None, oracle: Any = None,
-                 fallback: Any = None, sink: Any = None, max_lineages: int = 4) -> None:
+                 fallback: Any = None, sink: Any = None, max_lineages: int = 4,
+                 base_replicas: int = 0) -> None:
         self.oracle = oracle
-        self._mechanics = ThresholdPlanner(stages=stages)
+        #: The campaign's declared lineage width, handed to the mechanics so an arm whose
+        #: model says nothing about breadth still composes what the campaign asked for. A
+        #: model that does name a width still wins, clamped by `CampaignSpec.replicas` in the
+        #: executor as before. 0 keeps the mechanics' own default (backlog G13).
+        self._mechanics = ThresholdPlanner(
+            stages=stages,
+            **({"base_replicas": base_replicas} if base_replicas else {}))
+        #: The campaign's declared lineage width, 0 when it declared none. Held here as
+        #: well as on the mechanics because this planner chooses a width of its own and has
+        #: to know when not to.
+        self.declared_width = max(0, base_replicas)
+
         #: Mandatory for a real run (Part A risk R7). Model D's planner, so a campaign whose
         #: endpoint is down keeps planning rather than holding an allocation idle.
         self.fallback = fallback or self._mechanics
@@ -142,7 +154,8 @@ class OraclePlanner(BasePlanner):
         # plans. See `ThresholdPlanner.plan`.
         stage = await self._mechanics.plan(
             spec, ctx, chain=list(raw["stages"]),
-            lineages=max(1, min(self.max_lineages, int(raw["replicas"]))))
+            lineages=(self.declared_width or
+                      max(1, min(self.max_lineages, int(raw["replicas"])))))
         if stage is None:
             return None
         params = raw.get("params") or {}

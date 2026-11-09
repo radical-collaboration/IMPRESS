@@ -191,6 +191,7 @@ def _options_for(spec: CampaignSpec,
         oracle=client, reasoner=client,
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
+        replicas=spec.replicas,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
 
 
@@ -473,7 +474,8 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
         # arms ran to ten - a difference between arms that is not the model (backlog G11).
         goal = Goal(text=obs.goal, objectives=list(obs.objectives),
                     target_front=obs.target_front)
-        pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile)
+        pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile,
+                          replicas=obs.replicas)
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         # The campaign's OWN bounds, from the observation. `max_turns=10_000` was here, and
         # it is not a neutral default: every in-process arm is driven through
@@ -493,7 +495,8 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
 
 
 def _role_pair(model: str, specifier: str | None, planner: str | None,
-               stages: list[str], guard: bool, profile: str | None = None):
+               stages: list[str], guard: bool, profile: str | None = None,
+               replicas: int = 0):
     """Build the two halves for a remote driver, from the served campaign's own chain.
 
     `stages` comes from `CampaignObservation.stages` - the campaign's declaration in its own
@@ -508,7 +511,7 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     # easily as `--model B`, and filling only one would make `--model-profile` silently
     # inert for half the letters it is offered for.
     opts = reasoners.ReasonerOptions(
-        stages=stages or None, oracle=client, reasoner=client)
+        stages=stages or None, oracle=client, reasoner=client, replicas=replicas)
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
@@ -1187,7 +1190,9 @@ def _parser() -> argparse.ArgumentParser:
     tr.add_argument("--replicas", type=int, action="append", default=None, metavar="N",
                     help="replica width to assert at, repeatable. The signature includes "
                          "replica multiplicity, so width 1 does not cover width 4 "
-                         "(backlog A10). Default: the campaign's own `replicas`")
+                         "(backlog A10). Default: EVERY width from 1 to the campaign's own "
+                         "`replicas`, because a width nobody asserted runs under the "
+                         "untrusted interlock (backlog G13)")
     return ap
 
 
@@ -1215,7 +1220,16 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "trust":
         widths = a.replicas
         if widths is None:
-            widths = [max(1, load_spec(a.spec).replicas)] if a.spec else [1]
+            # EVERY width an arm of this campaign can compose, not just the declared one.
+            # Replica multiplicity is part of the pattern signature, so a width nobody
+            # asserted runs under forced dry-run and a 10% cost cap - and on array 23680876
+            # that is exactly what happened to the control arm, which composed 2 against a
+            # campaign declaring 4 and spent three cycles untrusted while the other three
+            # arms ran trusted throughout (backlog G13). A planner reduced to one lineage by
+            # a refinement, or a model naming a narrower draw, lands in the same hole.
+            # Asserting the whole range costs one composed graph per width and nothing else.
+            declared = max(1, load_spec(a.spec).replicas) if a.spec else 1
+            widths = list(range(1, declared + 1))
         return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec) if a.spec else None, a.quick)

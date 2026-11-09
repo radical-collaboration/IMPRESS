@@ -1283,7 +1283,8 @@ had never run anywhere but Delta's 3.12.
 ---
 
 **G13. The arms do not compose the same replica width, and the control arm fell through the
-gap.** **OPEN**, diagnosed on the four-arm smoke of 2026-11-09. Doc:
+gap.** **FIXED** in code on `agent/stopping-rules`, **unrun on hardware**. Diagnosed on the
+four-arm smoke of 2026-11-09. Doc:
 [replica-width-confound](replica-width-confound.md). Evidence: array 23680876 (arms 23680888,
 23680907, 23681055, 23680876).
 
@@ -1309,14 +1310,46 @@ A10 predicted the signature half of this and `impress-a trust --replicas` was bu
 nobody enumerated is that **the arms do not all agree on width**, so no assertion list can cover
 them all, and the arm that falls through is the control.
 
-**Fix:** feed `spec.replicas` into `ReasonerOptions` and pass it to `_plan_d` as
-`base_replicas`, so D proposes the declared width and the executor's `min` clamps to the same
-number; a campaign declaring nothing keeps the default of 2. Asserting trust at width 2 as well
-would remove the trust half and leave the width half, so it is a workaround and not the fix.
-Arm D then costs ~0.68 gpu-h per run (4.08 over six cycles, inside the 6.0 budget) and runs
-trusted from r0001. **Needs a test the suite has never had:** one that compares the arms'
-composed widths *to each other* against a spec declaring `replicas: 4`. Every existing test
-checks one arm alone, where a width of 2 is merely different rather than wrong.
+**Ruling: breadth is held FIXED across the arms, and the campaign declares it.** The comparison
+exists to observe differences that follow from the reasoning track and from what that reasoning
+costs; an arm targeting a smaller ensemble spends differently per cycle for a reason the
+endpoint cannot separate from reasoning quality, so every arm targets an ensemble of similar
+size. Model A's inherited explore-3 / exploit-2 breadth (`PROFILES`,
+`policy/planners/agentic.py:64`, carried over from `FourNodePolicy`) is **not** a rigorous part
+of model A - its purpose is projecting LLM reasoning onto a research-cycle structure - so the
+declared width overrides it. A's quality and diversity fractions are untouched: those are the
+strategy.
+
+**The fix was not one wire, and a test comparing the arms to each other is what showed it.**
+All four planners built `ThresholdPlanner(stages=stages)` and inherited `base_replicas = 2`, so
+the declared width reached **none** of them. Three routes to one confound: (1) D's and C's
+mechanics took the hardcoded 2 - the one the smoke measured; (2) A and B override with their
+own numbers, reaching 4 only because a live Beam model asked for 4 every cycle, so **a degraded
+turn would have silently halved that arm's width** and dropped it into the untrusted interlock
+with the model blamed for it (probed: with no client they compose 3); (3)
+`ExternalPlanner._to_stage` read `directive.get("replicas") or 1`, so a caller silent about
+breadth composed **one** lineage.
+
+`ReasonerOptions.replicas` now carries it, fed from `spec.replicas` and from
+`CampaignObservation.replicas` for a remote driver; every planner forwards `base_replicas` to
+its mechanics; A and B treat a declared width as authoritative over their own; `ExternalPlanner`
+passes `lineages=None` rather than 1 when the directive is silent. 0 everywhere still means the
+planner's own default, so no campaign declaring no width moves. `CampaignSpec.replicas` stays a
+ceiling in the executor, which can clamp a graph down but cannot add lineages - the planners are
+where width has to be composed.
+
+**And `impress-a trust --assert` now covers every width from 1 to the declared one** rather than
+the declared width alone, because a width nobody asserted runs under forced dry-run and a 10%
+cost cap. On the smoke spec that is four signatures rather than two - `f5b21d82…` at 1,
+`f8bcefed…` at 2 (the one D fell through), `fa8f3389…` at 3 (the one a degraded model-A arm
+would have hit, never asserted by anyone), `78e730c6…` at 4.
+
+**Tests:** `test_every_arm_composes_the_width_the_campaign_declared` builds a Stage from each of
+the four arms against a spec declaring `replicas: 4` and asserts they agree - the comparison the
+suite never made, since every other test checks one arm alone where a narrower width is merely
+different. `test_a_campaign_that_declares_no_width_keeps_the_planners_own_default` pins the 0
+case. Arm D now costs ~0.68 gpu-h per run (4.08 over six cycles, inside the 6.0 budget) and runs
+trusted from r0001.
 
 **Forces a pre-registration amendment** before any production arm (§10 step 2, §11's width-4
 abort criterion and §12's admissions-under-scrutiny line). Drafted verbatim in the doc and
@@ -1589,11 +1622,13 @@ paid for out of the first allocation.
     second bound at all behind it, and is now a declared `CampaignSpec` field (0 keeps the model's
     own 3) rather than an inferred one, because how many designs a campaign wants is a property of
     the Goal and `core.pareto.Objective` says nothing about it.
-12. **G13 the replica-width confound** — next, and before any further arm comparison. It is one
-    wire and one test, it costs no allocation to write, and until it lands every per-cycle
-    number measured against arm D is measuring width and admission regime as well as the model.
-    It also forces a pre-registration amendment, which is only legitimate before the production
-    arms are submitted - so the ordering is not a preference.
+12. ~~**G13 the replica-width confound**~~ — **FIXED in code, unrun on hardware.** It was not
+    the one wire it looked like: the declared width reached no planner at all, and two of the
+    three routes were latent rather than measured. The pre-registration amendment it forces is
+    drafted and still unapplied, and is only legitimate before the production arms are
+    submitted - so that ordering is not a preference. **A smoke rerun is what closes it**, and
+    the thing to read is whether all four arms report the same lineage count and all four run
+    trusted from r0001.
 
 ## The legacy decision path is gone (phase 11)
 

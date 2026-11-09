@@ -109,14 +109,26 @@ class AgenticPlanner(BasePlanner):
     NODES = ("select_tasks", "parameterize")
 
     def __init__(self, stages: list[str] | None = None, reasoner: Any = None,
-                 sink: Any = None, max_lineages: int = 4) -> None:
+                 sink: Any = None, max_lineages: int = 4,
+                 base_replicas: int = 0) -> None:
         self.reasoner = reasoner
         self.sink = sink
         #: A planner's own ceiling on breadth, beside the campaign's `replicas` cap. The cap
         #: is the campaign's call and binds in the executor; this stops a model's own number
         #: being the thing that asks for sixty lineages.
         self.max_lineages = max(1, max_lineages)
-        self._mechanics = ThresholdPlanner(stages=stages)
+        #: The campaign's declared lineage width, handed to the mechanics so an arm whose
+        #: model says nothing about breadth still composes what the campaign asked for. A
+        #: model that does name a width still wins, clamped by `CampaignSpec.replicas` in the
+        #: executor as before. 0 keeps the mechanics' own default (backlog G13).
+        self._mechanics = ThresholdPlanner(
+            stages=stages,
+            **({"base_replicas": base_replicas} if base_replicas else {}))
+        #: The campaign's declared lineage width, 0 when it declared none. Held here as
+        #: well as on the mechanics because this planner chooses a width of its own and has
+        #: to know when not to.
+        self.declared_width = max(0, base_replicas)
+
         self.graph = self._build()
 
     @property
@@ -163,6 +175,15 @@ class AgenticPlanner(BasePlanner):
         ctx: PlanningContext = state["ctx"]
         strategy = state.get("strategy", "explore")
         lineages = int(state.get("lineages") or PROFILES[strategy][0])
+        # **The campaign's declared width wins over any number this planner chose.**
+        # Breadth is held FIXED across the arms on purpose: the comparison is about reasoning
+        # tracks and their cost, and an arm drawing 3 where another draws 4 spends differently
+        # per cycle for a reason the endpoint cannot separate from reasoning quality. So every
+        # arm targets an ensemble of the same size, and what varies is the reasoning (backlog
+        # G13's ruling). 0 means the campaign declared nothing and this planner's own number
+        # stands.
+        if self.declared_width:
+            lineages = self.declared_width
 
         stage = await self._mechanics.plan(spec, ctx, lineages=lineages)
         if stage is None:

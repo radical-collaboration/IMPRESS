@@ -116,6 +116,10 @@ class CampaignObservation(BaseModel):
     #: 0 means "not declared" and leaves the driver's own default, so no existing caller moves.
     max_cycles: int = 0
     max_attempts: int = 0
+    #: Independent lineages per experiment, as the campaign declared them. Carried for the
+    #: same reason, and because a remotely driven arm composing a different width from the
+    #: in-process ones is backlog G13's confound arriving by a second route.
+    replicas: int = 0
     #: The applied Spec. Carried so a Planner plans against objectives the executor has
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).

@@ -80,6 +80,70 @@ async def _plan(reg, objectives=None, stages=CHAIN, **kw):
     return planner, spec, await planner.plan(spec, _ctx(reg, goal, spec, stages))
 
 
+async def test_every_arm_composes_the_width_the_campaign_declared(reg):
+    """The arms must agree on width, and the campaign must be what decides it.
+
+    Nothing compared the arms' composed widths TO EACH OTHER, and that is how backlog G13
+    survived: every other test checks one arm alone, where a width of 2 against a campaign
+    asking for 4 is merely different rather than wrong.
+
+    On the four-arm smoke of 2026-11-09 (array 23680876) arms A, B and C composed 4 lineages
+    and model D composed 2, from one campaign declaring `replicas: 4`. All four planners built
+    `ThresholdPlanner(stages=stages)` and inherited its `base_replicas = 2`, and
+    `CampaignSpec.replicas` is only a CEILING - `executor` applies
+    `min(intent.replicas, spec.replicas)` - so the declared width reached NO planner. A, B and
+    C reached 4 only because a live model happened to ask for it in its reply, which means a
+    degraded turn would have silently halved that arm's width, changed its pattern signature,
+    and dropped it into the untrusted interlock, all attributed to the model.
+
+    Replica multiplicity is part of the pattern signature, so a width nobody asserted trust
+    for is a width that runs under forced dry-run and a 10% cost cap. On that run the control
+    arm was the one that fell through.
+
+    Arm C is driven by a directive that names NO width on purpose: `_to_stage` read
+    `directive.get("replicas") or 1`, so a caller silent about breadth composed ONE lineage
+    against a campaign asking for four - the third route into the same defect, and the one
+    that would have hit arm C the moment its caller stopped naming a number.
+    """
+    goal = Goal(text="stabilize", objectives=list(OBJS))
+    spec = await ThresholdSpecifier().initial_spec(goal)
+
+    def _planner(model: str):
+        return reasoners.build_roles(model, model, reasoners.ReasonerOptions(
+            stages=CHAIN, replicas=4)).planner
+
+    widths: dict[str, int] = {}
+    for model in ("A", "B", "D"):
+        stage = await _planner(model).plan(spec, _ctx(reg, goal, spec))
+        assert stage is not None, f"model {model} planned nothing"
+        widths[model] = stage.lineages
+
+    planner_c = _planner("C")
+    planner_c.steer({"role": "planner", "stages": CHAIN})
+    stage_c = await planner_c.plan(spec, _ctx(reg, goal, spec))
+    assert stage_c is not None, "the steered model-C planner composed nothing"
+    widths["C"] = stage_c.lineages
+
+    assert set(widths.values()) == {4}, (
+        "every arm must compose the campaign's declared width, or the comparison is "
+        f"measuring breadth as well as the model: {widths}")
+
+
+async def test_a_campaign_that_declares_no_width_keeps_the_planners_own_default(reg):
+    """The G13 fix must not retune every campaign that never asked for a width.
+
+    `CampaignSpec.replicas` defaults to 0, and 0 has to mean "the planner's own default"
+    rather than "one lineage" - otherwise wiring the declared width through would quietly
+    narrow every mock campaign in the suite.
+    """
+    goal = Goal(text="stabilize", objectives=list(OBJS))
+    spec = await ThresholdSpecifier().initial_spec(goal)
+    planner = reasoners.build_roles("D", "D", reasoners.ReasonerOptions(stages=CHAIN)).planner
+    stage = await planner.plan(spec, _ctx(reg, goal, spec))
+    assert stage is not None and stage.lineages == 2, \
+        f"an undeclared width must leave ThresholdPlanner's own default of 2: {stage}"
+
+
 async def test_an_objective_no_enabled_task_reports_is_deferred_not_dropped(reg):
     """A Deferral is an answer; a silent omission is the thing the coverage gate refuses.
 
