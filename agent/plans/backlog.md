@@ -57,6 +57,10 @@ that moves this item, and it should now surface the real LigandMPNN error instea
   never run (A10); and no measurement has superseded a prediction, so calibration is untested.
   (Promotion has since happened: job 22726105, see A12.)
 
+  **C11 provenance:** the evidence above is jobs 22536706, 22669509, 22692304, 22726105, which ran
+  the `/work/hdd` checkout rather than this one. The measurements stand as measurements; what they
+  cannot be read as is evidence about *this* code. See C11.
+
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
 benchmark (`campaigns/data/alr/ALR.smiles`), and `_check_ligand_smiles` (`cli/__init__.py`, wired
@@ -91,6 +95,10 @@ minutes instead of consuming the whole allocation silently. What remains open: *
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
 needs a person on a real allocation, with the bounded timeout now giving a fast, clear failure to
 iterate against instead of another silent multi-hour loss.
+
+  **C11 provenance:** the evidence above is job 22318678, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
 
 **A4. The rfd3_design rewrite needs a real smoke-run confirmation.** The Hydra contract and
 `DesignInputSpecification` JSON shape are verified against the installed `rfd3` CLI's own source,
@@ -130,6 +138,10 @@ glob finds the structures; confirm on the first real run, and see G2 for using t
   `out_dir` of structures with no metadata raises instead of guessing. Pinned by
   `test_rfd3_never_hands_downstream_a_trajectory` and
   `test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in`.
+
+  **C11 provenance:** the evidence above is jobs 22536706, 22669509, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A6. LigandMPNN cannot import under this venv's numpy — RESOLVED in code, unexecuted.** Job
 22669509's recovered stderr: `run.py` dies in its **module-level imports**, before parsing an
@@ -218,6 +230,10 @@ what the job runs*. A second thing worth keeping - the other FAIL in that same o
 `boltz not on PATH`, was an artefact of invoking `.venv/bin/impress-a` without activating the
 venv. Real on its face, caused by the harness. The launcher activates, so it never sees it.
 
+  **C11 provenance:** the evidence above is jobs 22669509, 22684607, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
+
 **A7. `boltz_predict` has never executed, and a budget correction is why — RESOLVED.** Not a tool failure. The
 `cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
 against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,
@@ -237,6 +253,10 @@ run was unwinnable from the moment it was admitted and nothing said so.
   gates and produced `complex_plddt` 0.507 and `ligand_iptm` 0.752 - the two objectives that had
   never had a producer in a completed graph. Its own cost model was the last literature guess
   standing (0.15 against 0.0160 measured, 9.3x) and is now 0.05.
+
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A8. Nothing checks that an admitted graph can produce the campaign's objectives.** `grep -rn
 "objective" src/impress_a/compose` returns nothing - the composer and validator never receive them.
@@ -279,6 +299,10 @@ On job 22675512 attempts 1-3 shrank replicas 3→2→1 while composing **identic
 signature, same estimate, same rejection - and only attempt 4 reached the stage-dropping branch.
 `max_attempts` is 4: one more rejection and the campaign would have run nothing at all. The policy
 should see the effective replica count.
+
+  **C11 provenance:** the evidence above is job 22675512, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
 
 **A10. `replicas > 1` has never executed.** `plans/first-real-run.md` calls the four-lineage
 independence check the invariant most likely to be silently wrong: `replicas: N` must produce N
@@ -369,6 +393,10 @@ a band rather than a value for exactly this reason.
   **Reproduced off-cluster (2026-10-09)** from `impress_a_runs_2026-10-08.tar.gz` alone, on this
   laptop, at the same commit: every figure above holds to the digit except the 16-of-17, corrected
   here. So these are archive-derived, not Delta-session-derived - the distinction G9 is about.
+
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A12. The trust ledger reset every job, so promotion was unreachable on Delta — RESOLVED.**
 `executor.py` loaded it from `Path(spec.root) / "_trust"`, and `spec.root` defaults to the
@@ -473,6 +501,10 @@ is device-time and `cores` is the CPU request.
 means the next slower task blocks the smoke again. `filter_shape` left at **0.01** and
 deliberately not adjusted: it has still never produced a cost measurement, so there is nothing
 to derive a figure from, and the re-run is what will say.
+
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, 22702568, 22726105, 22728140,
+  which ran the `/work/hdd` checkout rather than this one. The measurements stand as measurements;
+  what they cannot be read as is evidence about *this* code. See C11.
 
 **G9. The code that reports a QC failure could not survive one.** **RESOLVED**
 (2026-11-08). Found by the first four-arm smoke, job 23671024: all four arms died inside
@@ -887,7 +919,26 @@ Pinned by `tests/test_toolchain.py::test_the_launcher_refuses_a_checkout_that_is
 submitted`, which runs the resolution block itself in four environments.
 
 **Not retrospectively fixable:** results recorded before this commit were produced by the
-`/work/hdd` tree. Anything cited from them should say so.
+`/work/hdd` tree. Anything cited from them should say so, and now does: every item below whose
+evidence is a job before the cutover carries a **C11 provenance** note naming its jobs. The rule
+is mechanical - **any job id below 23670000 ran the other checkout** - and the sweep found ten
+items, derived from the file rather than from memory:
+
+| item | pre-cutover jobs it cites |
+|---|---|
+| A1 | 22536706, 22669509, 22692304, 22726105 |
+| A4 | 22536706, 22669509 |
+| A5 | 22318678 |
+| A6 | 22669509, 22684607 |
+| A7 | 22684607, 22692304 |
+| A9 | 22675512 |
+| A11 | 22684607, 22692304 |
+| A12 | 22684607, 22692304, 22702568, 22726105, 22728140 (and 23670171, 23670891, which are this tree) |
+| G4 | 22702568 |
+| G6 | 22536706 |
+
+A3 and G8 cite no job id at all, so neither needed one - which is worth recording, because both
+were on the list this sweep was planned from and that list was written from memory.
 
 **C12. Arm C's serve/control pair had never been executed.** **RUN, 2026-11-08**, on a login
 node with mock tools - the first time the two processes have talked to each other anywhere.
@@ -1138,6 +1189,10 @@ an integrity failure: a wrong guess would not merely be useless, it would refuse
 demote the pattern. Backlog A3 is the standing lesson about flags nobody has run. The adapter logs
 the sidecar's actual keys, so one real run resolves it; the gates land then.
 
+  **C11 provenance:** the evidence above is job 22702568, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
+
 **G5. `filter_shape` may be measuring the wrong interface.** **DONE** (phase 10), and not by
 copying upstream. Upstream splits by chain (`Chain chains="A"` against `chains="B"`), which is
 right only when the ligand is its own chain - a property of the input, not of the tool. The pair
@@ -1173,6 +1228,10 @@ The LigandMPNN stderr, the actual failure, was lost with it.
   report, not a vendored patch. We have no per-run wall-clock bound that would catch the hang
   either, so any third-party exception with the same shape (a required-arg `__init__` that does
   not forward those args to `super()`) reproduces it.
+
+  **C11 provenance:** the evidence above is job 22536706, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
 
 **G7. A run's seed comes from its run label, so every job samples the same five designs.**
 `_replica_seed(run_label, lineage)`, and labels restart at r0001 in every job. Found by
