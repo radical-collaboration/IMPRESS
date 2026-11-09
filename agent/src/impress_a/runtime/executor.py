@@ -261,6 +261,13 @@ class CampaignExecutor:
         self.max_attempts = spec.max_attempts
         self.pending_human: RequestHuman | None = None
         self.prov_sink: Any = None
+        #: Whether a control plane registered this campaign - i.e. whether there IS an
+        #: external caller that could go away. Set by `ControlPlane.register`; an
+        #: `impress-a run` campaign never has one, and the liveness timeout is meaningless
+        #: for it. Deliberately explicit rather than inferred from `prov_sink`, which the
+        #: plane also happens to set: a liveness bound that stops campaigns must not rest on
+        #: a side effect of provenance mirroring.
+        self.under_external_control: bool = False
         self._stagnant = 0
         # Consecutive absorbed runs that could not have reached the front. Reset by any run
         # that could.
@@ -422,8 +429,27 @@ class CampaignExecutor:
         self._last_contact = time.monotonic()
 
     def _control_lost_for(self) -> float | None:
-        """Seconds since the last contact, if the timeout is enabled and has expired."""
+        """Seconds since the last contact, if the timeout is enabled and has expired.
+
+        **Only ever armed for a campaign under EXTERNAL control.** A campaign driven
+        in-process has no control plane, so there is none to lose: the "caller" is the role
+        driver in this same process, and it is silent precisely when it is busy awaiting the
+        tasks it just asked for. Armed everywhere, this killed all three in-process arms of
+        the first four-arm smoke - A, B and D, each after one cycle, at 267s/182s/185s of
+        "silence" against a 120s bound - while arm C, the only arm that actually had a
+        caller, ran to its own stop. The spec's own comment had it backwards, and
+        `cli/__init__.py` records that the setting did nothing at all until the loader began
+        reading it, so its first real outing was the one that lost three arms.
+
+        **And silence while work is in flight is not evidence either.** A cycle of the real
+        chain runs ~180s of tasks with no session traffic, so any bound shorter than a cycle
+        converts normal progress into a lost plane - for arm C too, whose caller legitimately
+        observes once per cycle. The clock is therefore only consulted when nothing is
+        running, which is when a vanished caller is the only thing that would explain silence.
+        """
         if not self.spec.control_liveness_timeout_s or self._last_contact is None:
+            return None
+        if not self.under_external_control or self._inflight:
             return None
         silent = time.monotonic() - self._last_contact
         return silent if silent > self.spec.control_liveness_timeout_s else None

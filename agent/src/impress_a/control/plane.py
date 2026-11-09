@@ -102,6 +102,11 @@ class InProcessControlPlane:
         self.managers[cid] = manager
         self._events.setdefault(cid, [])
         manager.prov_sink = self.emit
+        # Registering IS what makes a campaign externally controlled, and it is the only
+        # moment at which that becomes true. The liveness timeout reads this: a campaign
+        # nobody registered has no caller that could go silent, and arming the bound against
+        # one killed three arms of the first four-arm smoke.
+        manager.under_external_control = True
         return cid
 
     def emit(self, cid: str, kind: str, payload: dict[str, Any]) -> None:

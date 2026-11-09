@@ -514,6 +514,55 @@ drop of the field would also not raise. Confirmed to reproduce the exact `Attrib
 untested path, and a green validation run is evidence about the success path only. There are
 only two callers of `failed()` today and the other is correct.
 
+**G10. The liveness bound killed the three arms that had no control plane.** **RESOLVED**
+(2026-11-08). Second four-arm smoke, job 23671367: all four arms exited 0, no crashes - and
+A, B and D each terminated after ONE cycle with `control plane lost after 267s/182s/185s of
+silence` against `control_liveness_timeout_s: 120`. Arm C, the only arm with a caller, ran to
+its own stop.
+
+Two things were wrong. `touch()` records "any session operation", and an in-process campaign's
+"caller" is the role driver in the same process - silent exactly when it is busy awaiting the
+tasks it just asked for. And a cycle of this chain runs ~180s of tasks with no session
+traffic, so **any bound shorter than a cycle turns normal progress into a lost plane**, for a
+served campaign as much as an in-process one.
+
+The spec's own comment said the bound "matters for any arm driven from a control process",
+which is the opposite of what it did. `cli/__init__.py` records that `control_liveness_
+timeout_s: 120` did nothing in all three Delta specs until the loader began reading it - so
+its first real outing was the one that lost three arms.
+
+Armed now only when a control plane has REGISTERED the campaign, and suspended entirely while
+work is in flight. The flag is explicit (`under_external_control`, set by
+`ControlPlane.register`) rather than inferred from `prov_sink`, which the plane also happens
+to set: a bound that stops campaigns must not rest on a side effect of provenance mirroring.
+It needed a property on `CampaignManager` too - `__getattr__` delegates reads of a known set
+and nothing delegates writes, so a bare assignment would have landed on the manager while the
+executor kept its default, leaving the bound disarmed for arm C as well.
+
+**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **OPEN - needs a
+decision.** Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
+That was CORRECT behaviour, and the diagnosis is the interesting part.
+
+`ThresholdSpecifier` translates each declared objective into a `SatisfactionRule` and leaves
+`n` at its default of **1** (`policy/specifiers/explicit.py:72`). The campaign's
+`target_front: 10` never reaches it. So the Spec is satisfied the moment ONE node clears each
+threshold, while the Goal reads "Design at least ten distinct small-molecule binders meeting
+every declared threshold" and the endpoint counts distinct T2 designs per node-hour. Two
+stopping rules disagree and the laxer one wins - backlog X1's shape, inverted.
+
+**And a node did clear them.** Arm C's own tasks:
+
+    complex_plddt         0.904   bar 0.75   PASS
+    ligand_iptm           0.851   bar 0.40   PASS
+    shape_complementarity 0.731   bar 0.55   PASS
+    interaction_energy  -25.47    bar -8     PASS (T2)
+
+Prereg section 3 pre-registers `C_T3 = 0`, on the evidence that `complex_plddt` measured
+0.426 / 0.486 / 0.507 across every run this project had recorded - "0 of 3". **Those three
+runs came from the `/work/hdd` checkout** (C11), so that baseline describes different code.
+The pre-registered expectation should be read against this before the next smoke, and the
+tier arithmetic in sections 12-13 rests on the same numbers.
+
 ## B. Silent-failure defences — unmet for the real toolkits
 
 The project's central claim is that these tools fail *silently*. For the real toolkits that defence

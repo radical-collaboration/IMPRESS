@@ -73,6 +73,19 @@ class CampaignManager:
     def prov_sink(self, sink: Any) -> None:
         self.executor.prov_sink = sink
 
+    @property
+    def under_external_control(self) -> bool:
+        return self.executor.under_external_control
+
+    @under_external_control.setter
+    def under_external_control(self, value: bool) -> None:
+        # A property, not a bare attribute: `__getattr__` delegates READS of a known set and
+        # nothing delegates writes, so `manager.under_external_control = True` would have
+        # landed on the manager while the executor - which is what consults it - kept its
+        # default. The liveness bound would then have stayed disarmed for arm C too, which is
+        # the one arm it is actually for.
+        self.executor.under_external_control = bool(value)
+
     # -- the campaign --------------------------------------------------------
     def _roles(self) -> Any:
         """The Spec Loop + Planning Loop pipeline, as one `conduct`.

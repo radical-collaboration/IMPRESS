@@ -22,6 +22,7 @@ import contextlib
 import os
 import shutil
 import sys
+import time
 
 import pytest
 import yaml
@@ -511,3 +512,46 @@ def test_the_launcher_does_not_pin_the_control_planes_port():
         "the launcher must not pin the port: serve's ephemeral default is the hardening"
     assert "--host" not in code, \
         "nor the host: loopback is the only boundary a plane with no auth can defend"
+
+
+async def test_the_liveness_bound_is_armed_only_for_a_registered_campaign(reg, tmp_path):
+    """An in-process campaign has no control plane, so there is none to lose.
+
+    `control_liveness_timeout_s: 120` killed three arms of the first four-arm smoke - A, B
+    and D, each after ONE cycle, at 267s/182s/185s of "silence" against a 120s bound - while
+    arm C, the only arm that actually had a caller, ran to its own stop. Nothing external
+    existed for those three: the "caller" was the role driver in the same process, and it is
+    silent exactly when it is busy awaiting the tasks it just asked for.
+
+    The spec's comment claimed the bound "matters for any arm driven from a control process",
+    which is the opposite of what it did. `cli/__init__.py` records that the setting did
+    nothing at all until the loader began reading it, so its first real outing was the one
+    that lost three arms.
+
+    Two conditions, both asserted here: registration is what arms it, and work in flight
+    suspends it - because a cycle of the real chain runs ~180s with no session traffic, so
+    any bound shorter than a cycle turns normal progress into a lost plane for arm C too.
+    """
+    from impress_a.control.plane import InProcessControlPlane
+
+    spec = _spec("t-liveness", tmp_path, control_liveness_timeout_s=120.0)
+    mgr = CampaignManager(spec, _Idle(), reg)
+    assert mgr.under_external_control is False, \
+        "a campaign nobody registered must not be under external control"
+    mgr.executor._last_contact = time.monotonic() - 10_000
+    assert mgr.executor._control_lost_for() is None, \
+        "an in-process campaign has no plane to lose, however long it is quiet"
+
+    InProcessControlPlane().register(mgr)
+    assert mgr.under_external_control is True, "registering IS what arms the bound"
+    assert mgr.executor.under_external_control is True, \
+        "and it must reach the executor, which is what consults it - not stop at the manager"
+    assert mgr.executor._control_lost_for() is not None, \
+        "a registered campaign silent past its bound has lost its caller"
+
+    mgr.executor._inflight["r0001"] = object()
+    try:
+        assert mgr.executor._control_lost_for() is None, \
+            "work in flight explains the silence; a long cycle is not a dead caller"
+    finally:
+        mgr.executor._inflight.clear()
