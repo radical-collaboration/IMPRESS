@@ -303,7 +303,15 @@ does anything. Every real run so far has been `replicas: 1`.
   multiplicity (`f5b21d82…` at 1, `f8bcefed…` at 2, `78e730c6…` at 4), so trust earned at
   width 1 does not transfer, and width 4 can never be admitted untrusted at a 6.0 GPU-h budget,
   so it can never earn trust there either. Width 4 needs route (b), or a deliberate ruling on
-  whether multiplicity belongs in the signature. Separately, concurrent GPU tasks are not pinned:
+  whether multiplicity belongs in the signature.
+
+  **Annotation (2026-11-09): the *Trust* half below is incomplete rather than wrong.**
+  `--replicas 1 --replicas 4` presumes every arm composes the same width, and on array 23680876
+  they did not: A, B and C composed 4 and model D composed 2, so D's `f8bcefed…` was in no
+  arm's ledger and D alone ran three cycles untrusted. The remedy here made width 4 *runnable*;
+  it does not make the arms *comparable*. See **G13** and
+  [replica-width-confound](replica-width-confound.md). The budget and pinning halves are
+  unaffected. Separately, concurrent GPU tasks are not pinned:
   every task sees `CUDA_VISIBLE_DEVICES=0,1,2,3`, and `exec/resources.to_backend_description` is
   called by nothing. `plans/next-run-replicas.md` pins lineages to GPUs before running width 2.
 
@@ -1274,6 +1282,48 @@ had never run anywhere but Delta's 3.12.
 
 ---
 
+**G13. The arms do not compose the same replica width, and the control arm fell through the
+gap.** **OPEN**, diagnosed on the four-arm smoke of 2026-11-09. Doc:
+[replica-width-confound](replica-width-confound.md). Evidence: array 23680876 (arms 23680888,
+23680907, 23681055, 23680876).
+
+Arms A, B and C composed **4 lineages** per cycle and arm D composed **2**, on one campaign
+declaring `replicas: 4`. `ThresholdPlanner.__init__` carries `base_replicas: int = 2`
+(`policy/planners/explicit.py:79`, used at `:127`) and nothing overrides it - `_plan_d`
+(`policy/registry.py:147-154`) passes only `stages`, and `ReasonerOptions` has no replicas
+field. The declared width cannot correct it, because `runtime/executor.py:763-765` applies
+`min(intent.replicas, spec.replicas)`: `replicas` is a **ceiling, not a target**, so it is a
+number only the arms with a model in them ever reach.
+
+**It cost twice.** Replica multiplicity is part of the pattern signature
+(`compose/graph.py:56-65` sorts one entry per node, so four lineages contribute four copies
+where two contribute two - despite the docstring's "SHAPE ONLY"). Trust was asserted at widths 1
+and 4, as `plans/arms-preregistration.md` §10 step 2 prescribes, so D's `f8bcefed63c493ae` was
+in no arm's ledger and **D alone ran untrusted for r0001-r0003** - forced dry-run, 10% cost cap,
+one instance in flight - earning trust at r0004, while A, B and C ran trusted from r0001. The
+control arm therefore spent half its campaign at half the width under a different admission
+regime from the arms it is the control for, and anything per-cycle measures that as well as the
+model.
+
+A10 predicted the signature half of this and `impress-a trust --replicas` was built for it. What
+nobody enumerated is that **the arms do not all agree on width**, so no assertion list can cover
+them all, and the arm that falls through is the control.
+
+**Fix:** feed `spec.replicas` into `ReasonerOptions` and pass it to `_plan_d` as
+`base_replicas`, so D proposes the declared width and the executor's `min` clamps to the same
+number; a campaign declaring nothing keeps the default of 2. Asserting trust at width 2 as well
+would remove the trust half and leave the width half, so it is a workaround and not the fix.
+Arm D then costs ~0.68 gpu-h per run (4.08 over six cycles, inside the 6.0 budget) and runs
+trusted from r0001. **Needs a test the suite has never had:** one that compares the arms'
+composed widths *to each other* against a spec declaring `replicas: 4`. Every existing test
+checks one arm alone, where a width of 2 is merely different rather than wrong.
+
+**Forces a pre-registration amendment** before any production arm (§10 step 2, §11's width-4
+abort criterion and §12's admissions-under-scrutiny line). Drafted verbatim in the doc and
+deliberately **not applied**: the prereg's own header rules that an amendment after the first
+arm has run voids the comparison, `impress-a compare` enforces it through `prereg_sha`, and all
+four smoke manifests record `c710f017…`.
+
 ## H. Reasoner models
 
 The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
@@ -1539,6 +1589,11 @@ paid for out of the first allocation.
     second bound at all behind it, and is now a declared `CampaignSpec` field (0 keeps the model's
     own 3) rather than an inferred one, because how many designs a campaign wants is a property of
     the Goal and `core.pareto.Objective` says nothing about it.
+12. **G13 the replica-width confound** — next, and before any further arm comparison. It is one
+    wire and one test, it costs no allocation to write, and until it lands every per-cycle
+    number measured against arm D is measuring width and admission regime as well as the model.
+    It also forces a pre-registration amendment, which is only legitimate before the production
+    arms are submitted - so the ordering is not a preference.
 
 ## The legacy decision path is gone (phase 11)
 
