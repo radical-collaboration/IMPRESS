@@ -70,6 +70,45 @@ def test_impress_is_a_declared_dependency():
                for d in deps), f"`impress` missing from dependencies: {deps}"
 
 
+def test_the_aucam_extra_pins_a_commit_not_a_branch():
+    """A branch pin reinstalls something different next week, and moves this tier under us.
+
+    `aucam` has no PyPI release, so the same rule the `agentbridge` extra states applies: pin
+    the commit, name the branch in the comment beside it. The branch `aucam-v2` pointed at
+    this commit when the extra was written, and that is a fact about a moment, not a version.
+    """
+    extra = _config()["project"]["optional-dependencies"].get("aucam")
+    assert extra, "no `aucam` optional-dependency - the adapter's dependency is undeclared"
+    spec = extra[0]
+    assert spec.startswith("aucam @ git+"), f"expected a git requirement, got {spec!r}"
+    rev = spec.rsplit("@", 1)[1]
+    assert len(rev) == 40 and all(c in "0123456789abcdef" for c in rev), (
+        f"the aucam pin is {rev!r}, which is not a 40-character commit sha. A branch or tag "
+        f"here means `pip install -e .[aucam]` resolves to different code over time.")
+
+
+def test_aucam_imports_as_src_aucam_and_not_from_this_repository():
+    """AuCaM's importable name is the generic `src`, and this repository has two of those.
+
+    Its distribution is named `aucam`, but `[tool.setuptools.packages.find]` upstream declares
+    `include = ["src*"]`, so what lands on `sys.path` is a top-level package called `src` -
+    which setuptools itself warns about at install time. IMPRESS has `src/` at the root and
+    `agent/src/` under it, neither a package, so running from either directory puts a
+    same-named namespace portion ahead of AuCaM's on the path. It resolves today because a
+    regular package beats a namespace portion; that is a property of the import system worth
+    pinning rather than reasoning about again, because the failure mode is an ImportError that
+    blames the adapter for a packaging decision made in another repository.
+    """
+    import pytest
+    aucam = pytest.importorskip("src.aucam", reason="the aucam extra is not installed")
+    resolved = pathlib.Path(aucam.__file__).resolve()
+    assert not resolved.is_relative_to(REPO), (
+        f"`src.aucam` resolved to {resolved}, inside this repository - one of our own `src/` "
+        f"directories captured the name instead of AuCaM's package")
+    for name in ("WorkflowConfig", "WorkflowReporter", "WorkflowResult", "CampaignDecision"):
+        assert hasattr(aucam, name), f"src.aucam does not export {name}"
+
+
 def test_ruff_config_is_local():
     """A `[tool.ruff]` table here, so ruff can never resolve to the root project's again.
 
