@@ -1311,7 +1311,24 @@ def _parser() -> argparse.ArgumentParser:
                          "repeated: they are what the activity runs by hand")
     ml.add_argument("--only", action="append", default=None, metavar="NAME",
                     help="`arms`, `sweeps`, an arm name or a knob name; repeatable")
-    ml.add_argument("--model", default="D", help="the reasoner every cell is driven by")
+    ml.add_argument("--model", default="",
+                    help="drive every cell with this one reasoner (default: D). "
+                         "`--reasoners` is the axis; this is the single-model shorthand")
+    ml.add_argument("--reasoners", action="append", default=None, metavar="LETTER",
+                    help="a control model to put on the axis, repeatable: D, null, A, B. "
+                         "The four knob arms are run under each. A and B make LLM calls "
+                         "and are REFUSED without --model-profile, because without one "
+                         "they run their rule cascades and report zero calls - which is "
+                         "what a degraded live arm reports too")
+    ml.add_argument("--model-profile", dest="profile", default="", metavar="NAME",
+                    help="a models.yaml profile for the live reasoners (e.g. beam)")
+    ml.add_argument("--reasoner-repeats", type=int, default=3, metavar="N",
+                    help="runs per live cell. A model at temperature 0 is still not a "
+                         "function, so one draw of a live arm is an anecdote")
+    ml.add_argument("--max-llm-calls", type=int, default=400, metavar="N",
+                    help="stop launching live cells once this many calls have been "
+                         "recorded. Counted from what each cell actually made, not "
+                         "estimated; skipped cells are named in the manifest")
     ml.add_argument("--jobs", type=int, default=4, metavar="N",
                     help="sweep cells at a time. The four arms always run one at a time, "
                          "because every wall-clock figure comes from them")
@@ -1362,7 +1379,8 @@ def main(argv: list[str] | None = None) -> int:
         from ..analysis.mock_lab import BASE_SPEC
         from ..analysis.mock_lab import main as mock_lab_main
         return mock_lab_main(a.out, a.stage, a.repeats, a.only, a.model, a.jobs,
-                             a.base_spec or BASE_SPEC)
+                             a.base_spec or BASE_SPEC, a.reasoners, a.profile,
+                             a.reasoner_repeats, a.max_llm_calls)
     if a.cmd == "validate-tasks":
         return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":

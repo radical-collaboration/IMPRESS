@@ -104,6 +104,50 @@ SWEEPS: dict[str, tuple[str, list[float]]] = {
     "diffusion_samples": ("mock_boltz_predict", [1, 2, 8, 16, 25]),
 }
 
+@dataclass(frozen=True)
+class Reasoner:
+    """One control model as the lab drives it."""
+
+    letter: str
+    #: True when this model makes LLM calls, so the lab must be given a profile for it and
+    #: must count what it spends.
+    live: bool
+    note: str
+
+
+#: The reasoner axis. The tools below are mocked in every one of these; what varies is the
+#: control plane, which is the half the four-model taxonomy is actually about.
+#:
+#: **A live model with no profile is REFUSED, never quietly run.** `--model A` with no
+#: `--model-profile` runs its rule cascades and reports nothing wrong, and `--model B` runs
+#: `RehearsalOracle` - both report zero LLM calls exactly as a degraded live arm does. On the
+#: sibling example's job 23219379 that ambiguity let 144 degraded turns read as a
+#: frontier-model result for a full day, and the pre-registration makes a silently-degraded
+#: arm a void outcome (§8). A lab that produced a figure labelled "model B" from the
+#: rehearsal would be manufacturing exactly that.
+#:
+#: C is absent: it needs `impress-a serve` plus an `impress-a control` sidecar waiting on the
+#: 0600 `control_plane.url`, which is two processes per cell, and its caller-side reasoner
+#: records have nowhere to land (backlog H8).
+REASONERS: dict[str, Reasoner] = {
+    "D": Reasoner("D", live=False,
+                  note="the deterministic control; rules end to end, no model anywhere"),
+    "null": Reasoner("null", live=False,
+                     note="stops at cycle 0 with an empty Spec; the floor"),
+    "A": Reasoner("A", live=True,
+                  note="four nodes, two of which call the model: hypothesize, select_tasks"),
+    "B": Reasoner("B", live=True,
+                  note="two schemas, one call each: SPEC_SCHEMA and STAGE_SCHEMA"),
+}
+
+#: The lab's own default axis. D alone reproduces the knob lab exactly as it shipped.
+DEFAULT_REASONERS = ("D",)
+
+#: Calls per cycle per live model, measured on a login node 2026-11-08 and corrected in
+#: backlog H1: TWO for both A and B, not A's four. Used only to print an estimate before a
+#: live run, never to bound anything - the cap counts what was actually recorded.
+CALLS_PER_CYCLE = 2
+
 #: Which objective each figure reads a sweep against, and the acceptance bar the campaign
 #: declares for it. Copied from the campaign spec on load rather than written twice - see
 #: `_objective_bars`.
@@ -130,12 +174,23 @@ class Cell:
     value: float                # its value, else 0.0
     salt: str                   # $IMPRESS_A_SEED_SALT for this cell
     rep: int                    # which repeat this is
+    #: Which control model drives this cell: the `--model` letter, not the tools. The tool
+    #: surrogates are mocked in every cell; this is what sits above them.
+    model: str = "D"
+    #: `--model-profile`, for the cells whose model talks to an endpoint. Empty otherwise.
+    profile: str = ""
     overrides: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def live(self) -> bool:
+        """Whether this cell will spend real calls on a real endpoint."""
+        return bool(self.profile) and REASONERS[self.model].live
 
     @property
     def keys(self) -> dict[str, Any]:
         return {"cell": self.cell, "kind": self.kind, "arm": self.arm,
-                "knob": self.knob, "value": self.value, "rep": self.rep, "salt": self.salt}
+                "knob": self.knob, "value": self.value, "rep": self.rep, "salt": self.salt,
+                "model": self.model, "profile": self.profile}
 
 
 def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
@@ -151,22 +206,44 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def cells(repeats: int, only: list[str] | None = None) -> list[Cell]:
-    """Every cell this lab runs: the four arms once each, then each sweep point `repeats`
-    times under a different salt.
+def cells(repeats: int, only: list[str] | None = None,
+          models: list[str] | None = None, profile: str = "",
+          reasoner_repeats: int = 3) -> list[Cell]:
+    """Every cell this lab runs.
 
-    The arms are NOT repeated. They are what the activity runs and what the deck shows, so
-    each one is a single reproducible campaign a reader can re-run by hand and get back; the
-    ensembles come from the sweeps, which is where repeats buy something.
+    Three families, and which axis each varies:
+
+    * **arms x models** - the four knob settings under each control model. The knob arms are
+      never repeated under a deterministic model: each is one reproducible campaign a reader
+      re-runs by hand and gets back. A LIVE model is repeated `reasoner_repeats` times,
+      because a model at temperature 0 is still not a function - a single draw of a
+      nondeterministic arm is an anecdote, and the figures draw its spread.
+    * **sweeps** - each knob point `repeats` times under a different salt, on model D only.
+      They measure the SURROGATE's response surface, which no reasoner changes, so running
+      them under four models would buy four readings of the same arithmetic.
+
+    `models` defaults to `DEFAULT_REASONERS`, which is D alone - so a lab run with no new
+    flags is byte-for-byte the lab that shipped.
     """
     want = set(only or [])
+    chosen = list(models or DEFAULT_REASONERS)
     out: list[Cell] = []
-    for arm, over in ARMS.items():
-        if want and arm not in want and "arms" not in want:
-            continue
-        out.append(Cell(cell=f"arm-{arm}", kind="arm", arm=arm, knob="", value=0.0,
-                        salt=f"arm-{arm}", rep=0,
-                        overrides=_merge(_merge(LAB_BASE, ARM_BASE), over)))
+    for model in chosen:
+        reps = reasoner_repeats if (profile and REASONERS[model].live) else 1
+        for arm, over in ARMS.items():
+            if want and arm not in want and "arms" not in want:
+                continue
+            for rep in range(max(1, reps)):
+                # The model is in the cell id only when the axis has more than one, so a
+                # default lab keeps the directory names - and the figures' labels, and the
+                # deck's - exactly as they were.
+                tag = f"arm-{arm}" if len(chosen) == 1 else f"arm-{arm}-{model}"
+                out.append(Cell(
+                    cell=tag if reps == 1 else f"{tag}-r{rep}",
+                    kind="arm", arm=arm, knob="", value=0.0,
+                    salt=f"arm-{arm}" if reps == 1 else f"arm-{arm}-r{rep}", rep=rep,
+                    model=model, profile=profile if REASONERS[model].live else "",
+                    overrides=_merge(_merge(LAB_BASE, ARM_BASE), over)))
     for knob, (tool, values) in SWEEPS.items():
         if want and knob not in want and "sweeps" not in want:
             continue
@@ -196,14 +273,18 @@ def _write_spec(cell: Cell, base: dict[str, Any], out: Path) -> Path:
     return path
 
 
-def run_cell(cell: Cell, base: dict[str, Any], out: Path, model: str = "D",
+def run_cell(cell: Cell, base: dict[str, Any], out: Path, model: str = "",
              timeout_s: float = 600.0) -> dict[str, Any]:
     """Run one campaign in its own run root, trust ledger and seed salt.
 
     A non-zero exit is RECORDED, never raised. `difficulty: 0.85` is a cell whose campaign
     aborts by design, and a sweep that stopped there would be unable to draw the one arm that
     shows what an integrity failure costs.
+
+    `model` overrides the cell's own letter and exists for the callers that drive one model
+    across every cell; the cell's letter is what a reasoner-axis lab uses.
     """
+    model = model or cell.model
     spec = _write_spec(cell, base, out)
     root = out / "runs" / cell.cell
     env = dict(os.environ,
@@ -216,6 +297,8 @@ def run_cell(cell: Cell, base: dict[str, Any], out: Path, model: str = "D",
     # interpreter running this module is the one environment known to have the package, and
     # CLAUDE.md's whole "Environment" section is about PATH drifting out from under a run.
     argv = [sys.executable, "-m", "impress_a", "run", str(spec), "--model", model]
+    if cell.profile:
+        argv += ["--model-profile", cell.profile]
     t0 = datetime.now()
     try:
         proc = subprocess.run(argv, env=env, capture_output=True, text=True,
@@ -226,49 +309,153 @@ def run_cell(cell: Cell, base: dict[str, Any], out: Path, model: str = "D",
     rec = dict(cell.keys, exit_code=rc, model=model,
                spec=str(spec), run_dir=str(root / f"{cell.cell}-{model}"),
                launch_wall_s=round((datetime.now() - t0).total_seconds(), 3))
+    rec["live"] = cell.live
     (out / "logs").mkdir(parents=True, exist_ok=True)
     (out / "logs" / f"{cell.cell}.log").write_text(tail)
     log.info("%s exit=%d in %.1fs", cell.cell, rc, rec["launch_wall_s"])
     return rec
 
 
-def sweep(out: Path, repeats: int = 3, only: list[str] | None = None, model: str = "D",
-          jobs: int = 4, base_spec: Path = BASE_SPEC) -> Path:
+def probe_endpoint(profile: str, out: Path) -> str:
+    """One cheap call before any live cell. Returns "" when the endpoint answered.
+
+    `cli._client_for` opens no socket, so without this the first failure lands inside a
+    campaign cycle - where `reasoning.ask` retries twice, gives up, writes
+    `reasoner_degraded` and runs model D's cascade. The campaign then exits 0. Every live
+    cell would do the same, and the lab would produce a full set of figures labelled with a
+    model that never answered. One round trip up front is the difference between "the
+    endpoint is down" and twenty-four quietly degraded arms.
+    """
+    code = (
+        "import asyncio, json, sys\n"
+        "from impress_a.policy.llm import build_oracle, load_profiles\n"
+        "from impress_a.cli import _client_for\n"
+        "from impress_a.manager import CampaignSpec\n"
+        "client = _client_for(sys.argv[1], CampaignSpec(campaign_id='probe', goal='',\n"
+        "                                               objectives=[]))\n"
+        "out = asyncio.run(client.think('spec', 'Reply with {\"ok\": true}.',\n"
+        "                               {'ok': 'boolean'}))\n"
+        "print(json.dumps({'model_id': client.model_id, 'reply': out}))\n")
+    proc = subprocess.run([sys.executable, "-c", code, profile],
+                          capture_output=True, text=True, timeout=300, check=False)
+    (out / "logs").mkdir(parents=True, exist_ok=True)
+    (out / "logs" / "_probe.log").write_text((proc.stdout or "") + (proc.stderr or ""))
+    if proc.returncode == 0:
+        log.info("lab: endpoint probe ok - %s", (proc.stdout or "").strip()[:200])
+        return ""
+    reason = ((proc.stderr or proc.stdout or "").strip().splitlines() or ["no output"])[-1]
+    log.error("lab: endpoint probe FAILED for profile %s: %s", profile, reason)
+    return reason
+
+
+def _count_calls(run_dir: str) -> int:
+    """LLM calls a finished cell actually made, from its own `decisions.jsonl`.
+
+    Counted from the record rather than predicted from the cycle count, because a corrective
+    retry is a second call and a degraded node is two calls that bought nothing. A cap built
+    on an estimate would be a cap on the wrong number.
+    """
+    return sum(1 for rec in _jsonl(Path(run_dir) / "provenance" / "decisions.jsonl")
+               if rec.get("model_id") and rec.get("model_id") != "rehearsal")
+
+
+def sweep(out: Path, repeats: int = 3, only: list[str] | None = None, model: str = "",
+          jobs: int = 4, base_spec: Path = BASE_SPEC, models: list[str] | None = None,
+          profile: str = "", reasoner_repeats: int = 3,
+          max_llm_calls: int = 400) -> Path:
     """Run every cell and write the manifest the collector joins against."""
     base = yaml.safe_load(Path(base_spec).read_text())
-    todo = cells(repeats, only)
+    chosen = list(models or ([model] if model else list(DEFAULT_REASONERS)))
+    for letter in chosen:
+        if letter not in REASONERS:
+            raise ValueError(f"unknown reasoner {letter!r}; the axis is {sorted(REASONERS)}")
+    todo = cells(repeats, only, chosen, profile, reasoner_repeats)
     out.mkdir(parents=True, exist_ok=True)
+
+    # A LIVE MODEL WITH NO PROFILE IS REFUSED, NOT QUIETLY RUN. `--model A` without one runs
+    # its rule cascades and `--model B` runs the rehearsal; both report zero LLM calls, which
+    # is also what a degraded live arm reports. A figure labelled "model B" drawn from the
+    # rehearsal is the pre-registration's §8 void outcome manufactured on purpose.
+    unprofiled = sorted({c.model for c in todo if REASONERS[c.model].live and not c.profile})
+    if unprofiled:
+        raise ValueError(
+            f"{', '.join(unprofiled)} "
+            f"{'makes' if len(unprofiled) == 1 else 'make'} LLM calls and no "
+            "--model-profile was given. "
+            "Without one they run their rule cascades and report zero calls, which is "
+            "indistinguishable from a live arm that degraded - so the lab will not label "
+            "a figure with a model that was never asked. Name a profile, or drop them "
+            "from --reasoners.")
+
+    live = [c for c in todo if c.live]
+    if live:
+        est = len(live) * CALLS_PER_CYCLE * ARM_BASE["max_cycles"]
+        log.info("lab: %d live cells on profile %s - at most ~%d calls "
+                 "(%d cells x %d per cycle x %d cycles), capped at %d",
+                 len(live), profile, est, len(live), CALLS_PER_CYCLE,
+                 ARM_BASE["max_cycles"], max_llm_calls)
+        if (reason := probe_endpoint(profile, out)):
+            raise RuntimeError(
+                f"the endpoint for profile {profile!r} did not answer a one-call probe "
+                f"({reason}). Every live cell would degrade to model D's cascade and exit "
+                "0, and the lab would draw a full set of figures for a model that never "
+                "answered.")
 
     # THE ARMS RUN ONE AT A TIME, whatever `--jobs` says, and the sweeps run in parallel.
     # The arms are where every wall-clock figure comes from, and a cell that shared four
     # cores with seven others is not a timing measurement: run eight-wide, one arm's first
     # cycle came back at 0.10s against 1.10s for the other three, which is scheduling noise
     # presented as a property of the knob setting. The sweep cells are only read for the
-    # metrics their tools drew, which no amount of CPU contention changes.
+    # metrics their tools drew, which no amount of CPU contention changes. A live cell is
+    # serial for a second reason: one request at a time to one endpoint.
     arms = [c for c in todo if c.kind == "arm"]
     rest = [c for c in todo if c.kind != "arm"]
-    log.info("lab: model %s, %d arms one at a time, %d sweep cells %d at a time",
-             model, len(arms), len(rest), jobs)
-    records = [run_cell(c, base, out, model) for c in arms]
+    log.info("lab: reasoners %s, %d arm cells one at a time, %d sweep cells %d at a time",
+             "+".join(chosen), len(arms), len(rest), jobs)
+
+    records: list[dict[str, Any]] = []
+    spent = 0
+    for cell in arms:
+        if cell.live and spent >= max_llm_calls:
+            # Skipped, and SAID so in the manifest. A cell silently missing from a figure
+            # reads as a model that had nothing to show rather than one the lab stopped
+            # paying for.
+            log.warning("lab: %s skipped - %d calls already spent, cap is %d",
+                        cell.cell, spent, max_llm_calls)
+            records.append(dict(cell.keys, exit_code=None, model=cell.model, spec="",
+                                run_dir="", launch_wall_s=0.0, live=True,
+                                skipped=f"llm call cap reached ({spent} >= {max_llm_calls})"))
+            continue
+        rec = run_cell(cell, base, out)
+        if cell.live:
+            rec["llm_calls"] = _count_calls(rec["run_dir"])
+            spent += rec["llm_calls"]
+            log.info("lab: %s made %d calls (%d of %d spent)",
+                     cell.cell, rec["llm_calls"], spent, max_llm_calls)
+        records.append(rec)
+
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
         # Threads, not processes: every cell is a `subprocess.run`, so the work is in another
         # process already and the pool only needs to wait on it. Cells are independent by
         # construction - separate run root, separate trust ledger, separate salt - so the
         # only shared state is the manifest, written once below.
-        records += list(pool.map(lambda c: run_cell(c, base, out, model), rest))
+        records += list(pool.map(lambda c: run_cell(c, base, out), rest))
     manifest = {"ts": datetime.now().astimezone().isoformat(),
                 "disclaimer": DISCLAIMER,
                 "base_spec": str(base_spec),
                 "objectives": _objective_bars(base),
                 "lab_base": LAB_BASE, "arm_base": ARM_BASE, "sweep_base": SWEEP_BASE,
                 "arms": ARMS, "sweeps": {k: v[1] for k, v in SWEEPS.items()},
-                "repeats": repeats, "model": model, "cells": records}
+                "repeats": repeats, "reasoners": chosen, "profile": profile,
+                "reasoner_repeats": reasoner_repeats, "llm_calls": spent,
+                "max_llm_calls": max_llm_calls, "cells": records}
     path = out / "manifest.json"
     path.write_text(json.dumps(manifest, indent=2, default=str))
-    bad = [r["cell"] for r in records if r["exit_code"] not in (0,)]
+    bad = [r["cell"] for r in records if r.get("exit_code") not in (0, None)]
     # Named, not just counted: `arm-hopeless` is SUPPOSED to exit non-zero, and a reader who
     # cannot see which cell it was has no way to tell the designed abort from a broken cell.
-    log.info("lab: wrote %s%s", path,
+    log.info("lab: wrote %s%s%s", path,
+             f"; {spent} llm calls" if spent else "",
              f"; {len(bad)} cells exited non-zero: {', '.join(bad)}" if bad else "")
     return path
 
@@ -322,6 +509,66 @@ def _abort_reason(log_path: Path) -> str:
     hits = [m for line in log_path.read_text(errors="replace").splitlines()
             if (m := ABORT_RE.search(line.strip()))]
     return f"aborted: {hits[-1].group(2).strip()}" if hits else "exited non-zero"
+
+
+#: The parameter no reasoner may propose, and the string a refusal names it in. Checked
+#: rather than trusted: `operator_only` is enforced in one place and a mechanism with one
+#: enforcement point deserves one check that it fired.
+OPERATOR_ONLY_DIAL = "difficulty"
+
+
+def _difficulty_proposed(params: list[dict[str, Any]], graphs: list[dict[str, Any]],
+                         stages: list[dict[str, Any]], cell: str) -> str:
+    """Evidence that a reasoner tried to set the experiment's own dial, or "".
+
+    Two places it could show. In `mappings`, if it somehow reached a deployed stage - the
+    loud failure, because the arm then ran at a difficulty nobody declared. And in a
+    rejection reason, which is the quiet and expected one: `OraclePlanner`'s schema check
+    refuses a reply naming a frozen parameter, so a model that reached for it is corrected
+    inside the retry and the campaign carries on. Worth recording either way: the second
+    says the model wanted to, which is a finding about the model.
+    """
+    breach = [r for r in params
+              if r["cell"] == cell and r["parameter"] == OPERATOR_ONLY_DIAL
+              and r["source"] == "reasoner"]
+    if breach:
+        return f"set to {breach[0]['value']} in a deployed stage, not by the campaign"
+    for rec in (*graphs, *stages):
+        reason = str((rec.get("rejected") or {}).get("reason") or "")
+        if OPERATOR_ONLY_DIAL in reason and "frozen" in reason:
+            return reason
+    return ""
+
+
+def _registry() -> Any:
+    """The tool registry, for the declared ranges a parameter value is read against.
+
+    Imported inside the function: `analysis` may import `tools` (`tests/test_layering.py`
+    allows it) but loading the toolkits costs a directory walk, and `collect` is the only
+    stage that needs them - the sweep stage shells out and the figures read CSVs.
+    """
+    from ..tools.registry import Registry
+    return Registry().load()
+
+
+def _fraction_of_range(reg: Any, tool: str | None, name: str, value: Any) -> float | None:
+    """Where a chosen value sits between a parameter's declared min and max.
+
+    `None` when the spec declares no bounds, when the value is not a number, or when the
+    tool is not in the registry - all three are "this cannot be placed on a scale", and a
+    0.0 there would read as "the planner chose the minimum".
+    """
+    try:
+        spec = reg.get(tool)
+    except Exception:                      # noqa: BLE001 - an unknown tool is not an error
+        return None
+    param = spec.parameters.get(name)
+    if param is None or param.min is None or param.max is None:
+        return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    span = float(param.max) - float(param.min)
+    return round((float(value) - float(param.min)) / span, 4) if span else None
 
 
 def _gate_names(gates: list[Any]) -> list[str]:
@@ -404,9 +651,25 @@ def collect(out: Path) -> dict[str, Path]:
     cycles: list[dict[str, Any]] = []
     camps: list[dict[str, Any]] = []
     phases: list[dict[str, Any]] = []
+    # `calls`, not `decisions`: the per-cell block below already binds `decisions` to the
+    # graph count, and the accumulator was being replaced by an int on the first cell.
+    calls: list[dict[str, Any]] = []
+    params: list[dict[str, Any]] = []
+    # Read once, for `fraction_of_range`. A parameter's declared min and max live in the
+    # tool spec and nowhere in provenance, and "the planner set diffusion_steps to 170" says
+    # much less than "85% of the way up its declared range".
+    reg = _registry()
 
     for rec in manifest["cells"]:
-        keys = {k: rec[k] for k in ("cell", "kind", "arm", "knob", "value", "rep", "salt")}
+        keys = {k: rec.get(k) for k in ("cell", "kind", "arm", "knob", "value", "rep",
+                                        "salt", "model", "profile")}
+        if rec.get("skipped"):
+            # A cell the cap stopped the lab paying for. One row in `campaigns.csv` saying
+            # so, and no attempt to read provenance it never wrote: a cell silently missing
+            # reads as a model that had nothing to show rather than one nobody ran.
+            camps.append(dict(keys, exit_code=None, skipped=rec["skipped"], aborted=False,
+                              live=rec.get("live", False)))
+            continue
         prov = Path(rec["run_dir"]) / "provenance"
         results = _jsonl(prov / "results.jsonl")
         task_rows = _jsonl(prov / "tasks.jsonl")
@@ -415,6 +678,56 @@ def collect(out: Path) -> dict[str, Path]:
         specs = _jsonl(prov / "specs.jsonl")
         trans = _jsonl(prov / "transitions.jsonl")
         camp = _jsonl(prov / "campaign.jsonl")
+        decided = _jsonl(prov / "decisions.jsonl")
+
+        # -- what the reasoner was asked, and what it cost ---------------------------
+        # Two shapes share `decisions.jsonl`: `reasoning.ask`'s per-call transcript, keyed
+        # by `node`, and each agentic half's own summary of what it concluded, keyed by
+        # `policy`. Only the first says a MODEL was called, so only the first is a call.
+        asked = [d for d in decided if d.get("node") and d.get("model_id")]
+        for d in asked:
+            calls.append(dict(
+                keys, node=d.get("node"), cycle=d.get("cycle"), attempt=d.get("attempt"),
+                ok=bool(d.get("ok", True)), model_id=d.get("model_id"),
+                elapsed_s=d.get("elapsed_s"),
+                prompt_tokens=d.get("prompt_tokens"),
+                completion_tokens=d.get("completion_tokens"),
+                # The bodies stay in the JSONL. A prompt is thousands of characters and a
+                # CSV is for counting, not for reading a transcript out of.
+                prompt_chars=len(str(d.get("prompt") or "")),
+                error=d.get("error", ""), ts=d.get("ts")))
+
+        # -- the parameter vector each Planner chose ---------------------------------
+        # From `stages.jsonl` `mappings`, which the executor writes for exactly this
+        # (`executor.py`: "without it the parameter vector a Planner chose is recorded
+        # nowhere"). It is the only evidence of WHICH knobs a reasoner moved, and the
+        # pre-registration names it as the source for Planner attribution.
+        # `mappings` holds the EFFECTIVE vector, so the campaign's own `params:` are in it
+        # too - `_apply_campaign_defaults` merges them into the intent before composition.
+        # Without separating them, every cell would read as a planner that set `difficulty`.
+        # The cell's spec is what it declared, so a value equal to the declared one is
+        # credited to the campaign and anything else to the reasoner. A reasoner that chose
+        # exactly the declared value is credited to the campaign, which provenance cannot
+        # distinguish and which is the conservative direction: it under-credits a model
+        # rather than inventing a decision for it.
+        declared = (yaml.safe_load(Path(rec["spec"]).read_text()).get("params") or {}
+                    if rec.get("spec") and Path(rec["spec"]).exists() else {})
+        cycle_of = {g.get("run"): g.get("cycle") for g in graphs}
+        for st in stages:
+            if st.get("event") != "deployed":
+                continue
+            for m in st.get("mappings") or []:
+                tool = m.get("tool")
+                for name, value in (m.get("params") or {}).items():
+                    from_campaign = (declared.get(tool, {}).get(name) == value)
+                    params.append(dict(
+                        keys, run=st.get("run"), stage=st.get("stage"),
+                        cycle=cycle_of.get(st.get("run")), task=m.get("task_id"),
+                        tool=tool, lineage=m.get("lineage"), parameter=name, value=value,
+                        source="campaign" if from_campaign else "reasoner",
+                        declared=declared.get(tool, {}).get(name),
+                        fraction_of_range=_fraction_of_range(reg, tool, name, value),
+                        rationale=st.get("rationale", "")))
 
         for r in results:
             gates = r.get("failed_gates") or []
@@ -503,8 +816,34 @@ def collect(out: Path) -> dict[str, Path]:
         # cycles: a rejected graph IS a decision, and the arm that spends its cycles being
         # refused at the interlock is exactly the one a cycle count would flatter.
         decisions = len(graphs)
+        # `reasoner_degraded` and `oracle_degraded` share a name on purpose, so one query
+        # finds every degraded decision whatever model made it. A non-zero count here means
+        # the arm fell back to model D's cascade and its yield is NOT that model's - the
+        # pre-registration's void rule, enforceable for the first time now that anything
+        # writes these events (§8, and `compare_arms.Figures.degraded_events`).
+        degraded = sum(1 for t in trans
+                       if t.get("event") in ("reasoner_degraded", "oracle_degraded",
+                                             "caller_timeout"))
+        llm_s = sum(float(d.get("elapsed_s") or 0.0) for d in asked)
+        model_ids = sorted({str(d["model_id"]) for d in asked if d.get("model_id")})
         camps.append(dict(
             keys, exit_code=rec.get("exit_code"), model=rec.get("model"),
+            live=rec.get("live", False), skipped="",
+            # Which model actually answered, from the records rather than from the flag the
+            # lab passed. A cell that asked for `beam` and was answered by a rehearsal is
+            # the failure the whole refusal rule exists to prevent, and this is where it
+            # would show.
+            model_id=";".join(model_ids),
+            llm_calls=len(asked), llm_retries=sum(1 for d in asked if not d["ok"]),
+            llm_s=round(llm_s, 4),
+            prompt_tokens=sum(int(d.get("prompt_tokens") or 0) for d in asked) or None,
+            completion_tokens=sum(int(d.get("completion_tokens") or 0) for d in asked)
+            or None,
+            s_per_llm_call=round(llm_s / len(asked), 4) if asked else None,
+            degraded_events=degraded,
+            # The freeze check. `difficulty` is `operator_only`, so no reasoner may propose
+            # it; this is what says the mechanism held rather than assuming it did.
+            difficulty_proposed=_difficulty_proposed(params, graphs, stages, rec["cell"]),
             stop_reason=reason, aborted=aborted,
             cycles=term.get("cycles") if not aborted else len(graphs),
             front=len(term.get("front") or []),
@@ -521,6 +860,7 @@ def collect(out: Path) -> dict[str, Path]:
             tasks_per_s=round(len(task_rows) / wall, 2) if wall else None,
             s_per_decision=round(wall / decisions, 4) if (wall and decisions) else None,
             launch_wall_s=rec.get("launch_wall_s"),
+            llm_share=round(llm_s / wall, 4) if (wall and llm_s) else None,
             gpu_h_measured=round(sum((t.get("cost_measured") or {}).get("gpu_hours") or 0.0
                                      for t in task_rows), 6),
             gpu_h_est=round(sum((t.get("cost_estimated") or {}).get("gpu_hours") or 0.0
@@ -534,17 +874,26 @@ def collect(out: Path) -> dict[str, Path]:
 
     tables = out / "tables"
     _write_csv(tables / "lineages.csv", lineages,
-               ["cell", "kind", "arm", "knob", "value", "rep", "salt", "node", "cycle",
-                "run", "lineage", "qc", "failed_gates", *OBJECTIVES])
+               ["cell", "kind", "arm", "model", "knob", "value", "rep", "salt", "node",
+                "cycle", "run", "lineage", "qc", "failed_gates", *OBJECTIVES])
     _write_csv(tables / "tasks.csv", tasks,
-               ["cell", "kind", "arm", "knob", "value", "rep", "salt", "run", "cycle",
-                "lineage", "stage_index", "tool", "task", "qc", "failed_gates", "wall_s"])
+               ["cell", "kind", "arm", "model", "knob", "value", "rep", "salt", "run",
+                "cycle", "lineage", "stage_index", "tool", "task", "qc", "failed_gates",
+                "wall_s"])
     _write_csv(tables / "cycles.csv", cycles)
     _write_csv(tables / "campaigns.csv", camps)
     _write_csv(tables / "phases.csv", phases)
+    _write_csv(tables / "decisions.csv", calls,
+               ["cell", "kind", "arm", "model", "profile", "rep", "node", "cycle",
+                "attempt", "ok", "model_id", "elapsed_s", "prompt_tokens",
+                "completion_tokens"])
+    _write_csv(tables / "params.csv", params,
+               ["cell", "kind", "arm", "model", "rep", "run", "cycle", "tool", "parameter",
+                "value", "source", "declared", "fraction_of_range"])
     return {"lineages": tables / "lineages.csv", "tasks": tables / "tasks.csv",
             "cycles": tables / "cycles.csv", "campaigns": tables / "campaigns.csv",
-            "phases": tables / "phases.csv"}
+            "phases": tables / "phases.csv", "decisions": tables / "decisions.csv",
+            "params": tables / "params.csv"}
 
 
 #: The control plane's segments inside one cycle, in the order a cycle walks them, and the
@@ -673,12 +1022,23 @@ def _progress() -> None:
 
 
 def main(out: str | Path, stage: str = "all", repeats: int = 3, only: list[str] | None = None,
-         model: str = "D", jobs: int = 4, base_spec: str | Path = BASE_SPEC) -> int:
+         model: str = "", jobs: int = 4, base_spec: str | Path = BASE_SPEC,
+         reasoners: list[str] | None = None, profile: str = "",
+         reasoner_repeats: int = 3, max_llm_calls: int = 400) -> int:
     _progress()
     out = Path(out)
     if stage in ("all", "sweep"):
-        sweep(out, repeats=repeats, only=only, model=model, jobs=jobs,
-              base_spec=Path(base_spec))
+        try:
+            sweep(out, repeats=repeats, only=only, model=model, jobs=jobs,
+                  base_spec=Path(base_spec), models=reasoners, profile=profile,
+                  reasoner_repeats=reasoner_repeats, max_llm_calls=max_llm_calls)
+        except (ValueError, RuntimeError) as refused:
+            # An unknown letter, a live model with no profile, an endpoint that did not
+            # answer: all operator errors, and all reported the way preflight reports a
+            # missing binary rather than as a traceback. Nothing has been spent at this
+            # point - the refusals run before the first cell.
+            log.error("%s", refused)
+            return 2
     if stage in ("all", "collect"):
         if not (out / "manifest.json").exists():
             log.error("%s: no manifest.json - run the sweep stage first", out)
@@ -696,11 +1056,16 @@ def _cli(argv: list[str] | None = None) -> int:
     ap.add_argument("--stage", default="all", choices=("all", "sweep", "collect", "figures"))
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--only", action="append", default=None)
-    ap.add_argument("--model", default="D")
+    ap.add_argument("--model", default="")
+    ap.add_argument("--reasoners", action="append", default=None)
+    ap.add_argument("--model-profile", dest="profile", default="")
+    ap.add_argument("--reasoner-repeats", type=int, default=3)
+    ap.add_argument("--max-llm-calls", type=int, default=400)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--base-spec", default=str(BASE_SPEC))
     a = ap.parse_args(argv)
-    return main(a.out, a.stage, a.repeats, a.only, a.model, a.jobs, a.base_spec)
+    return main(a.out, a.stage, a.repeats, a.only, a.model, a.jobs, a.base_spec,
+                a.reasoners, a.profile, a.reasoner_repeats, a.max_llm_calls)
 
 
 if __name__ == "__main__":

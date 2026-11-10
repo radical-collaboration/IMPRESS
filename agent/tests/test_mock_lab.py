@@ -260,6 +260,9 @@ def test_every_figure_draws_from_a_collected_lab(one_cell):
     out, _ = one_cell
     collect(out)
     written = draw_all(out)
-    assert len(written) == 6
+    # Six knob figures plus the three reasoner ones. The reasoner figures must draw from a
+    # lab with no reasoner axis at all - a single D cell - because that is what a default
+    # run produces and an empty panel has to say so rather than raise.
+    assert len(written) == 9
     for path in written:
         assert path.exists() and path.stat().st_size > 1000, path

@@ -100,6 +100,36 @@ RUN_STYLES: dict[str, RunStyle] = {
         color="#993284", cmap="RdPu", marker="X", tier="failed"),
 }
 
+# -- the second categorical: which control model drove the cell -------------
+# The four validated hues are spent on the four knob arms, and colour follows
+# the entity. A reasoner axis is a SECOND four-member categorical over the same
+# figures, and giving it hues would either need four more validated colours or
+# make one hue mean two things in one report - both of which the palette rules
+# forbid for the same reason.
+#
+# So the model takes the FILL channel instead: hatch and face alpha, inside the
+# arm's own hue. It survives every CVD simulation by construction (it is not a
+# colour difference), it reads in greyscale, and the arm identity a reader
+# already learned from f1-f6 carries straight into f7-f9. Every series also
+# carries a direct label, as everything here does.
+MODEL_FILLS: dict[str, dict] = {
+    "D": {"hatch": "", "alpha": 1.0},
+    "null": {"hatch": "..", "alpha": 0.30},
+    "A": {"hatch": "//", "alpha": 0.65},
+    "B": {"hatch": "xx", "alpha": 0.65},
+}
+#: Marker per model, for the panels where a model is a point rather than a bar.
+MODEL_MARKERS = {"D": "o", "null": ".", "A": "^", "B": "s"}
+
+
+def model_fill(model: str) -> dict:
+    """Fill keywords for one control model. Unknown is a bug, as with `style_for`."""
+    try:
+        return dict(MODEL_FILLS[model])
+    except KeyError:
+        raise KeyError(f"no fill for model {model!r}; known: {sorted(MODEL_FILLS)}") from None
+
+
 # The equal window, IN SECONDS rather than the skill's minutes, because these
 # campaigns finish in about one: a 60-minute window would be every run in full
 # and the constant would mean nothing. Same rule, same reason - a cross-arm time

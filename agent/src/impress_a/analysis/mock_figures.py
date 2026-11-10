@@ -379,9 +379,13 @@ def fig_decision_rate(camps: list[dict[str, Any]], phases: list[dict[str, Any]],
     bx.set_xticks(pos)
     bx.set_xticklabels([ps.style_for(a).short for a in clean])
     # One log axis rather than two linear ones: both series are per-second counts, so they
-    # are the same unit, and they are two orders of magnitude apart.
-    bx.set_yscale("log")
-    bx.set_ylabel("per second (log)")
+    # are the same unit, and they are two orders of magnitude apart. Only when there is
+    # something positive to put on it: the `null` model stops at cycle 0, so an axis of all
+    # zeros is not drawable on a log scale and matplotlib warns and silently draws nothing.
+    if any((r.get("decisions_per_s") or 0) > 0 or (r.get("tasks_per_s") or 0) > 0
+           for r in (camp_by_arm.get(a, {}) for a in clean)):
+        bx.set_yscale("log")
+    bx.set_ylabel("per second (log)" if bx.get_yscale() == "log" else "per second")
     bx.set_title("both are counts per second, so one axis - two decades apart",
                  fontsize="medium", loc="left", color=ps.INK_SECONDARY)
     bx.legend(handles=_neutral_patches([("decisions / s", {}),
@@ -534,6 +538,218 @@ def _wrap(text: str, width: int) -> str:
     return "\n".join(out)
 
 
+
+# -- F7-F9: the reasoner axis -------------------------------------------------------------
+#
+# The entity in these three is the CONTROL MODEL, and it does not get a hue. The four
+# validated colours are spent on the four knob arms and colour follows the entity, so a model
+# takes the fill channel instead - hatch and face alpha, inside the arm's own colour
+# (`plot_style.MODEL_FILLS`). An arm a reader learned in f1-f6 is the same colour here.
+
+
+def _models(rows: list[dict[str, Any]]) -> list[str]:
+    """The models present, in the axis's own order rather than alphabetical."""
+    seen = {str(r.get("model")) for r in rows if r.get("model")}
+    return [m for m in ps.MODEL_FILLS if m in seen]
+
+
+def _model_legend(ax, models: list[str], **over):
+    """A key for the fill channel, in neutral grey - the fill names a MODEL, not an arm."""
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=ps.NEUTRAL_SERIES, edgecolor="white",
+                     label=f"model {m}", **ps.model_fill(m)) for m in models]
+    ax.legend(handles=handles, fontsize="small", **over)
+
+
+def fig_reasoner_yield(camps: list[dict[str, Any]], out: Path) -> Path:
+    """What each control model got out of each knob arm.
+
+    The question the reasoner axis exists for: `hard` is a campaign model D stops on "every
+    spec objective satisfied" with an empty front. Does a model that can read the tool cards
+    and move the knobs get anything onto it?
+
+    Front size rather than lineages, because lineages are what a campaign SPENT and the front
+    is what it has to show. The run count is annotated beside each bar so a model that bought
+    its front with four times the work cannot read as a free win.
+    """
+    import matplotlib.pyplot as plt
+    ps.apply_rcparams()
+    rows = [r for r in camps if r.get("kind") == "arm" and not r.get("skipped")]
+    models = _models(rows)
+    arms = [a for a in ps.ORDER if any(r.get("arm") == a for r in rows)]
+    fig, ax = plt.subplots(figsize=(14.0, 6.8))
+    width = 0.8 / max(1, len(models))
+    pos = np.arange(len(arms))
+    for i, model in enumerate(models):
+        offset = (i - (len(models) - 1) / 2) * width
+        for j, arm in enumerate(arms):
+            cells = [r for r in rows if r.get("arm") == arm and r.get("model") == model]
+            if not cells:
+                continue
+            fronts = [int(c.get("front") or 0) for c in cells]
+            nodes = [int(c.get("nodes") or 0) for c in cells]
+            st = ps.style_for(arm)
+            # Mean over repeats, and the spread drawn as a range bar rather than a band: a
+            # live model is repeated because it is not a function, and three draws is too
+            # few for a sigma to mean anything.
+            mean = float(np.mean(fronts))
+            ax.bar(pos[j] + offset, mean, width * 0.9, color=st.color,
+                   edgecolor=st.color, linewidth=1.2, zorder=ps.Z["bar"],
+                   **ps.model_fill(model))
+            if len(fronts) > 1:
+                ax.plot([pos[j] + offset] * 2, [min(fronts), max(fronts)],
+                        color=ps.INK, linewidth=1.6, zorder=ps.Z["annot"])
+            ax.annotate(f"{model}\n{mean:.0f}/{int(np.mean(nodes))}",
+                        xy=(pos[j] + offset, mean), xytext=(0, 6),
+                        textcoords="offset points", ha="center", fontsize="small",
+                        color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
+    ax.set_xticks(pos)
+    ax.set_xticklabels([ps.style_for(a).short for a in arms])
+    ax.set_ylabel("designs on the Pareto front")
+    ax.set_xlabel("knob arm - colour - against control model - fill")
+    _model_legend(ax, models, loc="upper right")
+    fig.suptitle("Does a reasoner rescue a campaign the rules cannot?", y=0.985)
+    fig.subplots_adjust(left=0.08, right=0.985, top=0.9, bottom=0.21)
+    return _save(fig, out, "f7-reasoner-yield.png",
+                 "bar is the mean over repeats and the vertical rule its full range; the "
+                 "label is front/lineages. A live model is repeated because it is not a "
+                 "function - three draws is too few for a sigma, so the range is drawn")
+
+
+def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any]],
+                      out: Path) -> Path:
+    """What a decision costs each model, in seconds and in tokens.
+
+    Two panels because the units differ and one axis for both would be the two-scales
+    mistake. `null` and `D` carry no tokens at all and that is drawn as absence, not as
+    zero - a zero would say the call was free rather than that no call was made.
+    """
+    import matplotlib.pyplot as plt
+    ps.apply_rcparams()
+    rows = [r for r in camps if r.get("kind") == "arm" and not r.get("skipped")]
+    models = _models(rows)
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(15.0, 6.4))
+    pos = np.arange(len(models))
+
+    for i, model in enumerate(models):
+        cells = [r for r in rows if r.get("model") == model]
+        secs = [float(c["s_per_decision"]) for c in cells if c.get("s_per_decision")]
+        if secs:
+            ax.bar(pos[i], float(np.mean(secs)), 0.6, color=ps.NEUTRAL_SERIES,
+                   edgecolor=ps.NEUTRAL_SERIES, linewidth=1.2, zorder=ps.Z["bar"],
+                   **ps.model_fill(model))
+            if len(secs) > 1:
+                ax.plot([pos[i]] * 2, [min(secs), max(secs)], color=ps.INK, linewidth=1.6,
+                        zorder=ps.Z["annot"])
+            ax.annotate(f"{np.mean(secs):.2f}s", xy=(pos[i], float(np.mean(secs))),
+                        xytext=(0, 6), textcoords="offset points", ha="center",
+                        fontsize="small", color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
+    ax.set_xticks(pos)
+    ax.set_xticklabels([f"model {m}" for m in models])
+    ax.set_ylabel("seconds per decision (wall clock)")
+    ax.set_title("every model, from the campaign's own clock", fontsize="medium",
+                 loc="left", color=ps.INK_SECONDARY)
+
+    live = [m for m in models
+            if any(d.get("model") == m for d in decisions)]
+    if live:
+        for i, model in enumerate(live):
+            calls = [d for d in decisions if d.get("model") == model]
+            toks = [float(d["completion_tokens"]) for d in calls
+                    if d.get("completion_tokens") is not None]
+            secs = [float(d["elapsed_s"]) for d in calls if d.get("elapsed_s") is not None]
+            if toks:
+                m, lo, hi = _band(toks)
+                bx.bar(i, m, 0.6, color=ps.NEUTRAL_SERIES, edgecolor=ps.NEUTRAL_SERIES,
+                       linewidth=1.2, zorder=ps.Z["bar"], **ps.model_fill(model))
+                bx.plot([i] * 2, [max(0.0, lo), hi], color=ps.INK, linewidth=1.6,
+                        zorder=ps.Z["annot"])
+                bx.annotate(f"{m:.0f} tok\n{np.mean(secs):.1f}s/call",
+                            xy=(i, m), xytext=(0, 6), textcoords="offset points",
+                            ha="center", fontsize="small", color=ps.INK_SECONDARY,
+                            zorder=ps.Z["annot"])
+        bx.set_xticks(np.arange(len(live)))
+        bx.set_xticklabels([f"model {m}" for m in live])
+        bx.set_ylabel("completion tokens per call")
+    else:
+        # Said, not left blank. An empty panel reads as "the models were free".
+        bx.set_xticks([])
+        bx.set_yticks([])
+        bx.annotate("no live cell in this lab - run with --model-profile\n"
+                    "to put A or B on a real endpoint",
+                    xy=(0.5, 0.5), xycoords="axes fraction", ha="center", va="center",
+                    fontsize="large", color=ps.INK_SECONDARY)
+    bx.set_title("only a model that called an endpoint has tokens", fontsize="medium",
+                 loc="left", color=ps.INK_SECONDARY)
+    _model_legend(ax, models, loc="upper left")
+    fig.suptitle("What one decision costs, by who made it", y=0.985)
+    fig.subplots_adjust(left=0.075, right=0.985, top=0.885, bottom=0.2, wspace=0.24)
+    return _save(fig, out, "f8-decision-cost.png",
+                 "left is wall clock per composed graph, which every model has; right is "
+                 "mean +/- 2 sigma over individual calls. A model with no tokens made no "
+                 "call - absence, not zero")
+
+
+def fig_knobs_moved(params: list[dict[str, Any]], out: Path) -> Path:
+    """Which knobs each model actually moved, and how far up their declared ranges.
+
+    From `stages.jsonl`'s `mappings`, the only record of the parameter vector a Planner
+    chose. `source` separates the campaign's declared values from the reasoner's: the
+    campaign's are in `mappings` too, because `_apply_campaign_defaults` merges them before
+    composition, and counting them would credit every model with setting every knob.
+
+    `difficulty` must appear for nobody. It is `operator_only`, so no reasoner may propose
+    it, and this figure is where a leak would show.
+    """
+    import matplotlib.pyplot as plt
+    ps.apply_rcparams()
+    chosen = [r for r in params if r.get("source") == "reasoner"
+              and r.get("fraction_of_range") is not None]
+    models = _models(chosen)
+    names = sorted({str(r["parameter"]) for r in chosen})
+    fig, ax = plt.subplots(figsize=(14.0, 6.8))
+    if not names:
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.annotate("no reasoner moved a parameter in this lab",
+                    xy=(0.5, 0.5), xycoords="axes fraction", ha="center", va="center",
+                    fontsize="large", color=ps.INK_SECONDARY)
+    else:
+        ys = np.arange(len(names))
+        height = 0.8 / max(1, len(models))
+        for i, model in enumerate(models):
+            offset = (i - (len(models) - 1) / 2) * height
+            for j, name in enumerate(names):
+                vals = [float(r["fraction_of_range"]) for r in chosen
+                        if r["parameter"] == name and r.get("model") == model]
+                if not vals:
+                    continue
+                ax.barh(ys[j] + offset, float(np.mean(vals)), height * 0.9,
+                        color=ps.NEUTRAL_SERIES, edgecolor=ps.NEUTRAL_SERIES,
+                        linewidth=1.2, zorder=ps.Z["bar"], **ps.model_fill(model))
+                ax.plot([min(vals), max(vals)], [ys[j] + offset] * 2, color=ps.INK,
+                        linewidth=1.4, zorder=ps.Z["annot"])
+                ax.annotate(f"{model} x{len(vals)}",
+                            xy=(float(np.mean(vals)), ys[j] + offset), xytext=(6, 0),
+                            textcoords="offset points", va="center", fontsize="small",
+                            color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
+        ax.set_yticks(ys)
+        ax.set_yticklabels(names)
+        ax.set_xlim(0, 1.18)
+        ax.set_xlabel("where the chosen value sits in the parameter's own declared range")
+        ax.invert_yaxis()
+        _model_legend(ax, models, loc="lower right")
+    assert not [r for r in chosen if r["parameter"] == "difficulty"], (
+        "a reasoner set the experiment's own dial - `operator_only` did not hold")
+    fig.suptitle("Which knobs each model moved, and how far", y=0.985)
+    fig.subplots_adjust(left=0.19, right=0.985, top=0.9, bottom=0.22)
+    return _save(fig, out, "f9-knobs-moved.png",
+                 "the reasoner's own choices only; a value equal to the campaign's declared "
+                 "one is credited to the campaign, which under-credits a model rather than "
+                 "inventing a decision for it. `difficulty` is operator_only and appears for "
+                 "nobody")
+
+
 # -- entry point -------------------------------------------------------------------------
 
 def draw_all(lab: Path) -> list[Path]:
@@ -546,6 +762,8 @@ def draw_all(lab: Path) -> list[Path]:
     tasks = read_table(tables / "tasks.csv")
     camps = read_table(tables / "campaigns.csv")
     phases = read_table(tables / "phases.csv")
+    decisions = read_table(tables / "decisions.csv")
+    params = read_table(tables / "params.csv")
     out = lab / "figures"
     written = [
         fig_metric_ensembles(lin, objectives, out),
@@ -554,6 +772,9 @@ def draw_all(lab: Path) -> list[Path]:
         fig_decision_rate(camps, phases, out),
         fig_control_time(phases, out),
         fig_stop_vs_front(camps, out),
+        fig_reasoner_yield(camps, out),
+        fig_decision_cost(camps, decisions, out),
+        fig_knobs_moved(params, out),
     ]
     log.info("%d figures in %s", len(written), out)
     return written
