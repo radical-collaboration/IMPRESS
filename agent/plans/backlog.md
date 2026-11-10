@@ -1749,6 +1749,49 @@ before `frozen`, and `card_for` has always left a frozen parameter out of `param
 frozen branch was **unreachable** - a model naming one was told the tool declares no such
 parameter. False, and a correction a corrective retry cannot act on.
 
+**H10. Model B raises breadth parameters, which are excluded from model D on evidence - and
+the cost models cannot see it.** Found on the FIRST live run of model B's two-schema path,
+2026-11-10, `Beam-501B-A23B` via profile `beam`, four mock arms, 20 calls, zero degraded
+turns. Not a surrogate artefact: the mechanism is in the real specs.
+
+`OraclePlanner._prompt` filters what a model is shown with `_knobs.tunable`, which excludes
+frozen, non-numeric and unbounded parameters - and **not** by kind. So model B is shown
+`num_designs` labelled `"kind": "breadth"` and raised it anyway, to 2, 3, 4 and 8 across 36
+task mappings in four campaigns. It also set `batch_size`, `num_seqs` and `nstruct`.
+
+Three facts make that expensive rather than merely different:
+
+* `policy/planners/_knobs.py` excludes breadth for models A and D **on evidence**:
+  `rfd3_design`'s own spec records that `num_designs` stays at 1 because its adapter keeps
+  index 0, so raising it pays N times for one design. B is told the kind and is not bound by
+  the rule derived from it.
+* `rfd3_design`'s `cost_model` is `{unit: invocation, gpu_hours: 0.1}` - **per invocation,
+  not per design**. So the estimate does not scale with `num_designs`, which means gate 5 and
+  the untrusted-pattern cap are blind to it too. A model-B arm asking for 8 would burn 8x the
+  GPU time for one design with nothing refusing the graph.
+* Breadth is held fixed across the four arms on purpose (backlog G13's ruling): an arm
+  drawing wider spends differently per cycle for a reason the endpoint cannot separate from
+  reasoning quality. `declared_width` binds `replicas`; it does not bind a tool's own
+  breadth parameter.
+
+Three ways to close it, and the choice is a decision about what model B may do rather than
+plumbing. **Filter the prompt by kind**, so breadth and identity are not offered to B as they
+are not offered to A and D - smallest change, and it makes the three autonomous models obey
+one rule. **Mark the real tools' breadth parameters `operator_only`** (H9), which says they
+are the campaign's to set - true for this experiment, and arguably true generally. Or **make
+the cost models scale**, which is honest but does not stop the waste, only prices it.
+
+Measured beside it, worth keeping: B spent **19.96s per decision against D's 0.35s**, 1148
+completion tokens a call, and **94-99% of each live campaign's wall clock was the endpoint**.
+Zero retries and zero degraded turns across 20 calls, so the corrective-retry path still has
+never been exercised against a live endpoint (H1's open note stands). And the freeze held:
+`difficulty` is `operator_only`, B was never shown it, and `difficulty_proposed` is empty for
+every cell.
+
+**This also closes H2's outstanding probe.** "No request has reached a real endpoint from this
+project" was true of model B's `SPEC_SCHEMA`/`STAGE_SCHEMA` path until this run; both halves
+answered, were schema-checked and were admitted, on a laptop and with no allocation.
+
 ---
 
 ## Recommended order

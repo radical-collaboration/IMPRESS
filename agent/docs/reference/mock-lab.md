@@ -161,6 +161,26 @@ arm fell back to model D's cascade, and what it produced is not that model's res
 the pre-registration's void rule, enforceable for the first time now that anything writes
 these events.
 
+### What the first live run found
+
+`Beam-501B-A23B` via profile `beam`, four arms under model B, 2026-11-10. Twenty calls, zero
+retries, zero degraded turns, and no allocation.
+
+| | model D | model B (live) |
+|---|---|---|
+| seconds per decision | 0.35 | **19.96** |
+| completion tokens per call | — | 1148 |
+| share of campaign wall clock spent at the endpoint | — | **94–99%** |
+| parameters it moved | 3, all quality | 9, including every breadth knob |
+
+Two things worth carrying off the laptop. **The endpoint is the campaign** on this tier: the
+six tools return in milliseconds and 94–99% of each live cell's wall clock was one model
+thinking. And **model B raises breadth parameters that models A and D are forbidden to touch**
+— `num_designs` to 2, 3, 4 and 8 — because `OraclePlanner._prompt` filters what it shows by
+`tunable`, which does not look at kind. `rfd3_design`'s own spec records that `num_designs`
+stays at 1 because its adapter keeps index 0, and its `cost_model` is per *invocation*, so
+nothing prices the extra draws either. Backlog **H10**.
+
 ### `difficulty` is `operator_only`
 
 `OraclePlanner` shows a live model every tunable parameter with its range and its `trades`
