@@ -22,6 +22,14 @@ pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
 
 impress-a tools                                      # list registered tools
 impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
+impress-a offer campaigns/mock-small-molecule-binding.yaml   # what one invocation would COST
+#   and which goals it could address, computed from the toolkit without running anything. A
+#   different question from `preflight`: that asks whether this machine can run the binaries,
+#   this asks what a caller is buying. `--json` is the form an enclosing campaign manager
+#   reads to size its own budget (decision 0014); `--validation <validate_tasks.json>` is the
+#   only route by which a MEASURED figure enters an offer. Everything else is declared, and
+#   the payload says so - declared cost models sit above measurement on purpose, because they
+#   feed gates that refuse graphs. See docs/reference/observation.md
 impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and check it, ON
 #   hardware. Exits non-zero if any Task fails an INTEGRITY row; an acceptance row that falls
 #   short does not fail it (a weak design is not a broken Task). This is what justifies

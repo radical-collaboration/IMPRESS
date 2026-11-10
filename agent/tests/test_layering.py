@@ -192,6 +192,23 @@ def test_only_the_runner_imports_impress():
         "package:\n" + "\n".join(bad))
 
 
+def test_the_offer_cannot_reach_the_execution_layer():
+    """`impress-a offer` prices a campaign without running it, and nothing may erode that.
+
+    The layer row permits `runtime -> exec`, correctly - the executor lives there. The offer
+    does not get that licence: a caller asks it what an invocation would cost precisely
+    because it has not decided to make one, so a module that could dispatch a task is the
+    wrong shape for the answer. The synchronous signature is the other half of the guarantee
+    (`tests/test_validation.py`), and this is the half review would otherwise have to hold.
+    """
+    offered = SRC / "runtime" / "offer.py"
+    assert offered.exists(), "runtime/offer.py has moved; update this test with it"
+    reached = {imported for path, _ln, _a, imported in _edges() if path == offered}
+    assert "exec" not in reached, (
+        f"runtime/offer.py imports the exec layer (reaches {sorted(reached)}) - it can now "
+        f"dispatch work, and an offer must not be able to run what it is pricing")
+
+
 def test_every_keyword_passed_to_a_core_model_is_a_field_of_it():
     """A projection that passes a field the model does not declare loses it silently.
 

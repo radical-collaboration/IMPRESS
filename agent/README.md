@@ -141,6 +141,8 @@ different transport.
 ruff check src tests                                      # reports; never rewrites. Ceiling: zero
 pytest tests -q                                           # the whole local tier, ~19s, no allocation
 impress-a tools                                           # list registered tools
+impress-a offer campaigns/mock-stabilize.yaml             # what one invocation costs, and
+                                                          # which goals it can address
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```
 

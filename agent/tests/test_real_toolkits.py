@@ -1012,6 +1012,59 @@ def test_the_six_stage_chain_fits_the_untrusted_pattern_cap(reg):
         f"cpu estimate {est['cpu_hours']:.3f} exceeds the 1.000 provisional cap"
 
 
+def test_the_offer_for_the_six_stage_campaign_fits_the_untrusted_pattern_cap(reg, tmp_path):
+    """The same arithmetic as the test above, asked of the offer a caller actually reads.
+
+    The test above does the sum by hand and proves the figures are sound. This one proves the
+    offer REPORTS that soundness - including the cap itself, which is the number that decided
+    job 22675512: the chain's estimate exceeded 10% of available budget, the graph was refused
+    three times, and the policy truncated `boltz_predict` - the only producer of two of four
+    objectives - off the end. A caller handed this offer can see that before it launches.
+    """
+    from impress_a.runtime.executor import CampaignSpec
+    from impress_a.runtime.offer import offer_for_spec
+
+    spec = CampaignSpec(campaign_id="smoke", goal="bind", objectives=[],
+                        stages=list(CHAIN), budget={"gpu_hours": 6.0, "cpu_hours": 10.0},
+                        root=str(tmp_path / "runs"))
+    offer = offer_for_spec(spec, reg)
+
+    assert offer.chain.trusted is False and offer.chain.cost_cap_fraction == 0.10
+    cap = offer.chain.cost_cap_fraction
+    for dim in ("gpu_hours", "cpu_hours"):
+        allowed = offer.cost[dim].ceiling * cap
+        assert offer.cost[dim].expected <= allowed, (
+            f"the offer prices one cycle at {offer.cost[dim].expected:.3f} {dim} against a "
+            f"provisional cap of {allowed:.3f} - a caller sizing to this offer would be "
+            f"refused before a task ran")
+
+
+def test_the_offered_wall_ceiling_covers_every_measured_task_time(reg, tmp_path):
+    """A wall figure below reality makes a caller's proration exceed 100% and cancel us.
+
+    An enclosing campaign manager prorates an unreported spend against the declared wall
+    time, so `wall_hours` too SMALL is the dangerous direction - it reads as a workflow over
+    its budget rather than one running normally. Checked against the measured per-task
+    seconds this file already records, summed along the chain, because that is the closest
+    thing to a real campaign's wall time that exists without an allocation.
+    """
+    from impress_a.runtime.executor import CampaignSpec
+    from impress_a.runtime.offer import offer_for_spec
+
+    measured_s = {"rfd3_design": 145.7, "ligandmpnn_design": 18.1, "packmin": 15.9,
+                  "fastrelax": 25.9, "filter_shape": 10.2, "boltz_predict": 57.8}
+    spec = CampaignSpec(campaign_id="walled", goal="bind", objectives=[],
+                        stages=list(CHAIN), max_cycles=1, root=str(tmp_path / "runs"))
+    offer = offer_for_spec(spec, reg)
+
+    assert offer.resources.walltime_s_per_cycle >= sum(measured_s.values()), (
+        f"one cycle is offered {offer.resources.walltime_s_per_cycle}s against "
+        f"{sum(measured_s.values()):.0f}s measured along the chain")
+    assert offer.cost["wall_hours"].expected == offer.cost["wall_hours"].ceiling, (
+        "wall_hours must not be offered as a range: a caller prorates against the expected "
+        "figure, and anything below the ceiling invites a false over-budget cancel")
+
+
 def test_packmin_does_not_gate_on_a_relaxed_score(reg):
     """Whether a pose blew up is fastrelax's call, made by whether it converges.
 

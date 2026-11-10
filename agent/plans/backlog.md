@@ -1024,6 +1024,22 @@ them: `impress-a tools` prints four fields per tool, `preflight` answers a diffe
 a goal against a toolkit before a run, and the only hook out of a running campaign is one
 unguarded `prov_sink` slot (G18).
 
+**The handshake half is DONE.** `impress-a offer <spec>.yaml [--json]` (`runtime/offer.py`,
+types in `core/offer.py`) prices a campaign and reports its goal vocabulary without running
+anything: the declared chain and the minimal chain the objectives actually need, a floor /
+one-cycle / ceiling range per budget dimension, the resource shape in use at once, the pattern
+signature with its trust verdict and provisional cap, every addressable metric with its
+producers, the campaign's own objectives split into producible and unproducible, the toolkit's
+own acceptance bars, and the bounded/unbounded split that decides whether an objective can
+ever stop a campaign at all. The ceiling for a budgeted dimension is **exact** rather than
+estimated, because `reserve` refuses what does not fit and `settle` charges no more than was
+reserved. Costs come from `Validator.estimate` - the same estimator gate 5 prices a graph with
+- so a caller sizing to the offer cannot be refused for a reason the offer did not price;
+`test_the_offer_prices_the_graph_the_validator_would_price` pins that, and was confirmed to
+fail against a 1.25x divergence. `basis` states that every figure is declared, and `warnings`
+names what they cannot see, H10 and G21 included. **Still open:** delivering observations to
+the caller, and the adapter itself.
+
 Scoped and decided in `docs/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
 the enclosing manager is a caller, not control model C. Three deliverables — `impress-a offer`
 (a synchronous handshake computing a cost model and the goal vocabulary from the toolkit, with
