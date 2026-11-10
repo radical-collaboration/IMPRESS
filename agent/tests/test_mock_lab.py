@@ -35,6 +35,8 @@ from impress_a.analysis.mock_lab import (
     SWEEPS,
     Cell,
     _abort_reason,
+    _difficulty_proposed,
+    _fraction_of_range,
     _gate_names,
     _merge,
     _phases,
@@ -44,9 +46,17 @@ from impress_a.analysis.mock_lab import (
     collect,
     read_table,
     run_cell,
+    sweep,
 )
 
 BASE = pathlib.Path("campaigns/mock-small-molecule-binding.yaml")
+
+
+@pytest.fixture(scope="module")
+def reg_for_lab():
+    """The real registry, for the declared ranges `_fraction_of_range` reads."""
+    from impress_a.tools.registry import Registry
+    return Registry().load()
 
 
 # -- cell construction --------------------------------------------------------------------
@@ -266,3 +276,94 @@ def test_every_figure_draws_from_a_collected_lab(one_cell):
     assert len(written) == 9
     for path in written:
         assert path.exists() and path.stat().st_size > 1000, path
+
+
+# -- the reasoner axis ----------------------------------------------------------------
+
+def test_a_default_lab_is_byte_for_byte_the_one_that_shipped():
+    """The model is in a cell's name only when the axis has more than one.
+
+    Not cosmetic: the cell name is the run-directory name, the figures' labels and what
+    `campaigns/README.md` and the activity deck tell a reader to look for. A default run
+    gaining `-D` on every path would break all four for a feature none of them use.
+    """
+    plain = {c.cell for c in cells(1, ["arms"])}
+    assert plain == {f"arm-{a}" for a in ARMS}
+    assert all(c.model == "D" for c in cells(1, ["arms"]))
+
+    axis = {c.cell for c in cells(1, ["arms"], ["D", "null"])}
+    assert axis == {f"arm-{a}-{m}" for a in ARMS for m in ("D", "null")}
+
+
+def test_only_a_live_model_is_repeated():
+    """A deterministic model run three times is three identical campaigns. A live one is
+    not a function even at temperature 0, so one draw of it is an anecdote."""
+    axis = cells(1, ["arms"], ["D", "B"], profile="beam", reasoner_repeats=3)
+    assert len([c for c in axis if c.model == "D"]) == len(ARMS)
+    assert len([c for c in axis if c.model == "B"]) == len(ARMS) * 3
+    assert all(c.live for c in axis if c.model == "B")
+    assert not any(c.live for c in axis if c.model == "D")
+
+
+def test_the_sweeps_are_not_crossed_with_the_models():
+    """They measure the SURROGATE's response surface, which no reasoner changes."""
+    axis = cells(1, None, ["D", "null"])
+    assert {c.model for c in axis if c.kind == "sweep"} == {"D"}
+
+
+def test_a_live_model_without_a_profile_is_refused_rather_than_quietly_run(tmp_path):
+    """`--model A` with no profile runs its rule cascades and `--model B` runs the
+    rehearsal; both report zero LLM calls, which is what a degraded live arm reports too.
+    A figure labelled "model B" drawn from the rehearsal is the pre-registration's §8 void
+    outcome manufactured on purpose."""
+    with pytest.raises(ValueError, match="model-profile"):
+        sweep(tmp_path, only=["arms"], models=["D", "B"])
+    assert not (tmp_path / "runs").exists(), "it refused before spending anything"
+
+
+def test_an_unknown_reasoner_is_named_with_the_axis(tmp_path):
+    with pytest.raises(ValueError, match="unknown reasoner"):
+        sweep(tmp_path, only=["arms"], models=["Z"])
+
+
+# -- the parameter vector, and the freeze -----------------------------------------------
+
+def test_fraction_of_range_refuses_to_place_what_has_no_scale(reg_for_lab):
+    """None, never 0.0, for an unbounded parameter, a non-number or an unknown tool - all
+    three mean "this cannot be placed on a scale", and a zero would read as "the planner
+    chose the minimum"."""
+    assert _fraction_of_range(reg_for_lab, "mock_rfd3_design", "diffusion_steps", 110) == \
+        pytest.approx((110 - 20) / 180, abs=1e-3)
+    assert _fraction_of_range(reg_for_lab, "mock_rfd3_design", "input_spec_path", "x") is None
+    assert _fraction_of_range(reg_for_lab, "no_such_tool", "x", 1) is None
+    assert _fraction_of_range(reg_for_lab, "mock_rfd3_design", "no_such_param", 1) is None
+
+
+def test_the_campaigns_own_parameters_are_not_credited_to_the_reasoner(one_cell):
+    """`mappings` holds the EFFECTIVE vector, campaign-declared values included, because
+    `_apply_campaign_defaults` merges them before composition. Without the split every
+    model would read as having set every knob - `difficulty` among them."""
+    out, _ = one_cell
+    tables = collect(out)
+    rows = read_table(tables["params"])
+    assert rows, "the planner's parameter vector is recorded nowhere else"
+    dial = [r for r in rows if r["parameter"] == "difficulty"]
+    assert dial, "the campaign declares it, so it is in the effective vector"
+    assert {r["source"] for r in dial} == {"campaign"}, \
+        "no reasoner may set the experiment's own dial"
+
+
+def test_the_freeze_check_reports_both_shapes_a_breach_could_take():
+    """A value that reached a deployed stage - the loud one, because the arm then ran at a
+    difficulty nobody declared - and a rejection naming it, which is the quiet expected one:
+    `OraclePlanner`'s schema check refuses it inside the corrective retry."""
+    keys = {"cell": "c", "parameter": "difficulty"}
+    assert _difficulty_proposed([], [], [], "c") == ""
+    assert _difficulty_proposed([{**keys, "source": "campaign", "value": 0.55}],
+                                [], [], "c") == ""
+    loud = _difficulty_proposed([{**keys, "source": "reasoner", "value": 0.0}], [], [], "c")
+    assert "0.0" in loud and "not by the campaign" in loud
+    quiet = _difficulty_proposed(
+        [], [{"rejected": {"reason": "mock_rfd3_design.difficulty is frozen: the "
+                                     "experiment's own condition"}}], [], "c")
+    assert "frozen" in quiet

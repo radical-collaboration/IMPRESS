@@ -1622,7 +1622,11 @@ benchmark against the reference's `adaptive_decision()`, which varies the route 
 (`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
 "supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
 `obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
-pitfalls. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
+pitfalls. **The second half of that is stale**: since phase 9 `OraclePlanner._prompt` carries each
+enabled tool's outputs, metrics and every tunable parameter with its type, default, range, `trades`
+sentence and inferred kind, and its schema check refuses a reply naming an unknown, out-of-range or
+frozen one. What is still true is `toolkit_skills()`: no caller, so the SKILL documents - the costs
+and the pitfalls - still reach no reasoner. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
 `docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
 needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
 
@@ -1671,6 +1675,79 @@ contract under a live LLM: a real `Decision`, an LLM-authored `ExperimentIntent`
 refused by the five gates, `on_rejected` under a real rejection, the degraded transition and its
 labelling. **They cannot test decision quality** while H3 is open, and must not be reported as if they
 could. Prerequisites with their evidence, and the scoring method, are in the plan.
+
+**H8. Nothing recorded what a reasoner did, and two readers were already waiting for it.**
+**RESOLVED** (`890829d`), except for the caller-side half.
+
+`ReasonerOptions.sink` had writers throughout `policy/` - the transcript in `reasoning.ask`,
+`reasoner_degraded`, the external halves' `directive_rejected`/`caller_timeout` - and no
+subscriber: `ReasonerOptions(...)` is constructed in exactly two places, `cli/__init__.py`'s
+`_options_for` and `_role_pair`, and **neither passed `sink=`**. So every campaign ever run
+left on disk no prompt, no reply, no model id, no attempt count, no timing and no degraded
+event, whatever drove it.
+
+Not a bookkeeping gap. `analysis/compare_arms` reads `degraded_events` out of `transitions`
+to **void an arm** (`:410`) and `elapsed_s` out of `decisions` for the decision-layer share
+(`:499`); neither key had a writer anywhere in `src/`. So the pre-registration's "an arm
+shown to have degraded is void" rule (§8, `plans/arms-preregistration.md:116`) could not fire
+- on the laptop or on Delta - and `decision_share` has been `None` for every arm scored.
+`Figures.directives` and `stagnation_trace` are the same shape and are still open: `steered`
+goes into the plane's in-memory `_events` and is never persisted, and `Executor._stagnant` is
+private and reaches provenance only folded into a stop-reason string.
+
+Why it survived: **every test asserted at the HALF**, building `OracleSpecifier(sink=...)` by
+hand, and none at the seam where the sink is assembled.
+`tests/test_reasoner_record.py::test_a_campaign_writes_its_reasoners_decisions_to_provenance`
+asserts at the seam, and fails with the `sink=` argument removed.
+
+Records route through `Executor.record_reasoning`, which accepts `decisions` and
+`transitions` and refuses anything else: the executor stays the single writer of every file
+under `provenance/` - two writers appending to one JSONL is a torn line waiting for a long
+campaign - and a reasoner cannot append to `results`, which is exactly what scoring from
+these files is supposed to rule out. A record now also carries `elapsed_s` and token deltas,
+and a REJECTED attempt is recorded (`ok: false`), which used to reach a `log.warning` and
+nothing else.
+
+**Still open: the caller side.** `impress-a control` drives a campaign it does not host. The
+executor writing `provenance/` is across a socket and there is no plane operation for "append
+this to your decisions log" - ADR 0007 forbids an adapter carrying one the core protocol
+lacks. So a model-C arm's transcript, timing and degraded turns are on disk **nowhere**, and
+arm C is precisely the arm whose claim is that a third party steered it. `_role_pair` attaches
+a `ReasonerSink` that counts and drops, and `control_campaign` now warns with the count rather
+than leaving the silence to be read as "the model made no calls". The fix is a plane
+operation or a caller-side provenance root, and it is a prerequisite for scoring arm C on
+anything but yield.
+
+**H9. A reasoner could set a parameter that is the experiment's own condition.**
+**RESOLVED** (`890829d`) by `ParameterSpec.operator_only`.
+
+`OraclePlanner._prompt` shows a live model every tunable parameter with its range and its
+`trades` sentence, and `executor._apply_campaign_defaults` states that "the policy always
+wins on any key it did set". `mock_rfd3_design.difficulty` is a float from 0.0 to 1.0 whose
+trades sentence reads "how hard this campaign is" - so a model asked to satisfy the
+objectives turns it down, the mock lab's `hard` arm quietly becomes its easy one, and nothing
+records that the independent variable moved. Models D and A are safe only by accident:
+`_knobs.kind_of` finds no kind word in that sentence and skips it.
+
+`operator_only` is the third state the two existing ones could not express - varyable (the
+campaign sets it and so may a Planner), `frozen_parameters` (nobody sets it, and gate 3
+refuses a graph carrying it, so the campaign cannot declare it either), and now the
+campaign's to set and a reasoner's to leave alone. Enforced in ONE seam, `tools/view.card_for`,
+which reports it under `TaskCard.frozen` and leaves it out of `TaskCard.parameters`;
+everything downstream already honours that, and gate 3 reads `ToolSpec.frozen_parameters`,
+which stays empty.
+
+The same shape covers any campaign configuration a reasoner should not re-litigate - a ligand,
+an input path, a contig - which is the distinction `_apply_campaign_defaults` already draws in
+prose ("a policy chooses how to explore, not what molecule the campaign is about"). **Not
+applied to the real toolkits yet**; `rfd3_design.input_spec_path` and `boltz_predict`'s ligand
+fields are strings, which `_knobs.tunable` already excludes, so nothing is exposed today - but
+the first numeric campaign-configuration parameter on a real tool will be.
+
+One latent defect surfaced closing it: `OraclePlanner`'s schema check tested `parameters`
+before `frozen`, and `card_for` has always left a frozen parameter out of `parameters`, so the
+frozen branch was **unreachable** - a model naming one was told the tool declares no such
+parameter. False, and a correction a corrective retry cannot act on.
 
 ---
 

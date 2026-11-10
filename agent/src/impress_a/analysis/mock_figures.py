@@ -556,8 +556,12 @@ def _models(rows: list[dict[str, Any]]) -> list[str]:
 def _model_legend(ax, models: list[str], **over):
     """A key for the fill channel, in neutral grey - the fill names a MODEL, not an arm."""
     from matplotlib.patches import Patch
-    handles = [Patch(facecolor=ps.NEUTRAL_SERIES, edgecolor="white",
-                     label=f"model {m}", **ps.model_fill(m)) for m in models]
+    # The KEY is drawn opaque whatever the fill's own alpha. `null` sits at 0.30 so its
+    # zero-height bars do not shout, and at 0.30 its legend swatch was very nearly the
+    # page - a key the reader cannot see is not a key.
+    handles = [Patch(facecolor=ps.NEUTRAL_SERIES, edgecolor=ps.INK_SECONDARY,
+                     linewidth=0.8, label=f"model {m}",
+                     hatch=ps.model_fill(m)["hatch"]) for m in models]
     ax.legend(handles=handles, fontsize="small", **over)
 
 
@@ -606,7 +610,11 @@ def fig_reasoner_yield(camps: list[dict[str, Any]], out: Path) -> Path:
     ax.set_xticks(pos)
     ax.set_xticklabels([ps.style_for(a).short for a in arms])
     ax.set_ylabel("designs on the Pareto front")
-    ax.set_xlabel("knob arm - colour - against control model - fill")
+    ax.set_xlabel("knob arm (colour) x control model (fill)")
+    # A front is a COUNT, so its axis has no halves on it.
+    top = max(1.0, ax.get_ylim()[1])
+    ax.set_yticks(np.arange(0, np.ceil(top) + 1))
+    ax.set_ylim(0, np.ceil(top) * 1.18)
     _model_legend(ax, models, loc="upper right")
     fig.suptitle("Does a reasoner rescue a campaign the rules cannot?", y=0.985)
     fig.subplots_adjust(left=0.08, right=0.985, top=0.9, bottom=0.21)
@@ -634,6 +642,12 @@ def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any
     for i, model in enumerate(models):
         cells = [r for r in rows if r.get("model") == model]
         secs = [float(c["s_per_decision"]) for c in cells if c.get("s_per_decision")]
+        if not secs:
+            # `null` composes no graph at all, so it has no seconds-per-decision. Said
+            # rather than left as a gap, which would read as a measurement of zero.
+            ax.annotate("no decision\nto time", xy=(pos[i], 0), xytext=(0, 12),
+                        textcoords="offset points", ha="center", fontsize="small",
+                        color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
         if secs:
             ax.bar(pos[i], float(np.mean(secs)), 0.6, color=ps.NEUTRAL_SERIES,
                    edgecolor=ps.NEUTRAL_SERIES, linewidth=1.2, zorder=ps.Z["bar"],
@@ -675,15 +689,24 @@ def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any
         # Said, not left blank. An empty panel reads as "the models were free".
         bx.set_xticks([])
         bx.set_yticks([])
+        # No frame either: an empty ruled box reads as a panel whose data came out at zero.
+        for side in bx.spines.values():
+            side.set_visible(False)
+        bx.grid(False)
         bx.annotate("no live cell in this lab - run with --model-profile\n"
                     "to put A or B on a real endpoint",
                     xy=(0.5, 0.5), xycoords="axes fraction", ha="center", va="center",
                     fontsize="large", color=ps.INK_SECONDARY)
     bx.set_title("only a model that called an endpoint has tokens", fontsize="medium",
                  loc="left", color=ps.INK_SECONDARY)
-    _model_legend(ax, models, loc="upper left")
+    # Upper RIGHT: the tallest bar is the first model, and at upper left the key landed on
+    # its own annotation.
+    _model_legend(ax, models, loc="upper right")
+    ax.set_ylim(0, max(ax.get_ylim()[1], 1e-9) * 1.22)
     fig.suptitle("What one decision costs, by who made it", y=0.985)
-    fig.subplots_adjust(left=0.075, right=0.985, top=0.885, bottom=0.2, wspace=0.24)
+    # A wider left margin: "seconds per decision (wall clock)" at this type scale is a long
+    # y-label and at 0.075 it ran off the canvas.
+    fig.subplots_adjust(left=0.105, right=0.985, top=0.885, bottom=0.2, wspace=0.26)
     return _save(fig, out, "f8-decision-cost.png",
                  "left is wall clock per composed graph, which every model has; right is "
                  "mean +/- 2 sigma over individual calls. A model with no tokens made no "
