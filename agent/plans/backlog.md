@@ -1210,6 +1210,19 @@ The mitigation applied here is that every `file:line` in both new pages was reso
 before the commit, and the pages end by naming the provenance files each step's output lands in,
 so a future reader can check the claim rather than trust it.
 
+**F6. CI never exercises the AuCaM adapter.** `.github/workflows/agent-tests.yml` installs
+`-e ..` then `-e ".[dev]"`, and the aucam extra is neither - so `tests/test_aucam.py` skips in
+the only automated environment there is, and the eight tests that prove an IMPRESS-A campaign
+really runs as an AuCaM workflow prove it only on a developer's laptop. Verified by
+uninstalling the extra and running the tier: 502 passed, 2 skipped, green either way, which is
+the designed behaviour and also exactly the hazard this project already names - "an unbuilt
+transport is a gap; a built one that nothing runs is worse, because it looks finished"
+(`tests/test_http_adapter.py`). One line fixes it, `pip install -e ".[aucam]"` beside the dev
+extra, and the whole run costs about a second. Not done here only because the workflow file
+lives outside `agent/` and this project's scope rule is to leave the root alone; it needs a
+decision, not work. The pin test is unaffected - it reads `pyproject.toml` rather than
+importing, so a branch pin would still be caught in CI.
+
 ## G. Engine semantics
 
 **G1. Exploration cannot move the front, so it counts toward stagnation.** Nodes from the explore
