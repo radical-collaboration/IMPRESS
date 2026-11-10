@@ -163,19 +163,27 @@ these events.
 
 ### What the live runs found
 
-`Beam-501B-A23B` via profile `beam`, the four arms under each model, 2026-11-10. Model B
-first (20 calls), then D + A + B together (31 calls). Zero retries and zero degraded turns in
-both, and no allocation.
+`Beam-501B-A23B` via profile `beam`, 2026-11-10: model B alone (20 calls), then D + A + B at
+one repeat (31), then **three repeats of every live cell (89 calls, 28 cells)**, which is the
+run the figures are drawn from. Zero retries and zero degraded turns in all three, and no
+allocation.
 
 | | model D | model A (live) | model B (live) |
 |---|---|---|---|
-| seconds per decision | 0.14 | 7.56 | **20.48** |
-| seconds per call | — | 2.2 | 7.8 |
-| completion tokens per call | — | 346 | 1180 |
-| share of campaign wall clock at the endpoint | — | 82–98% | **96–99%** |
-| calls per arm | 0 | 3 | 3–7 |
+| seconds per decision | 0.33 | 9.23 | **19.36** |
+| seconds per call | — | 2.8 | 7.2 |
+| completion tokens per call | — | 386 | 1110 |
+| share of campaign wall clock at the endpoint | — | 84–99% | **93–99%** |
+| cycles run | 2–4 | 1–1 | **1–6** |
 | knobs it moved | 3, all quality | 4, all quality | 9, mostly breadth |
-| front on the `hard` arm | 0 of 12 | **2 of 4** | 0 of 4 |
+| front on `hard`, over 3 repeats | 0 of 12 | **3–4 of 4** | 0 of 16 |
+| predicted GPU-h per campaign | 1.4–2.0 | 0.68, flat | **0.68–4.1** |
+
+**A live model is not a function, and three repeats is the smallest number that shows it.**
+Model B ran the `rescued` arm as one cycle with an empty front twice and as six cycles with
+four designs on the front once — same arm, same salt, same endpoint. Model A was identical in
+all three. Any single-repeat figure here would have been a draw reported as a property; the
+repeats are what let `f7` and `f11` draw a range instead of a bar.
 
 **A and B differ in what they are shown, not only in what they choose.** Model A's parameter
 vector comes from `parameterize`, a deterministic node the model steers only by naming a
@@ -193,12 +201,17 @@ nothing prices the extra draws either. Backlog **H10**.
 
 And **a live Specifier can skip the abort rule**. On `hopeless` — difficulty 0.85, the arm
 whose backbone breaks — model A stopped at cycle 1 on "every spec objective satisfied" with
-all four lineages failing the `ss_fraction` integrity gate and an empty front, where D and B
-both ran on and aborted on three consecutive all-failed runs. A's Specifier emitted no
-refinement objective, so nothing was left unsatisfied and a third cycle never came. The
-quality dials it had raised made the *numbers* good on a structure difficulty 0.85 had
-already destroyed. Backlog **H11**, which is G14's mechanism with a safety consequence
-rather than a reporting one.
+all four lineages failing the `ss_fraction` integrity gate and an empty front, where the
+deterministic control ran on and aborted on three consecutive all-failed runs. Its Specifier
+emitted no refinement objective, so nothing was left unsatisfied and a third cycle never
+came. The quality dials it had raised made the *numbers* good on a structure difficulty 0.85
+had already destroyed — which is visible in `f10`, where that arm clears every band but
+`ss_fraction`.
+
+Over three repeats it is **A 3 of 3 and B 1 of 3**, so it is not a model-A property: it is
+what any live Specifier does when it declines to add a refinement objective, and B does that
+one time in three. Backlog **H11** — G14's mechanism with a safety consequence rather than a
+reporting one.
 
 ### `difficulty` is `operator_only`
 

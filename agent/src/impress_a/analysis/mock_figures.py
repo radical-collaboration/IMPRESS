@@ -658,8 +658,10 @@ def fig_reasoner_yield(camps: list[dict[str, Any]], out: Path) -> Path:
             if len(fronts) > 1:
                 ax.plot([pos[j] + offset] * 2, [min(fronts), max(fronts)],
                         color=ps.INK, linewidth=1.6, zorder=ps.Z["annot"])
+            # Above the range, not on the bar: with repeats the rule runs past the mean
+            # and was drawn straight through both lines of the label.
             ax.annotate(f"{model}\n{mean:.0f}/{int(np.mean(nodes))}",
-                        xy=(pos[j] + offset, mean), xytext=(0, 6),
+                        xy=(pos[j] + offset, max(mean, float(max(fronts)))), xytext=(0, 6),
                         textcoords="offset points", ha="center", fontsize="small",
                         color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
     ax.set_xticks(pos)
@@ -669,7 +671,8 @@ def fig_reasoner_yield(camps: list[dict[str, Any]], out: Path) -> Path:
     # A front is a COUNT, so its axis has no halves on it.
     top = max(1.0, ax.get_ylim()[1])
     ax.set_yticks(np.arange(0, np.ceil(top) + 1))
-    ax.set_ylim(0, np.ceil(top) * 1.18)
+    # 1.32, not 1.18: the label now sits above the top of the range rather than on the bar.
+    ax.set_ylim(0, np.ceil(top) * 1.32)
     _model_legend(ax, models, loc="upper right")
     fig.suptitle("Does a reasoner rescue a campaign the rules cannot?", y=0.985)
     fig.subplots_adjust(left=0.08, right=0.985, top=0.9, bottom=0.21)

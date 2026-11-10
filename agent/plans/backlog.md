@@ -1807,6 +1807,13 @@ choosing a strategy, and `_knobs.tunable` keeps breadth away from it. B is hande
 card and chooses for itself. So the comparison here is between a filtered knob set and an
 unfiltered one, not between two models' judgement.
 
+**Three repeats sharpen it into a cost argument.** Over 12 cells per model: A's front on
+`hard` is 3-4 against D's 0 of 12 and B's 0 of 16, and A's predicted hardware cost is flat at
+0.68 GPU-h per campaign in every arm. B's ranges from 0.68 to **4.1** on one arm, a 6x spread
+on the same campaign, because an unfiltered planner also chooses how many cycles to spend.
+An arm whose GPU bill cannot be predicted within 6x is a scheduling problem as much as a
+quality one, and `f11-predicted-cost.png` is where it shows.
+
 **H11. A live Specifier can end a campaign in one cycle on readings from designs that all
 failed an integrity gate, and the abort rule then never fires.** Found on model A's first
 live run on the mock arms, 2026-11-10, `Beam-501B-A23B`, 3 calls per arm, zero degraded
@@ -1832,6 +1839,21 @@ reasoner that declines to add an objective can stop before it.**
 Worth saying plainly: A's quality knobs are what made the numbers good - 169 diffusion steps
 and 7 relax cycles on a backbone that difficulty 0.85 has already destroyed. The metrics
 improved, the structures did not, and nothing in the stopping rule can tell those apart.
+
+**Repeated three times the same day, and the picture is worse than one run showed.** 89 calls,
+four arms x three models x three repeats, zero degraded:
+
+* **model A: 3 of 3.** Every repeat stops at cycle 1 on "every spec objective satisfied" with
+  an empty front. Not a draw - it is what A's Specifier does on this arm.
+* **model B: 1 of 3.** `arm-hopeless-B-r1` does the same thing; r0 and r2 run three cycles and
+  abort correctly. So this is NOT a model-A property, which is what the single-repeat run
+  suggested and what the first version of this item said. It is a property of **any live
+  Specifier that declines to add a refinement objective**, and B does that one time in three.
+* The deterministic control aborts every time, because its cascade always emits one.
+
+That changes the fix's priority. A defect that fires on one model is a model to avoid; one
+that fires stochastically on both live models is the stopping rule, and the stopping rule is
+shared with every arm pre-registered for Delta.
 
 Fixing G14 fixes this. Recorded separately because it changes the argument for fixing it: not
 only "an arm can report success with an empty front", which a reader can dismiss as a
