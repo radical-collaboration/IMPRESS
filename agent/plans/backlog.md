@@ -1052,6 +1052,14 @@ a 500. Add the two fields, and pin the rest by introspection — a test that eve
 projection passes is a field of the model it passes them to. Found while writing
 `docs/reference/observation.md` (finding 9).
 
+**That half is RESOLVED.** `TaskCard` declares `burn_rate` and `max_commitment` now, so
+`max_commitment` can finally be read by the rule that documents it, and
+`tests/test_layering.py::test_every_keyword_passed_to_a_core_model_is_a_field_of_it` walks every
+module with `ast` and fails on any keyword passed to a `core/toolkit` or `core/decision` model
+that the model does not declare — confirmed to fail against the two dropped kwargs before the
+fields existed. **D1 itself stands:** a typo'd key in a `spec.yaml` is still dropped at load,
+and that is `ToolSpec`'s own `extra`, not a projection's.
+
 **D2. `entry:` importability is never checked at load time** — only when `agent_for` is first called,
 i.e. mid-campaign rather than at registration.
 

@@ -215,7 +215,7 @@ class ThresholdPlanner(BasePlanner):
 
         for obj in ready:
             for metric in obj.targets:
-                tool = self._producer_of(metric, enabled, view)
+                tool = view.producer_of(metric, enabled)
                 if tool is None:
                     deferrals.append(Deferral(
                         objective=obj.id,
@@ -224,72 +224,17 @@ class ThresholdPlanner(BasePlanner):
                         waiting_on=[f"a tool reporting {metric}"]))
                     continue
                 planned.add(obj.id)
-                self._require(tool, enabled, view, order, need, wiring)
+                view.require(tool, enabled, need, wiring)
 
         if need:
             for metric in ranked:
-                if (tool := self._producer_of(metric, enabled, view)) is not None:
-                    self._require(tool, enabled, view, order, need, wiring)
+                if (tool := view.producer_of(metric, enabled)) is not None:
+                    view.require(tool, enabled, need, wiring)
 
         chain = sorted(need, key=lambda t: order[t])
         # An objective planned on one target is not deferred for another.
         deferrals = [d for d in deferrals if d.objective not in planned]
         return chain, wiring, deferrals
-
-    @staticmethod
-    def _producer_of(metric: str, enabled: list[str], view: ToolkitView) -> str | None:
-        """The earliest enabled tool declaring `metric`.
-
-        Earliest rather than best: a metric reported by two tools in one chain is reported
-        twice, and ADR 0012's one-property-two-sources rule means the later measurement
-        supersedes the earlier by name - so choosing the earlier producer never loses the
-        later one, while choosing the later could drop the chain that feeds it.
-        """
-        reporting = {card.id for card in view.reporting(metric)}
-        return next((t for t in enabled if t in reporting), None)
-
-    def _require(self, tool: str, enabled: list[str], view: ToolkitView,
-                 order: dict[str, int], need: set[str],
-                 wiring: dict[str, dict[str, tuple[str, str]]]) -> None:
-        """Add `tool` and, recursively, a producer for each of its required input ports."""
-        if tool in need:
-            return
-        need.add(tool)
-        card = view.tools[tool]
-        ports = wiring.setdefault(tool, {})
-        for port in card.inputs.values():
-            if not port.required:
-                continue
-            src = self._source_for(port.type, tool, enabled, view, order)
-            if src is None:
-                # A root port with no producer in the enabled set. Left unwired on purpose:
-                # gate 1 decides whether `Goal.reference_data` satisfies it, and inventing a
-                # producer here would be the Planner overruling the validator.
-                continue
-            src_tool, out_port = src
-            ports[port.name] = (src_tool, out_port)
-            self._require(src_tool, enabled, view, order, need, wiring)
-
-    @staticmethod
-    def _source_for(want: Any, consumer: str, enabled: list[str], view: ToolkitView,
-                    order: dict[str, int]) -> tuple[str, str] | None:
-        """The nearest enabled tool BEFORE `consumer` whose output satisfies `want`.
-
-        Nearest-preceding, which is the rule `Composer.compose` already applies to a linear
-        chain, so a Stage this planner wires explicitly and a chain the composer wires by
-        position describe the same graph. Restricting to tools declared earlier is what keeps
-        the result acyclic without a topological pass: the campaign's declared order is the
-        only ordering either side has.
-        """
-        limit = order[consumer]
-        for tool in sorted((t for t in enabled if order[t] < limit),
-                           key=lambda t: -order[t]):
-            card = view.tools[tool]
-            match = next((name for name, port in card.outputs.items()
-                          if port.type.unifies_with(want)), None)
-            if match:
-                return tool, match
-        return None
 
     # -- the parameter axis (H3) ---------------------------------------------
     def _params(self, card: TaskCard, refining: bool) -> dict[str, Any]:

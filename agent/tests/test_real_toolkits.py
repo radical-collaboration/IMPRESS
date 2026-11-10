@@ -37,7 +37,8 @@ from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.tools._ensemble import member_index, pair_by_index, select_best
 from impress_a.tools.ligandmpnn_agents import _parse_all_confidences, _parse_confidence
 from impress_a.tools.registry import Registry
-from impress_a.tools.view import view_of
+from impress_a.tools.spec import CostModel
+from impress_a.tools.view import card_for, view_of
 
 CHAIN = ["rfd3_design", "ligandmpnn_design", "packmin", "fastrelax", "filter_shape",
          "boltz_predict"]
@@ -1075,6 +1076,34 @@ async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
 # ---------------------------------------------------------------------------
 # The ToolkitView and the model-D Specifier (phase 2 of plans/control-plane-refactor.md).
 # ---------------------------------------------------------------------------
+
+def test_a_card_carries_the_cost_terms_its_spec_declares(reg):
+    """`burn_rate` and `max_commitment` reach the card, which they did not for a year.
+
+    `card_for` passed both to a `TaskCard` that declared neither field, and pydantic's
+    default `extra` is `ignore`, so both were discarded in silence. No shipped spec sets
+    either key - which is why nothing broke, and why the behaviour had to be checked against
+    a spec written for the purpose rather than against the toolkit on disk.
+
+    `max_commitment` is the one with a consumer waiting: `core/budget.Commitment` states the
+    rule `min(goal.budget[d], card.max_commitment[d])`, and until now the right-hand side
+    could not be read. `tests/test_layering.py` guards the general case mechanically.
+    """
+    spec = reg.get("rfd3_design").model_copy(update={
+        "cost_model": CostModel(unit="invocation",
+                                cost={"gpu_hours": 0.1},
+                                burn={"gpu_hours": 0.00003},
+                                max_commitment={"gpu_hours": 0.4})})
+    card = card_for(spec)
+    assert card.declared_cost == {"gpu_hours": 0.1}
+    assert card.burn_rate == {"gpu_hours": 0.00003}
+    assert card.max_commitment == {"gpu_hours": 0.4}
+
+    # None rather than {} when a spec declares neither, so "not declared" and "declared
+    # empty" stay distinguishable to a reader deciding whether a cap exists at all.
+    bare = card_for(reg.get("rfd3_design"))
+    assert bare.burn_rate is None and bare.max_commitment is None
+
 
 def test_the_view_exposes_every_declared_parameter_with_its_range(reg):
     """A reasoner given bare tool ids cannot choose, so it guesses - which is backlog H3.

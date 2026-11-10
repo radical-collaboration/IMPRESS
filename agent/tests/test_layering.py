@@ -192,6 +192,55 @@ def test_only_the_runner_imports_impress():
         "package:\n" + "\n".join(bad))
 
 
+def test_every_keyword_passed_to_a_core_model_is_a_field_of_it():
+    """A projection that passes a field the model does not declare loses it silently.
+
+    `tools/view.card_for` passed `burn_rate=` and `max_commitment=` to `TaskCard`, which
+    declared neither, from the line's first day - and pydantic's default `extra` is `ignore`,
+    so both were dropped without a word. Nothing observably broke because no shipped spec
+    sets either key, and `core/budget.Commitment` meanwhile documented a rule against a field
+    that could not exist (backlog D1).
+
+    `extra="forbid"` is NOT the fix: these models cross the HTTP control-plane boundary, and
+    forbidding extras would turn a newer peer's observation into a 500 rather than a field
+    this version ignores. So the check is mechanical instead, and it is cheap: every keyword
+    any module passes to a model declared in `core/toolkit` or `core/decision` must be one of
+    that model's fields. Walked with `ast`, for the reason the rest of this file is.
+    """
+    import pydantic
+
+    from impress_a.core import decision as decision_mod
+    from impress_a.core import toolkit as toolkit_mod
+
+    models = {
+        name: obj
+        for mod in (toolkit_mod, decision_mod)
+        for name, obj in vars(mod).items()
+        if isinstance(obj, type) and issubclass(obj, pydantic.BaseModel)
+        and obj.__module__ == mod.__name__
+    }
+    assert "TaskCard" in models and "CampaignObservation" in models, (
+        f"the model sweep found {sorted(models)}; it has stopped seeing the models it is "
+        f"meant to guard")
+
+    bad = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if (model := models.get(node.func.id)) is None:
+                continue
+            for kw in node.keywords:
+                if kw.arg is None:          # **kwargs - nothing named to check
+                    continue
+                if kw.arg not in model.model_fields:
+                    bad.append(f"{path.relative_to(SRC)}:{node.lineno} passes "
+                               f"`{kw.arg}=` to {node.func.id}, which has no such field - "
+                               f"pydantic drops it silently")
+    assert bad == [], "\n".join(bad)
+
+
 def test_every_layer_is_in_the_table():
     """A new package under `impress_a/` must be placed in the contract, not skipped.
 

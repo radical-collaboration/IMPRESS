@@ -177,6 +177,37 @@ async def test_the_chain_is_the_subset_the_objectives_need(reg):
     assert [t.tool for t in wider.runs if t.lineage == 0] == CHAIN
 
 
+async def test_the_shared_rule_resolves_the_chain_the_planner_resolves(reg):
+    """One implementation of "the nearest preceding producer", now used by two callers.
+
+    `ThresholdPlanner._resolve` answers it from the open Spec, per cycle, inside a running
+    campaign. `ToolkitView.required_closure` answers it at calltime, with no Spec and no
+    campaign in existence, which is what pricing an invocation before anything runs needs.
+    They were one function before the second caller existed; two would drift the moment
+    either side learned a new rule, and the drift would show up as an offer quoting a chain
+    the planner would not have built.
+    """
+    from impress_a.tools.view import view_of
+
+    for objectives, expected in ((OBJS, ["mock_generate", "mock_design", "mock_fold"]),
+                                 ([*OBJS, Objective(name="ddg", direction=Direction.MIN)],
+                                  CHAIN)):
+        _, _, stage = await _plan(reg, objectives)
+        planned = [t.tool for t in stage.runs if t.lineage == 0]
+        assert planned == expected, "the planner's own selection moved; fix this first"
+
+        chain, wiring = view_of(reg, CHAIN).required_closure(
+            [o.name for o in objectives], CHAIN)
+        assert chain == planned, (
+            f"the shared rule resolved {chain} where the planner resolved {planned}")
+
+        # Acyclic by declared order, which is what makes a topological pass unnecessary.
+        for consumer, ports in wiring.items():
+            for src, _out in ports.values():
+                assert CHAIN.index(src) < CHAIN.index(consumer), (
+                    f"{consumer} is wired to {src}, which is not declared before it")
+
+
 async def test_replan_shrinks_breadth_and_never_the_chain(reg):
     """Job 22675512's defect, refused by construction.
 
