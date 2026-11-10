@@ -21,3 +21,7 @@ src/impress_a.egg-info/
 # and gate fixtures, and a new one silently left untracked is a test that never runs.
 !*.pdb
 !*.fa
+# Working copies of decks published as private claude.ai Artifacts. The Artifact is the
+# source of truth; these are kept so a later session can edit without re-reading the
+# service. The committed decks beside them (slides/*.pptx) are built from the codebase.
+slides/_published/

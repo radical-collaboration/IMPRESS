@@ -270,10 +270,11 @@ def test_every_figure_draws_from_a_collected_lab(one_cell):
     out, _ = one_cell
     collect(out)
     written = draw_all(out)
-    # Six knob figures plus the three reasoner ones. The reasoner figures must draw from a
-    # lab with no reasoner axis at all - a single D cell - because that is what a default
-    # run produces and an empty panel has to say so rather than raise.
-    assert len(written) == 9
+    # Six knob figures, the three reasoner ones, and the two live-comparison ones.
+    # The reasoner figures must draw from a lab with NO reasoner axis at all - a single
+    # D cell - because that is what a default run produces, and an empty panel has to
+    # say so rather than raise. Same for f10/f11 with one model and no live cell.
+    assert len(written) == 11
     for path in written:
         assert path.exists() and path.stat().st_size > 1000, path
 
@@ -397,3 +398,50 @@ def test_a_figure_pooled_by_arm_is_drawn_for_one_control_model():
     # No D in the axis at all: the first model on the axis stands in, never nothing.
     kept, many, only = _control_only([r for r in rows if r["model"] != "D"])
     assert many and only == "A" and [r["cell"] for r in kept] == ["arm-hard-A"]
+
+
+def test_the_protein_figure_draws_the_bands_a_live_arm_is_scored_on():
+    """f10's thresholds come from `analysis/tiers`, not from a copy of them.
+
+    The whole claim of that figure is "these are the same bands `compare_arms` tiers a Delta
+    arm against". A retyped threshold that drifted would make it a different figure wearing
+    the same caption, and nothing would say so.
+    """
+    pytest.importorskip("matplotlib")
+    from impress_a.analysis import tiers
+    from impress_a.analysis.mock_figures import CHAIN, _tier_bands
+    bands = _tier_bands()
+    assert {b[0] for b in bands if b[3] == "T2"} == {m for m, _, _ in tiers.T2_THRESHOLDS}
+    assert {b[0] for b in bands if b[3] == "T3"} == {m for m, _, _ in tiers.T3_THRESHOLDS}
+    by_metric = {b[0]: b for b in bands}
+    assert by_metric["total_score"][1:3] == ("max", -250.0)
+    assert by_metric["shape_complementarity"][1:3] == ("min", 0.55)
+    assert by_metric["complex_plddt"][1:3] == ("min", 0.75)
+
+    # Every band is a metric the mock chain actually reports, or its panel draws nothing.
+    # Read off the specs rather than a list here, because the specs are what could drift.
+    from impress_a.analysis.mock_lab import _registry
+    reg = _registry()
+    reported = {m for tool, _ in CHAIN for m in getattr(reg.get(tool), "metrics", {})}
+    missing = {b[0] for b in bands} - reported
+    assert not missing, f"tier bands with no surrogate metric behind them: {sorted(missing)}"
+
+
+def test_the_cost_figure_charges_the_real_rates_not_the_surrogate_s():
+    """f11 pairs the mock lab's task counts with the REAL tools' cost models.
+
+    The mock specs all declare 0.002 of one dimension - uniform on purpose, so a figure drawn
+    from them would say every stage costs the same. The real ones differ by 25x across the
+    chain, and they are what gate 5 and the untrusted-pattern cap refuse graphs against.
+    """
+    pytest.importorskip("matplotlib")
+    from impress_a.analysis.mock_figures import _real_cost_models
+    costs = _real_cost_models()
+    assert costs["mock_rfd3_design"]["gpu_hours"] == 0.1
+    assert costs["mock_boltz_predict"]["gpu_hours"] == 0.05
+    assert costs["mock_fastrelax"]["cpu_hours"] == 0.25
+    # The one stage whose mock id is not `mock_` + the real id.
+    assert costs["mock_mpnn_design"] == costs["mock_ligandmpnn_design"]
+    # Every stage of the mock chain is priced, or an arm's total is silently short.
+    from impress_a.analysis.mock_figures import CHAIN
+    assert all(tool in costs for tool, _ in CHAIN), sorted(costs)

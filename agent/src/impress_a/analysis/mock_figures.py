@@ -843,6 +843,250 @@ def fig_knobs_moved(params: list[dict[str, Any]], out: Path) -> Path:
 
 # -- entry point -------------------------------------------------------------------------
 
+# -- F10: the protein metrics, against the bands a live arm is tiered on ------------------
+
+#: The seven metrics `analysis/tiers` tests, with the direction and bound it applies, and
+#: which tier the bound belongs to. Read from `tiers` rather than retyped: a threshold that
+#: drifted there and not here would draw a bar nobody is scored against.
+def _tier_bands() -> list[tuple[str, str, float, str]]:
+    """`(metric, "min"|"max", bound, tier)` for every one-sided band in T2 and T3."""
+    from .tiers import T2_THRESHOLDS, T3_THRESHOLDS
+    bands: list[tuple[str, str, float, str]] = []
+    for tier, table in (("T2", T2_THRESHOLDS), ("T3", T3_THRESHOLDS)):
+        for metric, lo, hi in table:
+            if lo is not None:
+                bands.append((metric, "min", float(lo), tier))
+            elif hi is not None:
+                bands.append((metric, "max", float(hi), tier))
+    return bands
+
+
+def fig_protein_metrics(lin: list[dict[str, Any]], out: Path) -> Path:
+    """Every metric a live arm is tiered on, per arm per control model.
+
+    This is the protein axis of `compare_arms` drawn on the surrogate: the SAME seven
+    thresholds, from `tiers.T2_THRESHOLDS` and `T3_THRESHOLDS`, read at import rather than
+    retyped. What it deliberately does NOT draw is a tier COUNT. The live headline is
+    `distinct_t2`/`distinct_t3` - tiers after clustering at 90% sequence identity and 2.5 A
+    Ca RMSD - and the surrogate emits neither a sequence nor a structure, so the clustering
+    step is absent and any count here would be an upper bound wearing the name of a measured
+    one. The distributions carry the comparison; `f7` carries the yield.
+
+    One panel per metric because they are seven measures on five scales. A mark is one arm
+    under one model: the mean over that cell's lineages, with the full range as a rule.
+    """
+    import matplotlib.pyplot as plt
+    ps.apply_rcparams()
+    rows = [r for r in lin if r.get("kind") == "arm"]
+    models = _models(rows)
+    bands = [b for b in _tier_bands() if any(r.get(b[0]) not in (None, "") for r in rows)]
+    if not rows or not bands or not models:
+        fig, ax = plt.subplots(figsize=(14.0, 6.0))
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.annotate("no arm lineages with tier metrics in this lab",
+                    xy=(0.5, 0.5), xycoords="axes fraction", ha="center", va="center",
+                    fontsize="large", color=ps.INK_SECONDARY)
+        return _save(fig, out, "f10-protein-metrics.png", "nothing to draw")
+
+    arms = [a for a in ps.ORDER if any(r.get("arm") == a for r in rows)]
+    cols = 4
+    nrows = (len(bands) + cols - 1) // cols
+    fig, axes = plt.subplots(nrows, cols, figsize=(17.5, 4.6 * nrows))
+    flat = list(np.asarray(axes).ravel())
+    width = 0.8 / max(1, len(arms))
+    pos = np.arange(len(models))
+    for ax, (metric, sense, bound, tier) in zip(flat, bands, strict=False):
+        for j, arm in enumerate(arms):
+            offset = (j - (len(arms) - 1) / 2) * width
+            st = ps.style_for(arm)
+            for i, model in enumerate(models):
+                vals = [float(r[metric]) for r in rows
+                        if r.get("arm") == arm and r.get("model") == model
+                        and r.get(metric) not in (None, "")]
+                if not vals:
+                    continue
+                x = pos[i] + offset
+                ax.plot([x, x], [min(vals), max(vals)], color=st.color, linewidth=1.6,
+                        alpha=0.55, zorder=ps.Z["line"], solid_capstyle="round")
+                ax.plot([x], [float(np.mean(vals))], marker=ps.MODEL_MARKERS.get(model, "o"),
+                        markersize=9, markerfacecolor="#FFFFFF", markeredgecolor=st.color,
+                        markeredgewidth=1.8, linestyle="none", zorder=ps.Z["annot"])
+        # The band, and which SIDE of it clears. A bare line leaves the reader to work out
+        # the direction from the metric's name, and three of these seven are minimised.
+        ax.axhline(bound, color=ps.INK_SECONDARY, linewidth=1.4, linestyle=(0, (6, 3)),
+                   zorder=ps.Z["band"])
+        lo, hi = ax.get_ylim()
+        lo, hi = min(lo, bound), max(hi, bound)
+        span = (lo, bound) if sense == "max" else (bound, hi)
+        ax.axhspan(*span, color=ps.NEUTRAL_SERIES, alpha=0.08, zorder=ps.Z["grid"])
+        ax.set_ylim(lo, hi)
+        ax.set_title(f"{metric}  ·  {tier} {'≤' if sense == 'max' else '≥'} {bound:g}",
+                     fontsize="small", loc="left", color=ps.INK_SECONDARY)
+        ax.set_xticks(pos)
+        ax.set_xticklabels([f"model {m}" for m in models], fontsize="small")
+    spare = flat[len(bands):]
+    for ax in spare:
+        for side in ax.spines.values():
+            side.set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.grid(False)
+    # THE KEY GOES IN THE SPARE PANEL. At figure level it sat across the top row's panel
+    # titles - seven panels leave no band of empty canvas up there - and the eighth cell of
+    # a 4x2 grid is exactly the room a four-arm key needs.
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], color=ps.style_for(a).color, marker=ps.style_for(a).marker,
+                      markerfacecolor="white", markeredgecolor=ps.style_for(a).color,
+                      markeredgewidth=1.8, markersize=9, linewidth=1.8,
+                      label=ps.style_for(a).label) for a in arms]
+    handles += [Line2D([], [], color=ps.INK_SECONDARY, marker=ps.MODEL_MARKERS.get(m, "o"),
+                       markerfacecolor="white", markeredgecolor=ps.INK_SECONDARY,
+                       markeredgewidth=1.8, markersize=9, linestyle="none",
+                       label=f"model {m}") for m in models]
+    if spare:
+        # x-small: at "small" the longest arm label lost its last word off the
+        # canvas, and the spare cell is one panel wide.
+        spare[0].legend(handles=handles, loc="center", fontsize="x-small",
+                        frameon=False)
+    else:
+        fig.legend(handles=handles, loc="upper center", ncol=len(handles),
+                   fontsize="small", bbox_to_anchor=(0.5, 0.945))
+    fig.suptitle("The bands a live arm is tiered on, drawn per control model", y=0.985)
+    fig.subplots_adjust(left=0.055, right=0.99, top=0.9, bottom=0.135, hspace=0.42,
+                        wspace=0.26)
+    return _save(fig, out, "f10-protein-metrics.png",
+                 "thresholds are `analysis/tiers`' own T2/T3 bands, read at import, not "
+                 "retyped; shading is the side that clears. A mark is one arm under one "
+                 "model - mean over its lineages, rule is the full range. NO TIER COUNT is "
+                 "reported: the live headline counts tiers AFTER clustering at 90% identity "
+                 "and 2.5A Ca RMSD, and the surrogate emits neither sequence nor structure")
+
+
+# -- F11: what the same decisions would cost on hardware ---------------------------------
+
+def _real_cost_models() -> dict[str, dict[str, float]]:
+    """`mock_<tool>` -> the REAL tool's declared per-invocation cost.
+
+    The mock specs all declare 0.002 of something, uniform on purpose, so their own cost
+    models carry no information about relative cost. The real ones do, and the task counts
+    are the reasoner's own decisions - so pairing them answers "what would these decisions
+    have cost on Delta" without pretending anything was measured here.
+    """
+    from .mock_lab import _registry
+    reg = _registry()
+    out: dict[str, dict[str, float]] = {}
+    for tool_id in reg.ids():
+        if tool_id.startswith("mock_"):
+            continue            # the surrogate's own 0.002 placeholders
+        cm = getattr(reg.get(tool_id), "cost_model", None)
+        cost = dict(getattr(cm, "cost", {}) or {}) if cm is not None else {}
+        if cost:
+            out[f"mock_{tool_id}"] = {k: float(v) for k, v in cost.items()}
+    # `mock_mpnn_design` mirrors `ligandmpnn_design`; every other stage keeps the real id
+    # with `mock_` in front, which is the naming rule `toolkits/mock` was built to.
+    if "mock_ligandmpnn_design" in out:
+        out["mock_mpnn_design"] = out["mock_ligandmpnn_design"]
+    return out
+
+
+def fig_predicted_cost(tasks: list[dict[str, Any]], camps: list[dict[str, Any]],
+                       out: Path) -> Path:
+    """The real toolkit's cost models applied to the mock lab's task counts.
+
+    `compare_arms` publishes `gpu_hours` and `gpu_hours_per_t2`, both charged from `sacct`:
+    `AllocNodes x gpus_per_node x Elapsed_h`. There is no allocation here and no GPU, so
+    neither is measurable - and a laptop's wall clock is not a stand-in, because on this tier
+    82-99% of it is one model thinking. What IS transferable is the decision: which tools ran,
+    how many times. Charged at the REAL specs' declared rates, that is the same arithmetic
+    gate 5 and the untrusted-pattern cap do before admitting a graph.
+
+    Predicted, and labelled predicted everywhere. The right panel's denominator is the Pareto
+    front rather than `t2`, because tier counts are not reported here (see `f10`).
+    """
+    import matplotlib.pyplot as plt
+    ps.apply_rcparams()
+    costs = _real_cost_models()
+    rows = [r for r in tasks if r.get("kind") == "arm"]
+    models = _models(rows)
+    arms = [a for a in ps.ORDER if any(r.get("arm") == a for r in rows)]
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(17.0, 6.6))
+    pos = np.arange(len(arms))
+    width = 0.8 / max(1, len(models))
+    front_by = {(r.get("arm"), r.get("model")): r for r in camps if r.get("kind") == "arm"}
+
+    per_cell: dict[tuple[str, str], dict[str, float]] = {}
+    for r in rows:
+        key = (str(r.get("arm")), str(r.get("model")), str(r.get("cell")))
+        for unit, rate in costs.get(str(r.get("tool")), {}).items():
+            per_cell.setdefault(key[:2] + (key[2],), {})
+            per_cell[key][unit] = per_cell[key].get(unit, 0.0) + rate
+
+    def cells_of(arm: str, model: str) -> list[dict[str, float]]:
+        return [v for k, v in per_cell.items() if k[0] == arm and k[1] == model]
+
+    for i, model in enumerate(models):
+        offset = (i - (len(models) - 1) / 2) * width
+        for j, arm in enumerate(arms):
+            got = cells_of(arm, model)
+            if not got:
+                continue
+            gpu = [c.get("gpu_hours", 0.0) for c in got]
+            st = ps.style_for(arm)
+            ax.bar(pos[j] + offset, float(np.mean(gpu)), width * 0.9, color=st.color,
+                   edgecolor=st.color, linewidth=1.2, zorder=ps.Z["bar"],
+                   **ps.model_fill(model))
+            if len(gpu) > 1:
+                ax.plot([pos[j] + offset] * 2, [min(gpu), max(gpu)], color=ps.INK,
+                        linewidth=1.6, zorder=ps.Z["annot"])
+            ax.annotate(model, xy=(pos[j] + offset, max(gpu)), xytext=(0, 6),
+                        textcoords="offset points", ha="center", fontsize="small",
+                        color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
+
+            # Per design on the front. A cell with an empty front has no denominator, and
+            # that is SAID rather than drawn as a zero or left as a gap - an arm that spent
+            # the hours and produced nothing is the expensive case, not the cheap one.
+            fronts = int(front_by.get((arm, model), {}).get("front") or 0)
+            if fronts:
+                bx.bar(pos[j] + offset, float(np.mean(gpu)) / fronts, width * 0.9,
+                       color=st.color, edgecolor=st.color, linewidth=1.2,
+                       zorder=ps.Z["bar"], **ps.model_fill(model))
+                bx.annotate(model, xy=(pos[j] + offset, float(np.mean(gpu)) / fronts),
+                            xytext=(0, 6), textcoords="offset points", ha="center",
+                            fontsize="small", color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
+            else:
+                # Just the letter and a dash. "no front" under each of three models in one
+                # group overlapped into "no fronto fro"; the panel's subtitle says what a
+                # missing bar means, once.
+                bx.annotate(f"{model}\n\u2014", xy=(pos[j] + offset, 0), xytext=(0, 8),
+                            textcoords="offset points", ha="center", fontsize="small",
+                            color=st.color, zorder=ps.Z["annot"])
+    # SHORT y-labels. "predicted GPU-hours per design on the front" at this type scale is
+    # 1.2 panels wide: it ran across the left panel's bars and under the suptitle.
+    for panel, label, title in (
+            (ax, "predicted GPU-hours",
+             "whole campaign, at the real specs' rates - not measured here"),
+            (bx, "predicted GPU-h / front design",
+             "no bar = empty front, so no denominator")):
+        panel.set_xticks(pos)
+        panel.set_xticklabels([ps.style_for(a).short for a in arms])
+        panel.set_ylabel(label)
+        panel.set_title(title, fontsize="medium", loc="left", color=ps.INK_SECONDARY)
+        panel.set_ylim(0, max(panel.get_ylim()[1], 1e-9) * 1.25)
+        # Room for the outermost group's tick label, which was clipped at the right edge.
+        panel.set_xlim(-0.65, len(arms) - 0.35)
+    _model_legend(ax, models, loc="upper left")
+    fig.suptitle("What these decisions would have cost on hardware", y=0.985)
+    fig.subplots_adjust(left=0.065, right=0.99, top=0.88, bottom=0.235, wspace=0.17)
+    return _save(fig, out, "f11-predicted-cost.png",
+                 "PREDICTED, never measured: the real toolkit's per-invocation cost models "
+                 "(rfd3 0.1 GPU-h, ligandmpnn 0.02, boltz 0.05) applied to the tasks each "
+                 "model's decisions actually ran. `sacct` charges an arm "
+                 "AllocNodes x gpus_per_node x Elapsed_h, which a laptop cannot stand in "
+                 "for. Per INVOCATION, so `num_designs` does not enter it - a model that "
+                 "asked for four designs per call is charged for one")
+
+
 def draw_all(lab: Path) -> list[Path]:
     """Every figure, from one lab directory's tables. Returns what it wrote."""
     import json
@@ -866,6 +1110,8 @@ def draw_all(lab: Path) -> list[Path]:
         fig_reasoner_yield(camps, out),
         fig_decision_cost(camps, decisions, out),
         fig_knobs_moved(params, out),
+        fig_protein_metrics(lin, out),
+        fig_predicted_cost(tasks, camps, out),
     ]
     log.info("%d figures in %s", len(written), out)
     return written

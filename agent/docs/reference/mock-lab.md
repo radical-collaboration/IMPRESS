@@ -250,6 +250,35 @@ Two things in there are easy to get subtly wrong, so they are done once and test
 | `f7-reasoner-yield.png` | front size per arm per control model — does a reasoner rescue a campaign the rules cannot? |
 | `f8-decision-cost.png` | what one decision costs in seconds and in tokens, by who made it |
 | `f9-knobs-moved.png` | which knobs each model moved, and how far up their declared ranges |
+| `f10-protein-metrics.png` | every metric a live arm is tiered on, per arm per model, against `tiers`' own T2/T3 bands |
+| `f11-predicted-cost.png` | what the same decisions would have cost on hardware, at the real specs' rates |
+
+### f10 and f11: the comparison as a live campaign will make it
+
+`analysis/compare_arms.py` scores a Delta arm on two axes, and these two draw the same axes
+on the surrogate — with the two places the surrogate cannot follow stated rather than papered
+over.
+
+**f10, the protein axis.** The seven metrics `tiers.T2_THRESHOLDS` and `T3_THRESHOLDS` test,
+read at import rather than retyped, one panel each, a mark per arm per model and the band
+shaded on the side that clears. What it does **not** draw is a tier count: the live headline
+is `distinct_t2`/`distinct_t3`, which is tiers *after* clustering at 90 % sequence identity
+and 2.5 Å Cα RMSD, and the surrogate emits neither a sequence nor a structure. A count here
+would be an upper bound wearing a measured number's name. The yield comparison stays in f7,
+where the denominator is the Pareto front and nothing is implied about distinctness.
+
+**f11, the cost axis.** `compare_arms` charges an arm `AllocNodes × gpus_per_node ×
+Elapsed_h` from `sacct`. There is no allocation here, and the laptop's clock is not a
+stand-in — 82–99 % of it is one model thinking, which inverts completely on hardware. What
+*does* transfer is the decision: which tools ran and how many times. Charged at the **real**
+toolkit's declared rates (rfd3 0.1 GPU-h, ligandmpnn 0.02, boltz 0.05, fastrelax 0.25 CPU-h),
+that is the same arithmetic gate 5 and the untrusted-pattern cap do before admitting a graph.
+Every number on it is labelled predicted. The mock specs' own cost models are deliberately
+uniform at 0.002 and carry no information, so they are not used.
+
+It also shows H10 without having to argue it: models A and B cost **the same** predicted
+GPU-hours in every arm, because the estimate is per *invocation* and B's `num_designs: 4`
+does not enter it.
 
 **f3, f4 and f5 are drawn for one control model.** They pool by arm, and an arm stops being
 one campaign once the reasoner axis exists: averaging D's 0.14s decision with B's 20.5s one
