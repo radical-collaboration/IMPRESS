@@ -51,7 +51,13 @@ figures/*.png          the six figures
 
 **Four arms**, which are the settings the ten-minute activity walks through and the four hues
 in `analysis/plot_style.py`. Each is one reproducible campaign a person can re-run by hand
-and get back:
+and get back.
+
+**They are named for what the campaign DOES, not for what the surrogate reports.** Every mock
+metric is a seeded random draw, so a name like "low-plddt" would be naming noise, while "aborted
+after three all-failed runs" is a control-plane outcome that reproduces. The tier each arm takes
+in the palette follows the same rule and is assigned once, in `analysis/plot_style.py`, never per
+figure.
 
 | Arm | Setting | What the campaign does |
 |---|---|---|
@@ -59,6 +65,27 @@ and get back:
 | `rescued` | `difficulty: 0.55`, plus `diffusion_steps: 200`, `packmin.cycles: 5`, `diffusion_samples: 25` | the same difficulty, bought back by three knobs |
 | `hard` | `difficulty: 0.55` | acceptance shortfall; the front stays empty; trust untouched |
 | `hopeless` | `difficulty: 0.85` | integrity failure; `CampaignAborted` after three all-failed runs |
+
+Two things the table cannot say. **`hard` and `rescued` are a matched pair** at identical
+`difficulty`, differing only in the three knobs raised to buy it back — which is what separates
+"can knobs recover this campaign?" from "is this campaign hard?". Under a one-dial sweep those two
+questions are the same column, which is why the pair exists as arms rather than as sweep points.
+
+One caveat on `rescued`, measured from its own `stages.jsonl` rather than assumed: **two of its
+three knobs only hold for cycle 1.** Exploring emits no parameters, so the arm's values stand; from
+cycle 2 the planner escalates `diffusion_steps` and `packmin.cycles` from the *tool spec's*
+defaults (50 and 1) and the policy wins the merge, so they become 88 and 2 — below what the arm
+declared. `diffusion_samples` survives at 25 because it is a **breadth** knob no planner may touch.
+The campaign is real and the measured behaviour is real; what the label overstates is how much of
+it is held across cycles. Backlog G17, which is where the fix is being argued.
+
+And **`hard` versus `hopeless` is the acceptance/integrity line**, not a matter of degree. Between
+roughly 0.5 and 0.75 the dial only misses the 0.5 acceptance threshold: the node FAILs and the
+pattern's trust is untouched. Above about 0.75 it drives `ss_fraction` under the 0.3
+`has_secondary_structure` floor, which is an **integrity** failure — the node FAILs *and* the
+pattern is demoted ([decision 0013](../decisions/0013-trust-counts-integrity-not-acceptance.md)).
+Reaching for the dial to "make the campaign fail" without noticing which kind of failure you
+bought is the mistake the mock toolkit exists to make visible.
 
 **Sweep cells**, one campaign per knob value per repeat, each repeat under a different seed
 salt. These carry the ensembles: 8 lineages a cell times 3 repeats is 24 independent draws

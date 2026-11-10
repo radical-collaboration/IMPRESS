@@ -1082,6 +1082,37 @@ it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` doe
 enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
 but no lookup API does.
 
+**F5. `docs/reference/` documented the pre-phase-11 policy layer, and one page a test names did
+not exist — RESOLVED.** Opened and closed in the same commit, because the evidence is the useful
+part. Found while answering four questions about the control plane that all had to be answered
+from the source: by what process the toolkit, the goal, the budget and the parameters become
+specified targets and a programmed Stage. No shipping page traced that path at all.
+
+Two separate defects. **`frontends.md`'s "Writing your own" example did not run**: it subclassed
+`BasePolicy` and implemented `decide`, returning `ComposeAndRun`. Verified by grep over `src/` —
+`BasePolicy`, `RuleCorrectionsPolicy`, `LoggingPolicy`, `NullPolicy`, `ComposeAndRun` and
+`Backtrack` exist nowhere; only `RequestHuman` survives, in `core/decision.py`. The "Composable
+wrappers" section listed three deleted classes, and `architecture.md`'s DECIDE row named the
+deleted return union. A reader following either would have written against an interface removed in
+phase 11. **And `tests/test_reasoner_registry.py:81` instructed a maintainer to keep
+`docs/reference/control-models.md` in step with the `llm_calls` assertion** — a file that had
+never been written, so the pointer was dead from the day the test landed.
+
+Resolved by two new pages and four repairs: `docs/reference/resolution.md` (the pipeline, step 0
+to step 8, each with its owner, its anchor and its refusal, plus a closing table of what the
+pipeline does **not** enforce), `docs/reference/control-models.md` (the per-reasoner half: what
+each model is shown, what it may choose, the six layers that constrain a reply), the two stale
+sections in `frontends.md` rewritten against `policy/wrappers.py` as it stands, `architecture.md`'s
+loop corrected to specify/plan/review, the arm **naming rule** added to `mock-lab.md`, and both
+new pages plus `mock-lab.md` added to the README index, where `mock-lab.md` was missing.
+
+The pattern worth keeping: **three of the symbols `docs/` described did not exist, and nothing
+mechanical would ever have said so.** `tests/test_layering.py` walks imports with `ast` and
+`test_reasoner_registry.py` checks the status column against behaviour; neither can check prose.
+The mitigation applied here is that every `file:line` in both new pages was resolved by grep
+before the commit, and the pages end by naming the provenance files each step's output lands in,
+so a future reader can check the claim rather than trust it.
+
 ## G. Engine semantics
 
 **G1. Exploration cannot move the front, so it counts toward stagnation.** Nodes from the explore
@@ -1491,8 +1522,47 @@ engine were ever used for many short tasks. Upstream, not ours: record it here s
 person measuring agent overhead on short tasks does not spend the afternoon looking for it in
 `exec/dispatch.py`.
 
+**G17. A campaign cannot raise a quality knob that survives its own first refinement.** Found
+while checking `docs/reference/resolution.md` step 6 against provenance rather than against the
+source, which is the only reason it was found at all: three correct rules compose into a surprise,
+and no single function is wrong.
 
-## H. Reasoner models
+`ThresholdPlanner._params` escalates with `_knobs.step_up`, whose `base` is
+**`float(param.default)` - the TOOL SPEC's default, not the campaign's value** - and
+`executor._apply_campaign_params` merges `CampaignSpec.params` as defaults *under* the policy's
+choices, because the policy must win or a campaign's defaults would override the decisions being
+measured. Exploring emits no parameters at all, so cycle 1 runs at the campaign's values. From
+cycle 2 the planner's escalation replaces them, computed from a base the campaign never used.
+
+Measured on `arm-rescued-D`'s own `stages.jsonl` (`campaigns/_runs/_labs/live-ab3`):
+
+| knob | spec default | arm declared | cycle 1 | cycle 2 |
+|---|---|---|---|---|
+| `mock_rfd3_design.diffusion_steps` | 50 | **200** | 200 | **88** |
+| `mock_packmin.cycles` | 1 | **5** | 5 | **2** |
+| `mock_boltz_predict.diffusion_samples` | 8 | **25** | 25 | **25** |
+
+The third survives only because its `trades` reads "samples per call", so `_knobs` classifies it
+**breadth** and no planner may touch it. So the rule is: **a campaign's quality knobs last one
+cycle; its breadth and frozen knobs last the campaign.** Exactly backwards from what a reader
+setting `params:` would expect, and backwards from what matters - breadth is the one a campaign is
+trusted with on evidence (H10), and quality is the one it is not.
+
+**It changes what the `rescued` arm measures.** That arm's whole claim is "difficulty 0.55, bought
+back by three knobs"; two of the three are undone from cycle 2 onward, so what the figures compare
+is `hard` against *one cycle* of `rescued` plus an escalation path that starts below the arm's own
+setting. The arm is still a valid campaign and the measured behaviour is real - this does not
+invalidate any figure - but the label overstates what is held. `docs/reference/mock-lab.md` now
+says so beside the arm table.
+
+Three ways to close it, none obviously right. **Escalate from the effective value** rather than the
+spec default - `max(param.default, current)` - which makes a campaign's setting a floor; cheapest,
+and it changes model D's behaviour on every campaign that sets a quality knob, so it is not a
+free fix. **Give a campaign a declared floor** distinct from `params:`, which is honest and is
+another concept. Or **leave it and document it**, which is what this commit does, on the grounds
+that a planner reasoning in fractions of declared headroom is the behaviour the four-arm design
+wants and the surprise is in the label rather than in the engine. Decide before the next
+`rescued`-style arm is pre-registered.
 
 The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
 and what runs. Full evidence, the harmonization options and the hardware follow-on are in
@@ -1633,6 +1703,30 @@ frozen one. What is still true is `toolkit_skills()`: no caller, so the SKILL do
 and the pitfalls - still reach no reasoner. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
 `docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
 needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
+
+**Three more, found while writing `docs/reference/resolution.md` and verified by grep.**
+`ToolkitView.skills` *is* populated — `view_of` (`tools/view.py:67`) fills it from
+`Registry.skills` for every enabled toolkit — so the skill text now reaches the object a reasoner
+holds and is still included in no prompt; the gap moved one step closer without closing.
+`Goal.walltime_s` (`core/goal.py:74`) is read by nothing, which is defensible on HPC where SLURM's
+`--time` is the real backstop, but it is a field a caller can set and watch do nothing. And
+`ReasonerOptions.max_cycles` and `.target_front` (`policy/registry.py:80-81`) are read by nothing
+in `policy/`: they were forwarded to fix X1 — a model's own bound must never be tighter than the
+campaign's — and the `RehearsalOracle` literals that consumed them were deleted in the same phase,
+so what remains is two fields whose only job is to not be wrong. `target_front` reaches a
+Specifier through `Goal` instead. Deleting either is not obviously right: the X1 defect was a
+model stopping a four-hour arm in twenty minutes, and an empty seam is cheaper than rediscovering
+that. Recorded so the next reader does not have to re-derive which of the two paths is live.
+
+**And a fourth that is the opposite shape**: `Goal.reference_data` (`core/goal.py:55`) is read
+nowhere *and* nothing fills it, while `policy/planners/explicit.py:266` says in a comment that
+"gate 1 decides whether `Goal.reference_data` satisfies it" — gate 1 never receives a Goal, and its
+required-root-port loop is a literal `pass` commented `# roots may be satisfied from campaign
+inputs` (`compose/validate.py:79-81`). So **no gate checks that a required root input was
+satisfied at all**; the caller's input data arrives as `params:` entries such as
+`rfd3_design.input_spec_path`, and a campaign that forgot one is caught, if at all, by
+`cli._check_ligand_smiles` and the dry-run. This is A2's neighbour — Boltz with no ligand does not
+fail, it models no ligand — and it belongs with it rather than here if anyone acts on it.
 
 **H5. No `conduct` reasoner ships.** The entry point, `core/session.py`'s ten-operation surface and
 `policy/driver.py`'s adapter all exist and are covered, but every `conduct` implementation in the
@@ -1813,6 +1907,16 @@ unfiltered one, not between two models' judgement.
 on the same campaign, because an unfiltered planner also chooses how many cycles to spend.
 An arm whose GPU bill cannot be predicted within 6x is a scheduling problem as much as a
 quality one, and `f11-predicted-cost.png` is where it shows.
+
+**The layer the per-invocation assumption actually lives in is `Validator.estimate`**
+(`compose/validate.py:142`), found while writing `docs/reference/resolution.md`. It is four lines,
+and it sums `cost_model.cost` **per node in the graph** with no reference to any parameter. So
+"the cost models are per invocation" is not a property of the specs that a better spec could fix
+on its own: gate 5, the Reviewer's `affordable` and the interlock's 10% provisional cap all price
+a graph by its *shape*, which is the same reason a pattern signature excludes parameter values.
+Making the cost models scale therefore means giving `estimate` a parameter-aware term, not only
+editing six `cost_model` blocks - which moves that third option from "honest but does not stop
+the waste" to "honest, and a change to the admission path". Worth knowing before choosing.
 
 **H11. A live Specifier can end a campaign in one cycle on readings from designs that all
 failed an integrity gate, and the abort rule then never fires.** Found on model A's first
