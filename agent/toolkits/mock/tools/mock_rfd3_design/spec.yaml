@@ -35,8 +35,18 @@ parameters:
   # untouched. Above ~0.75 it goes under the floor, which is an INTEGRITY failure: the node
   # fails AND the pattern's trust suffers. That difference is decision 0013, and watching it
   # is the reason this dial exists.
+  #
+  # `operator_only` because this dial is the lab's independent VARIABLE, and a reasoner is
+  # shown every tunable parameter with its range and its trades sentence. A model asked to
+  # satisfy the objectives, and told there is a 0.0-to-1.0 knob called "how hard this
+  # campaign is", turns it down - and `_apply_campaign_defaults` would let it, because "the
+  # policy always wins on any key it did set". The hard arm would become the easy one and
+  # nothing would say so. The campaign still sets it exactly as before; only a reasoner is
+  # refused, and the refusal names this reason.
   difficulty: {type: float, default: 0.25, min: 0.0, max: 1.0,
-               trades: "how hard this campaign is; surrogate-only, no rfd3 counterpart"}
+               trades: "how hard this campaign is; surrogate-only, no rfd3 counterpart",
+               operator_only: "the experiment's own condition - a reasoner that could turn
+                               it down would be choosing its own difficulty"}
 metrics: [ss_fraction, num_models, ca_deviation, ligand_clashes,
           helix_fraction, sheet_fraction]
 qc_gates:

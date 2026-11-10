@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Protocol, runtime_checkable
 
 log = logging.getLogger(__name__)
@@ -88,6 +89,21 @@ async def ask(reasoner: Any, node: str, prompt: str, schema: dict[str, str],
     which is what makes a live arm replayable and what the experiment reads for
     decision-layer timing. The reply is not recorded as a *result*: nothing a model says is
     scored, only what the campaign then executed.
+
+    **A REJECTED attempt is recorded too, `ok: false`.** It used to reach a `log.warning` and
+    nothing else, so a decision that took two round trips and one that took one were the same
+    single row, distinguishable only by an `attempt` index that started at 0 either way. The
+    corrective-retry path is the part of this design that has never been seen against a live
+    endpoint (backlog H1), and a path that leaves no record cannot be the thing a run is
+    checked against.
+
+    **And every record carries what the attempt cost**: `elapsed_s` around the call, and the
+    prompt and completion tokens it consumed, as DELTAS of the client's own running counters.
+    `analysis/compare_arms._decision_share` has read `elapsed_s` since it was written and
+    nothing has ever written it, so the decision-layer share of every arm scored so far has
+    been `None`. The counters live on `OpenAICompatOracle` (`policy/llm.py`) and were
+    discarded with the process; a rehearsal has none, and a missing counter is omitted rather
+    than reported as zero - the same rule the tool adapters follow, for the same reason.
     """
     last: Exception | str = "no attempt made"
     text = prompt
@@ -101,6 +117,8 @@ async def ask(reasoner: Any, node: str, prompt: str, schema: dict[str, str],
     if (reset := getattr(reasoner, "reset", None)) is not None:
         reset()
     for attempt in range(max(1, attempts)):
+        started = time.perf_counter()
+        before = _tokens(reasoner)
         try:
             raw = await reasoner.think(node, text, schema)
             if not isinstance(raw, dict):
@@ -110,17 +128,53 @@ async def ask(reasoner: Any, node: str, prompt: str, schema: dict[str, str],
                 raise ValueError(f"reply is missing {missing}")
             if validate is not None:
                 validate(raw)
-            if sink:
-                sink("decisions", {"node": node, "cycle": cycle, "attempt": attempt,
-                                   "model_id": getattr(reasoner, "model_id", "?"),
-                                   "prompt": text, "response": raw})
+            _record(sink, reasoner, node, cycle, attempt, started, before,
+                    prompt=text, response=raw, ok=True)
             return raw
         except Exception as failure:          # transport, parse or schema - all bounded here
             last = failure
             log.warning("reasoner: node %s attempt %d rejected: %s", node, attempt, failure)
+            _record(sink, reasoner, node, cycle, attempt, started, before,
+                    prompt=text, response=None, ok=False, error=str(failure))
             text = (f"{text}\n\nYour previous reply was rejected: {failure}. "
                     f"Return ONE JSON object with every key: {json.dumps(schema)}")
     raise NodeRefused(node, max(1, attempts), last)
+
+
+def _tokens(reasoner: Any) -> tuple[int | None, int | None]:
+    """The client's running token counters, or `(None, None)` for one that keeps none."""
+    return (getattr(reasoner, "prompt_tokens", None),
+            getattr(reasoner, "completion_tokens", None))
+
+
+def _record(sink: Any, reasoner: Any, node: str, cycle: int, attempt: int, started: float,
+            before: tuple[int | None, int | None], *, prompt: str, response: Any, ok: bool,
+            error: str = "") -> None:
+    """One attempt, with what it cost. No sink, no record - and no exception either.
+
+    A sink is the embedder's, so a sink that raises would take a campaign down over
+    bookkeeping. It is caught and logged: losing a transcript row is a bad day, losing the
+    cycle that produced it is a worse one.
+    """
+    if not sink:
+        return
+    rec: dict[str, Any] = {
+        "node": node, "cycle": cycle, "attempt": attempt, "ok": ok,
+        "model_id": getattr(reasoner, "model_id", "?"),
+        "elapsed_s": round(time.perf_counter() - started, 6),
+        "prompt": prompt, "response": response,
+    }
+    if error:
+        rec["error"] = error
+    for name, was in zip(("prompt_tokens", "completion_tokens"), before, strict=True):
+        now = getattr(reasoner, name, None)
+        if was is not None and now is not None:
+            rec[name] = now - was
+    try:
+        sink("decisions", rec)
+    except Exception as broken:               # noqa: BLE001 - see the docstring
+        log.warning("reasoner: could not record node %s attempt %d: %s", node, attempt,
+                    broken)
 
 
 def degraded(sink: Any, node: str, cycle: int, reason: str, fallback: str) -> None:

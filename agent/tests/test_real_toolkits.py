@@ -1088,11 +1088,21 @@ def test_the_view_exposes_every_declared_parameter_with_its_range(reg):
     assert set(view.ids) == set(reg.ids())
     for tool_id in view.ids:
         card, spec = view.tools[tool_id], reg.get(tool_id)
-        assert set(card.parameters) == set(spec.parameters), tool_id
-        assert set(card.frozen) == set(spec.frozen_parameters), tool_id
+        # `operator_only` is the third state: the campaign may declare it, a reasoner may
+        # not propose it. It stays in `ToolSpec.parameters`, so gate 3 and the campaign's
+        # own `params:` are untouched, and arrives on the card under `frozen`, which is
+        # what every reader of the card already honours.
+        operator = {n for n, p in spec.parameters.items() if p.operator_only}
+        assert set(card.parameters) == set(spec.parameters) - operator, tool_id
+        assert set(card.frozen) == set(spec.frozen_parameters) | operator, tool_id
         assert set(card.parameters).isdisjoint(card.frozen), (
             f"{tool_id}: a frozen parameter must not be proposable")
+        for name in operator:
+            assert card.frozen[name] == spec.parameters[name].operator_only, (
+                f"{tool_id}.{name}: a reasoner is told WHY, not just refused")
         for name, p in spec.parameters.items():
+            if name in operator:
+                continue
             assert card.parameters[name].min == p.min
             assert card.parameters[name].max == p.max
             assert card.parameters[name].trades == p.trades

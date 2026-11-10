@@ -45,7 +45,7 @@ __all__ = ["CampaignAborted", "CampaignManager", "CampaignResult", "CampaignSpec
 
 _DELEGATED = ("tree", "budget", "prov", "jobs", "trust", "reg", "root", "cycle",
               "run_seq", "dispatched", "observe", "composer", "validator",
-              "pending_human")
+              "pending_human", "record_reasoning")
 
 
 class CampaignManager:

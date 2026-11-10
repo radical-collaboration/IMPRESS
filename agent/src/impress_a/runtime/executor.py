@@ -320,6 +320,33 @@ class CampaignExecutor:
         if self.prov_sink is not None:
             self.prov_sink(self.spec.campaign_id, kind, dict(record))
 
+    #: The only provenance streams a REASONER may append to. Both describe the reasoner's
+    #: own behaviour and nothing else: what it was asked, what it answered, and whether it
+    #: fell back. A reasoner that could write `results` or `tasks` would be writing the
+    #: campaign's findings, which is the executor's job and the whole reason
+    #: `analysis/compare_arms` scores from these files rather than from an arm's own notes.
+    REASONER_KINDS = ("decisions", "transitions")
+
+    def record_reasoning(self, kind: str, record: dict[str, Any]) -> None:
+        """Append one record a reasoner authored, through the executor's own writer.
+
+        The reasoner sink (`policy/reasoning.ask`, `policy/reasoning.degraded`) had writers
+        throughout `policy/` and no subscriber: `ReasonerOptions.sink` was never passed, so a
+        live campaign left no prompt, no reply, no model id, no timing and no degraded event.
+        `analysis/compare_arms` has read all four since it was written, which meant the
+        pre-registration's "an arm shown to have degraded is void" rule could not fire.
+
+        Routed here rather than letting a half hold a `ProvenanceLog` of its own, so the
+        executor stays the single writer of every file under `provenance/` - two writers
+        appending to one JSONL is a torn line waiting for a long campaign - and so the
+        allowed kinds are enforced in one place.
+        """
+        if kind not in self.REASONER_KINDS:
+            raise ValueError(
+                f"a reasoner may write {self.REASONER_KINDS}, not {kind!r}: the campaign's "
+                "findings are the executor's to record")
+        self._log(kind, record)
+
     def _authority_of(self, tool_id: str) -> int:
         """The authority band a tool's numbers carry.
 

@@ -28,6 +28,31 @@ class ParameterSpec(BaseModel):
     max: float | None = None
     choices: list[Any] | None = None
     trades: str = ""
+    #: Non-empty = the reason a REASONER may not propose this parameter, although the
+    #: campaign may still declare it. The third state between varyable and
+    #: `frozen_parameters`, and the two existing ones could not express it:
+    #:
+    #: * varyable - the campaign sets it, and so may a Planner. The refinement knobs.
+    #: * `frozen_parameters` - nobody sets it; gate 3 refuses a graph carrying it, so a
+    #:   campaign cannot declare it either.
+    #: * `operator_only` - the campaign's to set, a reasoner's to leave alone.
+    #:
+    #: It exists because `mock_rfd3_design.difficulty` is the mock lab's independent
+    #: VARIABLE, and `OraclePlanner` shows a live model every tunable parameter with its
+    #: range and its `trades` sentence - "how hard this campaign is", 0.0 to 1.0. A model
+    #: asked to satisfy the objectives would turn it down, `_apply_campaign_defaults` would
+    #: let it ("the policy always wins on any key it did set"), and the hard arm of the
+    #: experiment would quietly become the easy one. The same shape covers any campaign
+    #: configuration a reasoner should not re-litigate - a ligand, an input path, a contig -
+    #: which is the distinction `_apply_campaign_defaults` already draws in prose: "a policy
+    #: chooses how to explore, not what molecule the campaign is about".
+    #:
+    #: Enforced once, in `tools/view.card_for`, by reporting it under `TaskCard.frozen`
+    #: instead of `TaskCard.parameters`. Everything downstream already honours that:
+    #: `_knobs.tunable` skips it, `OraclePlanner` leaves it out of the prompt and refuses a
+    #: reply naming it. Gate 3 reads `frozen_parameters`, which this is not, so the campaign
+    #: path is untouched.
+    operator_only: str = ""
 
     def validate_value(self, v: Any) -> str | None:
         """Return an error string, or None if acceptable."""

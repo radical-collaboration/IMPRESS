@@ -160,7 +160,8 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
                 stage_records: list[dict[str, Any]] | None = None,
-                profile: str | None = None, caller_timeout_s: float | None = None):
+                profile: str | None = None, caller_timeout_s: float | None = None,
+                sink: Any = None):
     """Adapt a `CampaignSpec` into the registry's options, and build the two halves.
 
     This function is the adapter and nothing more. `policy/registry.py` owns which models
@@ -189,11 +190,46 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     # failures, and the silent one. `target_front` is the same shape with nothing else behind
     # it at all, and 0 keeps the model's own number.
     opts = _options_for(spec, records, spec_records, stage_records, profile,
-                        caller_timeout_s)
+                        caller_timeout_s, sink)
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    # Handed back on the pair so the caller can `bind` it to the manager it is about to
+    # build. An attribute rather than a `RolePair` field: which sink a pair writes to is a
+    # property of how the CLI assembled it, not of the two-half contract that `policy`
+    # defines and that `impress-a control` honours across a socket.
+    pair.reasoner_sink = opts.sink
     return pair
+
+
+class ReasonerSink:
+    """Where a reasoner's own records go, bound after the manager that will hold them exists.
+
+    Late-bound because of an ordering that is not going to change: the halves are built
+    before the `CampaignManager`, since the manager takes the pair as an argument. A sink
+    that needed the manager at construction would mean building the halves twice or passing
+    a half-built manager, and both are worse than one small indirection.
+
+    **Records before `bind` are counted, not written, and not raised over.** A half built by
+    a test, or by `impress-a control` before it has a plane, has nowhere to put a transcript
+    row; losing the row is a bad day and taking the campaign down over bookkeeping is a worse
+    one. `dropped` is there so a caller can say so rather than discover silence.
+    """
+
+    def __init__(self) -> None:
+        self._write: Any = None
+        self.dropped = 0
+        self.written = 0
+
+    def bind(self, manager: Any) -> None:
+        self._write = manager.record_reasoning
+
+    def __call__(self, kind: str, record: dict[str, Any]) -> None:
+        if self._write is None:
+            self.dropped += 1
+            return
+        self._write(kind, record)
+        self.written += 1
 
 
 def _options_for(spec: CampaignSpec,
@@ -201,7 +237,8 @@ def _options_for(spec: CampaignSpec,
                  spec_records: list[dict[str, Any]] | None = None,
                  stage_records: list[dict[str, Any]] | None = None,
                  profile: str | None = None,
-                 caller_timeout_s: float | None = None) -> reasoners.ReasonerOptions:
+                 caller_timeout_s: float | None = None,
+                 sink: Any = None) -> reasoners.ReasonerOptions:
     """A `CampaignSpec` as the registry's plain-data options. The whole adapter, named.
 
     Named so a test can assert what reaches the halves without building them, which is what
@@ -222,6 +259,12 @@ def _options_for(spec: CampaignSpec,
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
         oracle=client, reasoner=client,
+        # The subscriber `ReasonerOptions.sink` never had. Every writer existed - the
+        # transcript in `reasoning.ask`, `reasoner_degraded`, the external-directive
+        # events - and nothing was listening, so a live campaign recorded nothing at all
+        # about the model that drove it. `bind` happens in `run_campaign` once the manager
+        # is built; see `ReasonerSink`.
+        sink=sink if sink is not None else ReasonerSink(),
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         replicas=spec.replicas,
@@ -524,6 +567,12 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
             await driver.conduct(session)
         except CampaignStopped as stopped:
             log.info("control: campaign ended (%s)", stopped)
+        if (sink := getattr(pair, "reasoner_sink", None)) is not None and sink.dropped:
+            log.warning(
+                "control: %d reasoner record(s) had nowhere to go - this side hosts no "
+                "provenance and the plane carries no operation for them, so this arm's "
+                "transcript and timing are not on disk anywhere (backlog H8)",
+                sink.dropped)
     return 0
 
 
@@ -543,11 +592,19 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     # Both slots, for the reason `_options_for` gives: a remote driver may be `--model A` as
     # easily as `--model B`, and filling only one would make `--model-profile` silently
     # inert for half the letters it is offered for.
+    # A sink here too, and it stays UNBOUND on purpose. The control process drives a
+    # campaign it does not host: the executor writing `provenance/` is on the other side of
+    # a socket, and there is no plane operation for "append this to your decisions log" -
+    # ADR 0007 says an adapter may not carry one the core protocol lacks. So a caller-side
+    # half has its records counted and dropped, and `control_campaign` says how many rather
+    # than leaving the silence to be read as "the model made no calls" (backlog H8).
     opts = reasoners.ReasonerOptions(
-        stages=stages or None, oracle=client, reasoner=client, replicas=replicas)
+        stages=stages or None, oracle=client, reasoner=client, replicas=replicas,
+        sink=ReasonerSink())
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    pair.reasoner_sink = opts.sink
     return pair
 
 
@@ -828,6 +885,12 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
              f" ERRORS: {reg.errors}" if reg.errors else "")
     mgr = CampaignManager(spec, policy, reg)
     mgr.prov_sink = _prov_heartbeat
+    # The halves were built before the manager existed, so their sink has had nowhere to
+    # write until now. Everything a reasoner records - its prompts, its replies, the model
+    # id that answered, how long each call took and whether it degraded - reaches
+    # `provenance/decisions.jsonl` and `provenance/transitions.jsonl` from here.
+    if (reasoner_sink := getattr(policy, "reasoner_sink", None)) is not None:
+        reasoner_sink.bind(mgr)
     if heartbeat_s is None:
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
     log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",

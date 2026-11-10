@@ -17,7 +17,17 @@ def card_for(spec: ToolSpec) -> TaskCard:
     Frozen parameters are reported under `frozen` and are absent from `parameters`, so a
     reasoner cannot propose one by accident. `ToolSpec` validation already refuses a spec that
     lists a name in both, so the two sets cannot overlap here.
+
+    **An `operator_only` parameter is reported the same way, and this is the only place that
+    happens.** It stays in `ToolSpec.parameters`, so gate 3 and the campaign's own `params:`
+    see it exactly as before; it arrives here under `frozen`, so everything that reads the
+    card - `_knobs.tunable`, `OraclePlanner`'s prompt and its schema check - treats it as a
+    parameter a reasoner may not propose. One seam rather than a flag threaded through four
+    readers, because a reader that forgot to check it would be a silent hole in the
+    distinction (`ParameterSpec.operator_only` records what that hole costs).
     """
+    operator_only = {name: p.operator_only for name, p in spec.parameters.items()
+                     if p.operator_only}
     return TaskCard(
         id=spec.id,
         toolkit=spec.toolkit,
@@ -28,8 +38,8 @@ def card_for(spec: ToolSpec) -> TaskCard:
                  for name, p in spec.outputs.items()},
         parameters={name: ParamCard(name=name, type=p.type, default=p.default, min=p.min,
                                     max=p.max, choices=p.choices, trades=p.trades)
-                    for name, p in spec.parameters.items()},
-        frozen=dict(spec.frozen_parameters),
+                    for name, p in spec.parameters.items() if name not in operator_only},
+        frozen={**spec.frozen_parameters, **operator_only},
         metrics=list(spec.metrics),
         gates=[GateCard(id=g.id, role=g.role, metric=(g.params or {}).get("metric"))
                for g in spec.qc_gates],
