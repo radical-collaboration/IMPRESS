@@ -103,9 +103,8 @@ async def _guarded(awaitable: Any, sink: Any, what: str, owner: Any) -> Any:
 
     A sink is somebody else's code reaching into a process that is holding an allocation. The
     campaign is the thing with the GPUs; a listener that raises must cost a log line and a
-    counter, never the run. Same rule as `policy/reasoning._record`, for the same reason - and
-    the opposite of `executor._log`, where an unguarded `prov_sink` can still take a campaign
-    down (backlog G18).
+    counter, never the run. The same rule `policy/reasoning._record` has always applied, and
+    that `executor._log` now applies to its own provenance listeners (backlog G18).
     """
     try:
         return await awaitable

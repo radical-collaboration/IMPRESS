@@ -2053,6 +2053,17 @@ allocation. Minimal fix is a guarded listener list with `prov_sink` kept as the 
 so no caller moves. Sibling of "the reasoner sink had writers and no subscriber"; found while
 writing `docs/reference/observation.md` (finding 3).
 
+**RESOLVED.** `_prov_listeners` is a list, `add_prov_listener` appends without displacing, and
+`prov_sink` survives as a property over the first listener so no existing caller had to move.
+Both competing assigners now append: `control/plane.py:104` and `cli/__init__.py:890`. Each
+call is wrapped, with `prov_dropped` counting failures so a subscriber that has gone deaf is
+discoverable rather than invisible - `_log` runs on every settlement and every absorption, so
+a listener that raised was aborting a campaign from inside the record of work already finished,
+which is the most expensive place in the system to raise. Pinned by
+`test_the_control_plane_and_the_log_both_receive_provenance` and
+`test_a_provenance_listener_that_raises_does_not_take_the_campaign_down`, both confirmed to
+fail against the single unguarded slot.
+
 **G19. Watching a campaign disarms the protection against not watching it.** `observe()` calls
 `touch()` (`runtime/executor.py:489`), which sets the `_last_contact` that `_control_lost_for`
 reads to decide a caller has vanished and the campaign should drain and stop. The coupling is

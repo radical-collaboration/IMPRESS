@@ -744,9 +744,12 @@ def _hms(seconds: float) -> str:
 def _prov_heartbeat(campaign: str, kind: str, record: dict[str, Any]) -> None:
     """Mirror every provenance record to the log as it is written.
 
-    `prov_sink` exists for the control plane; pointing it at a logger turns the campaign's
-    own append-only record into a live progress feed, so a batch run reports what it is
-    doing without the package printing anything of its own.
+    Provenance listeners exist for the control plane; pointing one at a logger turns the
+    campaign's own append-only record into a live progress feed, so a batch run reports what
+    it is doing without the package printing anything of its own. Attached with
+    `add_prov_listener` rather than by assigning `prov_sink`, because it used to be one slot
+    and `ControlPlane.register` wanted it too - serving a campaign over HTTP silently turned
+    this log off (backlog G18).
     """
     body = json.dumps({k: v for k, v in record.items() if k != "ts"}, default=str)
     log.info("prov %-12s %s", kind, body if len(body) <= 600 else body[:600] + "...")
@@ -884,7 +887,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
     mgr = CampaignManager(spec, policy, reg)
-    mgr.prov_sink = _prov_heartbeat
+    mgr.add_prov_listener(_prov_heartbeat)
     # The halves were built before the manager existed, so their sink has had nowhere to
     # write until now. Everything a reasoner records - its prompts, its replies, the model
     # id that answered, how long each call took and whether it degraded - reaches

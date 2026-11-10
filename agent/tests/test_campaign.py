@@ -1952,3 +1952,49 @@ async def test_the_jsonl_sink_keeps_what_the_caller_was_told(reg):
     mine = rows[-sink.count:]
     assert mine[0]["status"] == "starting" and mine[-1]["status"] == "stopped"
     assert all("ts" in r and "seq" in r for r in mine)
+
+
+async def test_the_control_plane_and_the_log_both_receive_provenance(reg):
+    """Two listeners, neither evicting the other. It used to be one slot.
+
+    `ControlPlane.register` assigned `prov_sink` for its event stream and
+    `cli.run_campaign` assigned it for the log heartbeat; neither checked for the other, so
+    serving a campaign over HTTP silently turned off its own progress log and the loser left
+    no trace of having been displaced (backlog G18).
+    """
+    seen_a, seen_b = [], []
+    mgr = CampaignManager(spec("t-fanout", max_cycles=2), _pair(), reg)
+    mgr.prov_sink = lambda cid, kind, rec: seen_a.append((cid, kind))   # the old spelling
+    mgr.add_prov_listener(lambda cid, kind, rec: seen_b.append((cid, kind)))
+    await mgr.run()
+
+    assert seen_a and seen_b, "both listeners must have been called"
+    assert seen_a == seen_b, "both must see the same records, in the same order"
+    assert {k for _c, k in seen_a} >= {"campaign", "results"}, \
+        "a listener must see what the campaign DID, not only what the plane asked"
+    # The old single-slot spelling still names the first listener, so no caller has to move.
+    assert mgr.prov_sink is not None
+
+
+async def test_a_provenance_listener_that_raises_does_not_take_the_campaign_down(reg):
+    """A bystander must not be able to kill a run from inside a provenance write.
+
+    This was the most expensive possible place to raise: `_log` is on every settlement and
+    every absorption, so a listener that threw aborted a campaign holding an allocation,
+    after the work was done and while it was being recorded. `policy/reasoning._record` has
+    always guarded its sink; this is the same rule arriving late.
+    """
+    calls = []
+
+    def broken(cid, kind, rec):
+        calls.append(kind)
+        raise RuntimeError("the subscriber's socket went away")
+
+    mgr = CampaignManager(spec("t-badlistener", max_cycles=2), _pair(), reg)
+    mgr.add_prov_listener(broken)
+    result = await mgr.run()
+
+    assert result.stop_reason, "the campaign must have reached its own conclusion"
+    assert calls, "and the listener must really have been called"
+    assert mgr.executor.prov_dropped == len(calls), \
+        "every failure must be counted, so a silently deaf subscriber is discoverable"
