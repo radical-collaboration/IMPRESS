@@ -30,6 +30,8 @@ almost every rule below exists to keep that window shut.
    provenance/*.jsonl, jobs/*.jsonl  ─────────────────────────────  step 7
                   │
    what a caller must do today  ──────────────────────────────────  step 8
+        │
+   Bridge ──→ CampaignDigest ──→ a sink, per absorbed cycle  ─────  step 9
 ```
 
 ---
@@ -184,12 +186,43 @@ invariant, so a heartbeat scheduled between them can never see a torn state."* A
 awaits a sink **outside** the executor is a heartbeat with a sink instead of a logger, and it
 needs nothing added to the executor at all.
 
+## Step 9 — the bridge, which is that pump with a sink
+
+**In:** a `CampaignManager` and a `CycleSink`. **Owner:** `integrations/reporting.Bridge`.
+**Out:** one `CampaignDigest` per absorbed cycle, and `reports/<sink>.jsonl` beside
+provenance.
+
+`run_with_sink(manager, sink)` races the campaign against the pump, exactly as
+`cli.run_campaign` already races it against the heartbeat. The executor is unchanged: the
+pump reads `observe()` between its mutating blocks and awaits the sink outside them, so no
+`await` enters a block that writes campaign state.
+
+| decision | why |
+|---|---|
+| Triggered on `obs.seq` advancing | the absorption watermark. **Not `cycle`**, which is incremented in `_dispatch:983` and so counts *submissions* — a report fired there carries no results. Not `_activity`, which `pump:1417` clears, so a second consumer would race it. A monotone integer is race-free. |
+| `period_s` is a floor, not the only trigger | a cycle of the real chain runs minutes of tasks with nothing absorbed, and a caller's staleness bound has to be satisfiable while that happens |
+| One report before the run, one after | the first is a liveness anchor before any work exists to describe; the last is the only one guaranteed to be read, because the stores a caller receives these through keep one value per workflow — so no digest may be a delta |
+| Every sink call guarded | a sink is somebody else's code reaching into a process holding an allocation. A listener that raises costs a log line and a counter, never the run — the rule `policy/reasoning.py:175` already applies, and the one `_log` still does not (finding 3) |
+| Digests land in `reports/`, not `provenance/` | the executor is the only writer there, and a tenth provenance kind would make a record of *what somebody else was told* look like a record of what the campaign did |
+
+`CampaignDigest` (`core/decision.py`) is a projection of `observe()`'s return value, not a new
+operation, so ADR 0007 stays out of play for the same reason adding a field to the observation
+does. It drops the `ToolkitView`, the `Spec` and the `DesignNode` bodies — static for the
+campaign, and already given to a caller once by `impress-a offer` — and carries both spending
+scales under distinct names, because declared and measured are two different numbers and a
+caller charging its own budget wants the second (finding 8).
+
+Pause is in the same loop, because it is the same cadence. It gates **admission**: in-flight
+runs are allowed to finish, since cancellation is advisory, so a paused campaign keeps
+spending for up to one cycle.
+
 ---
 
 ## What the observation plane does not enforce
 
 Eleven places where the implementation does not do what a reader of the design would
-reasonably assume. Each is verified against the source at the anchor given. **Read this
+reasonably assume, two of them since repaired and marked in place rather than deleted,
+because the evidence that forced them is the useful part. Each is verified against the source at the anchor given. **Read this
 section before changing any step above.**
 
 | # | the reasonable assumption | what the code does | anchor | item |
@@ -201,7 +234,7 @@ section before changing any step above.**
 | 5 | An observation says what the campaign tried, not only what it found | **Chosen parameter values are absent.** They reach `stages` provenance under `mappings` and no observation field, so a caller sees scores without the knobs that produced them | `runtime/executor.py:962,976` | G, and `resolution.md` finding 7's neighbour |
 | 6 | The payload carries what its consumers read | It embeds every `TaskCard` **and each toolkit's whole `SKILL.md`**, plus the applied `Spec` and the full front, rebuilt per call with no projection — and `ToolkitView.skills` is read by nothing at either end | `tools/view.py:67`, `runtime/executor.py:490-519` | G |
 | 7 | Watching a campaign is free of consequence | **`observe()` refreshes the liveness clock.** `touch()` sets `_last_contact`, and `_control_lost_for` is what drains and stops a campaign whose caller vanished. The coupling is deliberate — the Listener polls `observe()` every cycle, so no heartbeat operation was added — but the consequence is that a **purely passive observer keeps drain-and-stop from ever firing**, which is exactly the shape of a caller that watches without steering | `runtime/executor.py:489,448-455,458-482` | G |
-| 8 | Spending reported to a caller is spending | `BudgetLedger.spent` is **declared cost, not measured**: `_settle` settles `results.cost`, documented *"DECLARED, summed - unchanged on purpose"*. Declared figures sit multiples above measurement deliberately, because they feed gates that *refuse* graphs. `cost_measured` is summed per run already and folded into no ledger, so **an outer manager told our spend is told the inflated figure**, and can never learn a truer one | `runtime/executor.py:1127`, `exec/dispatch.py:34-38` | E2, A11 |
+| 8 | Spending reported to a caller is spending | **RESOLVED.** It was not: `BudgetLedger.spent` is declared cost - `_settle` settles `results.cost`, documented *"DECLARED, summed - unchanged on purpose"* - and declared figures sit multiples above measurement deliberately, because they feed gates that *refuse* graphs. So an outer manager told our spend was told the headroom too, and its own learned cost could never converge. `_settle` now also calls `charge_measured(results.cost_measured)`, which was already summed per run and folded into nothing, and `CampaignDigest` reports both scales under distinct names. The measured figure bounds nothing and gates nothing, deliberately: a measurement arrives after the work it describes is paid for, so an admission gate reading it would refuse tomorrow's work on yesterday's luck | `runtime/executor.py:1127-1132`, `core/budget.py:84-91` | G20 |
 | 9 | A `TaskCard` carries the cost terms its spec declares | **RESOLVED.** It did not: `tools/view.py:46-48` passed `burn_rate=` and `max_commitment=` to a model that declared neither field, and pydantic's default `extra` is `ignore`, so both were discarded in silence while `core/budget.py:67` documented the rule `min(goal.budget[d], card.max_commitment[d])` against a field that could not exist. Both are fields now. The fix is **not** `extra="forbid"` — these models cross the HTTP boundary, so forbidding extras would turn a newer peer's observation into a 500 — so the general case is guarded mechanically instead, by `tests/test_layering.py::test_every_keyword_passed_to_a_core_model_is_a_field_of_it` | `tools/view.py:46-48`, `core/toolkit.py:59-89` | D1, realised in our own code rather than in a user's YAML |
 | 10 | A caller can project a burn-down from what it is told | There is no rate. `BudgetLedger` is constructed without `walltime=`, so `burn_rate()` returns empty permanently and `project()` is inert. Limits, spent and holds cross; a rate does not | `runtime/executor.py:230`, `core/budget.py:160,172` | E |
 | 11 | The chain that runs is the chain the campaign declared | `_admit_once` composes against the **whole `Registry`** and reports `available: self.reg.ids()`; nothing restricts a submitted Stage to `spec.stages`. The bound holds by construction for the shipped planners, whose `ToolkitView` is narrowed — it is not a gate, and anything pricing a campaign from `stages` is relying on that | `runtime/executor.py:617-638`, `tools/view.py:55` | G, and `resolution.md`'s *"available means three different things"* |

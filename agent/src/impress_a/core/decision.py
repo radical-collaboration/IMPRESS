@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from .budget import BudgetLedger
 from .ids import counter
-from .pareto import Objective
+from .pareto import Direction, Objective
 from .spec import Spec
 from .toolkit import ToolkitView
 from .tree import DesignNode
@@ -130,3 +130,109 @@ class CampaignObservation(BaseModel):
     #: the observation already crosses the boundary and ADR 0007 would otherwise be in play.
     orphan_tasks: list[str] = Field(default_factory=list)
     last_rejection: ValidationFailure | None = None
+
+    def digest(self, *, status: str = "running",
+               stop_reason: str = "") -> CampaignDigest:
+        """Project this observation into what an outside caller is told.
+
+        A projection of an existing operation's return value, not a new operation, so ADR
+        0007 stays out of play for the same reason adding a field here does. It lives on the
+        observation because only `core` knows what an observation contains - the inverse of
+        `ExecutionResults.to_outcome`'s own argument for living in the execution layer.
+
+        What it drops is the point. The full observation carries the whole `ToolkitView` -
+        every `TaskCard` plus each toolkit's entire `SKILL.md` text - the applied `Spec`, and
+        every `DesignNode` on the front with its properties, artifacts and QC report, rebuilt
+        on every call. None of that changes from cycle to cycle, and a caller that needed the
+        toolkit was told it once, at calltime, by `impress-a offer`. Sending it again every
+        thirty seconds would be sending a campaign's static description as if it were news.
+
+        Each digest also stands alone rather than extending the last one, because the stores
+        a caller receives these through are last-value-wins per workflow: only the final one
+        is guaranteed to be read, so none of them may be a delta.
+        """
+        front_satisfying = sum(
+            1 for n in self.pareto_front
+            if all(o.satisfied_by(n.metric(o.name)) for o in self.objectives
+                   if o.min is not None or o.max is not None))
+        best: dict[str, float] = {}
+        for o in self.objectives:
+            values = [v for n in self.pareto_front if (v := n.metric(o.name)) is not None]
+            if values:
+                best[o.name] = min(values) if o.direction is Direction.MIN else max(values)
+        return CampaignDigest(
+            campaign_id=self.campaign_id, cycle=self.cycle, seq=self.seq,
+            status=status, stop_reason=stop_reason,
+            front_size=len(self.pareto_front),
+            front_satisfying=front_satisfying,
+            target_front=self.target_front,
+            best=best,
+            population=self.population,
+            spend=dict(self.budget.spent),
+            spend_measured=dict(self.budget.spent_measured),
+            limits=dict(self.budget.limits),
+            remaining={d: self.budget.remaining(d) for d in self.budget.limits},
+            in_flight={d: self.budget.reserved(d) for d in self.budget.limits},
+            orphan_tasks=len(self.orphan_tasks),
+            last_rejection_gate=(self.last_rejection.gate if self.last_rejection else ""),
+            last_rejection_reason=(self.last_rejection.reason if self.last_rejection else ""),
+            front_node_ids=[n.id for n in self.pareto_front],
+        )
+
+
+class CampaignDigest(BaseModel):
+    """What a campaign tells a caller outside its own process, once per absorbed cycle.
+
+    Transport-neutral on purpose: it names no enclosing manager's vocabulary, so the same
+    digest serves an in-process sink, an HTTP poller and a subprocess reporting over Redis,
+    and adding a second superstrate costs an adapter rather than a second payload.
+
+    Two spending figures, under distinct names, because they are genuinely two numbers.
+    `spend` is DECLARED - what `reserve` and `settle` work in, and what gate 5 refuses
+    against, so it is correctly pessimistic. `spend_measured` is what the tools measured. A
+    caller charging its own budget wants the measured one; a caller asking why a campaign
+    stopped wants the declared one, because that is what the ledger ran out of.
+    """
+
+    campaign_id: str
+    cycle: int = 0
+    #: Absorption watermark. Monotone, and the signal that something new has landed - which
+    #: is why a bridge reports on it advancing rather than on `cycle`, incremented at
+    #: DISPATCH and so counting submissions rather than results.
+    seq: int = 0
+    status: str = "running"          # starting | running | stopped | aborted
+    stop_reason: str = ""
+    front_size: int = 0
+    #: Front members satisfying every BOUNDED objective - what `target_front` counts toward.
+    #: An unbounded objective is excluded because it can never be unsatisfied, only
+    #: unmeasured, so counting it would make every front member look like a success.
+    front_satisfying: int = 0
+    target_front: int = 0
+    #: objective name -> the best value on the front, by that objective's own direction.
+    best: dict[str, float] = Field(default_factory=dict)
+    population: PopulationStats = Field(default_factory=PopulationStats)
+    spend: dict[str, float] = Field(default_factory=dict)
+    spend_measured: dict[str, float] = Field(default_factory=dict)
+    limits: dict[str, float] = Field(default_factory=dict)
+    remaining: dict[str, float] = Field(default_factory=dict)
+    in_flight: dict[str, float] = Field(default_factory=dict)
+    orphan_tasks: int = 0
+    #: A refusal a caller should be able to see without reading provenance.
+    last_rejection_gate: str = ""
+    last_rejection_reason: str = ""
+    #: Kept so a caller can fetch the artifacts later through the control plane; the nodes
+    #: themselves are deliberately absent.
+    front_node_ids: list[str] = Field(default_factory=list)
+
+    @property
+    def progress(self) -> float:
+        """Fraction of the asked-for front that is satisfied, in [0, 1].
+
+        The one scalar a caller can rank arms by. Degenerate where a campaign declares no
+        bounded objective - nothing can ever be satisfied, so this is 0.0 until the front is
+        non-empty and then 1.0 - and that is stated rather than smoothed over, because the
+        fix is for the caller to give its objectives thresholds.
+        """
+        if self.target_front <= 0:
+            return 1.0 if self.front_satisfying else 0.0
+        return min(1.0, self.front_satisfying / self.target_front)

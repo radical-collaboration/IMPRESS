@@ -62,6 +62,13 @@ ALLOWED = {
     # still imports nothing internal.
     "cli": frozenset({"control", "manager", "runtime", "policy", "compose", "tools",
                       "core", "analysis"}),
+    # `integrations` is a second composition root, in the sense `cli` already is: it builds a
+    # whole campaign on behalf of an owner that is not a person at a terminal. Narrow on
+    # purpose - `reporting` needs only the digest - and the direction is what matters: nothing
+    # else in the package imports `integrations`, so an adapter may name another project's
+    # types without any layer of IMPRESS-A needing to know that project exists. The row grows
+    # only when a concrete adapter lands, and each widening should say which adapter forced it.
+    "integrations": frozenset({"core"}),
     # `analysis` is downstream of everything and must reach no reasoner. The rule that
     # matters is the ABSENCE of `policy` and `control`: a scorer that could reach a reasoner
     # could score a campaign by asking it, and the comparison's whole method is that figures

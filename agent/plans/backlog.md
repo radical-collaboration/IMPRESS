@@ -1037,8 +1037,18 @@ reserved. Costs come from `Validator.estimate` - the same estimator gate 5 price
 - so a caller sizing to the offer cannot be refused for a reason the offer did not price;
 `test_the_offer_prices_the_graph_the_validator_would_price` pins that, and was confirmed to
 fail against a 1.25x divergence. `basis` states that every figure is declared, and `warnings`
-names what they cannot see, H10 and G21 included. **Still open:** delivering observations to
-the caller, and the adapter itself.
+names what they cannot see, H10 and G21 included.
+
+**The delivery half is DONE too.** `integrations/reporting.py` carries a transport-neutral
+`CycleSink`, a `Bridge` that reports one `CampaignDigest` per absorbed cycle, a `JsonlSink`
+that keeps what a caller was told under `reports/` beside provenance, and `run_with_sink`,
+which races the campaign against the pump the way `cli.run_campaign` already races it against
+the heartbeat. The executor is untouched: the pump reads the await-free `observe()` between
+mutating blocks and awaits the sink outside them. Triggered on the absorption watermark
+`obs.seq`, NOT on `cycle` - which is incremented at dispatch and so counts submissions, so a
+report fired there would carry no results. Every sink call is guarded, so a listener that
+raises costs a log line rather than the allocation. Pause is handled in the same loop and
+gates admission only. **Still open:** the adapter itself, and the off-process path.
 
 Scoped and decided in `docs/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
 the enclosing manager is a caller, not control model C. Three deliverables — `impress-a offer`
@@ -2065,6 +2075,16 @@ Across a boundary it is not: an enclosing manager told our spend is told the inf
 and its own learned-cost estimate converges on it forever (C13). Fix is a `spent_measured`
 dimension on the ledger and one line in `_settle`; the input is already there. Found while
 writing `docs/reference/observation.md` (finding 8).
+
+**RESOLVED.** `BudgetLedger.spent_measured` accumulates beside `spent`, `_settle` calls
+`charge_measured(results.cost_measured)` - the figure was already summed per run and folded
+into nothing - and `CampaignDigest` reports both scales under distinct names, so a caller
+charging its own budget uses the measured one and a caller asking why the campaign stopped
+uses the declared one. The measured figure deliberately bounds nothing and gates nothing: a
+measurement arrives only after the work it describes is already paid for, so an admission gate
+reading it would be refusing tomorrow's work on yesterday's luck. Pinned by
+`test_the_digest_carries_both_cost_scales_under_distinct_names`, which also asserts the two
+are not equal - they differ even in the mock tier.
 
 **G21. The chain a campaign declared is not the chain admission enforces.** `_admit_once`
 composes against the whole `Registry` and reports `available: self.reg.ids()`

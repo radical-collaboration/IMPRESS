@@ -81,6 +81,15 @@ class Commitment(BaseModel):
 class BudgetLedger(BaseModel):
     limits: dict[str, float] = Field(default_factory=dict)
     spent: dict[str, float] = Field(default_factory=dict)
+    #: What the same work actually MEASURED, accumulated beside `spent` and never used to
+    #: refuse anything. `spent` is declared cost, and deliberately so: it is what `reserve`
+    #: and `settle` work in, and a budget that reserves pessimistically is a budget that does
+    #: its job. That is also why it must not be the figure reported OUTSIDE the campaign - the
+    #: declared figures sit multiples above measurement, so an enclosing campaign manager told
+    #: `spent` is told the headroom as well as the cost, and its own learned-cost estimate
+    #: converges on a number no run ever consumed (backlog G20). The input was already there:
+    #: `ExecutionResults.cost_measured` is summed per run and was folded into nothing.
+    spent_measured: dict[str, float] = Field(default_factory=dict)
     #: hold_id -> estimated cost, for work admitted but not yet settled.
     holds: dict[str, dict[str, float]] = Field(default_factory=dict)
     #: Wall clock, when the campaign declared a limit. Separate from `limits` because wall
@@ -138,6 +147,17 @@ class BudgetLedger(BaseModel):
     def charge(self, cost: dict[str, float]) -> None:
         for d, c in cost.items():
             self.spent[d] = self.spent.get(d, 0.0) + c
+
+    def charge_measured(self, cost: dict[str, float]) -> None:
+        """Accumulate what was measured. Refuses nothing, bounds nothing, gates nothing.
+
+        Kept strictly beside `charge` rather than folded into it, because the moment a
+        measured figure could move `remaining()` it would start deciding admissions - and a
+        measurement arrives only after the work it describes is already paid for, so an
+        admission gate reading it would be refusing tomorrow's work on yesterday's luck.
+        """
+        for d, c in cost.items():
+            self.spent_measured[d] = self.spent_measured.get(d, 0.0) + c
 
     def exhausted(self) -> list[str]:
         """Dimensions with nothing left. Deliberately ignores reservations: a campaign

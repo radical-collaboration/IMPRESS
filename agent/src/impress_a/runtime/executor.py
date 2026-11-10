@@ -1125,6 +1125,11 @@ class CampaignExecutor:
     def _settle(self, run_id: str, rec: RunRecord,
                 results: ExecutionResults) -> list[DesignNode]:
         self.budget.settle(run_id, results.cost)
+        # Beside the settlement, never instead of it. `settle` works in DECLARED cost because
+        # that is what was reserved and what gate 5 refuses against; this is the same work as
+        # the tools measured it, accumulated so something outside the campaign can be told
+        # what it actually cost rather than what it was charged (backlog G20).
+        self.budget.charge_measured(results.cost_measured)
         self._untrusted_inflight.discard(rec.signature)
         self.jobs.record(job_id=run_id,
                          status=(RunState.FAILED if results.failures
@@ -1132,6 +1137,7 @@ class CampaignExecutor:
                          cost=results.cost, failures=results.failures)
         self._log("executions", {"cycle": rec.turn, "graph": rec.graph.id,
                                  "run": run_id, "cost": results.cost,
+                                 "cost_measured": results.cost_measured,
                                  "failures": results.failures})
         log.info("reaped %s: %d/%d tasks ok, cost=%s%s", run_id,
                  len(results.per_task), len(rec.graph.nodes), results.cost,
