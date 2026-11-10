@@ -1013,12 +1013,44 @@ everything including user site-packages.
   Pinned by `test_rfd3_does_not_leak_this_pythons_packages_into_the_container`, which also asserts
   an unrelated variable survives, so a future "strip more" does not quietly break the bind.
 
+**C13. IMPRESS-A cannot be sized, planned for, or watched by the caller it is built to be
+called by.** The README's own framing is that IMPRESS-A is a callable tool (decision 0001), and
+the class of caller that matters is one orchestrating many heterogeneous workflows toward a
+higher goal. Such a caller needs two things before it launches anything — what one invocation
+will cost, so it can size its own budget, and which campaign goals this workflow can address,
+so it can plan where to put it — and observations while it runs. Today it can have none of
+them: `impress-a tools` prints four fields per tool, `preflight` answers a different question
+(can this machine run the binaries), nothing computes a campaign-level cost, nothing validates
+a goal against a toolkit before a run, and the only hook out of a running campaign is one
+unguarded `prov_sink` slot (G18).
+
+Scoped and decided in `docs/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
+the enclosing manager is a caller, not control model C. Three deliverables — `impress-a offer`
+(a synchronous handshake computing a cost model and the goal vocabulary from the toolkit, with
+its declared basis stated rather than passing for a prediction), a `CampaignDigest` projection
+of the observation delivered per absorbed cycle by a pump that reads the executor's await-free
+snapshot API, and one adapter module for AuCaM. Blocked on nothing. The plane is described as
+built in `docs/reference/observation.md`, whose eleven findings are what the work has to be
+honest about — G20 especially, since without it the caller is told an inflated spend.
+
 ## D. Registry and spec-contract gaps
 
 All undercut the documented "loading is validating" guarantee.
 
 **D1. `ToolSpec` has no `extra="forbid"`** — pydantic ignores unknown keys, so a typo'd field in a
 `spec.yaml` is silently dropped instead of failing at load.
+
+**It has already happened, in our own code rather than in a user's YAML.** `tools/view.py:46-48`
+passes `burn_rate=` and `max_commitment=` to `TaskCard`, which declares neither field, and
+`extra` there is unset too — so both have been discarded silently since the line was written
+(`TaskCard.model_fields` holds thirteen names and neither is among them). Nothing observably
+breaks only because no shipped spec sets either key; meanwhile `core/budget.py:67` documents the
+rule `min(goal.budget[d], card.max_commitment[d])` against a field that cannot exist. So the
+hazard D1 describes is not hypothetical, and the fix is **not** `extra="forbid"` everywhere:
+these types cross the HTTP boundary, and forbidding extras turns a newer peer's observation into
+a 500. Add the two fields, and pin the rest by introspection — a test that every kwarg a
+projection passes is a field of the model it passes them to. Found while writing
+`docs/reference/observation.md` (finding 9).
 
 **D2. `entry:` importability is never checked at load time** — only when `agent_for` is first called,
 i.e. mid-campaign rather than at registration.
@@ -1057,6 +1089,18 @@ convention. A test asserts every `delta-*.yaml` declares it and that the value r
 **E2. Cost models are unmeasured literature guesses**, and gate 5 plus the interlock's 10% cap refuse
 graphs against them. Already concrete: the smoke campaign's original budget rejected its own first
 run. Early campaigns should record actual-vs-estimated per tool.
+
+**E3. The whole rate half of the budget ledger is inert.** `BudgetLedger` is constructed as
+`BudgetLedger(limits=dict(spec.budget))` (`runtime/executor.py:230`) and never given
+`walltime=`, so `burn_rate()` returns an empty `BurnRate` on every call it will ever receive
+(`core/budget.py:166-167`) and `project()` with it. `Walltime` itself, and `Commitment` with
+`commit`/`release_commitment`/`committed`, are constructed nowhere outside `tests/test_core.py`
+— `StageReviewer.affordable` uses the plain holds path despite a docstring claiming to be the
+Stage-level commitment layer. Consequence that matters now: limits, spent and holds cross to a
+caller on every observation, and **a rate does not**, so nothing outside can project a
+burn-down. Either drive them or delete them; carrying a third of a ledger that answers `{}` is
+how `sites/*.yaml` stayed inert for a release. Found while writing
+`docs/reference/observation.md` (finding 10).
 
 ## F. Documentation debt
 
@@ -1964,6 +2008,50 @@ only "an arm can report success with an empty front", which a reader can dismiss
 reporting problem, but "an arm can skip the abort rule entirely", which is a safety one. The
 reproduction costs 3 LLM calls and no allocation:
 `impress-a mock-lab --only arms --reasoners A --model-profile <profile> --reasoner-repeats 1`.
+
+**G18. A campaign can be watched by exactly one listener, and a listener that raises kills it.**
+`executor._log:313-321` is the only hook out of a running campaign, and `prov_sink` is a single
+slot: `control/plane.py:104` and `cli/__init__.py:887` both assign it, so attaching the control
+plane to a campaign **silently evicts the log heartbeat** and vice versa — whichever ran last
+wins, and nothing says so. The call is also unguarded, where the reasoner's equivalent sink
+catches (`policy/reasoning.py:175`), so a sink raising takes down the thing holding the
+allocation. Minimal fix is a guarded listener list with `prov_sink` kept as the slot-0 property
+so no caller moves. Sibling of "the reasoner sink had writers and no subscriber"; found while
+writing `docs/reference/observation.md` (finding 3).
+
+**G19. Watching a campaign disarms the protection against not watching it.** `observe()` calls
+`touch()` (`runtime/executor.py:489`), which sets the `_last_contact` that `_control_lost_for`
+reads to decide a caller has vanished and the campaign should drain and stop. The coupling is
+deliberate and documented at `:448-455` — the Listener polls `observe()` every cycle, so no
+heartbeat operation was added, and inventing one would have put ADR 0007 in play. The
+consequence is not: **a caller that only observes holds the clock open indefinitely**, so the
+bound cannot distinguish a steering caller from a monitoring one, and a reasoner that died
+behind a live monitor looks healthy. Decision 0014 resolves this for an enclosing manager by
+relying on the caller's own stale timeout and not arming ours; an in-tree monitor would still
+need either a non-touching read or an explicit statement that liveness is the caller's job.
+
+**G20. Spending reported out of a campaign is declared, not measured — so a caller cannot
+learn what we cost.** `_settle` charges `results.cost` (`runtime/executor.py:1127`), documented
+*"DECLARED, summed - unchanged on purpose"* (`exec/dispatch.py:34`), and declared figures sit
+multiples above measurement deliberately because they feed gates that *refuse* graphs (E2,
+A11). `ExecutionResults.cost_measured` is **already summed per run** (`exec/dispatch.py:38`)
+and folded into no ledger, so `BudgetLedger` has no measured dimension and neither does any
+observation. Inside one campaign that is harmless — the budget should reserve pessimistically.
+Across a boundary it is not: an enclosing manager told our spend is told the inflated figure,
+and its own learned-cost estimate converges on it forever (C13). Fix is a `spent_measured`
+dimension on the ledger and one line in `_settle`; the input is already there. Found while
+writing `docs/reference/observation.md` (finding 8).
+
+**G21. The chain a campaign declared is not the chain admission enforces.** `_admit_once`
+composes against the whole `Registry` and reports `available: self.reg.ids()`
+(`runtime/executor.py:617-638`); nothing restricts a submitted Stage to `CampaignSpec.stages`.
+The bound holds by construction for every shipped planner, because the `ToolkitView` they are
+shown is narrowed by `view_of(reg, spec.stages)` (`tools/view.py:55`) — but it is a property of
+the policies, not a gate, and an external caller under model C is shown the narrowed view and
+submits through a path that does not re-check it. Anything *pricing* a campaign from `stages`
+is relying on it, which is why `impress-a offer` has to declare the assumption rather than
+assert the number (C13). Neighbour of `resolution.md`'s "available means three different
+things"; found while writing `docs/reference/observation.md` (finding 11).
 
 ---
 
