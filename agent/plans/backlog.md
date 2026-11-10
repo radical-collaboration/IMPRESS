@@ -1437,6 +1437,10 @@ terminate early reporting success and hand back nothing. It is the same *shape* 
 stopping condition that does not count what the Goal asks for), and the same shape as the
 mock-chain-on-a-GPU failure (a number recorded without the context that invalidates it).
 
+**A live reasoner makes this worse, not only visible: see H11.** Model A reaches this state at
+cycle 1 on the `hopeless` arm, where the deterministic control aborts at cycle 4 - so the
+abort rule is skipped rather than merely reported around.
+
 **Deliberately not fixed on this branch.** Changing what satisfaction counts changes when a
 pre-registered arm stops, and `plans/arms-preregistration.md`'s sha is recorded in every
 smoke manifest. The fix is small - `ingest` knows each task's `qc`, and `satisfies` could
@@ -1791,6 +1795,49 @@ every cell.
 **This also closes H2's outstanding probe.** "No request has reached a real endpoint from this
 project" was true of model B's `SPEC_SCHEMA`/`STAGE_SCHEMA` path until this run; both halves
 answered, were schema-checked and were admitted, on a laptop and with no allocation.
+
+**Model A, run live on the same arms the next day, does the opposite** and makes the case for
+filtering the prompt by kind the strongest of the three. A moved `diffusion_steps` 50 -> 169,
+`temperature` 0.2 -> 0.35, `packmin.cycles` 1 -> 4 and `relax_cycles` 3 -> 7 - four quality
+dials, no breadth parameter, `num_designs` left at 1 - and took the `hard` arm from D's
+0-of-12 front to 2 of 4. B on that same arm raised `num_designs` to 4, lowered `batch_size`
+8 -> 4 and `diffusion_samples` 8 -> 6, and got nothing. The difference is not model quality:
+A's knobs come from `parameterize`, a DETERMINISTIC node that the model only steers by
+choosing a strategy, and `_knobs.tunable` keeps breadth away from it. B is handed the whole
+card and chooses for itself. So the comparison here is between a filtered knob set and an
+unfiltered one, not between two models' judgement.
+
+**H11. A live Specifier can end a campaign in one cycle on readings from designs that all
+failed an integrity gate, and the abort rule then never fires.** Found on model A's first
+live run on the mock arms, 2026-11-10, `Beam-501B-A23B`, 3 calls per arm, zero degraded
+turns. `arm-hopeless-A` - difficulty 0.85, the arm that exists to break the backbone:
+
+    cycles: 1   nodes: 4   front: 0   stop: every spec objective satisfied
+
+All four lineages FAILed `metric_in_range[ss_fraction]`, the secondary-structure floor, which
+is an INTEGRITY gate. All four campaign objectives were satisfied on the same tasks' numbers:
+`shape_complementarity` 0.78-0.80 against a 0.55 bar, `complex_plddt` 0.90-0.92 against 0.75,
+`ligand_iptm` 0.83-0.90 against 0.40. `specs.jsonl` records all four flipping to `satisfied`
+at generation 3.
+
+This is G14's mechanism, but the consequence is new and worse. On the same arm the
+deterministic control runs four cycles and **aborts** on `3 consecutive all-failed runs`, and
+so does model B. Model A does not, because it never reaches a third cycle: its Specifier
+returned `strategy: explore` with a hypothesis and emitted no refinement objective, so
+nothing was added for the satisfaction rule to find unsatisfied, and the campaign reported
+success at cycle 1. Under D only two of the four objectives flipped and the campaign kept
+going. **The safety net that catches a hopeless campaign is reached by running cycles, and a
+reasoner that declines to add an objective can stop before it.**
+
+Worth saying plainly: A's quality knobs are what made the numbers good - 169 diffusion steps
+and 7 relax cycles on a backbone that difficulty 0.85 has already destroyed. The metrics
+improved, the structures did not, and nothing in the stopping rule can tell those apart.
+
+Fixing G14 fixes this. Recorded separately because it changes the argument for fixing it: not
+only "an arm can report success with an empty front", which a reader can dismiss as a
+reporting problem, but "an arm can skip the abort rule entirely", which is a safety one. The
+reproduction costs 3 LLM calls and no allocation:
+`impress-a mock-lab --only arms --reasoners A --model-profile <profile> --reasoner-repeats 1`.
 
 ---
 

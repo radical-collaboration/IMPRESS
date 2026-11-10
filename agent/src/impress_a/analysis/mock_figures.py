@@ -254,6 +254,7 @@ def fig_stage_funnel(tasks: list[dict[str, Any]], out: Path) -> Path:
     import matplotlib.pyplot as plt
     ps.apply_rcparams()
     arm_rows = [r for r in tasks if r.get("kind") == "arm"]
+    arm_rows, many, only = _control_only(arm_rows)
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(15.5, 6.8),
                                  gridspec_kw={"width_ratios": [1.35, 1.0]})
     xs = np.arange(len(CHAIN))
@@ -311,7 +312,8 @@ def fig_stage_funnel(tasks: list[dict[str, Any]], out: Path) -> Path:
     fig.subplots_adjust(left=0.075, right=0.985, top=0.80, bottom=0.235, wspace=0.26)
     return _save(fig, out, "f3-stage-funnel.png",
                  "one task per lineage per stage, pooled over each arm's cycles. A FAIL does "
-                 "not halt the chain, so the pass rate is per stage rather than cumulative")
+                 "not halt the chain, so the pass rate is per stage rather than "
+                 "cumulative" + _only_note(many, only))
 
 
 # -- F4: the agent's own rate ------------------------------------------------------------
@@ -331,7 +333,13 @@ def fig_decision_rate(camps: list[dict[str, Any]], phases: list[dict[str, Any]],
     import matplotlib.pyplot as plt
     ps.apply_rcparams()
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(15.0, 6.4))
-    camp_by_arm = {r["arm"]: r for r in camps if r.get("kind") == "arm"}
+    arm_camps, many, only = _control_only(
+        [r for r in camps if r.get("kind") == "arm"])
+    # The dict keeps ONE row per arm, so with several models it silently kept
+    # whichever came last - the right panel was model B's rates under the arm's name.
+    camp_by_arm = {r["arm"]: r for r in arm_camps}
+    keep_cells = {r["cell"] for r in arm_camps}
+    phases = [r for r in phases if r.get("cell") in keep_cells]
     for arm in ps.ORDER:
         rows = sorted((r for r in phases if r.get("arm") == arm),
                       key=lambda r: r.get("order") or 0)
@@ -355,6 +363,9 @@ def fig_decision_rate(camps: list[dict[str, Any]], phases: list[dict[str, Any]],
         # costs what it costs whatever it returns - and unstaggered the labels did too.
         ps.direct_label(ax, xs[-1], cum[-1], f"{st.short}{tail}", st.color, dx=-8,
                         ha="right", dy=14 * (1 - 2 * (ps.ORDER.index(arm) % 2)))
+    # Headroom for the staggered direct labels: the last points of two arms can sit at the
+    # same height, and the one offset upward then landed on the panel title.
+    ax.margins(y=0.16)
     ax.set_xlabel("decision (graph composed), in order")
     ax.set_ylabel("elapsed seconds")
     ax.set_xticks(np.arange(1, 1 + max((len([r for r in phases if r.get("arm") == a])
@@ -398,7 +409,7 @@ def fig_decision_rate(camps: list[dict[str, Any]], phases: list[dict[str, Any]],
                  "elapsed is summed from the executor's own phase records. `hopeless` "
                  "aborted, so it is drawn as a trace on the left and omitted from the rates "
                  "on the right. A first step near 1.1s rather than 0.1s is the intermittent "
-                 "asyncflow dispatch stall, not the knob setting")
+                 "asyncflow dispatch stall, not the knob setting" + _only_note(many, only))
 
 
 # -- F5: where a cycle's second actually goes ---------------------------------------------
@@ -424,6 +435,7 @@ def fig_control_time(phases: list[dict[str, Any]], out: Path) -> Path:
     """
     import matplotlib.pyplot as plt
     ps.apply_rcparams()
+    phases, many, only = _control_only(phases)
     arms = [a for a in ps.ORDER if any(r.get("arm") == a for r in phases)]
     fig, axes = plt.subplots(1, 2, figsize=(15.5, 7.4), sharey=True, sharex=True)
     rows_for = {a: sorted((r for r in phases if r.get("arm") == a),
@@ -469,7 +481,8 @@ def fig_control_time(phases: list[dict[str, Any]], out: Path) -> Path:
                  "'tools running' is the union of task spans, so it is correct at any "
                  "concurrency. A missing bar is a gap, not a zero. About one first cycle in "
                  "eight pays an extra ~1.0s of scheduling wait - asyncflow's run-component "
-                 "loop waits on its component-change event with a 1.0s timeout")
+                 "loop waits on its component-change event with a 1.0s timeout"
+                 + _only_note(many, only))
 
 
 # -- F6: the stop reason is not the result -----------------------------------------------
@@ -488,7 +501,14 @@ def fig_stop_vs_front(camps: list[dict[str, Any]], out: Path) -> Path:
     ps.apply_rcparams()
     rows = [r for r in camps if r.get("kind") == "arm"]
     rows = [r for a in ps.ORDER for r in rows if r.get("arm") == a]
-    fig, ax = plt.subplots(figsize=(13.0, 6.4))
+    # ONE GROUP PER CELL, and with a reasoner axis there are four arms per model rather
+    # than four in total. At the fixed 13in the twelve groups collided three ways at once:
+    # the arm names ran together ("baselinbaselinbaseline"), the stop reasons overlapped
+    # into a single line of mush, and nothing said which model a bar belonged to. The
+    # canvas grows with the cell count and the model joins the tick label.
+    models = _models(rows)
+    many = len(models) > 1
+    fig, ax = plt.subplots(figsize=(max(13.0, 1.6 * len(rows)), 6.4))
     pos = np.arange(len(rows))
     width = 0.38
     for i, r in enumerate(rows):
@@ -507,19 +527,25 @@ def fig_stop_vs_front(camps: list[dict[str, Any]], out: Path) -> Path:
                     fontsize="small", color=st.color, fontweight="bold",
                     zorder=ps.Z["annot"])
         reason = str(r.get("stop_reason") or "")
-        ax.annotate(_wrap(reason, 26), xy=(pos[i], 0), xytext=(0, -58),
-                    textcoords="offset points", ha="center", va="top", fontsize="small",
+        ax.annotate(_wrap(reason, 18 if many else 26), xy=(pos[i], 0), xytext=(0, -62),
+                    textcoords="offset points", ha="center", va="top",
+                    fontsize="x-small" if many else "small",
                     color=st.color, zorder=ps.Z["annot"],
                     annotation_clip=False)
     ax.set_xticks(pos)
-    ax.set_xticklabels([ps.style_for(r["arm"]).short for r in rows])
+    ax.set_xticklabels([f"{ps.style_for(r['arm']).short}\n{r.get('model')}" if many
+                        else ps.style_for(r["arm"]).short for r in rows])
+    if many:
+        # "hopeless" three times in a row still touched at the default scale.
+        ax.tick_params(axis="x", labelsize="small")
     ax.set_ylabel("lineages")
     ax.set_ylim(0, max((int(r.get("nodes") or 0) for r in rows), default=1) * 1.25)
     ax.legend(handles=_neutral_patches([("lineages run", {"alpha": 0.35}),
                                         ("on the Pareto front", {})]),
               loc="upper left", fontsize="medium")
     fig.suptitle("The stop reason is not the result: read the front", y=0.985)
-    fig.subplots_adjust(left=0.085, right=0.985, top=0.9, bottom=0.34)
+    fig.subplots_adjust(left=0.085 * (13.0 / fig.get_size_inches()[0]) + 0.02,
+                        right=0.99, top=0.9, bottom=0.34)
     return _save(fig, out, "f6-stop-vs-front.png",
                  "'clean' is pass or suspect - a suspect node passed every gate and belongs "
                  "to an untrusted pattern. `hard` reports its Spec satisfied with nothing on "
@@ -551,6 +577,35 @@ def _models(rows: list[dict[str, Any]]) -> list[str]:
     """The models present, in the axis's own order rather than alphabetical."""
     seen = {str(r.get("model")) for r in rows if r.get("model")}
     return [m for m in ps.MODEL_FILLS if m in seen]
+
+
+def _control_only(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool, str]:
+    """One control model's rows, and which one, for the figures that pool by ARM.
+
+    f3, f4 and f5 each draw one series per arm, which was unambiguous while every cell ran
+    model D. With a reasoner axis an arm is no longer one campaign: pooling three models
+    under one hue averages a 0.3s decision with a 20s one and labels the result `baseline`,
+    and f4's `camp_by_arm` dict silently kept whichever model happened to be last. These
+    figures are about what the SURROGATE'S KNOBS do, so they are drawn for the deterministic
+    control alone and say so; the model comparison is f7-f9's subject.
+    """
+    models = _models(rows)
+    if len(models) <= 1:
+        return rows, False, (models[0] if models else "")
+    keep = "D" if "D" in models else models[0]
+    return [r for r in rows if str(r.get("model")) == keep], True, keep
+
+
+def _only_note(many: bool, model: str) -> str:
+    """The caption clause naming the model a pooled-by-arm figure was drawn for.
+
+    Empty for a single-model lab, so the shipped lab's captions are unchanged.
+    """
+    if not many:
+        return ""
+    # Kept to one clause: these captions already run two lines, and a third ran into the
+    # x-axis label.
+    return f" | control model {model} only - f7-f9 compare the models"
 
 
 def _model_legend(ax, models: list[str], **over):
@@ -655,7 +710,9 @@ def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any
             if len(secs) > 1:
                 ax.plot([pos[i]] * 2, [min(secs), max(secs)], color=ps.INK, linewidth=1.6,
                         zorder=ps.Z["annot"])
-            ax.annotate(f"{np.mean(secs):.2f}s", xy=(pos[i], float(np.mean(secs))),
+            # Above the range when there is one, for the same reason as the right panel.
+            ax.annotate(f"{np.mean(secs):.2f}s",
+                        xy=(pos[i], max(float(np.mean(secs)), max(secs))),
                         xytext=(0, 6), textcoords="offset points", ha="center",
                         fontsize="small", color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
     ax.set_xticks(pos)
@@ -678,13 +735,19 @@ def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any
                        linewidth=1.2, zorder=ps.Z["bar"], **ps.model_fill(model))
                 bx.plot([i] * 2, [max(0.0, lo), hi], color=ps.INK, linewidth=1.6,
                         zorder=ps.Z["annot"])
+                # ANCHORED AT THE TOP OF THE RANGE, not at the bar. Centred on the bar
+                # top, the +/-2 sigma rule is drawn straight through the two lines of
+                # text - the collision the style skill's look pass exists to catch.
                 bx.annotate(f"{m:.0f} tok\n{np.mean(secs):.1f}s/call",
-                            xy=(i, m), xytext=(0, 6), textcoords="offset points",
+                            xy=(i, max(m, hi)), xytext=(0, 6),
+                            textcoords="offset points",
                             ha="center", fontsize="small", color=ps.INK_SECONDARY,
                             zorder=ps.Z["annot"])
         bx.set_xticks(np.arange(len(live)))
         bx.set_xticklabels([f"model {m}" for m in live])
         bx.set_ylabel("completion tokens per call")
+        # Headroom for the label now sitting above the range, as on the left panel.
+        bx.set_ylim(0, max(bx.get_ylim()[1], 1e-9) * 1.22)
     else:
         # Said, not left blank. An empty panel reads as "the models were free".
         bx.set_xticks([])
@@ -702,7 +765,9 @@ def fig_decision_cost(camps: list[dict[str, Any]], decisions: list[dict[str, Any
     # Upper RIGHT: the tallest bar is the first model, and at upper left the key landed on
     # its own annotation.
     _model_legend(ax, models, loc="upper right")
-    ax.set_ylim(0, max(ax.get_ylim()[1], 1e-9) * 1.22)
+    # 1.45, not 1.22: the per-model label now sits above the top of its range rather than
+    # on the bar, and at 1.22 the tallest one landed inside the legend frame.
+    ax.set_ylim(0, max(ax.get_ylim()[1], 1e-9) * 1.45)
     fig.suptitle("What one decision costs, by who made it", y=0.985)
     # A wider left margin: "seconds per decision (wall clock)" at this type scale is a long
     # y-label and at 0.075 it ran off the canvas.
@@ -752,8 +817,11 @@ def fig_knobs_moved(params: list[dict[str, Any]], out: Path) -> Path:
                         linewidth=1.2, zorder=ps.Z["bar"], **ps.model_fill(model))
                 ax.plot([min(vals), max(vals)], [ys[j] + offset] * 2, color=ps.INK,
                         linewidth=1.4, zorder=ps.Z["annot"])
+                # PAST THE END OF THE RANGE, not at the bar's end: with repeats the
+                # rule runs beyond the mean and struck the label through.
                 ax.annotate(f"{model} x{len(vals)}",
-                            xy=(float(np.mean(vals)), ys[j] + offset), xytext=(6, 0),
+                            xy=(max(float(np.mean(vals)), max(vals)), ys[j] + offset),
+                            xytext=(6, 0),
                             textcoords="offset points", va="center", fontsize="small",
                             color=ps.INK_SECONDARY, zorder=ps.Z["annot"])
         ax.set_yticks(ys)

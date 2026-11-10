@@ -367,3 +367,33 @@ def test_the_freeze_check_reports_both_shapes_a_breach_could_take():
         [], [{"rejected": {"reason": "mock_rfd3_design.difficulty is frozen: the "
                                      "experiment's own condition"}}], [], "c")
     assert "frozen" in quiet
+
+
+def test_a_figure_pooled_by_arm_is_drawn_for_one_control_model():
+    """f3, f4 and f5 draw one series per ARM, which stopped being one campaign when the
+    reasoner axis landed.
+
+    Found by looking at the rendered PNGs of a D+A+B lab: f4's `baseline` trace stepped to
+    26 seconds, which is model B's endpoint latency wearing the arm's name, and its right
+    panel came from `{r["arm"]: r}` - a dict that silently keeps whichever model happened
+    to be last. Averaging a 0.14s decision with a 20.5s one under one hue is not a knob
+    measurement, so these three keep the deterministic control and say so in the caption.
+    """
+    pytest.importorskip("matplotlib")
+    from impress_a.analysis.mock_figures import _control_only, _only_note
+    rows = [{"model": "D", "arm": "hard", "cell": "arm-hard-D"},
+            {"model": "A", "arm": "hard", "cell": "arm-hard-A"},
+            {"model": "B", "arm": "hard", "cell": "arm-hard-B"}]
+    kept, many, only = _control_only(rows)
+    assert many and only == "D"
+    assert [r["cell"] for r in kept] == ["arm-hard-D"]
+    assert "control model D only" in _only_note(many, only)
+
+    # A default lab is untouched, caption included: one model is no choice to make.
+    plain = [{"model": "D", "arm": "hard", "cell": "arm-hard"}]
+    kept, many, only = _control_only(plain)
+    assert kept == plain and many is False and _only_note(many, only) == ""
+
+    # No D in the axis at all: the first model on the axis stands in, never nothing.
+    kept, many, only = _control_only([r for r in rows if r["model"] != "D"])
+    assert many and only == "A" and [r["cell"] for r in kept] == ["arm-hard-A"]

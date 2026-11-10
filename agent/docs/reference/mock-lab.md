@@ -161,17 +161,27 @@ arm fell back to model D's cascade, and what it produced is not that model's res
 the pre-registration's void rule, enforceable for the first time now that anything writes
 these events.
 
-### What the first live run found
+### What the live runs found
 
-`Beam-501B-A23B` via profile `beam`, four arms under model B, 2026-11-10. Twenty calls, zero
-retries, zero degraded turns, and no allocation.
+`Beam-501B-A23B` via profile `beam`, the four arms under each model, 2026-11-10. Model B
+first (20 calls), then D + A + B together (31 calls). Zero retries and zero degraded turns in
+both, and no allocation.
 
-| | model D | model B (live) |
-|---|---|---|
-| seconds per decision | 0.35 | **19.96** |
-| completion tokens per call | — | 1148 |
-| share of campaign wall clock spent at the endpoint | — | **94–99%** |
-| parameters it moved | 3, all quality | 9, including every breadth knob |
+| | model D | model A (live) | model B (live) |
+|---|---|---|---|
+| seconds per decision | 0.14 | 7.56 | **20.48** |
+| seconds per call | — | 2.2 | 7.8 |
+| completion tokens per call | — | 346 | 1180 |
+| share of campaign wall clock at the endpoint | — | 82–98% | **96–99%** |
+| calls per arm | 0 | 3 | 3–7 |
+| knobs it moved | 3, all quality | 4, all quality | 9, mostly breadth |
+| front on the `hard` arm | 0 of 12 | **2 of 4** | 0 of 4 |
+
+**A and B differ in what they are shown, not only in what they choose.** Model A's parameter
+vector comes from `parameterize`, a deterministic node the model steers only by naming a
+strategy, and `_knobs.tunable` keeps breadth parameters away from it. Model B is handed the
+whole task card and picks for itself. So A raising four quality dials and B raising
+`num_designs` is a comparison of a filtered knob set against an unfiltered one.
 
 Two things worth carrying off the laptop. **The endpoint is the campaign** on this tier: the
 six tools return in milliseconds and 94–99% of each live cell's wall clock was one model
@@ -180,6 +190,15 @@ thinking. And **model B raises breadth parameters that models A and D are forbid
 `tunable`, which does not look at kind. `rfd3_design`'s own spec records that `num_designs`
 stays at 1 because its adapter keeps index 0, and its `cost_model` is per *invocation*, so
 nothing prices the extra draws either. Backlog **H10**.
+
+And **a live Specifier can skip the abort rule**. On `hopeless` — difficulty 0.85, the arm
+whose backbone breaks — model A stopped at cycle 1 on "every spec objective satisfied" with
+all four lineages failing the `ss_fraction` integrity gate and an empty front, where D and B
+both ran on and aborted on three consecutive all-failed runs. A's Specifier emitted no
+refinement objective, so nothing was left unsatisfied and a third cycle never came. The
+quality dials it had raised made the *numbers* good on a structure difficulty 0.85 had
+already destroyed. Backlog **H11**, which is G14's mechanism with a safety consequence
+rather than a reporting one.
 
 ### `difficulty` is `operator_only`
 
@@ -231,6 +250,12 @@ Two things in there are easy to get subtly wrong, so they are done once and test
 | `f7-reasoner-yield.png` | front size per arm per control model — does a reasoner rescue a campaign the rules cannot? |
 | `f8-decision-cost.png` | what one decision costs in seconds and in tokens, by who made it |
 | `f9-knobs-moved.png` | which knobs each model moved, and how far up their declared ranges |
+
+**f3, f4 and f5 are drawn for one control model.** They pool by arm, and an arm stops being
+one campaign once the reasoner axis exists: averaging D's 0.14s decision with B's 20.5s one
+under the arm's hue measures the endpoint, not the knob. When a lab has more than one model
+these three keep the deterministic control — D, or the first model on the axis if D is not
+on it — and say so in the caption. A single-model lab is unaffected, caption included.
 
 **The control model does not get a hue.** The four validated colours are spent on the four
 knob arms and colour follows the entity, so in f7–f9 a model takes the *fill* channel —
