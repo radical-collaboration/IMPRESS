@@ -782,7 +782,7 @@ async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
                          f"{'' if r.trusted else ' untrusted'}]" for r in running))
 
 
-def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
+def _thread_caps(spec: CampaignSpec, ncpu: int | None = None) -> dict[str, str]:
     """How many threads each CPU-bound child may take, sized from what this process was
     actually given rather than from the machine.
 
@@ -799,10 +799,16 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
     both numbers: a `TaskRequest` carries no concurrency information, and an agent
     cannot see how many siblings it has. Applied with `setdefault`, so an operator who
     exported their own value keeps it.
+
+    `ncpu` overrides what the cgroup reports, for the one case where the cgroup is not the
+    right answer: under an enclosing campaign manager this process shares its cgroup with
+    every sibling workflow, so `sched_getaffinity` describes the allocation rather than our
+    share of it, and the caller's own resource grant is the honest number
+    (`integrations/aucam`).
     """
-    if hasattr(os, "sched_getaffinity"):
+    if ncpu is None and hasattr(os, "sched_getaffinity"):
         ncpu = len(os.sched_getaffinity(0))
-    else:  # not Linux; the campaign path is, but the test tier need not be
+    elif ncpu is None:  # not Linux; the campaign path is, but the test tier need not be
         ncpu = os.cpu_count() or 1
     pipelines = max(1, spec.concurrency) * max(1, spec.replicas)
     per = max(1, ncpu // (pipelines * 2))

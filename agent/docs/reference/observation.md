@@ -272,6 +272,54 @@ per arm in about half a minute with no allocation.
 | 6 | the campaign's `control_plane.url`, written `0600` under `serve` |
 | 7 | the table in step 7 |
 | 8 | the `heartbeat +…` lines in a run log, which is step 8's third option already working |
+| 9 | `reports/<sink>.jsonl` under the campaign root — one line per digest, with the `ts` it was sent |
 
 A step whose output cannot be pointed at in one of those files is a step this page has
 described wrongly — step 2 included, and that is finding 2 rather than an exception.
+
+---
+
+## Being one workflow of a larger campaign
+
+The two steps above are the whole of what an enclosing campaign manager needs, and
+`integrations/aucam.py` is the hundred lines that connect them to one. It is the only module
+in the package that imports AuCaM, which `tests/test_layering.py` asserts, so the dependency
+stays optional and one file wide.
+
+```python
+from impress_a.integrations.aucam import launch_bounds, reward_fn, workflow_config
+
+config = workflow_config("campaigns/delta-small-molecule.yaml", model="D")
+# -> an AuCaM WorkflowConfig: declared_spending and spending_limit from the offer,
+#    resources from its resource shape, supports_pause=True, stale_timeout_s at 4x
+#    the report interval the offer declares.
+bounds = launch_bounds(offer)          # for the caller's own LaunchRequest.bounds
+policy = BanditSchedulingPolicy(reward_fn=reward_fn)
+```
+
+Four things in that adapter are decisions rather than plumbing, and each is a defect avoided:
+
+- **It does not declare `flow`.** AuCaM passes its shared engine to a block that asks for
+  one. Taking it would be wrong twice: `WorkflowEngine.__init__` captures the loop it is built
+  on, and the executor must build its own through `exec.backend.make_engine_bounded`, which
+  also bounds Dragon's synchronous startup. There is no "use this engine instead" seam, and
+  inventing one is how jobs 22328172 and 22328262 spent their allocations on an engine that
+  dispatched nothing. The price is that our tasks are invisible to the caller's per-task
+  telemetry — which is why spending travels in our own reports.
+- **The caller's spending limit becomes the campaign's own budget**, narrowing it and never
+  loosening it. A limit enforced from outside can only cancel a campaign after it has
+  overspent; the same number as a budget is refused by `reserve` and gate 5 before a task
+  runs, and the campaign stops itself with a reason naming the dimension.
+- **`score` is a float, not a dict.** AuCaM's default bandit reward is
+  `1.0 if returncode == 0 else 0.0` — throughput, and its own comment says science scores
+  belong to the controller — so no shipped policy of theirs can rank a dict. The scalar is
+  progress toward the asked-for front; `reward_fn` is what ranks arms by it.
+- **`metrics` carries the MEASURED spend** under the keys the caller charges from. Without
+  them it prorates our declared cost, and the declared figures are inflated on purpose
+  (finding 8).
+
+The campaign is still ours throughout: it keeps the engine, the outer loop and the decision to
+stop, and the caller gets no privilege over campaign state that a policy would not have. That
+is [decision 0014](../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md),
+and `tests/test_aucam.py` runs a real AuCaM campaign over a real IMPRESS-A one to prove the
+page is describing something that works.

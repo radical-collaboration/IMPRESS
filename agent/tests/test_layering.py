@@ -68,7 +68,15 @@ ALLOWED = {
     # else in the package imports `integrations`, so an adapter may name another project's
     # types without any layer of IMPRESS-A needing to know that project exists. The row grows
     # only when a concrete adapter lands, and each widening should say which adapter forced it.
-    "integrations": frozenset({"core"}),
+    #
+    # `cli`, `manager`, `runtime` and `tools` were added by `integrations/aucam`, which has to
+    # build a whole campaign the way `cli.run_campaign` does: `load_spec` and `build_roles`
+    # are the adapters from a `CampaignSpec` to a registry and a role pair, `offer_for_spec`
+    # prices it, and `CampaignManager` runs it. Reimplementing any of those here would be a
+    # second way to start a campaign, and the second one is always the one that drifts.
+    # `exec` is absent and should stay absent: an integration drives the executor, it does not
+    # dispatch.
+    "integrations": frozenset({"cli", "manager", "runtime", "tools", "core"}),
     # `analysis` is downstream of everything and must reach no reasoner. The rule that
     # matters is the ABSENCE of `policy` and `control`: a scorer that could reach a reasoner
     # could score a campaign by asking it, and the comparison's whole method is that figures

@@ -1048,7 +1048,26 @@ mutating blocks and awaits the sink outside them. Triggered on the absorption wa
 `obs.seq`, NOT on `cycle` - which is incremented at dispatch and so counts submissions, so a
 report fired there would carry no results. Every sink call is guarded, so a listener that
 raises costs a log line rather than the allocation. Pause is handled in the same loop and
-gates admission only. **Still open:** the adapter itself, and the off-process path.
+gates admission only.
+
+**The adapter is DONE, and C13 is closed.** `integrations/aucam.py` is the only module that
+imports AuCaM: `workflow_config()` builds a real `WorkflowConfig` from the offer,
+`launch_bounds()` hands the cost ranges over separately because `bounds` lives on
+`LaunchRequest` and not on the config, and `reward_fn()` exists because AuCaM's default bandit
+reward is throughput and no shipped policy of theirs can rank a dict. The block function does
+NOT declare `flow` - taking the caller's engine would break loop ownership, which is what
+cost jobs 22328172 and 22328262 their allocations - and the caller's spending limit narrows
+the campaign's own budget rather than being enforced from outside, so gate 5 refuses an
+unaffordable graph before a task runs instead of AuCaM cancelling us after one has.
+`tests/test_aucam.py` runs a REAL AuCaM campaign over a real IMPRESS-A one in under a second,
+against AuCaM's own reporter rather than a fake, and asserts the charge came from our reported
+metrics (`method=exact source=wf_reported`) rather than from proration - which is what G20 was
+for.
+
+**Still open, and deliberately:** the off-process path, for a campaign inside its own `sbatch`
+reporting to an AuCaM running elsewhere. `CycleSink` is the seam, `aucam_client.Reporter` is
+the implementation, and it needs a Redis or Dragon `DataBackend` reachable from the compute
+node. Worth doing only after the in-process path has run once on hardware.
 
 Scoped and decided in `docs/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
 the enclosing manager is a caller, not control model C. Three deliverables — `impress-a offer`
