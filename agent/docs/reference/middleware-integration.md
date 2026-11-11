@@ -96,7 +96,10 @@ assert flow.loop is asyncio.get_running_loop()   # false => every submit hangs f
 ```
 
 **Version drift is real.** Check the installed version before trusting any API note here; this integration
-targets `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0.
+was written against `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0. **Re-verified on 0.6.0 / 0.6.0**
+(2026-11-06, Python 3.10.12): every note above still holds and the whole local tier is green, including
+the loop-ownership guard in `tests/test_backend_bound.py` that puts real work through a bounded engine.
+Nothing here is pinned to 0.5.x, so the floor in `pyproject.toml` stays `>=0.5.1`.
 
 **Session directories.** asyncflow writes an `asyncflow.session.*` directory into `work_dir` on every
 engine run, and `work_dir` defaults to the CWD. `exec/backend.make_engine` and `make_engine_bounded` both

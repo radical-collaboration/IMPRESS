@@ -9,11 +9,14 @@ first test here fails a model that claims `implemented` while still inheriting
 from __future__ import annotations
 
 import pytest
+
 from impress_a.cli import POLICIES, SUBCOMMANDS, build_policy, main
 from impress_a.core.pareto import Objective
 from impress_a.policy import registry as reasoners
 from impress_a.policy.base import BasePolicy
 from impress_a.policy.explicit import ReplayPolicy, ThresholdPolicy
+from impress_a.policy.planner import Planner
+from impress_a.policy.specifier import Specifier
 from impress_a.runtime.executor import CampaignSpec
 
 STATUSES = ("implemented", "partial", "stub")
@@ -145,3 +148,42 @@ def test_the_parser_accepts_every_declared_subcommand():
         with pytest.raises(SystemExit) as e:
             main([name, "--help"])
         assert e.value.code == 0, f"{name} is declared but the parser rejects it"
+
+
+# ---------------------------------------------------------------------------
+# The two halves (phase 1 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_every_model_supplies_both_halves():
+    """One `--model` must yield a usable Specifier and a usable Planner.
+
+    While the strangler is in place both are derived from the model's `ControlPolicy`, which is
+    what makes `--control roles` a change of vocabulary rather than of behaviour. `replay` is
+    excluded because it refuses to construct without records - deliberately, since a replay
+    with none is a different campaign rather than a degraded one.
+    """
+    for letter in sorted(reasoners.MODELS):
+        if letter == "replay":
+            continue
+        pair = reasoners.build_roles(letter)
+        assert isinstance(pair.specifier, Specifier), f"{letter}: specifier half"
+        assert isinstance(pair.planner, Planner), f"{letter}: planner half"
+        assert pair.name == letter
+
+
+def test_halves_mix_independently():
+    """`--specifier X --planner Y` is reachable from the first day, not retrofitted.
+
+    A pair that can only ever come from one row is not two interfaces; it is one with a seam
+    drawn on it. Keeping the mixed form constructible is what will later make it measurable
+    whether specification or planning is where a model earns its cost.
+    """
+    pair = reasoners.build_roles("A", "D")
+    assert pair.name == "A/D"
+    assert isinstance(pair.specifier, Specifier)
+    assert isinstance(pair.planner, Planner)
+
+
+def test_an_unknown_letter_names_the_known_ones():
+    with pytest.raises(KeyError, match="unknown control model"):
+        reasoners.build_roles("Z")

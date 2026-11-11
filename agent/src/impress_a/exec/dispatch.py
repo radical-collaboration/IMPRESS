@@ -62,7 +62,8 @@ class ExecutionResults:
                 q.verdict = QCVerdict.FAIL
                 q.notes.append(f"{tid}: no result")
                 continue
-            q.gates.extend(r.qc.gates); q.notes.extend(r.qc.notes)
+            q.gates.extend(r.qc.gates)
+            q.notes.extend(r.qc.notes)
             if r.qc.verdict is QCVerdict.FAIL:
                 q.verdict = QCVerdict.FAIL
             elif r.qc.verdict is QCVerdict.SUSPECT and q.verdict is not QCVerdict.FAIL:
@@ -193,7 +194,7 @@ class Dispatcher:
         """Await a submitted graph and assemble its typed results."""
         raw = await h.gather
         out = ExecutionResults(graph_id=h.graph_id)
-        for tid, r in zip(h.futures.keys(), raw):
+        for tid, r in zip(h.futures.keys(), raw, strict=True):
             if isinstance(r, BaseException):
                 out.failures[tid] = f"{type(r).__name__}: {r}"
                 continue

@@ -9,6 +9,16 @@ from impress_a.compose.interlock import Scrutiny, TrustLedger
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger
 from impress_a.core.decision import ExperimentIntent
+from impress_a.core.spec import (
+    Aim,
+    Deferral,
+    Spec,
+    SpecObjective,
+    SpecRevision,
+    Stage,
+    TaskMapping,
+)
+from impress_a.runtime.reviewer import StageReviewer
 from impress_a.tools.registry import Registry
 
 CHAIN = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
@@ -93,14 +103,14 @@ def test_pattern_signature_ignores_parameter_values(reg):
 
 
 def test_interlock_promotes_then_demotes():
-    L = TrustLedger(promote_after=3)
-    L.record_for("sig", ["x"])
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert not L.on_clean_run("sig") and not L.on_clean_run("sig")
-    assert L.on_clean_run("sig"), "third clean run promotes"
-    assert not Scrutiny.for_pattern(L, "sig").mark_suspect
-    assert L.on_failure("sig"), "failure demotes"
-    assert Scrutiny.for_pattern(L, "sig").mark_suspect
+    led = TrustLedger(promote_after=3)
+    led.record_for("sig", ["x"])
+    assert Scrutiny.for_pattern(led, "sig").mark_suspect
+    assert not led.on_clean_run("sig") and not led.on_clean_run("sig")
+    assert led.on_clean_run("sig"), "third clean run promotes"
+    assert not Scrutiny.for_pattern(led, "sig").mark_suspect
+    assert led.on_failure("sig"), "failure demotes"
+    assert Scrutiny.for_pattern(led, "sig").mark_suspect
 
 
 def test_trust_ledger_survives_concurrent_writers(tmp_path):
@@ -136,7 +146,8 @@ def test_trust_survives_a_campaign_running_from_a_different_directory(tmp_path, 
     """Promotion has to accumulate across JOBS, and on HPC every job is a fresh CWD.
 
     `spec.root` defaulted to the relative "campaigns/_runs", and `delta_gpu_run.sh` cds into a
-    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger resolved inside
+    per-job directory under `$WORK_DIR/impress_a_runs` before launching - so the ledger
+    resolved inside
     each job's own directory and started empty every time. On disk after two real runs:
 
         22684607/campaigns/_runs/_trust/cuda.jsonl   0 clean
@@ -216,11 +227,11 @@ def test_run_root_comes_from_the_environment_unless_the_yaml_names_one(tmp_path,
 
 def test_trust_ledger_without_a_path_persists_nothing():
     """The in-memory form is what the validation tier uses; it must not touch disk."""
-    L = TrustLedger(promote_after=2)
-    L.record_for("sig", ["x"])
-    assert L.on_clean_run("sig") is False
-    assert L.on_clean_run("sig") is True
-    assert L.path is None
+    led = TrustLedger(promote_after=2)
+    led.record_for("sig", ["x"])
+    assert led.on_clean_run("sig") is False
+    assert led.on_clean_run("sig") is True
+    assert led.path is None
 
 
 # -- integrity vs acceptance (decision 0013) ------------------------------------------
@@ -359,7 +370,7 @@ def test_replaying_job_22702568_promotes_at_its_third_run(reg, tmp_path):
 
     ex = _executor_with_memory_ledger(tmp_path)
     promoted_at = None
-    for run_id, results in zip(_JOB_22702568, runs):
+    for run_id, results in zip(_JOB_22702568, runs, strict=True):
         assert ex._record_evidence(SimpleNamespace(signature="sig"), results) is False, \
             f"{run_id}: every tool worked, so no run is evidence against the pattern"
         if promoted_at is None and ex.trust.is_trusted("sig"):
@@ -459,3 +470,227 @@ def test_shipped_campaigns_carry_no_absolute_checkout_paths():
     for f in pathlib.Path("campaigns").glob("*.yaml"):
         assert "/work/" not in f.read_text(), f
     assert "/work/" not in pathlib.Path("campaigns/data/alr/ALR_binder_design.json").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Asserted trust (phase 3 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_asserted_trust_skips_the_cap_and_the_forced_dry_run(tmp_path):
+    """A pre-loaded Toolkit of proven Tasks should not re-earn trust at runtime.
+
+    Promotion costs three consecutive clean runs under a forced dry-run, a 10%-of-available
+    cost cap and one-instance-in-flight. For a wide pattern that is not merely wasteful but
+    impossible: replica multiplicity is part of the signature, so width 4 can never reach three
+    clean runs under a realistic budget while the one-in-flight rule serialises it (backlog
+    A10).
+    """
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["rfd3_design"], reason="proven elsewhere", by="tester")
+
+    s = Scrutiny.for_pattern(led, "sig")
+    assert s.trusted and not s.force_dry_run and not s.mark_suspect
+    assert s.cost_cap_fraction is None
+
+
+def test_asserted_trust_is_distinguishable_from_earned_trust(tmp_path):
+    """Or "this pattern earned trust over three clean runs" becomes uncheckable.
+
+    Three forged `clean` events would also produce a trusted record, and would be
+    indistinguishable from evidence afterwards - which is why the ledger has a distinct event
+    kind rather than a documented convention.
+    """
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("granted", ["x"], reason="proven elsewhere", by="tester",
+                       git_sha="abc123")
+    led.record_for("earned", ["y"])
+    for _ in range(3):
+        led.on_clean_run("earned")
+
+    assert led.patterns["granted"].trusted and led.patterns["granted"].asserted
+    assert led.patterns["granted"].asserted_reason == "proven elsewhere"
+    assert led.patterns["granted"].git_sha == "abc123"
+    assert led.patterns["earned"].trusted and not led.patterns["earned"].asserted
+    assert led.patterns["earned"].clean_runs == 3
+    assert led.patterns["granted"].clean_runs == 0, \
+        "an assertion is not evidence, so it must not look like three runs of it"
+
+
+def test_an_assertion_accumulates_no_phantom_promotion(tmp_path):
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.on_clean_run("sig") is False, "already trusted; nothing to promote"
+    assert led.patterns["sig"].clean_runs == 0
+
+
+def test_an_asserted_pattern_still_demotes_and_does_not_survive_it(tmp_path):
+    """Demotion applies, and is a FINDING: it says the assertion was wrong.
+
+    The in-memory record and a re-fold of the log must agree, or a pattern is trusted in one
+    process and not in the next.
+    """
+    path = tmp_path / "cuda.jsonl"
+    led = TrustLedger.load(path)
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.on_failure("sig") is True, "demoting an asserted pattern is a demotion"
+    live = (led.patterns["sig"].trusted, led.patterns["sig"].asserted)
+
+    refolded = TrustLedger.load(path)
+    assert live == (False, False)
+    assert live == (refolded.patterns["sig"].trusted, refolded.patterns["sig"].asserted)
+    assert refolded.patterns["sig"].demotions == 1
+
+
+def test_an_assertion_without_a_reason_is_refused(tmp_path):
+    """The reason is the justification on the record, and what a later reader will ask for."""
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    with pytest.raises(ValueError, match="needs a reason"):
+        led.assert_trusted("sig", ["x"], reason="   ")
+    assert "sig" not in led.patterns or not led.patterns["sig"].trusted
+
+
+def test_revoking_withdraws_an_assertion(tmp_path):
+    led = TrustLedger.load(tmp_path / "cuda.jsonl")
+    led.assert_trusted("sig", ["x"], reason="proven")
+    assert led.revoke("sig", reason="superseded") is True
+    assert not led.patterns["sig"].trusted and not led.patterns["sig"].asserted
+    assert led.revoke("sig", reason="again") is False, "nothing left to revoke"
+
+
+def test_asserting_at_one_width_does_not_trust_another(reg):
+    """Backlog A10, as a property of the signature rather than a footnote.
+
+    The pattern signature includes replica multiplicity, so trust earned - or granted - at
+    width 1 does not transfer to width 4. `impress-a trust --replicas` therefore takes the
+    widths a campaign will actually run.
+    """
+    composer = Composer(reg)
+    narrow = composer.compose(ExperimentIntent(goal="g", stages=["mock_generate"], replicas=1))
+    wide = composer.compose(ExperimentIntent(goal="g", stages=["mock_generate"], replicas=4))
+    assert narrow.pattern_signature() != wide.pattern_signature()
+
+    led = TrustLedger()
+    led.assert_trusted(narrow.pattern_signature(), ["mock_generate"], reason="proven at 1")
+    assert led.is_trusted(narrow.pattern_signature())
+    assert not led.is_trusted(wide.pattern_signature()), \
+        "asserting at width 1 must not trust width 4"
+
+
+# ---------------------------------------------------------------------------
+# The Reviewer (phase 3 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def _spec_with(*objectives):
+    aim = Aim(statement="test aim")
+    objs = [SpecObjective(aim=aim.id, statement=s, targets=[m], **kw)
+            for s, m, kw in objectives]
+    spec = Spec()
+    spec.apply(SpecRevision(new_aims=[aim], new_objectives=objs))
+    return spec, objs
+
+
+def _reviewer(reg):
+    budget = BudgetLedger(limits={"gpu_hours": 10.0, "cpu_hours": 10.0})
+    return StageReviewer(Validator(reg, SiteCaps(gpu_api="cuda", gpus_per_node=1), budget),
+                         budget)
+
+
+def _stage(objective_ids, tools=("mock_generate", "mock_design"), **kw):
+    return Stage(tasks=[TaskMapping(task_id=f"r0_s{i}_{t}", tool=t, lineage=0,
+                                    objectives=list(objective_ids))
+                        for i, t in enumerate(tools)], **kw)
+
+
+async def test_the_reviewer_refuses_a_stage_that_leaves_a_ready_objective_unanswered(reg):
+    """Backlog A8's shape: a gate, not a `log.warning`.
+
+    On job 22675512 a budget correction truncated `boltz_predict` off the chain, taking the
+    only producer of two of four objectives with it. Nothing refused it, the run was
+    unwinnable from the moment it was admitted, and the admitted graph recorded
+    `rejected: null`. A warning in a log nobody reads during an allocation is not a gate.
+    """
+    spec, objs = _spec_with(("make a backbone", "ss_fraction", {}),
+                            ("fold it", "iptm", {}))
+    stage = _stage([objs[0].id])        # answers the first, ignores the second
+
+    failure = _reviewer(reg).coverage(stage, spec)
+    assert failure is not None and failure.gate == "coverage"
+    assert objs[1].id in failure.detail["missing"]
+    assert "neither planned nor deferred" in failure.reason
+
+
+async def test_the_reviewer_accepts_a_deferral_in_place_of_a_task(reg):
+    """A Deferral is an answer. Demanding a Task for blocked work would force the invention
+    this gate exists to prevent."""
+    spec, objs = _spec_with(("make a backbone", "ss_fraction", {}),
+                            ("fold it", "iptm", {}))
+    stage = _stage([objs[0].id])
+    stage.deferrals = [Deferral(objective=objs[1].id, reason="waits on the backbone",
+                                waiting_on=[objs[0].id])]
+
+    assert _reviewer(reg).coverage(stage, spec) is None
+
+
+async def test_the_reviewer_does_not_demand_a_task_for_a_blocked_objective(reg):
+    """`ready()`, not `open_objectives()`: an objective whose dependency is unmet cannot be
+    planned, so requiring it would make every Stage impossible until the last one."""
+    spec, objs = _spec_with(("first", "ss_fraction", {}), ("second", "iptm", {}))
+    spec.objectives[objs[1].id].depends_on = [objs[0].id]
+    stage = _stage([objs[0].id])
+
+    assert _reviewer(reg).coverage(stage, spec) is None, \
+        "the second objective is blocked, so it is not the Planner's to answer yet"
+
+
+async def test_the_reviewer_refuses_a_task_that_serves_no_live_objective(reg):
+    """A task working only for DELETED objectives belongs in `cancels`, not in `tasks`.
+
+    This is the other half of what makes cancellation decidable: `objectives` is a list, so a
+    task serving one live objective and three dead ones is still wanted.
+    """
+    spec, objs = _spec_with(("one", "ss_fraction", {}), ("two", "iptm", {}))
+    stage = _stage([objs[0].id])
+    stage.deferrals = [Deferral(objective=objs[1].id)]
+    rev = _reviewer(reg)
+    assert rev.coverage(stage, spec) is None
+
+    spec.apply(SpecRevision(deleted=[objs[0].id]))
+    failure = rev.coverage(stage, spec)
+    assert failure is not None and "only deleted objectives" in failure.reason
+
+    # But a task with one live objective among dead ones is still legitimate.
+    stage.tasks[0].objectives = [objs[0].id, objs[1].id]
+    stage.tasks[1].objectives = [objs[0].id, objs[1].id]
+    stage.deferrals = []
+    assert rev.coverage(stage, spec) is None
+
+
+async def test_the_reviewer_refuses_an_objective_that_is_not_in_the_applied_spec(reg):
+    """A Planner cannot widen its own coverage by naming objectives it imagined.
+
+    Not trusting that claim is the Reviewer's entire purpose, and it is why the Spec has one
+    writer on the execution side: in phase 7 a remote Planner must not be able to smuggle a
+    Spec revision in with a Stage.
+    """
+    spec, objs = _spec_with(("one", "ss_fraction", {}))
+    stage = _stage([objs[0].id, "o-invented"])
+
+    failure = _reviewer(reg).coverage(stage, spec)
+    assert failure is not None and failure.detail["unknown"] == ["o-invented"]
+
+
+async def test_the_reviewer_marks_a_budget_refusal_transient(reg):
+    """Contention is a property of the moment, not of the graph.
+
+    Without that distinction a policy answers contention by mutilating its intent - dropping
+    replicas, truncating stages - in response to what OTHER runs are consuming, which reads as
+    the policy quietly degrading.
+    """
+    budget = BudgetLedger(limits={"gpu_hours": 0.001})
+    rev = StageReviewer(
+        Validator(reg, SiteCaps(gpu_api="cuda", gpus_per_node=1), budget), budget)
+    graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["mock_generate"], replicas=1))
+
+    failure = rev.affordable(graph)
+    assert failure is not None and failure.gate == "budget" and failure.transient is True

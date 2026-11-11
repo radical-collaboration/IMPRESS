@@ -4,7 +4,7 @@ Everything outstanding. Each item says why it matters so the list can be triaged
 worked through top to bottom. Items resolved since the list was written carry a **RESOLVED**
 paragraph in place rather than being deleted - the evidence that forced them is the useful part.
 
-State it is measured against: local tier green, lint at its ceiling, the import contract clean **and
+State it is measured against: local tier green, lint reporting nothing, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
 on Delta. **One campaign has completed:** job 22692304 ran all six stages to `6/6 tasks ok`
@@ -226,6 +226,21 @@ A terminal-metrics gate was specified in
   and is the source of truth, with gate metrics unioned in so a drifting declaration still gets
   caught; `test_every_tool_declares_the_metrics_it_reports` enforces both halves. **Still open:**
   this is a warning, not a gate.
+
+**RESOLVED on the Stage path** (phase 3 of `control-plane-refactor.md`). `submit_stage` refuses a
+graph that no tool in it reports a declared objective for, with `gate="coverage"` and the metric
+named, and `StageReviewer` additionally refuses a Stage that leaves a *ready* objective neither
+planned nor deferred, a task that serves only DELETED objectives, and a task naming an objective
+absent from the applied Spec. The terminal-metrics gate specified in
+`planning/phase1-partB-architecture/05-...:66` therefore exists, five years of intent later.
+
+Two deliberate limits. The coverage check reads the **executor's applied Spec**, never the
+Stage's own claim about what is open - not trusting that claim is the Reviewer's whole purpose,
+and it is why the Spec keeps one writer on the execution side so a remote Planner in phase 7
+cannot smuggle a revision in with a Stage. And the legacy `submit` **keeps its warning**: that
+leaves the old path's behaviour unchanged, including
+`test_a_truncated_chain_does_not_count_toward_stagnation`, which runs a sub-chain on purpose.
+The two paths differ here by design, and phase 11 deletes the warning with the path.
 
 **A9. Three of four admission attempts are wasted, and the fourth is the last one.** `ThresholdPolicy.
 decide` asks for `base_replicas + 1 = 3` replicas, but the campaign's `replicas: 1` is applied
@@ -512,6 +527,27 @@ first exploit run lands (`slides/timeline_model.py --limit 4`). This is latent, 
 policy emits that chain yet. Raising the limit is the wrong fix. Stub:
 [`exploration-vs-stagnation.md`](exploration-vs-stagnation.md).
 
+**RESOLVED** (phase 2 of `control-plane-refactor.md`). The ruling: **a run that could not have
+moved the front is not evidence that progress has stalled.** `pareto.feasible` admits a node
+only if every *constrained* objective has a value satisfying it, and `satisfied_by(None)` is
+False - so a graph that cannot produce one of those names cannot produce a front-eligible node,
+whatever the science does. `RunRecord.could_reach_the_front` is answered at admission, where the
+graph is in hand, and `_note_progress` skips the increment when it is False.
+
+It is the same KIND of flaw as the fan-out one in `plans/done/03-stagnation-under-fanout.md`, and
+it was found the same way: the counter was asking "did the front change" when the question it
+needs answered is "did something that could have changed the front fail to". Unconstrained
+objectives are deliberately excluded - they rank but never prune, so missing one costs a node
+nothing.
+
+Additive by construction: a run that can produce every constrained objective counts exactly as
+it did, which `test_stagnation_still_counts_a_chain_that_could_have_moved_the_front` pins.
+Without that second test, "exclude the runs that never had a chance" would be
+indistinguishable from "stop counting". `test_a_truncated_chain_can_never_move_the_front` is
+renamed `..._does_not_count_toward_stagnation` and asserts the opposite of what it did, which
+its own docstring said would be the first thing to change. Raising the limit remains the wrong
+fix and was not what happened.
+
 **G2. rfd3 output parsing ignores the metrics rfd3 reports.** See B1 and A4. Switching
 `RFD3DesignAgent` to read the sidecar `*_model_*.json` would give a genuine structural gate
 (`ligand_clashes == 0`), replace our non-DSSP phi/psi estimate with rfd3's own `helix_fraction`/
@@ -699,6 +735,23 @@ This belongs to the project-level CI and documentation consolidation, not to a r
 is recorded here because the verification paragraph below currently states a number no configuration
 produces.
 
+**RESOLVED** (phase 0 of `control-plane-refactor.md`). `agent/pyproject.toml` now carries its own
+`[tool.ruff]` at `line-length = 100`, `target-version = "py310"` and **`fix = false`** — a linter
+that edits the tree cannot be a gate, because a clean run and a run that rewrote 36 files are
+indistinguishable afterwards. The residual against that config was **57**, and all 57 were closed
+rather than budgeted: 37 by one deliberate `ruff check --fix`, 20 by hand (10 line reflows, 3 unused
+locals, 3 `zip(strict=)`, 2 semicolons, 2 `N806`, 1 `E741`, 1 `B904`). `N818` is **declined**, not
+worked around — an `Error` suffix on `CampaignAborted`, `CampaignStopped`, `SubmissionRejected` and
+`BackendConstructionTimeout` would falsify every sentence in `docs/decisions/`, `plans/done/` and
+`CLAUDE.md` that names them, for no runtime benefit; the reason sits beside the `ignore` entry.
+`.github/workflows/agent-tests.yml` runs `ruff check src tests` before the suite, and its path
+filter now includes `src/impress/**` and the root `pyproject.toml`, because this package now
+depends on the root one. **The ceiling is zero**, stated in `CLAUDE.md`, so a finding is a
+regression rather than a budget — which is the only form in which a ceiling is worth anything.
+One measurement worth keeping: the 3.2× spread between the numbers quoted here came from *which
+config resolved*, not from drift, and that is why the table a tool reads must live next to the code
+it lints.
+
 **H7. Hardware: paired 1-hour, 1-node runs of B and D.** After H2. One spec, two arms, differing only
 in `--model`, submitted together - `campaigns/delta-small-molecule-arms.yaml` derived from
 `delta-small-molecule-trust.yaml`, 1 node on `gpuA40x4`, 8 GPU-h total. They test the `ControlPolicy`
@@ -729,17 +782,20 @@ paid for out of the first allocation.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
-9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
-   then, and now pinned by two characterization tests that must change when it is decided.
-10. **H6 the lint gate**, before anything else in H — it is the reason H1-H5 went unnoticed, and it
-    is cheap. Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
+9. ~~**G1**~~ **DONE** — decided in phase 2, before the `conduct()` role pipeline it was gating
+   could explore with a truncated chain. The characterization test did change, exactly as it
+   said it would, and a second test now holds the fix to being additive.
+10. ~~**H6 the lint gate**~~ **DONE** — it was the reason H1-H5 went unnoticed, and it was cheap.
+    Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
     claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
-    after H2, which is what makes it cheap. **H4** and **H5** on demand.
+    after H2, which is what makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now
+    phases 9 and the experiment of [`control-plane-refactor.md`](control-plane-refactor.md).
 
 ## Verification that applies to any item
 
-`pytest tests -q` green, no allocation. `ruff check src tests` **must not exceed 41** — the one
-number worth stating, and a budget that drifts upward is the thing you want to notice. The import
+`pytest tests -q` green, no allocation. `ruff check src tests` **must report nothing** — the one
+number worth stating, and it is zero rather than a budget, so any finding is a regression. It was
+quoted as 41 until H6 found that no configuration produced that number. The import
 contract is asserted by `tests/test_layering.py` rather than checked by eye. `impress-a run campaigns/mock-stabilize.yaml --model D` and
 `--model A` still terminate with a stated reason and a non-empty front, and
 `impress-a run campaigns/delta-small-molecule-smoke.yaml --model D` must compose `rfd3_design…`,

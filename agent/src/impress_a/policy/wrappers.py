@@ -7,10 +7,10 @@ the policy".
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from ..core.decision import (CampaignObservation, ComposeAndRun, Decision, Stop,
-                             ValidationFailure)
+from ..core.decision import CampaignObservation, ComposeAndRun, Decision, Stop
 
 
 class PolicyWrapper:

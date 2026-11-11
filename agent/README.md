@@ -2,11 +2,16 @@
 
 **Autonomous protein design on HPC.**
 
-> IMPRESS-A lives in the IMPRESS repository under `agent/`, as a self-contained subproject with its
-> own `pyproject.toml`: run every command below from `agent/`. It does not import the `impress`
-> package. The relationship is one of shared middleware and shared science —
-> `examples/small_molecule_binding` runs the same rfd3 → LigandMPNN → Rosetta → Boltz chain as a
-> fixed adaptive pipeline, where IMPRESS-A composes it per cycle.
+> IMPRESS-A lives in the IMPRESS repository under `agent/`, as a subproject with its own
+> `pyproject.toml`: run every command below from `agent/`. It **depends on** the `impress` package
+> at the repository root and may not modify it — the execution loop is built on
+> `ImpressBasePipeline` and `ImpressManager` rather than re-deriving the engine conventions
+> (named backends, `task_description` defaults, GPU pinning) a second time, and
+> `tests/test_layering.py` asserts that only `runtime/runner.py` and `runtime/pipelines.py`
+> import it. It used to import nothing from there; that changed with the control-plane refactor.
+> The rest of the relationship is shared science — `examples/small_molecule_binding` runs the same
+> rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes
+> it per cycle.
 
 IMPRESS-A conducts scientific exploration of protein design space given a design prompt — *"stabilize the
 given protein"* — by repeatedly deciding what experiment to run next, composing a workflow to run it,
@@ -121,10 +126,11 @@ different transport.
 ## Quickstart
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+./scripts/dev_setup.sh && source .venv/bin/activate       # installs `impress` from .. first
+                                                          # - it is unreleased, so order matters
 
-pytest tests -q                                           # the whole local tier, ~10s, no allocation
+ruff check src tests                                      # reports; never rewrites. Ceiling: zero
+pytest tests -q                                           # the whole local tier, ~19s, no allocation
 impress-a tools                                           # list registered tools
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```

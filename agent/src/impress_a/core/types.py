@@ -55,7 +55,7 @@ class ArtifactType(str, Enum):
     METRIC_SET = "MetricSet"
     TRAJECTORY = "Trajectory"
 
-    def unifies_with(self, other: "ArtifactType") -> bool:
+    def unifies_with(self, other: ArtifactType) -> bool:
         """Can a value of type `self` be consumed where `other` is required?"""
         if self is other:
             return True
@@ -66,9 +66,7 @@ class ArtifactType(str, Enum):
             return True
         return False
 
-
-class Verdict(str, Enum):
-    CORE = "Core"
-    RECOMMENDED = "Recommended"
-    DEFER = "Defer"
-    REJECT = "Reject"
+# `Verdict` (CORE | RECOMMENDED | DEFER | REJECT) lived here with no reader - a Phase 1
+# triage enum that never reached the code. It is deleted rather than kept, because
+# `core/spec.ObjectiveStatus.DEFERRED` now means something specific and load-bearing, and two
+# `DEFER`s one import apart is how the wrong one gets used.

@@ -10,8 +10,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ..core.decision import (Backtrack, CampaignObservation, ComposeAndRun, Decision,
-                             ExperimentIntent, RequestHuman, Stop, ValidationFailure)
+from ..core.decision import (
+    Backtrack,
+    CampaignObservation,
+    ComposeAndRun,
+    Decision,
+    ExperimentIntent,
+    RequestHuman,
+    Stop,
+    ValidationFailure,
+)
 from .base import BasePolicy
 
 

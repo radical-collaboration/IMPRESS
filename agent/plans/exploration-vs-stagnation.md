@@ -1,3 +1,9 @@
+<!-- DECIDED in phase 2 of plans/control-plane-refactor.md. Kept for the evidence it
+     records, which is what made the ruling obvious once the question was put the right way.
+     The ruling: a run that COULD NOT have moved the front is not evidence that progress has
+     stalled. See backlog G1's RESOLVED paragraph and
+     runtime/executor._could_reach_the_front. -->
+
 # Stub: exploration cannot move the front, so it counts toward stagnation
 
 **Status:** not started. Found on 2026-09-23 while modelling the explore/exploit timeline for the

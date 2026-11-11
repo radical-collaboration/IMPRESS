@@ -11,10 +11,11 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 ## Commands
 
 ```bash
+./scripts/dev_setup.sh           # once: creates .venv and installs BOTH projects editable
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
-pip install -e ".[dev]"          # once; then no PYTHONPATH is needed anywhere
 
-pytest tests -q                                      # the whole local tier, no allocation (~2min on a login node)
+ruff check src tests                                 # reports; never rewrites. Ceiling: ZERO
+pytest tests -q                                      # the whole local tier, no allocation (~19s local, ~2min on a login node)
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
@@ -29,9 +30,21 @@ Without the editable install, prefix with `PYTHONPATH=src` and use `python -m im
 
 ### Environment
 
-Use the project `.venv`. The system Python has `radical.asyncflow` **0.3.1** installed while this project
-requires **0.5.1**, and its `rhapsody` is an editable install pointing at a different checkout. Running
-tests against it produces confusing API errors.
+Use the project `.venv`, built by **`./scripts/dev_setup.sh`**. It does two editable installs and
+the order is load-bearing: `pip install -e ..` (the root `impress` package, which this project now
+depends on and which exists on no index) *before* `pip install -e ".[dev]"`, or pip resolves the
+name `impress` against PyPI and installs whatever it finds there — a failure that is silent until
+an import returns the wrong module. `tests/test_toolchain.py` asserts the installed `impress` is
+this repository's.
+
+Do not run the tier against the system Python. The reason recorded here was that it carried
+`radical.asyncflow` **0.3.1**; measured 2026-11-06 it carries **0.5.1** in `~/.local`, so that
+specific claim is stale — but a user-site install that drifts under you is the hazard, not any
+particular version, and `rhapsody` there has pointed at a different checkout.
+
+**Verified middleware: `radical.asyncflow` 0.6.0 / `rhapsody-py` 0.6.0**, 186 tests green in ~19s
+(2026-11-06, Python 3.10.12). `docs/reference/middleware-integration.md` was written against
+0.5.1/0.5.0 and its API notes still hold; check the installed version before trusting any of them.
 
 On Delta, `.venv` is a **symlink** to `$WORK_DIR/ve/impress_a`, and `$WORK_DIR` must be on NVMe
 (`/work/nvme/<project>/$USER`). The venv holds PyRosetta and torch, and reading them is the single
@@ -128,12 +141,19 @@ that blocks its own thread's event loop the way Dragon's `Batch()` does) ·
 `test_http_adapter.py` (a campaign driven end to end over a loopback socket) ·
 `test_layering.py` (the import contract, walked with `ast` rather than trusted to review) ·
 `test_gate_fixtures.py` (each real tool's gates against its known-bad fixtures, and the
-registry against the tool directories on disk).
+registry against the tool directories on disk) ·
+`test_toolchain.py` (that the `impress` dependency resolves to this repository and that the
+local `[tool.ruff]` table exists with `fix = false`).
 
 **Counts are not restated in prose.** `test_gate_fixtures.py` derives the tool count from the
-toolkit directories rather than asserting 11; there is no asserted test count and no asserted lint
-count. The one number worth stating is the lint ceiling, and it is stated once, in
-`plans/backlog.md`.
+toolkit directories rather than asserting 11, and there is no asserted test count.
+
+**The lint ceiling is ZERO**, and that is the one number worth stating. It used to be quoted as
+41 and did not reproduce, because no `[tool.ruff]` table existed here and ruff resolved to the
+root project's config: 449 findings against that, 9 against ruff's own defaults. With a local
+table at `line-length = 100` the residual was 57; all 57 were fixed and `N818` was declined with
+its reason in `pyproject.toml`. So a finding now is a regression, not a budget — which is the
+only form in which a ceiling is worth anything.
 
 **A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
 tests before anyone noticed the defect was in the executor, not the test setup. If a test needs an

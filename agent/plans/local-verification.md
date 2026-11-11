@@ -46,10 +46,14 @@ PyRosetta or Boltz has ever executed through this system — is untouched by a g
 ### 2. Lint
 
 ```bash
-ruff check src tests       # must not exceed 41
+ruff check src tests       # must report NOTHING
 ```
 
-A ceiling, not a target. Rising means new debt; falling is welcome.
+Zero, not a budget: any finding is a regression. The config that governs this lives in
+`agent/pyproject.toml` with `fix = false`, so the command reports and never rewrites. Before H6
+closed there was no table here at all and ruff resolved to the root project's, which sets
+`fix = true` — so this command used to edit the tree, and the 41 it was measured against came from
+ruff's bare defaults rather than any configuration in the repository.
 
 ### 3. The import contract
 
@@ -143,7 +147,8 @@ Three of the four this file originally recorded are closed. What each cost, and 
    that carries signal: loading is all-or-nothing, so a broken gate id removes a whole toolkit and
    shows up as a shorter list. The test and lint counts are simply no longer restated — a test
    asserting the test count fails on every legitimate addition, and a test shelling out to `ruff`
-   would pin the suite to a lint version. The lint ceiling survives as prose in `backlog.md`, once.
+   would pin the suite to a lint version. The lint ceiling survives as prose, once — now in
+   `CLAUDE.md`, and now zero.
 
    Found while doing this: `README.md` said **77 tests** in two places. The earlier 89 → 94 sync
    had missed it entirely, which is the argument for deleting the numbers rather than maintaining

@@ -13,7 +13,10 @@ from typing import Any
 
 import yaml
 
+from ..compose.composer import Composer
+from ..compose.interlock import TrustLedger
 from ..compose.validate import SiteCaps
+from ..core.decision import ExperimentIntent
 from ..core.pareto import Objective
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
@@ -34,7 +37,7 @@ POLICIES = reasoners.CLASSES
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
-SUBCOMMANDS = ("run", "tools", "models", "preflight")
+SUBCOMMANDS = ("run", "tools", "models", "preflight", "trust")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -123,6 +126,125 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
     return pol
 
 
+def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
+                records: list[dict[str, Any]] | None = None,
+                specifier: str | None = None, planner: str | None = None):
+    """The same adapter, for the two halves.
+
+    The guard still wraps the *decision-making* half rather than the pair: while the strangler
+    is in place both halves come from one `ControlPolicy`, so wrapping it once is wrapping both.
+    Phase 9 replaces it with `StageGuard`, which can refuse a Stage directly - including a RUN
+    task that serves no objective, which no policy-level wrapper could see.
+    """
+    opts = reasoners.ReasonerOptions(stages=list(spec.stages) or None, records=records)
+    if specifier or planner:
+        return reasoners.build_roles(specifier or model, planner or model, opts)
+    pol = build_policy(model, spec, guard, records)
+    return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def _halves_of(policy: Any):
+    from ..policy.legacy import DecideAsRoles
+    pair = DecideAsRoles(policy)
+    return pair.specifier, pair.planner
+
+
+def _git_sha() -> str:
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+                             text=True, timeout=5, cwd=str(Path(__file__).resolve().parents[3]))
+        sha = out.stdout.strip() if out.returncode == 0 else ""
+        dirty = subprocess.run(["git", "status", "--porcelain", "-uno"], capture_output=True,
+                               text=True, timeout=5,
+                               cwd=str(Path(__file__).resolve().parents[3]))
+        return f"{sha}{'-dirty' if dirty.stdout.strip() else ''}" if sha else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _signatures_for(spec: CampaignSpec, widths: list[int]) -> list[tuple[str, list[str], int]]:
+    """The pattern signatures a campaign will actually compose, one per replica width.
+
+    Computed by composing the campaign's own chain rather than guessed, because the signature
+    is a hash of graph shape and **includes replica multiplicity** - asserting at width 1 does
+    not trust width 4, which is the whole of backlog A10. `--replicas` therefore takes the
+    widths the campaign will run, and a campaign that will fan out to 4 must say so here.
+    """
+    reg = Registry().load()
+    composer = Composer(reg)
+    out = []
+    for width in widths:
+        intent = ExperimentIntent(goal=spec.goal, stages=list(spec.stages),
+                                  params=dict(spec.params), replicas=width)
+        graph = composer.compose(intent, run_label="trust-assert")
+        tools = sorted({n.tool for n in graph.nodes.values()})
+        out.append((graph.pattern_signature(), tools, width))
+    return out
+
+
+def trust(spec_path: str | None, do_assert: bool, revoke: str | None, reason: str,
+          widths: list[int]) -> int:
+    """Grant, list or withdraw trust for the composition patterns a campaign runs.
+
+    A pre-loaded Toolkit of Tasks proven elsewhere should not spend an allocation re-earning
+    trust at runtime, and for a wide pattern it *cannot*: promotion counts consecutive clean
+    runs, and replica multiplicity is part of the signature, so width 4 can never reach three
+    clean runs under a realistic budget while the one-instance-in-flight rule serialises it.
+
+    What this does not do is pretend the trust was earned. The ledger records an `asserted`
+    event with who, why and the commit, and every listing distinguishes it - because a figure
+    derived from an asserted admission has to be reportable as such.
+    """
+    ledger_dir = Path(os.environ.get("IMPRESS_A_TRUST_DIR", "")
+                      or (Path(load_spec(spec_path).root) / "_trust" if spec_path
+                          else "campaigns/_runs/_trust"))
+    api = os.environ.get("IMPRESS_A_GPU_API", "cuda")
+    led = TrustLedger.load(ledger_dir / f"{api}.jsonl")
+    print(f"\n  trust ledger: {(ledger_dir / f'{api}.jsonl').resolve()}")
+
+    if revoke:
+        ok = led.revoke(revoke, reason=reason or "revoked from the command line")
+        print(f"  {'revoked' if ok else 'not trusted, nothing to revoke'}: {revoke}")
+        return 0 if ok else 1
+
+    if do_assert:
+        if not spec_path:
+            print("  --assert needs a campaign spec: the signature is computed from its chain")
+            return 1
+        if not reason.strip():
+            print("  --assert needs --reason: it is the justification on the record, and what "
+                  "a later reader will ask for")
+            return 1
+        spec = load_spec(spec_path)
+        if not spec.stages:
+            print("  that campaign declares no stages, so there is no chain to assert")
+            return 1
+        sha = _git_sha()
+        for sig, tools, width in _signatures_for(spec, widths):
+            led.assert_trusted(sig, tools, reason=reason, by=os.environ.get("USER", ""),
+                               git_sha=sha)
+            print(f"  asserted {sig}  replicas={width}  ({', '.join(tools)})")
+        print(f"  reason: {reason}")
+        if sha:
+            print(f"  git:    {sha}")
+
+    rows = [("signature", "trust", "clean", "demotions", "tools")]
+    for sig in sorted(led.patterns):
+        r = led.patterns[sig]
+        rows.append((sig, "asserted" if r.asserted else "earned" if r.trusted else "-",
+                     str(r.clean_runs), str(r.demotions), ",".join(r.tools)))
+    widths_ = [max(len(c) for c in col) for col in zip(*rows, strict=True)]
+    print()
+    for n, row in enumerate(rows):
+        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths_, strict=True)).rstrip())
+        if n == 0:
+            print("  " + "  ".join("-" * w for w in widths_))
+    if len(rows) == 1:
+        print("  (no patterns known at this site yet)")
+    return 0
+
+
 def print_models() -> int:
     """Print the control models, their shape and their real status.
 
@@ -134,7 +256,7 @@ def print_models() -> int:
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     print()
     for n, row in enumerate(rows):
-        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
+        print("  " + "  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)).rstrip())
         if n == 0:
             print("  " + "  ".join("-" * w for w in widths))
     print()
@@ -242,7 +364,8 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
-                       replay_from: str | None = None) -> int:
+                       replay_from: str | None = None, control: str | None = None,
+                       specifier: str | None = None, planner: str | None = None) -> int:
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
@@ -257,10 +380,21 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
         actual = os.environ[var]
         log.info("thread cap %-22s %s%s", var, actual,
                  "" if actual == val else f"  (kept from the environment, not {val})")
-    spec.campaign_id = f"{spec.campaign_id}-{model}"
+    # Naming either half implies the role pipeline: a Specifier has nowhere to run in the
+    # single-`decide` path. Stated as an implication rather than an error so that
+    # `--specifier B --planner D` is one flag pair rather than three.
+    if specifier or planner:
+        control = "roles"
+    if control:
+        spec.control = control
+    label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
+    spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
         records = _replay_records(replay_from) if replay_from else None
-        policy = build_policy(model, spec, guard, records)
+        if spec.control == "roles":
+            policy = build_roles(model, spec, guard, records, specifier, planner)
+        else:
+            policy = build_policy(model, spec, guard, records)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -271,11 +405,19 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     # campaign that degraded to its fallback and one that deliberately ran the rehearsal
     # stand-in both report zero LLM calls; on the sibling example's job 23219379 that
     # ambiguity let 144 degraded turns read as a frontier-model result for a full day.
-    _m = reasoners.MODELS[model]
-    log.info("control model %s (%s): %s, %s llm shape, status=%s",
-             _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
-    if _m.note:
-        log.info("control model %s caveat: %s", _m.letter, _m.note)
+    # Which reasoner actually ran, and under which control vocabulary. Both halves are named
+    # even when they come from one model, because "model B" and "B's specifier with D's
+    # planner" produce different campaigns and a log that cannot tell them apart is how a
+    # degraded arm gets read as a frontier-model result.
+    for letter in dict.fromkeys([specifier or model, planner or model]):
+        _m = reasoners.MODELS[letter]
+        log.info("control model %s (%s): %s, %s llm shape, status=%s",
+                 _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
+        if _m.note:
+            log.info("control model %s caveat: %s", _m.letter, _m.note)
+    log.info("control vocabulary: %s%s", spec.control,
+             f" (specifier={specifier or model}, planner={planner or model})"
+             if spec.control == "roles" else "")
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
@@ -284,7 +426,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     if heartbeat_s is None:
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
     log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",
-             spec.campaign_id, model, spec.backend, mgr.root,
+             spec.campaign_id, label, spec.backend, mgr.root,
              ",".join(spec.stages) or "<policy default>", spec.replicas)
     # Absolute, and with a count. Trust accumulated inside each job's working directory for
     # three allocations without anyone noticing, because nothing ever named the file - a
@@ -459,6 +601,35 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
 
+    # The `impress` dependency is published on no index, so if pip ever went looking for that
+    # name it installed something else - and the failure is silent, because the import succeeds
+    # and hands back a working module that is simply not ours. Both installers put the root
+    # editable install first to prevent that; this proves the result on the machine that will
+    # run the campaign. Deterministic either way, so never undetermined.
+    # `find_spec`, not `import`: this resolves the name without executing the module, so
+    # preflight stays cheap and the import surface for the root package stays at exactly the two
+    # modules `tests/test_layering.py` allows. Checking where a dependency resolves to does not
+    # require depending on it.
+    try:
+        import importlib.util
+
+        import impress_a as _ia
+        found = importlib.util.find_spec("impress")
+        origin = Path(found.origin).resolve() if found and found.origin else None
+        want = Path(_ia.__file__).resolve().parents[3] / "src" / "impress" / "__init__.py"
+        if origin is None:
+            checks.append(("impress package", False,
+                           "not installed - run scripts/dev_setup.sh (or step 3 of "
+                           "scripts/delta_env_setup.sh), which installs it from the root"))
+        else:
+            checks.append(("impress package", origin == want,
+                           f"{origin}" if origin == want else
+                           f"resolved to {origin}, not {want} - a package of that name came "
+                           f"from an index; `pip uninstall impress` and re-run "
+                           f"scripts/dev_setup.sh"))
+    except (ImportError, ValueError) as e:
+        checks.append(("impress package", False, f"could not resolve: {e!r}"))
+
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
 
@@ -482,6 +653,17 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run", help="run a campaign")
     r.add_argument("spec")
     r.add_argument("--model", default="D", choices=sorted(POLICIES))
+    # The two halves. `--model X` takes both from one row, which keeps a four-arm comparison
+    # one-variable; naming them separately takes one from each, which is what makes it
+    # measurable whether specification or planning is where a model earns its cost. Either
+    # form implies `--control roles`, because a Specifier has nowhere to run in the legacy
+    # single-`decide` path.
+    r.add_argument("--specifier", default=None, choices=sorted(POLICIES),
+                   help="Specifier half (implies --control roles)")
+    r.add_argument("--planner", default=None, choices=sorted(POLICIES),
+                   help="Planner half (implies --control roles)")
+    r.add_argument("--control", default=None, choices=("legacy", "roles"),
+                   help="control vocabulary (default: the campaign spec's, which is legacy)")
     r.add_argument("--no-guard", action="store_true")
     r.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS",
                    help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
@@ -495,12 +677,30 @@ def main(argv: list[str] | None = None) -> int:
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
+    tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
+    tr.add_argument("spec", nargs="?", default=None)
+    tr.add_argument("--assert", dest="do_assert", action="store_true",
+                    help="grant trust to the patterns this campaign composes")
+    tr.add_argument("--revoke", default=None, metavar="SIGNATURE")
+    tr.add_argument("--reason", default="",
+                    help="why (required for --assert; it is the record)")
+    tr.add_argument("--replicas", type=int, action="append", default=None, metavar="N",
+                    help="replica width to assert at, repeatable. The signature includes "
+                         "replica multiplicity, so width 1 does not cover width 4 "
+                         "(backlog A10). Default: the campaign's own `replicas`")
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
-                                        a.heartbeat, a.replay_from))
+                                        a.heartbeat, a.replay_from,
+                                        control=a.control, specifier=a.specifier,
+                                        planner=a.planner))
     if a.cmd == "models":
         return print_models()
+    if a.cmd == "trust":
+        widths = a.replicas
+        if widths is None:
+            widths = [max(1, load_spec(a.spec).replicas)] if a.spec else [1]
+        return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec) if a.spec else None)
     reg = Registry().load(a.toolkits)

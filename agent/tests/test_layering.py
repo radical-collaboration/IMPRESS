@@ -134,6 +134,44 @@ def test_the_import_contract_holds():
     assert bad == [], "\n".join(bad)
 
 
+#: The only modules that may import the root `impress` package. IMPRESS-A depends on it for the
+#: execution loop (`ImpressBasePipeline`, `ImpressManager`) and for nothing else: a `policy` or
+#: `core` module reaching it would put framework types into the reasoner contract, and
+#: `ImpressBasePipeline` cannot cross the `CampaignSession` boundary.
+IMPRESS_IMPORTERS = {"runtime/runner.py", "runtime/pipelines.py"}
+
+
+def test_only_the_runner_imports_impress():
+    """The dependency boundary, asserted the same way as the internal one.
+
+    `agent/` depends on the repository root's `impress` and may not modify it. Keeping the
+    import surface to two modules is what makes that a boundary rather than a coupling: it is
+    the difference between "the execution loop is built on IMPRESS" and "IMPRESS-A is a fork of
+    it". Passes trivially while nothing imports it, which is the point - it holds as the Runner
+    lands rather than being written afterwards to describe whatever happened.
+    """
+    bad = []
+    for path in sorted(SRC.rglob("*.py")):
+        rel = path.relative_to(SRC).as_posix()
+        if rel in IMPRESS_IMPORTERS:
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+            elif isinstance(node, ast.Import):
+                mod = next((a.name for a in node.names
+                            if a.name == "impress" or a.name.startswith("impress.")), "")
+            else:
+                continue
+            # `impress_a` also starts with "impress"; match the package, not the prefix.
+            if mod == "impress" or mod.startswith("impress."):
+                bad.append(f"{rel}:{node.lineno}: imports {mod!r}")
+    assert bad == [], (
+        "only " + ", ".join(sorted(IMPRESS_IMPORTERS)) + " may import the root `impress` "
+        "package:\n" + "\n".join(bad))
+
+
 def test_every_layer_is_in_the_table():
     """A new package under `impress_a/` must be placed in the contract, not skipped.
 

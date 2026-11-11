@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +41,22 @@ from ..core.provenance import ProvenanceLog
 from ..core.qc import QCVerdict
 from ..core.results import RunOutcome, RunState, RunStatus
 from ..core.session import CampaignStopped, SubmissionRejected
+from ..core.spec import (
+    Spec,
+    SpecRevision,
+    Stage,
+    StageStatus,
+    TaskDirective,
+    TaskRecord,
+    TaskState,
+)
 from ..core.tree import CampaignTree, DesignNode, NodeStatus
 from ..exec.dispatch import Dispatcher, ExecutionResults
 from ..exec.ledger import JobLedger
+from ..exec.task_ledger import TaskLedger
 from ..tools.registry import Registry
+from ..tools.view import view_of
+from .reviewer import StageReviewer
 
 
 class CampaignAborted(RuntimeError):
@@ -65,6 +78,13 @@ class CampaignSpec:
     max_runs: int = 0         # submissions; 0 = unbounded. See `max_cycles`.
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
+    # Backstop for runs exempted from the stagnation counter. A run that could not reach the
+    # front is not evidence of stagnation (backlog G1) - but an exemption with no bound is
+    # fail-open, and a campaign whose chain can NEVER produce a constrained objective would
+    # then burn its whole allocation at full speed. This is not a search-shaping knob: it sits
+    # well above any legitimate run of exploration, and tripping it means the chain is wrong
+    # rather than unlucky.
+    max_unproductive_runs: int = 8
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -103,6 +123,12 @@ class CampaignSpec:
     # a policy asks for, so a policy never has to know a tool's parameter names.
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
     replicas: int = 0         # cap on lineages per experiment; 0 = policy decides
+    # Which control vocabulary drives this campaign. `legacy` is the single `decide(obs)`
+    # seam; `roles` is the Spec Loop + Planning Loop pipeline. Both run the same composition,
+    # validation, execution and state, which is what makes the two comparable - see
+    # `test_roles_pipeline_reproduces_the_legacy_campaign`. Phase 11 deletes `legacy` and this
+    # field with it.
+    control: str = "legacy"
 
 
 @dataclass
@@ -137,6 +163,19 @@ class RunRecord:
     #: Absorptions visible when this run was admitted. What separates a run that had a
     #: chance to act on the last result from one already in flight when it landed.
     informed_by: int = 0
+    #: Whether a node from this run's graph could be front-eligible at all. False for a
+    #: chain that cannot produce some constrained objective - an explore chain, or one a
+    #: budget correction truncated. Such a run is not evidence of stagnation (backlog G1).
+    could_reach_the_front: bool = True
+    #: Set when this run was admitted from a Stage rather than an intent. Exactly one of
+    #: `intent` and `stage` is meaningful; `parent_node` reads whichever it is.
+    stage: Any = None
+
+    @property
+    def parent_node(self) -> str | None:
+        if self.stage is not None:
+            return getattr(self.stage, "parent_node", None)
+        return getattr(self.intent, "parent_node", None)
 
 
 log = logging.getLogger(__name__)
@@ -152,11 +191,27 @@ class CampaignExecutor:
         self.root = Path(spec.root) / spec.campaign_id
         self.prov = ProvenanceLog(self.root / "provenance")
         self.jobs = JobLedger(self.root / "jobs" / "ledger.jsonl")
+        # A SECOND file, folded on task_id. Not a re-keying of the run ledger: run-keyed
+        # recovery is what `RunService.outcome` depends on, so changing it would trade one
+        # missing index for another.
+        self.tasks = TaskLedger(self.root / "jobs" / "tasks.jsonl")
         trust_dir = Path(spec.trust_root) if spec.trust_root else Path(spec.root) / "_trust"
         self.trust = TrustLedger.load(trust_dir / f"{spec.site.gpu_api}.jsonl")
         self.composer = Composer(self.reg)
         self.validator = Validator(self.reg, spec.site, self.budget)
+        self.reviewer = StageReviewer(self.validator, self.budget)
         self.cycle = 0
+        # The APPLIED Spec. A Specifier authors revisions; this is the only writer, so `specs`
+        # provenance is executor-written - which is the structural reason an arm's own
+        # bookkeeping is never what it gets scored on. The Reviewer's coverage gate (phase 3)
+        # reads this replica rather than whatever a Planner asserts is open, because not
+        # trusting that assertion is the Reviewer's whole purpose.
+        self.spec_state: Spec = Spec(campaign_id=spec.campaign_id)
+        # Immutable for the campaign, so built once. Narrowed to the campaign's own stages
+        # when it declared any: a Specifier shown the mock toolkit on a real campaign can map
+        # the Goal onto outputs that would then execute mocks on a GPU allocation, which
+        # plans/done/02-real-toolkit.md records as the headline bug of that work.
+        self._toolkit = view_of(self.reg, list(spec.stages) or None)
         # Labels issued vs experiments actually dispatched. A rejected submission still
         # burns a label - the retry is a different graph with a different draw, so it
         # must not reuse one - but it never ran and must not be counted as a run.
@@ -166,6 +221,9 @@ class CampaignExecutor:
         self.pending_human: RequestHuman | None = None
         self.prov_sink: Any = None
         self._stagnant = 0
+        # Consecutive absorbed runs that could not have reached the front. Reset by any run
+        # that could.
+        self._unproductive = 0
         # Absorptions counted toward stagnation so far. Runs admitted before this
         # watermark were already in flight when the last counted result landed.
         self._counted_through = 0
@@ -211,6 +269,44 @@ class CampaignExecutor:
         if self.prov_sink is not None:
             self.prov_sink(self.spec.campaign_id, kind, dict(record))
 
+    # -- the Spec ------------------------------------------------------------
+    # Both of these are synchronous and `await`-free, like every other mutating block here.
+    # The discipline is not enforced by the language: adding an `await` inside one would let an
+    # observation be taken half way through a revision, and a torn Spec is close to
+    # undiagnosable from provenance afterwards.
+    def set_spec(self, spec: Spec) -> int:
+        """Install the initial Spec. Returns the applied generation."""
+        spec.campaign_id = self.spec.campaign_id
+        self.spec_state = spec
+        self._log("specs", {"event": "initial", "generation": spec.generation,
+                            "aims": sorted(spec.aims),
+                            "objectives": {o.id: o.status.value
+                                           for o in spec.objectives.values()}})
+        return spec.generation
+
+    def apply_revision(self, rev: SpecRevision) -> int:
+        """Apply one revision to the Spec. Returns the applied generation."""
+        self.spec_state.apply(rev)
+        self._log("specs", {"event": "revision",
+                            "generation": self.spec_state.generation,
+                            "new_aims": [a.id for a in rev.new_aims],
+                            "new_objectives": [o.id for o in rev.new_objectives],
+                            "deleted": list(rev.deleted),
+                            "status_changes": {k: v.value
+                                               for k, v in rev.status_changes.items()},
+                            "rationale": rev.rationale})
+        return self.spec_state.generation
+
+    def publish_spec(self, payload: Spec | SpecRevision) -> int:
+        """One entry point for a Specifier, whichever side of a process boundary it is on.
+
+        Phase 3 makes this a `CampaignSession` and `CampaignControlPlane` operation so it can
+        cross a socket; today the manager hands it to the driver directly.
+        """
+        if isinstance(payload, Spec):
+            return self.set_spec(payload)
+        return self.apply_revision(payload)
+
     # -- observe -------------------------------------------------------------
     def observe(self, last_rejection: ValidationFailure | None = None,
                 since: int | None = None) -> CampaignObservation:
@@ -235,7 +331,13 @@ class CampaignExecutor:
             objectives=self.spec.objectives, pareto_front=front, population=stats,
             recent=[self.tree.get(nid) for nid in self._absorbed[cursor:]],
             seq=len(self._absorbed),
-            budget=self.budget, available_tools=self.reg.ids(),
+            # The NARROWED ids, not the registry's. These go straight into model B's prompt
+            # (`policy/oracle.py`), so the full list told a real campaign that the mock
+            # toolkit was available - the mock-chain-on-a-GPU hazard surviving in the half
+            # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
+            # this one is derived from the other.
+            budget=self.budget, available_tools=self._toolkit.ids,
+            toolkit=self._toolkit, spec=self.spec_state,
             last_rejection=last_rejection)
 
     # -- update --------------------------------------------------------------
@@ -290,10 +392,34 @@ class CampaignExecutor:
 
         At `concurrency: 1` every run is submitted after the previous one was absorbed,
         so every run counts and the behaviour is exactly what it always was.
+
+        **A run that could not have moved the front is not evidence either** (backlog G1).
+        The flaw there is the same KIND as the fan-out one and was found the same way: the
+        counter was asking "did the front change" when the question it needs answered is "did
+        something that could have changed the front fail to". An explore chain emits none of
+        the constrained objectives, so `pareto.feasible` rejects its nodes for a missing value,
+        the front stays empty, and at concurrency 1 every landing increments - ending a
+        campaign whose science is going fine, modelled at t~135 min of a 4 h allocation,
+        before the first exploit run lands. Raising `stagnation_limit` would hide that rather
+        than fix it; excluding the runs that never had a chance fixes it. Additive by
+        construction: a run that can produce every constrained objective counts exactly as
+        it did.
         """
+        # The exemption's own counter. Tracked separately because the two say different
+        # things: `_stagnant` means "work that could have progressed did not", and this means
+        # "nothing that could progress has been attempted". They need different stop reasons,
+        # or a reader cannot tell a search that stalled from a chain that was never able to
+        # score.
+        if rec.could_reach_the_front:
+            self._unproductive = 0
+        else:
+            self._unproductive += 1
+
         ids = {n.id for n in pareto_front(self.tree.live(), self.spec.objectives)}
         if ids != self._last_front_ids:
             self._last_front_ids, self._stagnant = ids, 0
+        elif not rec.could_reach_the_front:
+            pass    # never had a chance; says nothing about whether progress has stalled
         elif rec.informed_by >= self._counted_through:
             self._stagnant += 1
             self._counted_through = len(self._absorbed)
@@ -323,11 +449,23 @@ class CampaignExecutor:
                 reason=f"unknown tool {unknown.args[0] if unknown.args else unknown}",
                 detail={"stages": list(intent.stages),
                         "available": self.reg.ids()})
+        return await self._admit_graph(graph, run_label, intent=intent)
+
+    async def _admit_graph(self, graph, run_label: str, *, intent=None, stage=None,
+                           reviewed: bool = False
+                           ) -> tuple[RunRecord | None, ValidationFailure | None]:
+        """The interlock, the cap and the reservation - shared by both admission paths.
+
+        `reviewed=True` means a `StageReviewer` has already run gate 1-5 and the dry-run, so
+        they are not repeated: the dry-run instantiates every task agent in the graph, and
+        running it twice per admission would double the cost of the most expensive check for
+        no new information.
+        """
         sig = graph.pattern_signature()
         self.trust.record_for(sig, [n.tool for n in graph.nodes.values()])
         scrutiny = Scrutiny.for_pattern(self.trust, sig)
 
-        failure = self.validator.validate(graph)
+        failure = None if reviewed else self.validator.validate(graph)
         if failure is None and not scrutiny.trusted and sig in self._untrusted_inflight:
             failure = ValidationFailure(
                 gate="interlock", transient=True,
@@ -345,7 +483,7 @@ class CampaignExecutor:
                                f"{scrutiny.cost_cap_fraction:.0%} of available "
                                f"{dim} ({c:.3f} > {cap:.3f})")
                     break
-        if failure is None and scrutiny.force_dry_run:
+        if failure is None and scrutiny.force_dry_run and not reviewed:
             failure = await self.validator.dry_run(graph)
         if failure is None:
             # Reserve LAST. dry_run awaits, so the budget gate 5 saw may already have
@@ -385,8 +523,43 @@ class CampaignExecutor:
         if not scrutiny.trusted:
             self._untrusted_inflight.add(sig)
         return RunRecord(run_id=run_label, graph=graph, signature=sig,
-                         scrutiny=scrutiny, intent=intent, turn=self.cycle,
-                         informed_by=len(self._absorbed)), None
+                         scrutiny=scrutiny, intent=intent, stage=stage, turn=self.cycle,
+                         informed_by=len(self._absorbed),
+                         # Answered here, where the graph is in hand. The stagnation counter
+                         # is updated much later, by which time it is not.
+                         could_reach_the_front=self._could_reach_the_front(graph)), None
+
+    def _producible_metrics(self, graph) -> set[str]:
+        """Every metric some tool in this graph declares, or gates on.
+
+        Gate metrics are unioned in because a gated name is by definition reported, which
+        keeps a tool honest if its `metrics:` declaration drifts.
+        """
+        produced: set[str] = set()
+        for node in graph.nodes.values():
+            spec = self.reg.get(node.tool)
+            produced.update(spec.metrics)
+            for gate in spec.qc_gates:
+                if metric := (gate.params or {}).get("metric"):
+                    produced.add(metric)
+        return produced
+
+    def _could_reach_the_front(self, graph) -> bool:
+        """Whether a node from this graph could be FEASIBLE at all.
+
+        `pareto.feasible` admits a node only if every *constrained* objective - one with a
+        min or a max - has a value satisfying it, and `satisfied_by(None)` is False. So a
+        graph that cannot produce one of those names cannot produce a front-eligible node,
+        whatever the science does.
+
+        That is backlog G1's mechanism, and this is the one question whose answer makes the
+        stagnation counter honest: a run that COULD NOT have moved the front is not evidence
+        that progress has stalled. Unconstrained objectives are deliberately excluded - they
+        rank but never prune, so missing one costs a node nothing.
+        """
+        constrained = {o.name for o in self.spec.objectives
+                       if o.min is not None or o.max is not None}
+        return not constrained or constrained <= self._producible_metrics(graph)
 
     def _objectives_without_a_producer(self, graph) -> list[str]:
         """Campaign objectives no tool in this graph reports a metric for.
@@ -407,14 +580,7 @@ class CampaignExecutor:
         wanted = {o.name for o in self.spec.objectives}
         if not wanted:
             return []
-        produced: set[str] = set()
-        for node in graph.nodes.values():
-            spec = self.reg.get(node.tool)
-            produced.update(spec.metrics)
-            for gate in spec.qc_gates:
-                if metric := (gate.params or {}).get("metric"):
-                    produced.add(metric)
-        return sorted(wanted - produced)
+        return sorted(wanted - self._producible_metrics(graph))
 
     def _apply_campaign_defaults(self, intent: ExperimentIntent) -> ExperimentIntent:
         """Fill in what the campaign declares and the policy did not ask about.
@@ -445,6 +611,154 @@ class CampaignExecutor:
         })
 
     # -- the session surface -------------------------------------------------
+    async def submit_stage(self, stage: Stage) -> str:
+        """Admit and dispatch one Stage. Synchronous admission, as `submit` is.
+
+        Synchronous because `dry_run` instantiates task agents, so admission has to happen
+        where the toolkit is installed - which is also why it stays synchronous over a socket
+        in phase 7, and why the Reviewer and Deployer are execution-side rather than part of
+        the control process.
+
+        Cancellation is processed BEFORE composition: a Stage that only cancels orphaned work
+        is a legitimate Stage with nothing to run, and composing an empty graph to reject it
+        would turn housekeeping into a rejection.
+        """
+        if self._halt.is_set():
+            raise CampaignStopped(self._stop_reason or "campaign has ended")
+        await self._await_resume()
+        self._apply_cancels(stage)
+        if not stage.runs:
+            stage.status = StageStatus.SETTLED
+            self._log("stages", {"event": "cancels_only", "stage": stage.id,
+                                 "cancels": list(stage.cancels)})
+            raise SubmissionRejected(ValidationFailure(
+                gate="coverage", transient=True,
+                reason="stage has no runnable task (cancels only)",
+                detail={"cancels": list(stage.cancels)}))
+        if self.spec.max_runs and self.run_seq >= self.spec.max_runs:
+            self.request_stop(f"max_runs={self.spec.max_runs} reached")
+            raise CampaignStopped(self._stop_reason)
+
+        self.run_seq += 1
+        run_label = f"r{self.run_seq:04d}"
+        rec, failure = await self._admit_stage(stage, run_label)
+        if failure is not None:
+            stage.status = StageStatus.REJECTED
+            self.last_rejection = failure
+            self._rejections += 1
+            if self._rejections >= self.spec.max_admission_failures:
+                self.request_stop(
+                    f"{self._rejections} submissions rejected at admission")
+            raise SubmissionRejected(failure)
+
+        stage.status = StageStatus.DEPLOYED
+        stage.graph_id = rec.graph.id
+        self._dispatch(rec, run_label)
+        self._record_stage_tasks(stage, rec, run_label)
+        return run_label
+
+    async def _admit_stage(self, stage: Stage, run_label: str
+                           ) -> tuple[RunRecord | None, ValidationFailure | None]:
+        """Compose the Stage, review it, then admit the graph."""
+        try:
+            graph = self.composer.compose_stage(stage, run_label)
+        except KeyError as unknown:
+            return None, ValidationFailure(
+                gate="type",
+                reason=f"unknown tool {unknown.args[0] if unknown.args else unknown}",
+                detail={"tools": stage.tools, "available": self._toolkit.ids})
+        # Backlog A8, finally a refusal rather than a `log.warning`. On job 22675512 a budget
+        # correction truncated `boltz_predict` off the chain, taking the only producer of two
+        # of four objectives with it; nothing refused it, the run was unwinnable from the
+        # moment it was admitted, and the admitted graph recorded `rejected: null`. A warning
+        # in a log nobody reads during an allocation is not a gate.
+        #
+        # Gated on the Stage path only. The legacy `submit` keeps the warning so that path's
+        # behaviour is unchanged - including the truncated-chain characterization test, which
+        # runs a sub-chain on purpose - and phase 11 deletes it along with the path.
+        if orphaned := self._objectives_without_a_producer(graph):
+            failure = ValidationFailure(
+                gate="coverage",
+                reason=(f"no tool in this stage reports {', '.join(orphaned)}, so no node it "
+                        f"produces can be ranked on {'them' if len(orphaned) > 1 else 'it'}"),
+                detail={"unproducible_objectives": orphaned,
+                        "tools": sorted({n.tool for n in graph.nodes.values()})})
+            self._log("stages", {"event": "rejected", "stage": stage.id,
+                                 "attempt": stage.attempt, "graph": graph.id,
+                                 "rejected": failure.model_dump()})
+            return None, failure
+        # Coverage is checked against the APPLIED Spec, never the Stage's claim about what is
+        # open: not trusting that claim is the Reviewer's purpose.
+        failure = await self.reviewer.review(stage, graph, self.spec_state)
+        if failure is not None:
+            self._log("stages", {"event": "rejected", "stage": stage.id,
+                                 "attempt": stage.attempt, "graph": graph.id,
+                                 "rejected": failure.model_dump()})
+            return None, failure
+        return await self._admit_graph(graph, run_label, stage=stage, reviewed=True)
+
+    def _apply_cancels(self, stage: Stage) -> None:
+        """Cancel the pending tasks this Stage names, and record what could not be reclaimed.
+
+        Only PENDING work can be reclaimed. Once a callable has started, the concurrent
+        backend's `Future.cancel()` returns False and asyncflow discards that answer, so a
+        RUNNING task asked to stop is recorded ORPHANED rather than pretended CANCELLED -
+        reclaiming a GPU from one is backlog C4 and unsolved.
+        """
+        if not stage.cancels:
+            return
+        known = self.tasks.snapshot()
+        for task_id in stage.cancels:
+            rec = known.get(task_id)
+            if rec is None:
+                continue
+            if rec.state.is_cancellable:
+                self.tasks.record_state(task_id, TaskState.CANCELLED)
+            elif not rec.state.is_terminal:
+                self.tasks.record_state(task_id, TaskState.ORPHANED)
+                if rec.run_id:
+                    self.cancel(rec.run_id)      # advisory, and recorded as such
+
+    def _record_stage_tasks(self, stage: Stage, rec: RunRecord, run_label: str) -> None:
+        """Write one durable TaskRecord per deployed task, keyed campaign-globally."""
+        for mapping in stage.runs:
+            if mapping.task_id not in rec.graph.nodes:
+                continue    # a P6 tool, inlined by the composer rather than scheduled
+            self.tasks.record_task(TaskRecord(
+                task_id=f"{self.spec.campaign_id}/{stage.id}/{mapping.task_id}",
+                campaign_id=self.spec.campaign_id, stage_id=stage.id, run_id=run_label,
+                graph_node_id=mapping.task_id, tool=mapping.tool,
+                objectives=list(mapping.objectives), state=TaskState.DEPLOYED,
+                directive=TaskDirective.RUN,
+                deployed_at=datetime.now(timezone.utc),
+                commitment=dict(stage.commitment)))
+        self._log("stages", {"event": "deployed", "stage": stage.id, "run": run_label,
+                             "graph": rec.graph.id, "spec_generation": stage.spec_generation,
+                             "attempt": stage.attempt,
+                             "tasks": {m.task_id: m.tool for m in stage.runs},
+                             "objectives": {m.task_id: list(m.objectives)
+                                            for m in stage.runs},
+                             "deferrals": [d.model_dump() for d in stage.deferrals],
+                             "cancels": list(stage.cancels)})
+
+    def _dispatch(self, rec: RunRecord, run_label: str) -> None:
+        """The shared tail of both submit paths: book the run and hand it to the backend."""
+        self._rejections = 0
+        self.cycle += 1
+        self.dispatched += 1
+        self._runs[run_label] = rec
+        self._inflight[run_label] = rec
+        self._waiters[run_label] = asyncio.get_running_loop().create_future()
+        rec.state = RunState.RUNNING
+        self.jobs.record(job_id=run_label, status="submitted", graph=rec.graph.id,
+                         signature=rec.signature, cycle=self.cycle,
+                         estimate=self.validator.estimate(rec.graph))
+        rec.handle = self.dispatcher.submit(rec.graph, run_id=run_label)
+        log.info("submitted %s: %s (trusted=%s, estimate=%s)", run_label,
+                 {tid: n.tool for tid, n in rec.graph.nodes.items()},
+                 rec.scrutiny.trusted, self.validator.estimate(rec.graph))
+        self._activity.set()
+
     async def submit(self, intent: ExperimentIntent) -> str:
         """Admit and dispatch one experiment, without waiting for it."""
         if self._halt.is_set():
@@ -468,21 +782,7 @@ class CampaignExecutor:
                     f"{self._rejections} submissions rejected at admission")
             raise SubmissionRejected(failure)
 
-        self._rejections = 0
-        self.cycle += 1
-        self.dispatched += 1
-        self._runs[run_label] = rec
-        self._inflight[run_label] = rec
-        self._waiters[run_label] = asyncio.get_running_loop().create_future()
-        rec.state = RunState.RUNNING
-        self.jobs.record(job_id=run_label, status="submitted", graph=rec.graph.id,
-                         signature=rec.signature, cycle=self.cycle,
-                         estimate=self.validator.estimate(rec.graph))
-        rec.handle = self.dispatcher.submit(rec.graph, run_id=run_label)
-        log.info("submitted %s: %s (trusted=%s, estimate=%s)", run_label,
-                 {tid: n.tool for tid, n in rec.graph.nodes.items()},
-                 rec.scrutiny.trusted, self.validator.estimate(rec.graph))
-        self._activity.set()
+        self._dispatch(rec, run_label)
         return run_label
 
     def status(self, run_id: str) -> RunStatus:
@@ -597,7 +897,7 @@ class CampaignExecutor:
         log.info("reaped %s: %d/%d tasks ok, cost=%s%s", run_id,
                  len(results.per_task), len(rec.graph.nodes), results.cost,
                  f", failures={results.failures}" if results.failures else "")
-        return self._absorb(results, rec.graph, rec.intent.parent_node,
+        return self._absorb(results, rec.graph, rec.parent_node,
                             rec.scrutiny, run_id, turn=rec.turn)
 
     def _abandon(self, run_id: str, rec: RunRecord, err: BaseException) -> None:
@@ -638,10 +938,11 @@ class CampaignExecutor:
             # the waiter; letting it escape would strand both.
             self._abandon(run_id, rec, e)
             rec.state = RunState.FAILED
-            self._resolve(run_id, RunOutcome(run_id=run_id, graph_id=rec.graph.id,
-                                             state=RunState.FAILED,
-                                             signature=rec.signature,
-                                             failures={"run": str(e)}))
+            failed_outcome = RunOutcome(run_id=run_id, graph_id=rec.graph.id,
+                                        state=RunState.FAILED, signature=rec.signature,
+                                        failures={"run": str(e)})
+            self._settle_stage_tasks(rec, failed_outcome)
+            self._resolve(run_id, failed_outcome)
             return
 
         nodes = self._settle(run_id, rec, results)
@@ -650,6 +951,7 @@ class CampaignExecutor:
         outcome = results.to_outcome(run_id, rec.graph, state=rec.state,
                                      nodes=[n.id for n in nodes],
                                      signature=rec.signature)
+        self._settle_stage_tasks(rec, outcome)
         # NOTE: `policy.interpret` is deliberately NOT called here. It used to be, which
         # made this the only place the executor reached into the reasoner - and it worked
         # only while the two shared a process. A reasoner driving the campaign through a
@@ -672,8 +974,41 @@ class CampaignExecutor:
         if self._note_progress(rec):
             self.request_stop(
                 f"stagnation: front unchanged over {self._stagnant} informed attempts")
+        elif (self.spec.max_unproductive_runs
+                and self._unproductive >= self.spec.max_unproductive_runs):
+            # A distinct reason, deliberately. "Stagnation" would say the search stalled;
+            # this says nothing capable of scoring was ever attempted, which is a different
+            # defect with a different fix - almost always a chain that cannot produce a
+            # constrained objective. Exempting these runs from the stagnation counter (G1) is
+            # correct, but an exemption with no bound is fail-open, and on an allocation that
+            # is measured in GPU-hours.
+            self.request_stop(
+                f"{self._unproductive} consecutive runs could not produce a constrained "
+                f"objective, so none could reach the front")
         elif blown := self.budget.exhausted():
             self.request_stop(f"budget exhausted: {blown}")
+
+    def _settle_stage_tasks(self, rec: RunRecord, outcome: RunOutcome) -> None:
+        """Move this run's TaskRecords out of DEPLOYED.
+
+        Per task, from the run's own per-task outcomes - not one verdict for the whole run.
+        Without this the registry answers "what was deployed" and never "what is still open",
+        which is the question a restart needs and the one that makes a cancel decidable.
+        """
+        if rec.stage is None:
+            return
+        failed = set(outcome.failures)
+        done = {t.task_id for t in outcome.tasks}
+        for mapping in rec.stage.runs:
+            if mapping.task_id not in rec.graph.nodes:
+                continue
+            state = (TaskState.FAILED if mapping.task_id in failed
+                     else TaskState.DONE if mapping.task_id in done
+                     else TaskState.FAILED)
+            self.tasks.record_state(
+                f"{self.spec.campaign_id}/{rec.stage.id}/{mapping.task_id}",
+                state, run_id=rec.run_id, outcome_ref=outcome.run_id)
+        rec.stage.status = StageStatus.SETTLED
 
     def _resolve(self, run_id: str, outcome: RunOutcome) -> None:
         """Deliver a finished run to whoever asked for it, and write it down.

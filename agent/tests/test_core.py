@@ -1,11 +1,32 @@
 """T1 - unit tests. Pure logic, no I/O."""
+
 import pytest
 
-from impress_a.core.artifacts import (AUTHORITY_ASSAY, AUTHORITY_ML_PREDICTOR, Property,
-                                      PropertySource, SourceKind)
+from impress_a.core.artifacts import (
+    AUTHORITY_ASSAY,
+    AUTHORITY_ML_PREDICTOR,
+    ArtifactRef,
+    Property,
+    PropertySource,
+    SourceKind,
+)
 from impress_a.core.budget import BudgetLedger
+from impress_a.core.data import DataRegistry, DatumKind, TaskFuture
 from impress_a.core.pareto import Direction, Objective, pareto_front
 from impress_a.core.qc import GateOutcome, GateResult, QCReport, QCVerdict
+from impress_a.core.results import RunOutcome, RunState, TaskOutcome
+from impress_a.core.spec import (
+    Aim,
+    Deferral,
+    ObjectiveStatus,
+    SatisfactionRule,
+    Spec,
+    SpecObjective,
+    SpecRevision,
+    Stage,
+    TaskDirective,
+    TaskMapping,
+)
 from impress_a.core.tree import CampaignTree, DesignNode
 from impress_a.core.types import ArtifactType, Pattern
 
@@ -33,7 +54,8 @@ def test_unparameterised_ligand_is_a_type_error():
 def test_qc_fail_is_never_rankable():
     q = QCReport().add(GateResult(gate="g", outcome=GateOutcome.FAIL))
     assert q.verdict is QCVerdict.FAIL and not q.eligible_for_front
-    s = QCReport(); s.mark_suspect("provisional")
+    s = QCReport()
+    s.mark_suspect("provisional")
     assert s.verdict is QCVerdict.SUSPECT and s.eligible_for_front
 
 
@@ -187,3 +209,194 @@ def test_artifact_ref_records_size_and_digest(tmp_path):
 
     inline = ArtifactRef(type=ArtifactType.METRIC_SET, value="M")
     assert inline.located == "M" and inline.hash_file().sha256 is None
+
+
+# ---------------------------------------------------------------------------
+# The Spec vocabulary (phase 1 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def _spec_with_one_objective(**kw):
+    aim = Aim(statement="fold it")
+    obj = SpecObjective(aim=aim.id, statement="a passing fold", **kw)
+    s = Spec(campaign_id="t")
+    s.apply(SpecRevision(new_aims=[aim], new_objectives=[obj]))
+    return s, aim, obj
+
+
+def test_spec_is_append_only_and_delete_is_a_flag():
+    """DELETED is a signal, not a removal.
+
+    The Planner reads it to find pending Tasks no live objective wants any more, so removing
+    the record would remove the reason its orphans are cancellable - and `superseded_by` is
+    what lets a reader follow a substitution instead of finding a hole.
+    """
+    s, _, obj = _spec_with_one_objective()
+    s.apply(SpecRevision(deleted=[obj.id], superseded_by={obj.id: "o-replacement"}))
+
+    assert obj.id in s.objectives, "a deleted objective must still be on the record"
+    assert s.objectives[obj.id].status is ObjectiveStatus.DELETED
+    assert s.objectives[obj.id].superseded_by == "o-replacement"
+    assert s.generation == 2, "each revision advances the generation"
+
+
+def test_spec_complete_requires_every_objective_satisfied_or_deleted():
+    """The Listener's stop condition, and why an empty Spec terminates immediately."""
+    s, _, obj = _spec_with_one_objective()
+    assert not s.complete()
+
+    s.apply(SpecRevision(status_changes={obj.id: ObjectiveStatus.DEFERRED}))
+    assert not s.complete(), "DEFERRED is open: it wants work it cannot have yet"
+
+    s.apply(SpecRevision(status_changes={obj.id: ObjectiveStatus.SATISFIED}))
+    assert s.complete()
+
+    assert Spec().complete(), (
+        "an empty Spec is complete - that is what makes a Specifier which declines to "
+        "specify anything stop the campaign, with no special case elsewhere")
+
+
+def test_ready_excludes_objectives_with_unsatisfied_dependencies():
+    """Blocked work is DEFERRED, never dropped - which is what the Reviewer accepts."""
+    aim = Aim()
+    first = SpecObjective(aim=aim.id)
+    second = SpecObjective(aim=aim.id, depends_on=[first.id])
+    s = Spec()
+    s.apply(SpecRevision(new_aims=[aim], new_objectives=[first, second]))
+
+    assert [o.id for o in s.ready()] == [first.id]
+    assert [o.id for o in s.blocked()] == [second.id]
+    assert len(s.open_objectives()) == 2, "blocked work is still open work"
+
+    s.apply(SpecRevision(status_changes={first.id: ObjectiveStatus.SATISFIED}))
+    assert [o.id for o in s.ready()] == [second.id]
+
+
+def test_independent_aims_keep_their_order_and_a_cycle_is_an_error():
+    """Hierarchy is `parent`; execution order is `depends_on`. They are separate claims."""
+    a, b = Aim(), Aim()
+    c = Aim(depends_on=[a.id, b.id])
+    s = Spec()
+    s.apply(SpecRevision(new_aims=[a, b, c]))
+    order = s.aim_order()
+    assert order.index(c.id) > max(order.index(a.id), order.index(b.id))
+    assert order[:2] == [a.id, b.id], "independent aims keep insertion order"
+
+    loop_a = Aim()
+    loop_b = Aim(depends_on=[loop_a.id])
+    loop_a.depends_on = [loop_b.id]
+    cyc = Spec()
+    cyc.apply(SpecRevision(new_aims=[loop_a, loop_b]))
+    with pytest.raises(ValueError, match="cycle among aims"):
+        cyc.aim_order()
+
+
+def test_satisfaction_rule_reuses_objective_satisfied_by():
+    """One implementation of "acceptable", shared with the Pareto front.
+
+    Two would be how a threshold quietly comes to mean one thing to the front and another to
+    the Listener - including the `None -> False` case, which is the one that matters when a
+    tool omitted a metric it could not read.
+    """
+    rule = SatisfactionRule(kind="metric_in_range", metric="sc_rmsd", max=3.0)
+    ref = Objective(name="sc_rmsd", direction=Direction.MIN, max=3.0)
+    for v in (None, 2.9, 3.0, 3.1, -1.0):
+        assert rule.holds_for_value(v) is ref.satisfied_by(v), f"disagreed on {v!r}"
+
+    assert SatisfactionRule(kind="metric_present", metric="x").holds_for_value(0.0) is True
+    assert SatisfactionRule(kind="metric_present", metric="x").holds_for_value(None) is False
+
+
+def test_a_stage_answers_every_objective_by_a_task_or_a_deferral():
+    """`covered` is what the Reviewer's coverage gate checks against."""
+    stage = Stage(
+        tasks=[TaskMapping(task_id="t1", tool="mock_generate", objectives=["o1", "o2"]),
+               TaskMapping(task_id="t2", tool="mock_fold", objectives=["o3"],
+                           directive=TaskDirective.CANCEL)],
+        deferrals=[Deferral(objective="o4", reason="waits on o1")])
+    assert stage.covered == {"o1", "o2", "o4"}, "a CANCEL task covers nothing"
+    assert stage.tools == ["mock_generate"]
+
+
+def test_stage_identity_is_not_graph_shape():
+    """ADR 0003 binds the trust interlock to graph SHAPE, so a Stage must add nothing to it.
+
+    `TaskGraph.pattern_signature()` hashes tools and their dependency tools and nothing else.
+    This asserts the inputs: two Stages differing only in identity, generation, attempt,
+    rationale and deferrals present the same (tool, inputs) sequence, so they cannot hash
+    differently however `compose_stage` is written. Backlog A10 is the standing proof of the
+    cost of getting this wrong - replica multiplicity did leak into that hash, and width-4
+    consequently can never earn trust under a realistic budget.
+    """
+    def shape(st):
+        return [(t.tool, sorted(t.inputs.items()), t.lineage) for t in st.runs]
+
+    tasks = [TaskMapping(task_id="t1", tool="mock_generate"),
+             TaskMapping(task_id="t2", tool="mock_fold", inputs={"sequences": "t1.designs"})]
+    first = Stage(tasks=tasks, spec_generation=1, attempt=0)
+    second = Stage(tasks=tasks, spec_generation=47, attempt=3, rationale="re-planned",
+                   deferrals=[Deferral(objective="o9")], cancels=["t-old"])
+
+    assert first.id != second.id
+    assert shape(first) == shape(second)
+
+
+def _outcome(run_id="r0001", nodes=("n1",), metrics=None, task_id="t1"):
+    return RunOutcome(
+        run_id=run_id, graph_id="g1", state=RunState.DONE, nodes=list(nodes),
+        tasks=[TaskOutcome(task_id=task_id, tool="mock_fold", metrics=metrics or {},
+                           outputs={"complex": ArtifactRef(type=ArtifactType.COMPLEX,
+                                                           value="pdb")})])
+
+
+def test_the_data_registry_records_what_arrived_and_who_produced_it():
+    """Per-task attribution, not a merged view.
+
+    Reading `RunOutcome.tasks` rather than its merged metrics is what makes a per-Task
+    validation table and a per-stage pass rate computable from this registry later; a merged
+    dict cannot say which tool reported a number.
+    """
+    reg = DataRegistry()
+    new = reg.ingest(_outcome(metrics={"plddt": 0.81}))
+    kinds = {d.kind for d in new}
+    assert kinds == {DatumKind.NODE, DatumKind.METRIC, DatumKind.ARTIFACT}
+    assert reg.nodes() == ["n1"]
+    assert [d.from_task for d in reg.metrics("plddt")] == ["t1"]
+    assert reg.seq == 1, "the cursor advances once per absorption, not once per datum"
+
+
+def test_a_metric_the_tool_could_not_read_is_absent_rather_than_zero():
+    """Decision 0013's rule, seen from the Listener's side.
+
+    An adapter omits a metric it could not read, so a non-finite value must not count as
+    evidence that an objective is satisfied.
+    """
+    reg = DataRegistry()
+    reg.ingest(_outcome(metrics={"plddt": float("nan")}))
+    assert reg.metrics("plddt") == []
+    assert not reg.satisfies(SatisfactionRule(kind="metric_present", metric="plddt"))
+
+
+def test_satisfaction_treats_n_as_a_threshold():
+    """`n: 10` is the ten-distinct-designs shape: at least n, not the nth."""
+    reg = DataRegistry()
+    for i in range(3):
+        reg.ingest(_outcome(run_id=f"r{i}", nodes=(f"n{i}",),
+                            metrics={"plddt": 0.8}, task_id=f"t{i}"))
+    rule = SatisfactionRule(kind="metric_in_range", metric="plddt", min=0.75, n=3)
+    assert reg.satisfies(rule)
+    assert not reg.satisfies(rule.model_copy(update={"n": 4}))
+    assert reg.satisfies(SatisfactionRule(kind="count", n=3))
+    assert reg.satisfies(SatisfactionRule(kind="artifact_present",
+                                          port=ArtifactType.BACKBONE, n=3)), \
+        "a Complex satisfies a Backbone requirement, so the unification rule applies here too"
+
+
+def test_a_future_is_a_record_and_is_settled_by_ingestion():
+    """No awaitable lives in the registry: the Listener and the work are in different
+    processes, and completion arrives through `as_completed` rather than through a future."""
+    reg = DataRegistry()
+    reg.expect(TaskFuture(task_id="t1", run_id="r0001", expected_metrics=["plddt"]))
+    assert [f.task_id for f in reg.pending()] == ["t1"]
+    reg.ingest(_outcome(metrics={"plddt": 0.9}))
+    assert reg.pending() == []
+    assert reg.futures["t1"].settled, "the record is kept, not dropped"

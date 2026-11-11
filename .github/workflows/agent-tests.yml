@@ -2,12 +2,17 @@ name: agent-tests
 
 # IMPRESS-A (agent/) is a separate package with its own Python floor, so it gets its own
 # job rather than a leg in tests.yml. It runs only when agent/ changes.
+# `src/impress/**` and the root `pyproject.toml` are in the path filter because IMPRESS-A now
+# DEPENDS on the root package. Without them a change to the framework could break this package
+# without ever running the job that would have caught it.
 on:
   push:
     branches: [main]
-    paths: ['agent/**', '.github/workflows/agent-tests.yml']
+    paths: ['agent/**', 'src/impress/**', 'pyproject.toml',
+            '.github/workflows/agent-tests.yml']
   pull_request:
-    paths: ['agent/**', '.github/workflows/agent-tests.yml']
+    paths: ['agent/**', 'src/impress/**', 'pyproject.toml',
+            '.github/workflows/agent-tests.yml']
   workflow_dispatch:
 
 jobs:
@@ -30,7 +35,19 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: agent/pyproject.toml
-      - name: Install
-        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      # Two steps, in this order, on purpose. IMPRESS-A now depends on `impress`, the package
+      # at the repository root, which is unreleased - so it has to be present as a local
+      # editable install BEFORE pip resolves this project's dependencies, or pip goes looking
+      # for the name on PyPI and installs whatever it finds there.
+      - name: Install impress (repository root)
+        run: python -m pip install --upgrade pip && pip install -e ..
+      - name: Install impress-a
+        run: pip install -e ".[dev]"
+      # Nothing linted agent/ before this: there was no [tool.ruff] table here, so ruff walked
+      # up to the root project's config, which sets `fix = true` - the documented command
+      # rewrote the tree instead of reporting on it. The local table sets `fix = false`, and
+      # the ceiling is now zero, so any finding here is a regression rather than a budget.
+      - name: Lint
+        run: ruff check src tests
       - name: Run tests
         run: pytest tests -q

@@ -47,7 +47,7 @@ class QCReport(BaseModel):
         """FAIL is never rankable. SUSPECT is rankable but carries its flag."""
         return self.verdict is not QCVerdict.FAIL
 
-    def add(self, r: GateResult) -> "QCReport":
+    def add(self, r: GateResult) -> QCReport:
         self.gates.append(r)
         if r.outcome is GateOutcome.FAIL:
             self.verdict = QCVerdict.FAIL
@@ -65,7 +65,7 @@ class QCReport(BaseModel):
                  "threshold": g.threshold, "detail": g.detail}
                 for g in self.gates if g.outcome is GateOutcome.FAIL]
 
-    def mark_suspect(self, why: str) -> "QCReport":
+    def mark_suspect(self, why: str) -> QCReport:
         if self.verdict is not QCVerdict.FAIL:
             self.verdict = QCVerdict.SUSPECT
         self.notes.append(why)

@@ -27,6 +27,7 @@ from typing import Any
 from .core.pareto import pareto_front
 from .core.session import CampaignStopped
 from .policy.driver import SequentialPolicyDriver
+from .policy.legacy import DecideAsRoles
 from .runtime.executor import (
     CampaignAborted,
     CampaignExecutor,
@@ -34,6 +35,7 @@ from .runtime.executor import (
     CampaignSpec,
     RunRecord,
 )
+from .runtime.roles import RolesDriver, goal_from_spec
 from .runtime.runservice import RunService
 from .runtime.session import InProcessSession
 from .tools.registry import Registry
@@ -70,8 +72,26 @@ class CampaignManager:
         self.executor.prov_sink = sink
 
     # -- the campaign --------------------------------------------------------
+    def _roles(self) -> Any:
+        """The Spec Loop + Planning Loop pipeline, as one `conduct`.
+
+        It needs no special case in `run()`: the manager already races a reasoner's `conduct`
+        against the executor's pump, and a role pipeline is a reasoner that happens to be four
+        cooperating responsibilities rather than one. `publish` is handed over explicitly
+        because the Spec's only writer is the executor, and `publish_spec` is not a
+        `CampaignSession` member until phase 3 - a driver that declares what it needs beats one
+        that discovers it on the session.
+        """
+        pair = self.policy if hasattr(self.policy, "specifier") else DecideAsRoles(self.policy)
+        return RolesDriver(
+            goal_from_spec(self.spec), pair.specifier, pair.planner,
+            max_turns=self.spec.max_cycles, max_attempts=self.spec.max_attempts,
+            concurrency=self.spec.concurrency, publish=self.executor.publish_spec)
+
     def _reasoner(self) -> Any:
         """A policy that implements `conduct` drives itself; anything else is driven."""
+        if self.spec.control == "roles":
+            return self._roles()
         target = getattr(self.policy, "inner", self.policy)
         if hasattr(self.policy, "conduct") or hasattr(target, "conduct"):
             return self.policy if hasattr(self.policy, "conduct") else target
