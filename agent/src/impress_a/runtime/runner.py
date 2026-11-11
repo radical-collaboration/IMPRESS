@@ -54,7 +54,7 @@ class StageRunner:
     """Deploys Stages as IMPRESS pipelines on one `ImpressManager`."""
 
     def __init__(self, flow: Any, reg: Any, backend_kind: str = "concurrent", *,
-                 workdir: str | None = None, gpus_per_node: int = 1,
+                 workdir: str | None = None, gpus_per_node: int = 1, threads: int = 1,
                  telemetry_config: dict[str, Any] | None = None,
                  telemetry_subscribers: list[Any] | None = None) -> None:
         self.flow = flow
@@ -65,6 +65,7 @@ class StageRunner:
         #: so the two execution loops are constructed the same way.
         self.backend_kind = backend_kind
         self.gpus_per_node = gpus_per_node
+        self.threads = threads
         self._halt = asyncio.Event()
         self.manager = ImpressManager(
             flow, telemetry_config=telemetry_config or {},
@@ -106,7 +107,7 @@ class StageRunner:
             name=name, type=StagePipeline,
             config={"graph": g, "registry": self.reg, "invocation": run_id or g.id,
                     "workdir": self.workdir, "done": done,
-                    "gpus_per_node": self.gpus_per_node,
+                    "gpus_per_node": self.gpus_per_node, "threads": self.threads,
                     "backend_kind": self.backend_kind})
         self.manager.submit_new_pipelines([setup])
         log.info("runner: deployed %s as pipeline %r (%d tasks)",

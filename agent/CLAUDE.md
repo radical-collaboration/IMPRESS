@@ -164,7 +164,14 @@ Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones tha
   `__name__` before decorating is what lets one generic factory serve every DAG node.
 - **Two asyncflow idioms, not interchangeable.** Unawaited futures as call arguments express DAG *edges*;
   `asyncio.gather` awaits *independent* work.
-- **Resource shapes are not portable** across backends; `exec/resources.py` owns the translation.
+- **Resource shapes are not portable** across backends; `exec/resources.py` owns the translation
+  (`Placement.describe`), and holds the package's only - lazy - `dragon` import.
+- **A node is two kinds of engine work.** The adapter (pre-process through QC) is a function task on
+  the `local` route - a thread in this process, under its own `asyncio.run`. Each command it starts
+  through `run_cmd` is an executable task on `compute`, placed per backend (`exec/launch.py`). An
+  adapter that shelled out any other way would run its binary on the campaign host, unplaced.
+- **A cancel does not kill a running command on the concurrent backend** (rhapsody 0.7.0). Commands
+  carry their own `timeout --kill-after` for that reason; see `docs/impress-a/limitations.md`.
 - **No retry primitive, no durable job state** in asyncflow. Both are ours (`exec/ledger.py`).
 - asyncflow writes `asyncflow.session.*` into the CWD on every engine run *unless given a `work_dir`*.
   `make_engine`/`make_engine_bounded` take one, and the executor passes the campaign root, so sessions

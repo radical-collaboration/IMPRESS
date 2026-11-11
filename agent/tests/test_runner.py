@@ -19,7 +19,7 @@ from impress_a.core.decision import ExperimentIntent
 from impress_a.core.pareto import Direction, Objective
 from impress_a.exec.backend import make_engine
 from impress_a.exec.dispatch import Dispatcher, node_task
-from impress_a.exec.resources import gpu_env, thread_caps
+from impress_a.exec.resources import thread_caps
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.planners import ThresholdPlanner
 from impress_a.policy.registry import RolePair
@@ -279,20 +279,6 @@ def test_one_lineage_gets_one_gpu(reg):
         "one device means there is nothing to choose, which is also true of a laptop"
 
 
-def test_the_env_pins_a_gpu_only_where_the_env_is_what_pins_it():
-    """Two shapes, and only one of them is an environment variable.
-
-    Under a concurrent backend the env handed to `asyncio.create_subprocess_exec` REPLACES the
-    child's, so `CUDA_VISIBLE_DEVICES` works. Under Dragon it does not: local services merges a
-    process template's env and then applies the placement policy afterwards, so a policy with
-    no `gpu_affinity` resolves to every GPU on the node whatever the env said. Returning an
-    env var for Dragon would look like pinning and do nothing.
-    """
-    assert gpu_env(2, "concurrent") == {"CUDA_VISIBLE_DEVICES": "2"}
-    assert gpu_env(2, "dragon") == {}, "Dragon needs Policy(gpu_affinity=[2]), not an env var"
-    assert gpu_env(None, "concurrent") == {}
-
-
 def test_thread_caps_hold_a_cpu_stage_to_its_share():
     """`os.cpu_count()` reports the node, not the allocation.
 
@@ -319,7 +305,7 @@ async def test_a_task_is_told_which_gpu_it_may_use(reg, tmp_path):
         original = node_task
 
         def spy(*args, **kw):
-            seen[args[2]] = kw.get("gpu_index")
+            seen[args[2]] = kw["placement"].gpu_index
             return original(*args, **kw)
 
         import impress_a.exec.dispatch as mod
@@ -354,7 +340,7 @@ async def test_the_runner_path_pins_its_gpus_too(reg, tmp_path):
         original = mod.node_task
 
         def spy(*args, **kw):
-            seen[args[2]] = kw.get("gpu_index")
+            seen[args[2]] = kw["placement"].gpu_index
             return original(*args, **kw)
 
         mod.node_task = spy
@@ -368,59 +354,3 @@ async def test_the_runner_path_pins_its_gpus_too(reg, tmp_path):
 
     assert len(seen) == 4, f"one task per lineage was registered: {seen}"
     assert set(seen.values()) == {0, 1}, f"both devices should be used: {seen}"
-
-
-async def test_an_adapter_is_handed_the_pinning_env_rather_than_the_backend(reg, tmp_path):
-    """Resolved where the backend is known, not in each adapter.
-
-    `TaskRequest.gpu_index` used to say an adapter should turn it into an environment itself,
-    which means every adapter knowing which backend it runs under. Getting that wrong is not
-    cosmetic: under Dragon the placement policy pins and the env does not, so an adapter
-    setting `CUDA_VISIBLE_DEVICES=1` inside a process Dragon had restricted to one device
-    would point it at a device it was never given. So the dict arrives resolved, and empty
-    wherever nothing should be set.
-    """
-    import impress_a.exec.dispatch as mod
-    from impress_a.tools._subprocess import child_env
-
-    g = _graph(reg, 2, stages=["mock_generate"])
-    for kind, expected in (("concurrent", {"CUDA_VISIBLE_DEVICES": "1"}), ("dragon", {})):
-        seen: list[dict] = []
-        # A THREAD executor, deliberately: the concurrent backend defaults to a process
-        # pool, so the task body runs where a module patch cannot reach it - which is also
-        # why `test_a_task_is_told_which_gpu_it_may_use` spies on the factory instead. What
-        # is under test here is the request the factory builds, so it has to run in-process.
-        flow, _ = await make_engine("concurrent", {"workers": 2, "executor": "thread"},
-                                    work_dir=str(tmp_path))
-        original = mod.TaskRequest
-        try:
-            def record(_seen=seen, _real=original, **kw):
-                _seen.append(kw)
-                return _real(**kw)
-
-            mod.TaskRequest = record
-            try:
-                # Through the Dispatcher, which is what assigns the device; `backend_kind` is
-                # the only thing that differs between the two passes, and the engine under
-                # both is the concurrent one - what Dragon changes is where the pinning goes,
-                # not how a task is registered.
-                d = Dispatcher(flow, reg, kind, gpus_per_node=2)
-                await d.collect(d.submit(g, run_id="r0001"))
-            finally:
-                mod.TaskRequest = original
-        finally:
-            await flow.shutdown()
-        assert len(seen) == 2, seen
-        by_gpu = {r["gpu_index"]: r["gpu_env"] for r in seen}
-        assert set(by_gpu) == {0, 1}, f"one device per lineage: {by_gpu}"
-        assert by_gpu[1] == expected, kind
-
-    # And what an adapter does with it keeps the rest of the environment, because the env
-    # given to `create_subprocess_exec` REPLACES the child's rather than extending it.
-    class Req:
-        gpu_env = {"CUDA_VISIBLE_DEVICES": "3"}
-
-    merged = child_env(Req(), {"PATH": "/usr/bin", "MPNN_DIR": "/opt/mpnn"})
-    assert merged == {"PATH": "/usr/bin", "MPNN_DIR": "/opt/mpnn",
-                      "CUDA_VISIBLE_DEVICES": "3"}
-    assert "PATH" in child_env(Req()), "the default base is this process's own environment"

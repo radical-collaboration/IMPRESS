@@ -40,6 +40,7 @@ from typing import Any
 from impress import ImpressBasePipeline
 
 from ..exec.dispatch import gpu_for, node_task
+from ..exec.resources import placement_for
 
 
 class ControlPipeline(ImpressBasePipeline):
@@ -83,6 +84,7 @@ class StagePipeline(ImpressBasePipeline):
         workdir = self.config.get("workdir")
         gpus = int(self.config.get("gpus_per_node") or 1)
         backend_kind = self.config.get("backend_kind") or "concurrent"
+        threads = int(self.config.get("threads") or 1)
         self._order = graph.topo_order()
         for tid, node in graph.nodes.items():
             # The SAME factory the Dispatcher uses, deliberately. Two implementations of the
@@ -94,8 +96,10 @@ class StagePipeline(ImpressBasePipeline):
                 dep_order=tuple(node.deps),
                 wiring=tuple((port, *ref.split(".", 1)) if "." in ref else (port, ref, "")
                              for port, ref in node.inputs.items()),
-                workdir=workdir, seed_inputs=node.seed_inputs,
-                gpu_index=gpu_for(node.lineage, gpus), backend_kind=backend_kind)
+                workdir=workdir, seed_inputs=node.seed_inputs, workflow_id=self.name,
+                placement=placement_for(reg.get(node.tool).resources, backend_kind,
+                                        threads=threads,
+                                        gpu_index=gpu_for(node.lineage, gpus)))
             setattr(self, tid, task)
 
     async def run(self) -> None:

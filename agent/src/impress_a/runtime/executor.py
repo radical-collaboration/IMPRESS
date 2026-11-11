@@ -59,6 +59,7 @@ from ..core.spec import (
 from ..core.tree import CampaignTree, DesignNode, NodeStatus
 from ..exec.dispatch import Dispatcher, ExecutionResults
 from ..exec.ledger import JobLedger
+from ..exec.resources import thread_share
 from ..exec.task_ledger import TaskLedger
 from ..tools.registry import Registry
 from ..tools.view import view_of
@@ -290,6 +291,10 @@ class CampaignExecutor:
         #: once at `start()`. `[]` means unknown. Placement reads it; `spec.site` remains the
         #: declaration the validator checks graphs against.
         self.topology: list[dict[str, Any]] = []
+        #: Cores this campaign may use, when its caller knows better than the cgroup - under
+        #: an enclosing campaign manager the cgroup is shared with every sibling workflow
+        #: (`integrations/aucam`). `None` reads the cgroup. Sizes each command's thread caps.
+        self.cpu_share: int | None = None
         self.dispatcher: Dispatcher | None = None
         self.last_rejection: ValidationFailure | None = None
         self._runs: dict[str, RunRecord] = {}
@@ -1406,15 +1411,20 @@ class CampaignExecutor:
         log.info("engine: %s backend ready", self.spec.backend)
         self.topology = await probe_topology(self._backend)
         self._check_site_against_topology()
+        threads = thread_share(self.cpu_share, self.spec.concurrency, self.spec.replicas)
+        log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
+                 f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
+        hosts = tuple(str(n["id"]) for n in self.topology if n.get("id"))
         if self.spec.runner == "impress":
             self.dispatcher = StageRunner(
                 self.flow, self.reg, self.spec.backend, workdir=None,
-                gpus_per_node=self.spec.site.gpus_per_node)
+                gpus_per_node=self.spec.site.gpus_per_node, threads=threads)
             await self.dispatcher.start()
             log.info("execution loop: impress ImpressManager (one pipeline per stage)")
         else:
             self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend,
-                                         gpus_per_node=self.spec.site.gpus_per_node)
+                                         gpus_per_node=self.spec.site.gpus_per_node,
+                                         threads=threads, hosts=hosts)
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))

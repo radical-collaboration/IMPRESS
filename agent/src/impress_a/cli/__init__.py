@@ -486,8 +486,6 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
     reg = Registry().load()
     reasoner: Any = _Idle()
     if model:
@@ -661,8 +659,6 @@ async def validate_tasks_command(spec_path: str, out: str | None = None) -> int:
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
 
     out_dir = Path(out) if out else Path(spec.root) / spec.campaign_id / "validation"
     log.info("validating %d task(s) of %s; writing to %s",
@@ -782,43 +778,6 @@ async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
                          f"{'' if r.trusted else ' untrusted'}]" for r in running))
 
 
-def _thread_caps(spec: CampaignSpec, ncpu: int | None = None) -> dict[str, str]:
-    """How many threads each CPU-bound child may take, sized from what this process was
-    actually given rather than from the machine.
-
-    `os.cpu_count()` reports the node, not the allocation, so on anything less than a
-    whole node every Rosetta stage would claim every core on the box and the stages
-    would fight each other. `sched_getaffinity` reports the cgroup we were placed in.
-    The divisor is the number of pipelines that can be in flight at once - concurrent
-    experiments times replica lineages, each of which can be running a CPU-bound P2
-    stage - halved again, which is upstream's sizing
-    (`run_small_molecule_binding.py:134-143`) and leaves headroom for the GPU stages'
-    host-side work.
-
-    Computed here rather than in an adapter because this is the only layer that knows
-    both numbers: a `TaskRequest` carries no concurrency information, and an agent
-    cannot see how many siblings it has. Applied with `setdefault`, so an operator who
-    exported their own value keeps it.
-
-    `ncpu` overrides what the cgroup reports, for the one case where the cgroup is not the
-    right answer: under an enclosing campaign manager this process shares its cgroup with
-    every sibling workflow, so `sched_getaffinity` describes the allocation rather than our
-    share of it, and the caller's own resource grant is the honest number
-    (`integrations/aucam`).
-    """
-    if ncpu is None and hasattr(os, "sched_getaffinity"):
-        ncpu = len(os.sched_getaffinity(0))
-    elif ncpu is None:  # not Linux; the campaign path is, but the test tier need not be
-        ncpu = os.cpu_count() or 1
-    pipelines = max(1, spec.concurrency) * max(1, spec.replicas)
-    per = max(1, ncpu // (pipelines * 2))
-    caps = {v: str(per) for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-                                  "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
-    # Spinning idle threads burn a core each while a stage waits on the GPU stages.
-    caps["OMP_WAIT_POLICY"] = "PASSIVE"
-    return caps
-
-
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
                        replay_from: str | None = None,
@@ -830,14 +789,6 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
-        # The effective value, not the computed one: an operator who exported their own
-        # keeps it, and a log that reported our suggestion instead would be describing a
-        # run that is not the one happening.
-        actual = os.environ[var]
-        log.info("thread cap %-22s %s%s", var, actual,
-                 "" if actual == val else f"  (kept from the environment, not {val})")
     # Naming either half implies the role pipeline: a Specifier has nowhere to run in the
     # single-`decide` path. Stated as an implication rather than an error so that
     # `--specifier B --planner D` is one flag pair rather than three.

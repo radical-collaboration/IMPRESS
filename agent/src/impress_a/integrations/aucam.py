@@ -264,13 +264,11 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
     not taking it is that our tasks are invisible to AuCaM's per-task telemetry, so its
     task-level charging never applies - which is why spending travels in our own reports.
     """
-    from ..cli import _thread_caps, build_roles, load_spec  # noqa: PLC0415
+    from ..cli import build_roles, load_spec  # noqa: PLC0415
     from ..manager import CampaignManager  # noqa: PLC0415
     from ..tools.registry import Registry  # noqa: PLC0415
 
     async def impress_a_campaign(reporter: Any, context: dict | None = None) -> None:
-        import os  # noqa: PLC0415
-
         ctx = context or {}
         spec = load_spec(str(spec_path))
         if narrowed := _narrow_budget(spec, ctx.get("spending_limit")):
@@ -279,12 +277,13 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
         _fit_resources(spec, ctx.get("resources"))
 
         # The cgroup is shared with every sibling workflow under an enclosing manager, so
-        # `sched_getaffinity` describes the allocation rather than our share of it.
+        # `sched_getaffinity` describes the allocation rather than our share of it: the
+        # caller's own grant sizes each command's thread caps instead. Per command, not via
+        # this process's environment, which every sibling workflow would also inherit.
         cpus = int((ctx.get("resources") or {}).get("cpus", 0) or 0)
-        for var, val in _thread_caps(spec, cpus or None).items():
-            os.environ.setdefault(var, val)
 
         mgr = CampaignManager(spec, build_roles(model, spec, guard), Registry().load())
+        mgr.executor.cpu_share = cpus or None
         sink = _ReporterSink(reporter)
         result = await run_with_sink(mgr, sink, period_s=report_interval_s)
         log.info("campaign %s ended: %s (%d report(s) emitted)",

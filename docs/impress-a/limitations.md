@@ -88,6 +88,15 @@ from collecting it, never from the fact that cancel was called.
 What this leaves unsolved: reclaiming a GPU from a long-running task that should have been abandoned.
 That needs cooperative cancellation inside the task agents, or a backend that can kill a process.
 
+**Measured again on asyncflow/rhapsody 0.7.0 (2026-11-11).** Every tool command is now its own
+executable task on the engine (`exec/launch.py`), and asyncflow 0.7.0 sends a cancel to the backend the
+task was routed to. On the concurrent backend that still does not stop a running command:
+`cancel_task` cancels the backend's own coroutine and leaves the child process running (reproduced
+with a `sleep` that outlived its cancelled task). That is an upstream gap in rhapsody, not something to
+work around here. What does hold on every backend is the walltime: each command is wrapped in coreutils
+`timeout --kill-after`, so a command cannot outlive `resources.walltime_s` by more than the grace
+period, whatever its backend does with a cancel.
+
 ## Not yet implemented
 
 The **MCP** control-plane adapter, checkpoint/restart **resume** (the job ledger now records run state

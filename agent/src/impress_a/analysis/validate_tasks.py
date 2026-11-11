@@ -42,6 +42,7 @@ from ..core.decision import ExperimentIntent
 from ..core.qc import GateOutcome
 from ..exec.backend import make_engine_bounded
 from ..exec.dispatch import Dispatcher
+from ..exec.resources import thread_share
 from ..tools.registry import Registry
 
 log = logging.getLogger(__name__)
@@ -140,8 +141,11 @@ async def validate_tasks(spec: Any, reg: Registry | None = None,
         spec.backend_startup_heartbeat_s,
         work_dir=str(out_dir or Path(spec.root) / spec.campaign_id))
     try:
+        # One chain, one lineage: the thread share is the whole cgroup halved, as for a
+        # campaign of one pipeline.
         dispatcher = Dispatcher(flow, reg, spec.backend,
-                                gpus_per_node=spec.site.gpus_per_node)
+                                gpus_per_node=spec.site.gpus_per_node,
+                                threads=thread_share(None, 1, 1))
         results = await dispatcher.collect(dispatcher.submit(graph, run_id="validate"))
     finally:
         await flow.shutdown()
