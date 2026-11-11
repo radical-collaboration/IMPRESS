@@ -80,9 +80,10 @@ jobs:
   #
   # Not driven by tox, on evidence. The earlier consolidation attempt added an `agent-py3xx`
   # tox env whose `deps` were `./agent[dev]` alone; in its one CI run every campaign test
-  # failed and one wedged for twenty minutes, because `impress` is unreleased and resolving
-  # impress-a first sends pip to PyPI for that name. The explicit two-step install below is
-  # the one that is green, and it is the same order agent/scripts/dev_setup.sh uses locally.
+  # failed and one wedged for twenty minutes, because impress-a then depended on the
+  # unreleased `impress` and pip went to PyPI for that name. That dependency is gone (the
+  # agent's Stages are asyncflow blocks), so a tox env would now resolve; moving this job is
+  # a separate change, not a side effect of this one.
   agent-tests:
     name: agent py${{ matrix.python }}
     timeout-minutes: 20
@@ -105,17 +106,15 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          # Both files: this job installs the root package too, so a change to root's
-          # dependencies has to invalidate this cache as well as root-tests'.
+          # Both files, kept: the notebooks job installs both packages and shares this
+          # cache key shape.
           cache-dependency-path: |
             pyproject.toml
             agent/pyproject.toml
-      # Two steps, in this order, on purpose. IMPRESS-A depends on `impress`, the package at
-      # the repository root, which is unreleased - so it has to be present as a local
-      # editable install BEFORE pip resolves this project's dependencies, or pip goes looking
-      # for the name on PyPI and installs whatever it finds there.
-      - name: Install impress (repository root)
-        run: python -m pip install --upgrade pip && pip install -e ..
+      # One install: IMPRESS-A no longer depends on `impress` (its Stages are asyncflow
+      # blocks), so there is no unreleased root package to put in front of the resolver.
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
       # Every extra whose absence a test answers with a skip, in one install so pip resolves
       # once. A skip is not a pass, and each of these was skipping in the only automated
       # environment there is:

@@ -17,9 +17,10 @@ by nothing.
 **What that rule was really protecting, and what still holds:**
 
 - **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.11` with
-  langgraph, rhapsody and biopython. The dependency runs one way: `impress` is installed editable
-  into this project's environment, root first, because it is on no index. The reverse must never
-  happen — do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
+  langgraph, rhapsody and biopython. The two share middleware - asyncflow and rhapsody - and
+  nothing else: this project does not depend on `impress` any more (its Stages are asyncflow
+  blocks; `test_layering.test_nothing_imports_impress`), and the root must never depend on this
+  one. Do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
   front of a root test, and do not add an agent install to the 3.9 leg.
 - **`examples/` is IMPRESS's**, not this project's.
 - **`agent/.gitignore` stays**, and its trailing `!*.pdb` / `!*.fa` with it — they undo the root
@@ -78,12 +79,11 @@ Without the editable install, prefix with `PYTHONPATH=src` and use `python -m im
 
 ### Environment
 
-Use the project `.venv`, built by **`./scripts/dev_setup.sh`**. It does two editable installs and
-the order is load-bearing: `pip install -e ..` (the root `impress` package, which this project now
-depends on and which exists on no index) *before* `pip install -e ".[dev]"`, or pip resolves the
-name `impress` against PyPI and installs whatever it finds there — a failure that is silent until
-an import returns the wrong module. `tests/test_toolchain.py` asserts the installed `impress` is
-this repository's.
+Use the project `.venv`, built by **`./scripts/dev_setup.sh`**: one editable install of this
+project and the extras its tests guard with. It used to install the root `impress` package first,
+because this project depended on that unreleased name and pip would otherwise resolve it against
+PyPI. The dependency is gone, and `tests/test_toolchain.py::test_impress_is_not_a_dependency`
+keeps that exposure from coming back.
 
 Do not run the tier against the system Python. The reason recorded here was that it carried
 `radical.asyncflow` **0.3.1**; measured 2026-11-06 it carries **0.5.1** in `~/.local`, so that
@@ -208,9 +208,8 @@ registry against the tool directories on disk) ·
 `test_aucam.py` (a real campaign as one AuCaM workflow, driven through AuCaM's own reporter;
 skipped without the `aucam` extra, which CI installs - see
 ../docs/impress-a/reference/aucam.md) ·
-`test_toolchain.py` (that the `impress` dependency resolves to this repository, that the
-local `[tool.ruff]` table exists with `fix = false`, and that the `aucam` extra pins a commit
-rather than a branch).
+`test_toolchain.py` (that `impress` is not a dependency, that the local `[tool.ruff]` table
+exists with `fix = false`, and that the `aucam` extra pins a commit rather than a branch).
 
 **Counts are not restated in prose.** `test_gate_fixtures.py` derives the tool count from the
 toolkit directories rather than asserting 11, and there is no asserted test count.

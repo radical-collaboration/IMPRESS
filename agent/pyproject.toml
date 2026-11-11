@@ -8,14 +8,6 @@ version = "0.1.0"
 description = "Autonomous protein design agent for HPC"
 requires-python = ">=3.11"
 dependencies = [
-  # The IMPRESS framework at the repository root. IMPRESS-A's execution loop is built on
-  # its ImpressBasePipeline/ImpressManager rather than re-deriving the engine conventions
-  # (named backends, task_description defaults, GPU pinning) a second time. No version
-  # pin: `impress` is unreleased, so it is installed editable from `..` alongside this
-  # project - see scripts/dev_setup.sh. `agent/` depends on it and may not modify it;
-  # runtime/runner.py and runtime/pipelines.py are the only modules that may import it,
-  # which tests/test_layering.py asserts.
-  "impress",
   # 0.7.0 is the floor for what the execution loop relies on: a cancel reaches the backend a
   # task was routed to (asyncflow #118), a block cancel cascades to its members, `future.uid`
   # exists at call time, and every task event names its real backend. Both require >=3.11,

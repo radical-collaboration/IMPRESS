@@ -7,21 +7,19 @@ Two things this package's own notes claimed and the tree did not support:
   `ruff check src tests` therefore *rewrote the working tree* rather than reporting on it, and
   the ceiling of 41 that `CLAUDE.md` quoted did not reproduce against the config that actually
   resolved: 449 findings there, 9 under ruff's own defaults. CI ran only the test suite.
-* **The dependency on `impress` is new and unreleased.** IMPRESS-A's execution loop is built on
-  the framework at the repository root, which exists on no index - so pip must be handed it as
-  a local editable install before it resolves this project, or it goes looking for the name
-  `impress` on PyPI and installs whatever is there. That failure is silent until an import
-  returns the wrong module.
+* **`impress` was an unreleased dependency.** It exists on no index, so pip had to be handed
+  it as a local editable install first, or it resolved the name against PyPI - silently, until
+  an import returned the wrong module. The dependency is gone (the agent's Stages are asyncflow
+  blocks), and `test_impress_is_not_a_dependency` keeps that exposure from coming back.
 
 Neither is checkable by reading; both are cheap to assert.
 """
 from __future__ import annotations
 
 import pathlib
+import re
 import tomllib
 import types
-
-import impress
 
 import impress_a
 
@@ -34,35 +32,16 @@ def _config() -> dict:
     return tomllib.loads(PYPROJECT.read_text())
 
 
-def test_impress_is_importable_and_pinned():
-    """The three-name public API this project designs against, unchanged.
+def test_impress_is_not_a_dependency():
+    """The root `impress` package is on no index; declaring it again would re-open the hole.
 
-    `impress/__init__.py` exports exactly `ImpressManager`, `ImpressBasePipeline` and
-    `PipelineSetup`. The execution loop is written against those three and nothing else -
-    `ImpressLogger` and the telemetry helpers are reached through `impress.utils.*` - so a
-    change to this list is a change to the surface we build on and should be seen.
+    A dependency on an unreleased name is a dependency-confusion exposure: install this project
+    without the root first and pip fetches whatever PyPI has under that name. The agent runs on
+    asyncflow directly, and `test_layering.test_nothing_imports_impress` keeps it that way.
     """
-    assert impress.__all__ == ["ImpressManager", "ImpressBasePipeline", "PipelineSetup"]
-
-
-def test_the_installed_impress_is_the_one_in_this_repository():
-    """Not a package of the same name from an index.
-
-    This is the failure the two-step install in `scripts/dev_setup.sh` and
-    `.github/workflows/agent-tests.yml` exists to prevent, and it fails by returning a
-    *working* module that is simply the wrong one.
-    """
-    got = pathlib.Path(impress.__file__).resolve()
-    assert got == REPO / "src" / "impress" / "__init__.py", (
-        f"`impress` resolved to {got}, not this repository's src/impress - install it "
-        f"editable from the root first: see scripts/dev_setup.sh")
-
-
-def test_impress_is_a_declared_dependency():
-    """Importable by accident is not the same as declared."""
     deps = _config()["project"]["dependencies"]
-    assert any(d == "impress" or d.startswith("impress ") or d.startswith("impress=")
-               for d in deps), f"`impress` missing from dependencies: {deps}"
+    named = [d for d in deps if re.match(r"impress\s*($|[<>=!~\[;@ ])", d)]
+    assert not named, f"`impress` is declared again: {named}"
 
 
 def test_the_aucam_extra_pins_a_commit_not_a_branch():

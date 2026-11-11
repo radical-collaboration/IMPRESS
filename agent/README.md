@@ -3,12 +3,12 @@
 **Autonomous protein design on HPC.**
 
 > IMPRESS-A lives in the IMPRESS repository under `agent/`, as a subproject with its own
-> `pyproject.toml`: run every command below from `agent/`. It **depends on** the `impress` package
-> at the repository root and may not modify it — the execution loop is built on
-> `ImpressBasePipeline` and `ImpressManager` rather than re-deriving the engine conventions
-> (named backends, `task_description` defaults, GPU pinning) a second time, and
-> `tests/test_layering.py` asserts that only `runtime/runner.py` and `runtime/pipelines.py`
-> import it. It used to import nothing from there; that changed with the control-plane refactor.
+> `pyproject.toml`: run every command below from `agent/`. It runs on the same middleware as
+> IMPRESS - one `radical.asyncflow` engine over `rhapsody` backends - but not on the `impress`
+> package itself: each Stage is an asyncflow block, and each tool command an engine task placed
+> per backend (`exec/stage.py`, `exec/launch.py`). An earlier execution loop was built on
+> `ImpressBasePipeline`/`ImpressManager`; blocks gave natively what that layer had to be taught,
+> and `tests/test_layering.py` asserts nothing imports `impress` now.
 > The rest of the relationship is shared science — `examples/small_molecule_binding` runs the same
 > rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes
 > it per cycle.

@@ -47,15 +47,16 @@ IMPRESS-A is a **separate package**: `impress_a`, Python >= 3.11, living in this
 is not installed by `pip install .` at the repository root — see
 [Installation](../getting-started/installation.md).
 
-It **depends on** `impress`. The execution loop is built on `ImpressBasePipeline` and
-`ImpressManager` rather than re-deriving the engine conventions — named backends,
-`task_description` defaults, GPU pinning — a second time; see
-[Architecture](../concepts/architecture.md) for those. The two also share science:
+It runs on the same middleware as IMPRESS — one `radical.asyncflow` engine over `rhapsody`
+backends, reaching Dragon only through them — but not on the `impress` package: each Stage is an
+asyncflow block, and each tool command an engine task placed per backend. See
+[Architecture](../concepts/architecture.md) for the shared engine conventions. The two also share
+science:
 [Small Molecule Binding](../examples/small-molecule-binding.md) runs the same
 rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes it
 per cycle.
 
-The dependency runs one way only. The two packages are never installed into one environment as a
+Neither package depends on the other. The two are never installed into one environment as a
 merged dependency set: IMPRESS targets Python >= 3.9 with radical.pilot, and IMPRESS-A >= 3.11 with
 langgraph, rhapsody and biopython.
 
