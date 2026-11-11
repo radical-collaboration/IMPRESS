@@ -1210,10 +1210,10 @@ The mitigation applied here is that every `file:line` in both new pages was reso
 before the commit, and the pages end by naming the provenance files each step's output lands in,
 so a future reader can check the claim rather than trust it.
 
-**F6. CI never exercises the AuCaM adapter.** `.github/workflows/agent-tests.yml` installs
-`-e ..` then `-e ".[dev]"`, and the aucam extra is neither - so `tests/test_aucam.py` skips in
-the only automated environment there is, and the eight tests that prove an IMPRESS-A campaign
-really runs as an AuCaM workflow prove it only on a developer's laptop. Verified by
+**F6. CI never exercised the AuCaM adapter — RESOLVED.** `.github/workflows/agent-tests.yml` installed
+`-e ..` then `-e ".[dev]"`, and the aucam extra was neither - so `tests/test_aucam.py` skipped
+in the only automated environment there was, and the eight tests that prove an IMPRESS-A
+campaign really runs as an AuCaM workflow proved it only on a developer's laptop. Verified by
 uninstalling the extra and running the tier: 502 passed, 2 skipped, green either way, which is
 the designed behaviour and also exactly the hazard this project already names - "an unbuilt
 transport is a gap; a built one that nothing runs is worse, because it looks finished"
@@ -1222,6 +1222,16 @@ extra, and the whole run costs about a second. Not done here only because the wo
 lives outside `agent/` and this project's scope rule is to leave the root alone; it needs a
 decision, not work. The pin test is unaffected - it reads `pyproject.toml` rather than
 importing, so a branch pin would still be caught in CI.
+
+  **RESOLVED.** The extra now installs in CI (`-e ".[dev,aucam]"`), on the operator's decision
+  to amend the workflow file. Two things learned while doing it, both checked rather than
+  assumed: the pin resolves for anyone — the upstream repository answers an unauthenticated
+  request, every dependency has a PyPI wheel, and a clean venv resolves the whole tree in 6.5s,
+  so the extra costs CI nothing measurable; and the installed `src` beats this repository's own
+  two `src/` directories even with `agent/` as the working directory, because a regular package
+  outranks a namespace portion found earlier on the path. The fix is two steps and not one: a
+  skipped file exits 0, so the install alone would have gone back to being silently absent. The
+  second step imports `src.aucam` and the adapter, and fails the job if either is missing.
 
 ## G. Engine semantics
 
