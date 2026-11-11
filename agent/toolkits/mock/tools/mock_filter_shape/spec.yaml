@@ -1,0 +1,26 @@
+# Surrogate for `filter_shape`. See mock_rfd3_design/spec.yaml for why these live in the
+# `mock` toolkit and what was changed from the real spec.
+id: mock_filter_shape
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.mock_smb_agents.MockFilterShapeAgent
+resources: {cores: 2, walltime_s: 30}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  ligand_params_path: {type: str, default: ""}
+# `sc_selector_mode` is 1.0 here - the ligand-property selector, which is the mode any
+# reading of this chain would be taken in. Declared and reported rather than logged, for the
+# real spec's reason: two campaigns' numbers are not comparable across modes, and this is
+# what says so. Not gated - it is provenance, not quality.
+metrics: [shape_complementarity, sc_selector_mode]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported,
+     params: {metrics: [shape_complementarity, sc_selector_mode]}}
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: shape_complementarity, min: 0.55, max: 1.0}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.002}}

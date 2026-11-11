@@ -131,14 +131,21 @@ class OraclePlanner(BasePlanner):
                     raise ValueError(f"params names {tool!r}, which is not in this stage")
                 card = view.tools[tool] if view else None
                 for name, value in (params or {}).items():
+                    # FROZEN FIRST, and that order is the whole of this fix. `card_for`
+                    # leaves a frozen parameter out of `parameters` and reports it under
+                    # `frozen`, so the "declares no parameter" branch fired first and the
+                    # frozen branch was unreachable - a model naming one was told the tool
+                    # has no such parameter, which is false, and which a corrective retry
+                    # cannot act on because the correction is a lie. It now reads back the
+                    # reason the spec gave, which is the point of carrying one.
+                    if name in (card.frozen if card else {}):
+                        raise ValueError(
+                            f"{tool}.{name} is frozen: {card.frozen[name]}")
                     param = (card.parameters if card else {}).get(name)
                     if param is None:
                         raise ValueError(
                             f"{tool} declares no parameter {name!r}; it declares "
                             f"{sorted(card.parameters) if card else []}")
-                    if name in (card.frozen if card else {}):
-                        raise ValueError(
-                            f"{tool}.{name} is frozen: {card.frozen[name]}")
                     if param.min is not None and float(value) < float(param.min):
                         raise ValueError(f"{tool}.{name}={value} is below {param.min}")
                     if param.max is not None and float(value) > float(param.max):

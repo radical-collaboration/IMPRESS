@@ -1,0 +1,35 @@
+# Surrogate for `fastrelax`. See mock_rfd3_design/spec.yaml for why these live in the `mock`
+# toolkit and what was changed from the real spec.
+id: mock_fastrelax
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.mock_smb_agents.MockFastRelaxAgent
+resources: {cores: 8, walltime_s: 30}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  nstruct: {type: int, default: 1, min: 1, max: 8, trades: "sampling vs cpu-hours"}
+  relax_cycles: {type: int, default: 3, min: 1, max: 8, trades: "convergence vs cpu-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  ligand_params_path: {type: str, default: ""}
+metrics: [total_score, fa_rep, interaction_energy]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  # Divergence detectors, deliberately wide, and INTEGRITY - the real spec's reasoning holds
+  # unchanged here: a relax that cannot reach a negative score has not relaxed.
+  - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
+  - {id: metric_in_range, params: {metric: fa_rep, max: 500.0}}
+  - {id: metrics_reported,
+     params: {metrics: [total_score, fa_rep, interaction_energy]}}
+  # Acceptance: upstream's calibrated PROD values, copied verbatim. Two gates on one metric
+  # with different roles is what decision 0013 is for - +1500 means the tool broke, -12 means
+  # the design fell short, and only the first costs a pattern its trust.
+  - {id: metric_in_range, role: acceptance, params: {metric: total_score, max: -250.0}}
+  - {id: metric_in_range, role: acceptance, params: {metric: fa_rep, max: 100.0}}
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: interaction_energy, max: -8.0}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.002}}

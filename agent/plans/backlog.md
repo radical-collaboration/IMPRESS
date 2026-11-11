@@ -1082,6 +1082,37 @@ it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` doe
 enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
 but no lookup API does.
 
+**F5. `docs/reference/` documented the pre-phase-11 policy layer, and one page a test names did
+not exist — RESOLVED.** Opened and closed in the same commit, because the evidence is the useful
+part. Found while answering four questions about the control plane that all had to be answered
+from the source: by what process the toolkit, the goal, the budget and the parameters become
+specified targets and a programmed Stage. No shipping page traced that path at all.
+
+Two separate defects. **`frontends.md`'s "Writing your own" example did not run**: it subclassed
+`BasePolicy` and implemented `decide`, returning `ComposeAndRun`. Verified by grep over `src/` —
+`BasePolicy`, `RuleCorrectionsPolicy`, `LoggingPolicy`, `NullPolicy`, `ComposeAndRun` and
+`Backtrack` exist nowhere; only `RequestHuman` survives, in `core/decision.py`. The "Composable
+wrappers" section listed three deleted classes, and `architecture.md`'s DECIDE row named the
+deleted return union. A reader following either would have written against an interface removed in
+phase 11. **And `tests/test_reasoner_registry.py:81` instructed a maintainer to keep
+`docs/reference/control-models.md` in step with the `llm_calls` assertion** — a file that had
+never been written, so the pointer was dead from the day the test landed.
+
+Resolved by two new pages and four repairs: `docs/reference/resolution.md` (the pipeline, step 0
+to step 8, each with its owner, its anchor and its refusal, plus a closing table of what the
+pipeline does **not** enforce), `docs/reference/control-models.md` (the per-reasoner half: what
+each model is shown, what it may choose, the six layers that constrain a reply), the two stale
+sections in `frontends.md` rewritten against `policy/wrappers.py` as it stands, `architecture.md`'s
+loop corrected to specify/plan/review, the arm **naming rule** added to `mock-lab.md`, and both
+new pages plus `mock-lab.md` added to the README index, where `mock-lab.md` was missing.
+
+The pattern worth keeping: **three of the symbols `docs/` described did not exist, and nothing
+mechanical would ever have said so.** `tests/test_layering.py` walks imports with `ast` and
+`test_reasoner_registry.py` checks the status column against behaviour; neither can check prose.
+The mitigation applied here is that every `file:line` in both new pages was resolved by grep
+before the commit, and the pages end by naming the provenance files each step's output lands in,
+so a future reader can check the claim rather than trust it.
+
 ## G. Engine semantics
 
 **G1. Exploration cannot move the front, so it counts toward stagnation.** Nodes from the explore
@@ -1416,7 +1447,122 @@ deliberately **not applied**: the prereg's own header rules that an amendment af
 arm has run voids the comparison, `impress-a compare` enforces it through `prereg_sha`, and all
 four smoke manifests record `c710f017…`.
 
-## H. Reasoner models
+**G14. A node that FAILED QC can still satisfy the Spec, so a campaign can stop on "every
+spec objective satisfied" with an empty Pareto front.** Found on the laptop surrogate, where
+it costs nothing to see: `campaigns/mock-small-molecule-binding.yaml` with
+`params.mock_rfd3_design.difficulty: 0.55` ends at cycle 1 with
+
+    stop : every spec objective satisfied
+    nodes: 1  front: 0
+
+The one node FAILed `metric_in_range[ss_fraction]` (acceptance), so `core/pareto` correctly
+refuses it the front - a FAIL node is never rankable, which is an invariant. But
+`core/data.DataRegistry.ingest` records **every** task's metrics with no reference to the
+run's QC verdict, and `SatisfactionRule` is answered from that registry: the stages below the
+failure reported `shape_complementarity`, `complex_plddt` and `ligand_iptm` over their bars,
+and those readings satisfied the Spec on their own. The two halves of "is this campaign
+finished" are reading different evidence - the front reads verdicts, the Spec reads numbers.
+
+Why it matters on hardware rather than only here: it is the stopping rule, so a real arm can
+terminate early reporting success and hand back nothing. It is the same *shape* as G11 (a
+stopping condition that does not count what the Goal asks for), and the same shape as the
+mock-chain-on-a-GPU failure (a number recorded without the context that invalidates it).
+
+**A live reasoner makes this worse, not only visible: see H11.** Model A reaches this state at
+cycle 1 on the `hopeless` arm, where the deterministic control aborts at cycle 4 - so the
+abort rule is skipped rather than merely reported around.
+
+**Deliberately not fixed on this branch.** Changing what satisfaction counts changes when a
+pre-registered arm stops, and `plans/arms-preregistration.md`'s sha is recorded in every
+smoke manifest. The fix is small - `ingest` knows each task's `qc`, and `satisfies` could
+count only readings from tasks whose node passed - and the decision it needs is whether a
+SUSPECT node's readings count, which is a question about trust and not about plumbing. Opened
+with the reproduction above so the fix can be tested without an allocation.
+
+**G15. An ABORTED campaign leaves provenance that says it completed.** Found by the mock
+knob lab, whose `hopeless` arm aborts on purpose. `Executor._fail_all` writes
+
+    {"event": "campaign_ended", "reason": "completed"}
+
+because `stop_reason` carries its default - nothing requested a stop, the executor raised
+`CampaignAborted` instead - and no `terminated` record is written at all, since that is
+written on the normal path. So the only durable trace of `CampaignAborted: 3 consecutive
+all-failed runs` is the process's stderr.
+
+Why that matters beyond tidiness: **`analysis/compare_arms.py` scores from provenance on
+purpose** - "never from an arm's own bookkeeping" is the first line of its docstring - and
+provenance alone cannot distinguish an arm that aborted from one that finished. An aborted
+Delta arm would be scored as a completed one with fewer cycles. `analysis/mock_lab.collect`
+works around it by deriving `aborted` from the subprocess exit code and recovering the reason
+from the captured log, which is only available because the lab launched the process itself;
+a scorer handed a run directory has neither.
+
+The fix is small and local: set `stop_reason` before raising, and write a `terminated` record
+on the abort path with the reason and the cycles completed. Not done here because it changes
+what the single writer of campaign state records at the end of every campaign, and the arms
+pre-registered in `plans/arms-preregistration.md` are scored off exactly those records.
+`tests/test_mock_lab.py::test_abort_reason_takes_the_last_exception_line` pins the workaround
+so the fix has something to replace.
+
+**G16. About one first cycle in eight stalls for an extra ~1.0s inside asyncflow's dispatch
+loop.** Measured on the laptop surrogate, where a cycle is otherwise ~0.11s: over 8 runs of
+the same spec the first cycle's execute window came back 0.118, 0.114, **1.110**, 0.116,
+0.104, 0.117, 0.115, 0.113 s. It is not the knob setting and not the tools - the union of
+task spans is ~2ms in every one of those runs.
+
+`radical/asyncflow/workflow_manager.py` line ~1358: the run-component loop waits on its
+`_component_change_event` with `timeout=1.0`, so when the first batch of tasks is registered
+just after the loop enters `asyncio.wait`, nothing wakes it until the timeout expires. One
+second, once, at the head of a campaign.
+
+**Harmless on hardware and worth knowing anyway.** A Delta stage takes minutes, so 1s is
+noise; on the mock tier it is 90% of the first cycle, which is why every wall-clock figure
+the lab draws says so in its caption. It is also the kind of latency that would matter if the
+engine were ever used for many short tasks. Upstream, not ours: record it here so the next
+person measuring agent overhead on short tasks does not spend the afternoon looking for it in
+`exec/dispatch.py`.
+
+**G17. A campaign cannot raise a quality knob that survives its own first refinement.** Found
+while checking `docs/reference/resolution.md` step 6 against provenance rather than against the
+source, which is the only reason it was found at all: three correct rules compose into a surprise,
+and no single function is wrong.
+
+`ThresholdPlanner._params` escalates with `_knobs.step_up`, whose `base` is
+**`float(param.default)` - the TOOL SPEC's default, not the campaign's value** - and
+`executor._apply_campaign_params` merges `CampaignSpec.params` as defaults *under* the policy's
+choices, because the policy must win or a campaign's defaults would override the decisions being
+measured. Exploring emits no parameters at all, so cycle 1 runs at the campaign's values. From
+cycle 2 the planner's escalation replaces them, computed from a base the campaign never used.
+
+Measured on `arm-rescued-D`'s own `stages.jsonl` (`campaigns/_runs/_labs/live-ab3`):
+
+| knob | spec default | arm declared | cycle 1 | cycle 2 |
+|---|---|---|---|---|
+| `mock_rfd3_design.diffusion_steps` | 50 | **200** | 200 | **88** |
+| `mock_packmin.cycles` | 1 | **5** | 5 | **2** |
+| `mock_boltz_predict.diffusion_samples` | 8 | **25** | 25 | **25** |
+
+The third survives only because its `trades` reads "samples per call", so `_knobs` classifies it
+**breadth** and no planner may touch it. So the rule is: **a campaign's quality knobs last one
+cycle; its breadth and frozen knobs last the campaign.** Exactly backwards from what a reader
+setting `params:` would expect, and backwards from what matters - breadth is the one a campaign is
+trusted with on evidence (H10), and quality is the one it is not.
+
+**It changes what the `rescued` arm measures.** That arm's whole claim is "difficulty 0.55, bought
+back by three knobs"; two of the three are undone from cycle 2 onward, so what the figures compare
+is `hard` against *one cycle* of `rescued` plus an escalation path that starts below the arm's own
+setting. The arm is still a valid campaign and the measured behaviour is real - this does not
+invalidate any figure - but the label overstates what is held. `docs/reference/mock-lab.md` now
+says so beside the arm table.
+
+Three ways to close it, none obviously right. **Escalate from the effective value** rather than the
+spec default - `max(param.default, current)` - which makes a campaign's setting a floor; cheapest,
+and it changes model D's behaviour on every campaign that sets a quality knob, so it is not a
+free fix. **Give a campaign a declared floor** distinct from `params:`, which is honest and is
+another concept. Or **leave it and document it**, which is what this commit does, on the grounds
+that a planner reasoning in fractions of declared headroom is the behaviour the four-arm design
+wants and the surprise is in the label rather than in the engine. Decide before the next
+`rescued`-style arm is pre-registered.
 
 The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
 and what runs. Full evidence, the harmonization options and the hardware follow-on are in
@@ -1550,9 +1696,37 @@ benchmark against the reference's `adaptive_decision()`, which varies the route 
 (`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
 "supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
 `obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
-pitfalls. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
+pitfalls. **The second half of that is stale**: since phase 9 `OraclePlanner._prompt` carries each
+enabled tool's outputs, metrics and every tunable parameter with its type, default, range, `trades`
+sentence and inferred kind, and its schema check refuses a reply naming an unknown, out-of-range or
+frozen one. What is still true is `toolkit_skills()`: no caller, so the SKILL documents - the costs
+and the pitfalls - still reach no reasoner. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
 `docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
 needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
+
+**Three more, found while writing `docs/reference/resolution.md` and verified by grep.**
+`ToolkitView.skills` *is* populated — `view_of` (`tools/view.py:67`) fills it from
+`Registry.skills` for every enabled toolkit — so the skill text now reaches the object a reasoner
+holds and is still included in no prompt; the gap moved one step closer without closing.
+`Goal.walltime_s` (`core/goal.py:74`) is read by nothing, which is defensible on HPC where SLURM's
+`--time` is the real backstop, but it is a field a caller can set and watch do nothing. And
+`ReasonerOptions.max_cycles` and `.target_front` (`policy/registry.py:80-81`) are read by nothing
+in `policy/`: they were forwarded to fix X1 — a model's own bound must never be tighter than the
+campaign's — and the `RehearsalOracle` literals that consumed them were deleted in the same phase,
+so what remains is two fields whose only job is to not be wrong. `target_front` reaches a
+Specifier through `Goal` instead. Deleting either is not obviously right: the X1 defect was a
+model stopping a four-hour arm in twenty minutes, and an empty seam is cheaper than rediscovering
+that. Recorded so the next reader does not have to re-derive which of the two paths is live.
+
+**And a fourth that is the opposite shape**: `Goal.reference_data` (`core/goal.py:55`) is read
+nowhere *and* nothing fills it, while `policy/planners/explicit.py:266` says in a comment that
+"gate 1 decides whether `Goal.reference_data` satisfies it" — gate 1 never receives a Goal, and its
+required-root-port loop is a literal `pass` commented `# roots may be satisfied from campaign
+inputs` (`compose/validate.py:79-81`). So **no gate checks that a required root input was
+satisfied at all**; the caller's input data arrives as `params:` entries such as
+`rfd3_design.input_spec_path`, and a campaign that forgot one is caught, if at all, by
+`cli._check_ligand_smiles` and the dry-run. This is A2's neighbour — Boltz with no ligand does not
+fail, it models no ligand — and it belongs with it rather than here if anyone acts on it.
 
 **H5. No `conduct` reasoner ships.** The entry point, `core/session.py`'s ten-operation surface and
 `policy/driver.py`'s adapter all exist and are covered, but every `conduct` implementation in the
@@ -1599,6 +1773,197 @@ contract under a live LLM: a real `Decision`, an LLM-authored `ExperimentIntent`
 refused by the five gates, `on_rejected` under a real rejection, the degraded transition and its
 labelling. **They cannot test decision quality** while H3 is open, and must not be reported as if they
 could. Prerequisites with their evidence, and the scoring method, are in the plan.
+
+**H8. Nothing recorded what a reasoner did, and two readers were already waiting for it.**
+**RESOLVED** (`890829d`), except for the caller-side half.
+
+`ReasonerOptions.sink` had writers throughout `policy/` - the transcript in `reasoning.ask`,
+`reasoner_degraded`, the external halves' `directive_rejected`/`caller_timeout` - and no
+subscriber: `ReasonerOptions(...)` is constructed in exactly two places, `cli/__init__.py`'s
+`_options_for` and `_role_pair`, and **neither passed `sink=`**. So every campaign ever run
+left on disk no prompt, no reply, no model id, no attempt count, no timing and no degraded
+event, whatever drove it.
+
+Not a bookkeeping gap. `analysis/compare_arms` reads `degraded_events` out of `transitions`
+to **void an arm** (`:410`) and `elapsed_s` out of `decisions` for the decision-layer share
+(`:499`); neither key had a writer anywhere in `src/`. So the pre-registration's "an arm
+shown to have degraded is void" rule (§8, `plans/arms-preregistration.md:116`) could not fire
+- on the laptop or on Delta - and `decision_share` has been `None` for every arm scored.
+`Figures.directives` and `stagnation_trace` are the same shape and are still open: `steered`
+goes into the plane's in-memory `_events` and is never persisted, and `Executor._stagnant` is
+private and reaches provenance only folded into a stop-reason string.
+
+Why it survived: **every test asserted at the HALF**, building `OracleSpecifier(sink=...)` by
+hand, and none at the seam where the sink is assembled.
+`tests/test_reasoner_record.py::test_a_campaign_writes_its_reasoners_decisions_to_provenance`
+asserts at the seam, and fails with the `sink=` argument removed.
+
+Records route through `Executor.record_reasoning`, which accepts `decisions` and
+`transitions` and refuses anything else: the executor stays the single writer of every file
+under `provenance/` - two writers appending to one JSONL is a torn line waiting for a long
+campaign - and a reasoner cannot append to `results`, which is exactly what scoring from
+these files is supposed to rule out. A record now also carries `elapsed_s` and token deltas,
+and a REJECTED attempt is recorded (`ok: false`), which used to reach a `log.warning` and
+nothing else.
+
+**Still open: the caller side.** `impress-a control` drives a campaign it does not host. The
+executor writing `provenance/` is across a socket and there is no plane operation for "append
+this to your decisions log" - ADR 0007 forbids an adapter carrying one the core protocol
+lacks. So a model-C arm's transcript, timing and degraded turns are on disk **nowhere**, and
+arm C is precisely the arm whose claim is that a third party steered it. `_role_pair` attaches
+a `ReasonerSink` that counts and drops, and `control_campaign` now warns with the count rather
+than leaving the silence to be read as "the model made no calls". The fix is a plane
+operation or a caller-side provenance root, and it is a prerequisite for scoring arm C on
+anything but yield.
+
+**H9. A reasoner could set a parameter that is the experiment's own condition.**
+**RESOLVED** (`890829d`) by `ParameterSpec.operator_only`.
+
+`OraclePlanner._prompt` shows a live model every tunable parameter with its range and its
+`trades` sentence, and `executor._apply_campaign_defaults` states that "the policy always
+wins on any key it did set". `mock_rfd3_design.difficulty` is a float from 0.0 to 1.0 whose
+trades sentence reads "how hard this campaign is" - so a model asked to satisfy the
+objectives turns it down, the mock lab's `hard` arm quietly becomes its easy one, and nothing
+records that the independent variable moved. Models D and A are safe only by accident:
+`_knobs.kind_of` finds no kind word in that sentence and skips it.
+
+`operator_only` is the third state the two existing ones could not express - varyable (the
+campaign sets it and so may a Planner), `frozen_parameters` (nobody sets it, and gate 3
+refuses a graph carrying it, so the campaign cannot declare it either), and now the
+campaign's to set and a reasoner's to leave alone. Enforced in ONE seam, `tools/view.card_for`,
+which reports it under `TaskCard.frozen` and leaves it out of `TaskCard.parameters`;
+everything downstream already honours that, and gate 3 reads `ToolSpec.frozen_parameters`,
+which stays empty.
+
+The same shape covers any campaign configuration a reasoner should not re-litigate - a ligand,
+an input path, a contig - which is the distinction `_apply_campaign_defaults` already draws in
+prose ("a policy chooses how to explore, not what molecule the campaign is about"). **Not
+applied to the real toolkits yet**; `rfd3_design.input_spec_path` and `boltz_predict`'s ligand
+fields are strings, which `_knobs.tunable` already excludes, so nothing is exposed today - but
+the first numeric campaign-configuration parameter on a real tool will be.
+
+One latent defect surfaced closing it: `OraclePlanner`'s schema check tested `parameters`
+before `frozen`, and `card_for` has always left a frozen parameter out of `parameters`, so the
+frozen branch was **unreachable** - a model naming one was told the tool declares no such
+parameter. False, and a correction a corrective retry cannot act on.
+
+**H10. Model B raises breadth parameters, which are excluded from model D on evidence - and
+the cost models cannot see it.** Found on the FIRST live run of model B's two-schema path,
+2026-11-10, `Beam-501B-A23B` via profile `beam`, four mock arms, 20 calls, zero degraded
+turns. Not a surrogate artefact: the mechanism is in the real specs.
+
+`OraclePlanner._prompt` filters what a model is shown with `_knobs.tunable`, which excludes
+frozen, non-numeric and unbounded parameters - and **not** by kind. So model B is shown
+`num_designs` labelled `"kind": "breadth"` and raised it anyway, to 2, 3, 4 and 8 across 36
+task mappings in four campaigns. It also set `batch_size`, `num_seqs` and `nstruct`.
+
+Three facts make that expensive rather than merely different:
+
+* `policy/planners/_knobs.py` excludes breadth for models A and D **on evidence**:
+  `rfd3_design`'s own spec records that `num_designs` stays at 1 because its adapter keeps
+  index 0, so raising it pays N times for one design. B is told the kind and is not bound by
+  the rule derived from it.
+* `rfd3_design`'s `cost_model` is `{unit: invocation, gpu_hours: 0.1}` - **per invocation,
+  not per design**. So the estimate does not scale with `num_designs`, which means gate 5 and
+  the untrusted-pattern cap are blind to it too. A model-B arm asking for 8 would burn 8x the
+  GPU time for one design with nothing refusing the graph.
+* Breadth is held fixed across the four arms on purpose (backlog G13's ruling): an arm
+  drawing wider spends differently per cycle for a reason the endpoint cannot separate from
+  reasoning quality. `declared_width` binds `replicas`; it does not bind a tool's own
+  breadth parameter.
+
+Three ways to close it, and the choice is a decision about what model B may do rather than
+plumbing. **Filter the prompt by kind**, so breadth and identity are not offered to B as they
+are not offered to A and D - smallest change, and it makes the three autonomous models obey
+one rule. **Mark the real tools' breadth parameters `operator_only`** (H9), which says they
+are the campaign's to set - true for this experiment, and arguably true generally. Or **make
+the cost models scale**, which is honest but does not stop the waste, only prices it.
+
+Measured beside it, worth keeping: B spent **19.96s per decision against D's 0.35s**, 1148
+completion tokens a call, and **94-99% of each live campaign's wall clock was the endpoint**.
+Zero retries and zero degraded turns across 20 calls, so the corrective-retry path still has
+never been exercised against a live endpoint (H1's open note stands). And the freeze held:
+`difficulty` is `operator_only`, B was never shown it, and `difficulty_proposed` is empty for
+every cell.
+
+**This also closes H2's outstanding probe.** "No request has reached a real endpoint from this
+project" was true of model B's `SPEC_SCHEMA`/`STAGE_SCHEMA` path until this run; both halves
+answered, were schema-checked and were admitted, on a laptop and with no allocation.
+
+**Model A, run live on the same arms the next day, does the opposite** and makes the case for
+filtering the prompt by kind the strongest of the three. A moved `diffusion_steps` 50 -> 169,
+`temperature` 0.2 -> 0.35, `packmin.cycles` 1 -> 4 and `relax_cycles` 3 -> 7 - four quality
+dials, no breadth parameter, `num_designs` left at 1 - and took the `hard` arm from D's
+0-of-12 front to 2 of 4. B on that same arm raised `num_designs` to 4, lowered `batch_size`
+8 -> 4 and `diffusion_samples` 8 -> 6, and got nothing. The difference is not model quality:
+A's knobs come from `parameterize`, a DETERMINISTIC node that the model only steers by
+choosing a strategy, and `_knobs.tunable` keeps breadth away from it. B is handed the whole
+card and chooses for itself. So the comparison here is between a filtered knob set and an
+unfiltered one, not between two models' judgement.
+
+**Three repeats sharpen it into a cost argument.** Over 12 cells per model: A's front on
+`hard` is 3-4 against D's 0 of 12 and B's 0 of 16, and A's predicted hardware cost is flat at
+0.68 GPU-h per campaign in every arm. B's ranges from 0.68 to **4.1** on one arm, a 6x spread
+on the same campaign, because an unfiltered planner also chooses how many cycles to spend.
+An arm whose GPU bill cannot be predicted within 6x is a scheduling problem as much as a
+quality one, and `f11-predicted-cost.png` is where it shows.
+
+**The layer the per-invocation assumption actually lives in is `Validator.estimate`**
+(`compose/validate.py:142`), found while writing `docs/reference/resolution.md`. It is four lines,
+and it sums `cost_model.cost` **per node in the graph** with no reference to any parameter. So
+"the cost models are per invocation" is not a property of the specs that a better spec could fix
+on its own: gate 5, the Reviewer's `affordable` and the interlock's 10% provisional cap all price
+a graph by its *shape*, which is the same reason a pattern signature excludes parameter values.
+Making the cost models scale therefore means giving `estimate` a parameter-aware term, not only
+editing six `cost_model` blocks - which moves that third option from "honest but does not stop
+the waste" to "honest, and a change to the admission path". Worth knowing before choosing.
+
+**H11. A live Specifier can end a campaign in one cycle on readings from designs that all
+failed an integrity gate, and the abort rule then never fires.** Found on model A's first
+live run on the mock arms, 2026-11-10, `Beam-501B-A23B`, 3 calls per arm, zero degraded
+turns. `arm-hopeless-A` - difficulty 0.85, the arm that exists to break the backbone:
+
+    cycles: 1   nodes: 4   front: 0   stop: every spec objective satisfied
+
+All four lineages FAILed `metric_in_range[ss_fraction]`, the secondary-structure floor, which
+is an INTEGRITY gate. All four campaign objectives were satisfied on the same tasks' numbers:
+`shape_complementarity` 0.78-0.80 against a 0.55 bar, `complex_plddt` 0.90-0.92 against 0.75,
+`ligand_iptm` 0.83-0.90 against 0.40. `specs.jsonl` records all four flipping to `satisfied`
+at generation 3.
+
+This is G14's mechanism, but the consequence is new and worse. On the same arm the
+deterministic control runs four cycles and **aborts** on `3 consecutive all-failed runs`, and
+so does model B. Model A does not, because it never reaches a third cycle: its Specifier
+returned `strategy: explore` with a hypothesis and emitted no refinement objective, so
+nothing was added for the satisfaction rule to find unsatisfied, and the campaign reported
+success at cycle 1. Under D only two of the four objectives flipped and the campaign kept
+going. **The safety net that catches a hopeless campaign is reached by running cycles, and a
+reasoner that declines to add an objective can stop before it.**
+
+Worth saying plainly: A's quality knobs are what made the numbers good - 169 diffusion steps
+and 7 relax cycles on a backbone that difficulty 0.85 has already destroyed. The metrics
+improved, the structures did not, and nothing in the stopping rule can tell those apart.
+
+**Repeated three times the same day, and the picture is worse than one run showed.** 89 calls,
+four arms x three models x three repeats, zero degraded:
+
+* **model A: 3 of 3.** Every repeat stops at cycle 1 on "every spec objective satisfied" with
+  an empty front. Not a draw - it is what A's Specifier does on this arm.
+* **model B: 1 of 3.** `arm-hopeless-B-r1` does the same thing; r0 and r2 run three cycles and
+  abort correctly. So this is NOT a model-A property, which is what the single-repeat run
+  suggested and what the first version of this item said. It is a property of **any live
+  Specifier that declines to add a refinement objective**, and B does that one time in three.
+* The deterministic control aborts every time, because its cascade always emits one.
+
+That changes the fix's priority. A defect that fires on one model is a model to avoid; one
+that fires stochastically on both live models is the stopping rule, and the stopping rule is
+shared with every arm pre-registered for Delta.
+
+Fixing G14 fixes this. Recorded separately because it changes the argument for fixing it: not
+only "an arm can report success with an empty front", which a reader can dismiss as a
+reporting problem, but "an arm can skip the abort rule entirely", which is a safety one. The
+reproduction costs 3 LLM calls and no allocation:
+`impress-a mock-lab --only arms --reasoners A --model-profile <profile> --reasoner-repeats 1`.
 
 ---
 

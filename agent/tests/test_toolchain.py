@@ -445,7 +445,13 @@ def test_documented_command_lines_parse():
     """
     from impress_a.cli import _parser
 
-    docs = sorted(pathlib.Path("plans").glob("*.md")) + sorted(pathlib.Path(".").glob("*.md"))
+    # `campaigns/` is here because `campaigns/README.md` is a procedure document too: it
+    # tells a reader which `impress-a` lines to run against the laptop surrogate, and a flag
+    # argparse refuses there is a first command that fails - cheaper than an allocation, and
+    # the same defect.
+    docs = (sorted(pathlib.Path("plans").glob("*.md"))
+            + sorted(pathlib.Path("campaigns").glob("*.md"))
+            + sorted(pathlib.Path(".").glob("*.md")))
     seen = 0
     for doc in docs:
         for line_no, argv in _documented_command_lines(doc):

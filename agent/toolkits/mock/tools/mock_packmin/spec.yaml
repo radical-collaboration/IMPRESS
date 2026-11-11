@@ -1,0 +1,25 @@
+# Surrogate for `packmin`. See mock_rfd3_design/spec.yaml for why these live in the `mock`
+# toolkit and what was changed from the real spec.
+id: mock_packmin
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: impress_a.tools.mock_smb_agents.MockPackMinAgent
+resources: {cores: 4, walltime_s: 30}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  cycles: {type: int, default: 1, min: 1, max: 5, trades: "convergence vs cpu-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  ligand_params_path: {type: str, default: ""}
+metrics: [total_score]
+# No threshold on this tool's own score, exactly as the real spec has it: whether the pose
+# blew up is fastrelax's call, by whether it converges. What stays is that the score must be
+# REPORTED - a worker that exits without one has broken.
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [total_score]}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.002}}

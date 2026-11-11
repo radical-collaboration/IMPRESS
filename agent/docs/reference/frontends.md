@@ -32,6 +32,11 @@ stated methodology and its results are attributable to it.
 
 Model **C is the headless mode** (`docs/decisions/0002`) — not an extra option bolted onto the side.
 
+This section is the catalogue. For what each model is **shown**, what it may choose, how its reply
+is constrained, and which campaign fields reach a half, see
+[`control-models.md`](control-models.md); for the pipeline all of them drive — caller inputs to
+specified targets to a programmed Stage — see [`resolution.md`](resolution.md).
+
 ### Two contracts, and why not one
 
 ```python
@@ -64,35 +69,77 @@ and ends the campaign with the gate that refused it named.
 
 ### Writing your own
 
-Implement the two protocols (or subclass `BaseSpecifier`/`BasePlanner`, whose defaults are a
-fixed Spec and a planner that gives up loudly), add a row to `policy/registry.py` with both
-builders, and register it. Nothing else changes.
+Implement the two protocols — or subclass `BaseSpecifier`/`BasePlanner`, whose defaults are a
+fixed Spec and a planner that gives up loudly — then add a row to `policy/registry.MODELS` with
+both builders. Nothing else changes.
 
 ```python
-from impress_a.policy.base import BasePolicy
-from impress_a.core.decision import ComposeAndRun, ExperimentIntent, Stop
+from impress_a.core.goal import Goal
+from impress_a.core.spec import Spec, Stage
+from impress_a.policy import registry as reasoners     # policy/__init__ re-exports nothing
+from impress_a.policy.planner import BasePlanner, PlanningContext
+from impress_a.policy.planners import ThresholdPlanner
+from impress_a.policy.specifier import BaseSpecifier, SpecEvidence
 
-class MyPolicy(BasePolicy):
-    name = "mine"
-    async def decide(self, obs):
-        if obs.cycle >= 5:
-            return Stop(reason="enough")
-        return ComposeAndRun(intent=ExperimentIntent(
-            goal=obs.goal, stages=["generate", "design", "fold", "score"], replicas=2))
+
+class MySpecifier(BaseSpecifier):
+    name = "mine-spec"
+
+    async def initial_spec(self, goal: Goal) -> Spec:
+        ...                      # Goal -> Spec; see policy/specifiers/explicit.py
+    # `revise` defaults to "nothing has changed my mind", which is the common case, and
+    # `satisfied` to the rule-driven answer off the data registry. Overriding the second
+    # means arguing a campaign's stop condition rather than computing it.
+
+
+class MyPlanner(BasePlanner):
+    name = "mine-plan"
+
+    def __init__(self, stages: list[str] | None = None, base_replicas: int = 0) -> None:
+        # Type-driven chain resolution and typed port wiring are correctness, not
+        # strategy: compose them rather than reimplementing them, as models A, B and C do.
+        self._mechanics = ThresholdPlanner(
+            stages=stages, **({"base_replicas": base_replicas} if base_replicas else {}))
+
+    async def plan(self, spec: Spec, ctx: PlanningContext) -> Stage | None:
+        return await self._mechanics.plan(spec, ctx, lineages=2)
+
+
+reasoners.MODELS["mine"] = reasoners.ReasonerModel(
+    letter="mine", name="my control model", mode="autonomous",
+    llm_calls=0, llm_shape="none", status="implemented",
+    specifier=lambda o: MySpecifier(),
+    planner=lambda o: MyPlanner(stages=o.stages, base_replicas=o.replicas),
+    note="what is true of this model that a reader would otherwise have to discover")
 ```
+
+`ReasonerOptions` (`o` above) is the only configuration a builder sees, and `cli.POLICIES` is
+derived from `MODELS`, so the letter becomes a valid `--model` with no second list to update. A
+builder that needs something only `CampaignSpec` has wants another `ReasonerOptions` field, not an
+import — `policy` may import `core` only.
 
 ### Composable wrappers
 
-Policies decorate rather than inherit. `impress_a.policy.wrappers` provides:
+A half is decorated rather than subclassed. `impress_a.policy.wrappers` provides:
 
-- **`RuleCorrectionsPolicy`** — an unconditional external guard that validates and corrects *every*
-  decision before it reaches composition. Separation of authority: the policy proposes, the guard
-  disposes.
-- **`LoggingPolicy`** — provenance decorator.
-- **`NullPolicy`** — no-op baseline and control.
+- **`StageGuard`** — an unconditional external guard on a Planner half, attached by the CLI unless
+  `--no-guard` is passed. It carries `forbid_tools` and **refuses rather than edits**: dropping a
+  forbidden tool would leave a hole where a producer was, and a Stage is wired by port, so removing
+  a task leaves its consumers pointing at nothing. Two of its predecessor's three corrections moved
+  somewhere they cannot be bypassed — the **replica cap** is applied by the executor against the
+  campaign's own `replicas`, and a **task serving no objective** is refused by the Reviewer's
+  coverage gate — because `--no-guard` could switch both off and should never have been able to.
+  `forbid_tools` itself is a stopgap for phase 10's gate 6, which refuses a mock-toolkit node under
+  `tool_delivery: real` and cannot be disabled at all.
+- **`LoggingSpecifier` / `LoggingPlanner`** — provenance decorators, recording that a half
+  *authored* a revision or a Stage. Not redundant with the executor's own records, which say what
+  it *applied*: the four-arm comparison reads the second to tell a model that proposed nothing from
+  one whose proposals were refused.
+- **`NullSpecifier` / `NullPlanner`** — the no-op baseline. An empty Spec makes `complete()` true,
+  so the campaign ends through the designed path rather than a `Stop` the driver must recognise.
 
 ```python
-policy = LoggingPolicy(RuleCorrectionsPolicy(MyPolicy(), max_replicas=8), sink)
+pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
 ```
 
 ### Degraded mode is declared, not improvised
@@ -109,15 +156,16 @@ One transport-agnostic protocol; adapters translate transport only (`docs/decisi
 | Operation | Purpose |
 |---|---|
 | `submit` / `pause` / `resume` / `stop` | Lifecycle |
-| `observe` | **Returns the same `CampaignObservation` a policy's `decide` receives** |
+| `observe` | **Returns the same `CampaignObservation` an in-process half is given** |
 | `events` | Append-only stream with a resumable cursor |
-| `steer` | Inject a directive — this is model C's `decide` |
+| `steer` | Inject a directive — this is model C's planning call, routed to a half by its `role` key |
 | `artifacts` / `provenance` | Retrieve results and the audit trail |
 | `ingest_measurement` | Out-of-band P8 arrival; accepted even after termination |
 
-The `observe` symmetry is the point: an external caller, an LLM oracle and a user-written policy all
-consume the identical observation and return the identical `Decision`. "Informed monitoring" means
-**parity of evidence**, not a progress bar.
+The `observe` symmetry is the point: an external caller, an LLM oracle and a user-written half all
+consume the identical observation and answer in the identical vocabulary — a `SpecRevision` from the
+Specifier side, a candidate `Stage` from the Planner side. "Informed monitoring" means **parity of
+evidence**, not a progress bar.
 
 | Adapter | Status | Fits |
 |---|---|---|
@@ -137,8 +185,11 @@ leaves nothing to bound retries against.
 
 ### Steering carries no privilege
 
-A caller's directive is composed and passed through all five validation gates exactly as any policy's
-decision would be. Rejections come back through `on_rejected` with the gate and reason.
+A caller's directive is composed, type-checked, gated and budget-checked exactly as any Planner's
+Stage is — including the Reviewer's coverage check against the applied Spec. A rejection comes back
+to the caller through `replan` with the gate and the reason, for another turn. A caller may add and
+delete objectives but may **not** declare one satisfied: satisfaction is computed, not asserted
+(see [`resolution.md`](resolution.md) step 8).
 
 ## 3. The substrate is pluggable too
 

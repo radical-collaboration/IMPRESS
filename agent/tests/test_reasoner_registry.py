@@ -357,3 +357,35 @@ def test_model_c_is_built_to_stop_rather_than_to_fall_back():
 
     # There is no legacy policy left to check (phase 11): `ExternalPolicy` went with the
     # `decide` contract, so the planner half above is the only place this default lives.
+
+
+def test_no_shipped_half_argues_its_own_stop_condition():
+    """Satisfaction is COMPUTED off the data registry, by every model that ships.
+
+    `BaseSpecifier.satisfied` reads the rules against realized data and the Specifier gets no
+    say, and the protocol does permit an override - `specifier.py` says so, and says such a
+    Specifier "owes an explanation in provenance, because the campaign's stop condition is
+    being argued rather than computed". No shipped half takes that offer, and
+    `docs/reference/resolution.md` step 8 and `docs/reference/control-models.md` both rest on
+    it: the asymmetry behind G14 and H11 is that satisfaction counts READINGS while the front
+    counts ELIGIBLE nodes, and a half that redefined `satisfied` would add a third population
+    neither document describes.
+
+    So this is a statement about the shipped set, not about the protocol. A deliberate
+    override should change this test and both pages together - which is the point of asserting
+    it rather than writing it down.
+    """
+    # `spec_records` because `replay` refuses to be built without them, deliberately: a
+    # replay with no records is a different campaign rather than a degraded one.
+    options = reasoners.ReasonerOptions(stages=["mock_fold"], spec_records=[])
+    for letter, model in reasoners.MODELS.items():
+        half = model.specifier(options)
+        owner = next((klass for klass in type(half).__mro__ if "satisfied" in vars(klass)),
+                     None)
+        assert owner is not None, f"{letter}: {type(half).__name__} has no `satisfied` at all"
+        assert owner.__module__ in ("impress_a.policy.specifier",
+                                    "impress_a.policy.wrappers"), (
+            f"{letter}: {type(half).__name__} defines its own `satisfied` in "
+            f"{owner.__module__} - it is arguing the campaign's stop condition rather than "
+            f"computing it. Update docs/reference/resolution.md step 8 and "
+            f"docs/reference/control-models.md with it, or drop the override")

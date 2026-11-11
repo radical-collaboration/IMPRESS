@@ -1,0 +1,61 @@
+# Surrogate for `rfd3_design`. Copied from toolkits/rfd3/tools/rfd3_design/spec.yaml and
+# changed in five places: id/toolkit, entry, walltime, cost_model, and the hardware-provenance
+# comments. Every parameter name, every metric name and EVERY qc_gate - thresholds included -
+# is the real spec's, because mirroring the bars is the point: a reading that clears
+# `ss_fraction >= 0.5` here cleared the bar the real campaign measures against.
+#
+# `toolkit: mock` is load-bearing. Gate 6 (`compose/validate.py::_g6_delivery`) classifies a
+# tool by this field exactly, so a surrogate in a toolkit of its own would be admitted by a
+# campaign declaring `tool_delivery: real` - a chain of random number generators reporting its
+# draws as science.
+id: mock_rfd3_design
+toolkit: mock
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.mock_smb_agents.MockRFD3DesignAgent
+# 30s because the agent draws six numbers. A bound that can never bind teaches nothing, and a
+# bound copied from hardware (900s) would hide a surrogate that hung. `gpus: 1` stays: a P1
+# tool declaring no GPU is a load-time error, and on a laptop the declaration costs nothing -
+# the concurrent backend never looks for a device.
+resources: {gpus: 1, cores: 8, walltime_s: 30}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+outputs:
+  backbone: {type: Backbone}
+parameters:
+  num_designs: {type: int, default: 1, min: 1, max: 64, trades: "coverage vs GPU-hours"}
+  diffusion_steps: {type: int, default: 50, min: 20, max: 200, trades: "quality vs wall-clock"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  input_spec_path: {type: str, default: ""}
+  # THE ONE PARAMETER WITH NO REAL COUNTERPART. rfd3 has no such flag; this is the
+  # surrogate's own dial, so a reader can make the campaign easy or impossible without
+  # editing a threshold. At the 0.25 default `ss_fraction` lands near 0.60 and the whole
+  # chain passes. Around 0.5 it falls between the two bars: under the 0.5 acceptance
+  # threshold, still over the 0.3 integrity floor - a weak design, and the pattern's trust is
+  # untouched. Above ~0.75 it goes under the floor, which is an INTEGRITY failure: the node
+  # fails AND the pattern's trust suffers. That difference is decision 0013, and watching it
+  # is the reason this dial exists.
+  #
+  # `operator_only` because this dial is the lab's independent VARIABLE, and a reasoner is
+  # shown every tunable parameter with its range and its trades sentence. A model asked to
+  # satisfy the objectives, and told there is a 0.0-to-1.0 knob called "how hard this
+  # campaign is", turns it down - and `_apply_campaign_defaults` would let it, because "the
+  # policy always wins on any key it did set". The hard arm would become the easy one and
+  # nothing would say so. The campaign still sets it exactly as before; only a reasoner is
+  # refused, and the refusal names this reason.
+  difficulty: {type: float, default: 0.25, min: 0.0, max: 1.0,
+               trades: "how hard this campaign is; surrogate-only, no rfd3 counterpart",
+               operator_only: "the experiment's own condition - a reasoner that could turn
+                               it down would be choosing its own difficulty"}
+metrics: [ss_fraction, num_models, ca_deviation, ligand_clashes,
+          helix_fraction, sheet_fraction]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}
+  - {id: metrics_reported, params: {metrics: [ss_fraction, num_models]}}
+  - {id: metric_in_range, role: acceptance, params: {metric: ss_fraction, min: 0.5}}
+# Thousandths of an hour, so a laptop budget is never what stops the campaign. These figures
+# are NOT measurements of anything - the agent returns in microseconds - they are small enough
+# that gate 5 and the untrusted-pattern cap stay out of the way while remaining non-zero, so
+# the budget ledger still has something to count.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.002}}

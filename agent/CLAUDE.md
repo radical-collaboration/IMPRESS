@@ -28,6 +28,9 @@ impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and ch
 #   `impress-a trust --assert`, whose --reason cites the job id.
 #   On Delta: sbatch --partition=gpuA40x4-interactive --time=00:40:00 \
 #                    scripts/delta_validate_tasks.sh campaigns/<spec>.yaml
+impress-a mock-lab                                   # the mock chain across a knob grid, with
+#   figures. ~30s, no allocation. --stage sweep|collect|figures to run one; --only arms.
+#   Figures need `pip install -e ".[figures]"`. See docs/reference/mock-lab.md
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
 #   --control roles          the Specifier/Planner halves rather than the legacy `decide`
@@ -73,6 +76,7 @@ included `$USER`. `impress-a preflight` flags a venv still on HDD.
 | `toolkits/` | Declarative tool specs + skill docs, discovered at runtime — not package data |
 | `campaigns/`, `sites/` | Campaign specs and per-machine configuration |
 | `docs/` | **Shipping reference.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` |
+| `src/impress_a/analysis/` | Scoring and figures that run *beside* a campaign, never inside one. May not import `policy` or `control` |
 | `plans/` | **Working plans.** `backlog.md` is the live outstanding list; `done/` records completed work *for the rulings it contains*, not the task lists |
 | `planning/` | **Process history, not reference.** The design record; superseded in places. Where it disagrees with `docs/` or the code, the code is right |
 

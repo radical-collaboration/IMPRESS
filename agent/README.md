@@ -77,20 +77,26 @@ occupies.
 
 **Decision frontend — four control models**, exactly one active per campaign, fixed at launch:
 
-| | Model | Mode | `decide` |
-|---|---|---|---|
-| **A** | Four-node agentic loop | autonomous | A LangGraph graph: hypothesize → parameterize, auditable node by node |
-| **B** | Heavyweight LLM oracle | autonomous | One structured call over rich campaign state |
-| **C** | External caller steering | **headless** | Blocks on the control plane for a directive |
-| **D** | Explicit policy | autonomous | Rules, bandit, Bayesian optimization, or replay — fully reproducible |
+Each is a **Specifier half** (`Goal → Spec`, then revisions) and a **Planner half**
+(`Spec → Stage`), never a single `decide` call — so a transcript can say which half earned a model
+its cost:
 
-Writing a fifth is subclassing `BasePolicy` and implementing one method. Policies emit *abstract intent*,
-never a concrete DAG, which is what keeps them swappable. They compose: wrap any policy in
-`RuleCorrectionsPolicy` for an unconditional external guard, or `LoggingPolicy` for provenance.
+| | Model | Mode | the two halves |
+|---|---|---|---|
+| **A** | Four-node agentic loop | autonomous | A LangGraph graph, two nodes per half; `hypothesize` and `select_tasks` call the model, `analyze` and `parameterize` are deterministic |
+| **B** | Heavyweight LLM oracle | autonomous | One structured call per half: `SPEC_SCHEMA` in the Spec's vocabulary, `STAGE_SCHEMA` in the engine's |
+| **C** | External caller steering | **headless** | Two role inboxes; blocks on the control plane for a directive |
+| **D** | Explicit policy | autonomous | Rules end to end, fully reproducible — the baseline the others justify their cost against |
+
+Writing a fifth is implementing the two protocols and adding a row to `policy/registry.MODELS`.
+A reasoner emits *abstract intent* — a `Stage` of `TaskMapping`s, never a concrete DAG — which is
+what keeps the models swappable, and halves compose: wrap a Planner in `StageGuard` for an
+unconditional external guard, or either half in `LoggingSpecifier`/`LoggingPlanner` for provenance.
+See [`docs/reference/control-models.md`](docs/reference/control-models.md).
 
 **Interface frontend — control-plane adapters.** One transport-agnostic protocol (`observe`, `events`,
 `steer`, `artifacts`, `provenance`, `ingest_measurement`, lifecycle). `observe()` returns the **same
-observation object a policy's `decide` receives** — informed monitoring means parity of evidence, not a
+observation object an in-process half is given** — informed monitoring means parity of evidence, not a
 progress bar. The protocol also carries runs by id — `submit_run`, `list_runs`, `run_result`,
 `cancel_run` — with **synchronous admission**: accepted with an id, or refused with the gate and the
 reason that refused it. In-process and HTTP+SSE adapters ship; MCP is the same protocol behind a
@@ -207,7 +213,10 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 | | |
 |---|---|
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | The loop, layers, import contract, invariants |
+| [`docs/reference/resolution.md`](docs/reference/resolution.md) | **How the toolkit, goal, budget and parameters become specified targets and a programmed Stage** — step by step, with what refuses each one |
+| [`docs/reference/control-models.md`](docs/reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
 | [`docs/reference/frontends.md`](docs/reference/frontends.md) | Control models and control-plane adapters in detail |
+| [`docs/reference/mock-lab.md`](docs/reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |
 | [`docs/reference/compute-patterns.md`](docs/reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
 | [`docs/reference/authoring-tools.md`](docs/reference/authoring-tools.md) | Writing tools, gates and skill documents |
 | [`docs/reference/middleware-integration.md`](docs/reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |

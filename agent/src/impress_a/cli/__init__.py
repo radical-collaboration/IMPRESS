@@ -47,7 +47,7 @@ POLICIES = reasoners.LETTERS
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
 SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
-               "trust", "validate-tasks", "compare")
+               "trust", "validate-tasks", "compare", "mock-lab")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -110,6 +110,39 @@ def load_spec(path: str | Path) -> CampaignSpec:
         max_runs=int(d.get("max_runs", 0)))
 
 
+#: Which real tool each environment check exists for. Every entry names tools, never
+#: toolkits, because what a campaign declares is a stage list.
+_CHECK_OWNERS: dict[str, tuple[str, ...]] = {
+    "$WORK_DIR": ("rfd3_design", "ligandmpnn_design", "packmin", "fastrelax",
+                  "filter_shape", "boltz_predict"),
+    "$FOUNDRY_SIF_PATH": ("rfd3_design",),
+    "$MPNN_DIR": ("ligandmpnn_design",),
+    "$BOLTZ_CACHE": ("boltz_predict",),
+    "boltz CCD cache": ("boltz_predict",),
+    "apptainer": ("rfd3_design",),
+    "boltz": ("boltz_predict",),
+    "pyrosetta": ("packmin", "fastrelax", "filter_shape"),
+    "ml_collections": ("ligandmpnn_design",),
+}
+
+
+def _check_applies(stages: list[str] | None, owners: tuple[str, ...]) -> bool:
+    """Does any tool this check exists for appear in the campaign?
+
+    `stages` is `None` when preflight was given no campaign at all, and then every check
+    applies: the question there is what this machine can run, not what one spec needs.
+
+    Scoping matters because of the surrogate chain. `campaigns/mock-small-molecule-binding.yaml`
+    runs six `toolkit: mock` stand-ins on a laptop and needs no Apptainer image, no LigandMPNN
+    checkout, no Boltz weights and no PyRosetta - and before this, preflight reported five
+    FAILs against it and then printed "a campaign using mock_rfd3_design, ... needs the
+    entries above", which is false. A FAIL the reader cannot act on, under a sentence that is
+    wrong, is how the FAIL column stops being read - the same erosion the `warn` column's
+    rule guards against.
+    """
+    return stages is None or any(tool in stages for tool in owners)
+
+
 def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
     """`boltz_predict` with an empty `ligand_smiles` doesn't fail - it silently models no
     ligand, so the campaign's Pareto front optimizes the wrong objective. Backlog A2.
@@ -127,7 +160,8 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
                 stage_records: list[dict[str, Any]] | None = None,
-                profile: str | None = None, caller_timeout_s: float | None = None):
+                profile: str | None = None, caller_timeout_s: float | None = None,
+                sink: Any = None):
     """Adapt a `CampaignSpec` into the registry's options, and build the two halves.
 
     This function is the adapter and nothing more. `policy/registry.py` owns which models
@@ -156,11 +190,46 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     # failures, and the silent one. `target_front` is the same shape with nothing else behind
     # it at all, and 0 keeps the model's own number.
     opts = _options_for(spec, records, spec_records, stage_records, profile,
-                        caller_timeout_s)
+                        caller_timeout_s, sink)
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    # Handed back on the pair so the caller can `bind` it to the manager it is about to
+    # build. An attribute rather than a `RolePair` field: which sink a pair writes to is a
+    # property of how the CLI assembled it, not of the two-half contract that `policy`
+    # defines and that `impress-a control` honours across a socket.
+    pair.reasoner_sink = opts.sink
     return pair
+
+
+class ReasonerSink:
+    """Where a reasoner's own records go, bound after the manager that will hold them exists.
+
+    Late-bound because of an ordering that is not going to change: the halves are built
+    before the `CampaignManager`, since the manager takes the pair as an argument. A sink
+    that needed the manager at construction would mean building the halves twice or passing
+    a half-built manager, and both are worse than one small indirection.
+
+    **Records before `bind` are counted, not written, and not raised over.** A half built by
+    a test, or by `impress-a control` before it has a plane, has nowhere to put a transcript
+    row; losing the row is a bad day and taking the campaign down over bookkeeping is a worse
+    one. `dropped` is there so a caller can say so rather than discover silence.
+    """
+
+    def __init__(self) -> None:
+        self._write: Any = None
+        self.dropped = 0
+        self.written = 0
+
+    def bind(self, manager: Any) -> None:
+        self._write = manager.record_reasoning
+
+    def __call__(self, kind: str, record: dict[str, Any]) -> None:
+        if self._write is None:
+            self.dropped += 1
+            return
+        self._write(kind, record)
+        self.written += 1
 
 
 def _options_for(spec: CampaignSpec,
@@ -168,7 +237,8 @@ def _options_for(spec: CampaignSpec,
                  spec_records: list[dict[str, Any]] | None = None,
                  stage_records: list[dict[str, Any]] | None = None,
                  profile: str | None = None,
-                 caller_timeout_s: float | None = None) -> reasoners.ReasonerOptions:
+                 caller_timeout_s: float | None = None,
+                 sink: Any = None) -> reasoners.ReasonerOptions:
     """A `CampaignSpec` as the registry's plain-data options. The whole adapter, named.
 
     Named so a test can assert what reaches the halves without building them, which is what
@@ -189,6 +259,12 @@ def _options_for(spec: CampaignSpec,
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
         oracle=client, reasoner=client,
+        # The subscriber `ReasonerOptions.sink` never had. Every writer existed - the
+        # transcript in `reasoning.ask`, `reasoner_degraded`, the external-directive
+        # events - and nothing was listening, so a live campaign recorded nothing at all
+        # about the model that drove it. `bind` happens in `run_campaign` once the manager
+        # is built; see `ReasonerSink`.
+        sink=sink if sink is not None else ReasonerSink(),
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         replicas=spec.replicas,
@@ -491,6 +567,12 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
             await driver.conduct(session)
         except CampaignStopped as stopped:
             log.info("control: campaign ended (%s)", stopped)
+        if (sink := getattr(pair, "reasoner_sink", None)) is not None and sink.dropped:
+            log.warning(
+                "control: %d reasoner record(s) had nowhere to go - this side hosts no "
+                "provenance and the plane carries no operation for them, so this arm's "
+                "transcript and timing are not on disk anywhere (backlog H8)",
+                sink.dropped)
     return 0
 
 
@@ -510,11 +592,19 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     # Both slots, for the reason `_options_for` gives: a remote driver may be `--model A` as
     # easily as `--model B`, and filling only one would make `--model-profile` silently
     # inert for half the letters it is offered for.
+    # A sink here too, and it stays UNBOUND on purpose. The control process drives a
+    # campaign it does not host: the executor writing `provenance/` is on the other side of
+    # a socket, and there is no plane operation for "append this to your decisions log" -
+    # ADR 0007 says an adapter may not carry one the core protocol lacks. So a caller-side
+    # half has its records counted and dropped, and `control_campaign` says how many rather
+    # than leaving the silence to be read as "the model made no calls" (backlog H8).
     opts = reasoners.ReasonerOptions(
-        stages=stages or None, oracle=client, reasoner=client, replicas=replicas)
+        stages=stages or None, oracle=client, reasoner=client, replicas=replicas,
+        sink=ReasonerSink())
     pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    pair.reasoner_sink = opts.sink
     return pair
 
 
@@ -615,7 +705,7 @@ def print_models() -> int:
             if m.spec_ref:
                 print(f"     specified in {m.spec_ref}")
     print("\n  `llm` is what the specification asks for; `calls` is what runs today.")
-    print("  Reference: docs/reference/frontends.md\n")
+    print("  Reference: docs/reference/control-models.md\n")
     return 0
 
 
@@ -795,6 +885,12 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
              f" ERRORS: {reg.errors}" if reg.errors else "")
     mgr = CampaignManager(spec, policy, reg)
     mgr.prov_sink = _prov_heartbeat
+    # The halves were built before the manager existed, so their sink has had nowhere to
+    # write until now. Everything a reasoner records - its prompts, its replies, the model
+    # id that answered, how long each call took and whether it degraded - reaches
+    # `provenance/decisions.jsonl` and `provenance/transitions.jsonl` from here.
+    if (reasoner_sink := getattr(policy, "reasoner_sink", None)) is not None:
+        reasoner_sink.bind(mgr)
     if heartbeat_s is None:
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
     log.info("campaign %s: model=%s backend=%s root=%s stages=%s replicas=%d",
@@ -868,6 +964,16 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # "a failure we would rather not block on", this column is worth nothing.
     checks: list[tuple[str, bool | None, str]] = []
     skipped: list[str] = []
+    #: Checks this campaign's stages do not reach. Reported as a count rather than as rows,
+    #: because a run of nine `n/a` lines is what the reader would learn to skip past.
+    not_applicable: list[str] = []
+
+    def wanted(name: str) -> bool:
+        if _check_applies(stages, _CHECK_OWNERS[name]):
+            return True
+        not_applicable.append(name)
+        return False
+
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
@@ -875,6 +981,8 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                       ("FOUNDRY_SIF_PATH", "rfd3_design (Apptainer image)"),
                       ("MPNN_DIR", "ligandmpnn_design (checkout + checkpoints)"),
                       ("BOLTZ_CACHE", "boltz_predict (pre-warmed weights)")):
+        if not wanted(f"${var}"):
+            continue
         val = os.environ.get(var)
         if not val:
             checks.append((f"${var}", False, f"unset - needed by {what}"))
@@ -894,7 +1002,7 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # Presence of the weights is not completeness of the CCD dictionary, and the two
     # fail very differently: missing weights fail on the login node, a half-extracted
     # CCD fails inside the allocation, per-lineage, as `CCD component ... not found!`.
-    if cache := os.environ.get("BOLTZ_CACHE"):
+    if (cache := os.environ.get("BOLTZ_CACHE")) and wanted("boltz CCD cache"):
         marked = (Path(cache) / ".mols_complete").exists()
         checks.append(("boltz CCD cache", marked,
                        "extraction proven complete" if marked else
@@ -902,12 +1010,16 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
                        "step 11 HERE, where there is still internet to repair it"))
 
     for exe, what in (("apptainer", "rfd3_design"), ("boltz", "boltz_predict")):
+        if not wanted(exe):
+            continue
         found = shutil.which(exe)
         checks.append((exe, bool(found), found or f"not on PATH - needed by {what}"))
 
     # Tier 2. PyRosetta in a subprocess: importing it here would initialise a process-global
     # singleton in the very interpreter that has to stay clean for P2 fan-out.
-    if quick:
+    if not _check_applies(stages, _CHECK_OWNERS["pyrosetta"]):
+        not_applicable.append("pyrosetta")
+    elif quick:
         skipped.append("pyrosetta")
     else:
         try:
@@ -945,16 +1057,18 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     # Tier 1, ~1s, always: the one package `delta_env_setup.sh` was missing. Nothing of ours
     # imports it - LigandMPNN's bundled openfold does, at run.py import time - so it is
     # invisible until stage 2 of a campaign. Cheap enough to never be worth skipping.
-    try:
-        out = subprocess.run([sys.executable, "-c", "import ml_collections"],
-                             capture_output=True, timeout=60, check=False)
-        checks.append(("ml_collections", out.returncode == 0,
-                       "importable - LigandMPNN's openfold needs it" if out.returncode == 0
-                       else "missing; re-run scripts/delta_env_setup.sh step 6"))
-    except (OSError, subprocess.SubprocessError) as e:
-        # Including TimeoutExpired. A preflight that raises tells the operator nothing
-        # about the other eight checks, which is the opposite of what it is for.
-        checks.append(("ml_collections", None, f"could not check: {e}"))
+    if wanted("ml_collections"):
+        try:
+            out = subprocess.run([sys.executable, "-c", "import ml_collections"],
+                                 capture_output=True, timeout=60, check=False)
+            checks.append(("ml_collections", out.returncode == 0,
+                           "importable - LigandMPNN's openfold needs it"
+                           if out.returncode == 0
+                           else "missing; re-run scripts/delta_env_setup.sh step 6"))
+        except (OSError, subprocess.SubprocessError) as e:
+            # Including TimeoutExpired. A preflight that raises tells the operator nothing
+            # about the other eight checks, which is the opposite of what it is for.
+            checks.append(("ml_collections", None, f"could not check: {e}"))
 
     # Tier 2, MINUTES, and only for a campaign that actually runs it: the whole import
     # chain, through the same shim the adapter uses. `run.py` does its work under an
@@ -1080,8 +1194,14 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     if skipped:
         print(f"  {len(skipped)} skipped by --quick ({', '.join(skipped)})"
               f" - not checked here, and NOT a pass; run the deep form on a login node")
+    if not_applicable:
+        print(f"  {len(not_applicable)} n/a for these stages ({', '.join(not_applicable)})"
+              f" - no stage of this campaign uses them")
     if stages:
-        print(f"  (a campaign using {', '.join(stages)} needs the entries above)")
+        # Scoped, not universal: with a spec the rows above are this campaign's
+        # requirements, and `n/a` above says which ones it does not have. Without a spec
+        # every check runs and the question is what this machine can do.
+        print(f"  (scoped to this campaign's stages: {', '.join(stages)})")
     return 1 if failed else 0
 
 
@@ -1177,6 +1297,44 @@ def _parser() -> argparse.ArgumentParser:
     vt.add_argument("--out", default=None, metavar="DIR",
                     help="where to write validate_tasks.json and the per-Task table "
                          "(default: <root>/<campaign>/validation)")
+    ml = sub.add_parser("mock-lab",
+                        help="run the mock chain across a knob grid and draw the figures")
+    ml.add_argument("--out", default="campaigns/_runs/_analysis", metavar="DIR",
+                    help="where the run directories, tables and figures go "
+                         "(default: under the gitignored campaign run root)")
+    ml.add_argument("--stage", default="all",
+                    choices=("all", "sweep", "collect", "figures"),
+                    help="run one stage only; `collect` and `figures` re-read an existing "
+                         "lab, so a figure can be fixed without re-running 90 campaigns")
+    ml.add_argument("--repeats", type=int, default=3, metavar="N",
+                    help="independent seed salts per sweep point. The arms are never "
+                         "repeated: they are what the activity runs by hand")
+    ml.add_argument("--only", action="append", default=None, metavar="NAME",
+                    help="`arms`, `sweeps`, an arm name or a knob name; repeatable")
+    ml.add_argument("--model", default="",
+                    help="drive every cell with this one reasoner (default: D). "
+                         "`--reasoners` is the axis; this is the single-model shorthand")
+    ml.add_argument("--reasoners", action="append", default=None, metavar="LETTER",
+                    help="a control model to put on the axis, repeatable: D, null, A, B. "
+                         "The four knob arms are run under each. A and B make LLM calls "
+                         "and are REFUSED without --model-profile, because without one "
+                         "they run their rule cascades and report zero calls - which is "
+                         "what a degraded live arm reports too")
+    ml.add_argument("--model-profile", dest="profile", default="", metavar="NAME",
+                    help="a models.yaml profile for the live reasoners (e.g. beam)")
+    ml.add_argument("--reasoner-repeats", type=int, default=3, metavar="N",
+                    help="runs per live cell. A model at temperature 0 is still not a "
+                         "function, so one draw of a live arm is an anecdote")
+    ml.add_argument("--max-llm-calls", type=int, default=400, metavar="N",
+                    help="stop launching live cells once this many calls have been "
+                         "recorded. Counted from what each cell actually made, not "
+                         "estimated; skipped cells are named in the manifest")
+    ml.add_argument("--jobs", type=int, default=4, metavar="N",
+                    help="sweep cells at a time. The four arms always run one at a time, "
+                         "because every wall-clock figure comes from them")
+    ml.add_argument("--base-spec", default=None, metavar="FILE",
+                    help="the campaign each cell overrides (default: "
+                         "campaigns/mock-small-molecule-binding.yaml)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
@@ -1215,6 +1373,14 @@ def main(argv: list[str] | None = None) -> int:
                                             a.model_profile))
     if a.cmd == "compare":
         return compare_command(a.dirs, a.control, a.theta, a.t_cut, a.chain, a.json)
+    if a.cmd == "mock-lab":
+        # Imported here rather than at module scope: the figures stage pulls in matplotlib,
+        # which is an optional extra, and `impress-a run` must not need it.
+        from ..analysis.mock_lab import BASE_SPEC
+        from ..analysis.mock_lab import main as mock_lab_main
+        return mock_lab_main(a.out, a.stage, a.repeats, a.only, a.model, a.jobs,
+                             a.base_spec or BASE_SPEC, a.reasoners, a.profile,
+                             a.reasoner_repeats, a.max_llm_calls)
     if a.cmd == "validate-tasks":
         return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":

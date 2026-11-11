@@ -7,12 +7,17 @@ this order for any one experiment — but the reasoner is no longer the loop bod
 experiments can be at different steps at once:
 
 ```
-observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
-           (policy)   (typed     (5 gates    (asyncflow) (QC        (tree,
-                       DAG)       + dry-run)             gates)     Pareto,
-                                      │                             provenance)
-                                      └── reject ──→ back to DECIDE (bounded retry)
+observe ─→ SPECIFY ─→ PLAN ─→ compose ─→ review ─→ execute ─→ analyze ─→ update ─→ terminate?
+           (Spec      (Stage   (typed     (coverage, (asyncflow) (QC       (tree,
+            revision)  of       DAG)       5 gates,              gates)    Pareto,
+                       Tasks)              budget,                         provenance)
+                          │                dry-run)
+                          └── reject ──→ back to PLAN (bounded retry, with the gate and reason)
 ```
+
+How the campaign's inputs become that Spec and that Stage — the toolkit, the goal, the budget and
+the parameters, step by step with the refusal guarding each — is
+[`resolution.md`](resolution.md).
 
 **Only the reasoner differs between control models.** Everything below the policy layer is shared,
 which is what makes frontends pluggable rather than parallel implementations.
@@ -26,7 +31,8 @@ There are two ways to be a reasoner:
   `CampaignSession`. **This replaced `decide(obs) -> Decision`**, which answered "what should the
   campaign be trying to achieve" and "which tool should run next" in a single call - so no
   transcript could say which half of a control model earned its cost, which is exactly what the
-  four-arm comparison needs to say.
+  four-arm comparison needs to say. What each shipped model does with the two contracts, and what
+  it is shown when it does, is [`control-models.md`](control-models.md).
 - **`conduct(session)`** - drive yourself. The reasoner runs as its own coroutine and reaches the
   executor through `core.session.CampaignSession`: submit as many experiments as it wants, then
   collect them with `as_completed` in the order they finish. This is what makes a federation of
@@ -38,10 +44,11 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 
 | Step | Owner | Notes |
 |---|---|---|
-| observe | manager | Builds a `CampaignObservation` — front, population stats, budget, failures |
-| **decide** | **policy** | Returns `ComposeAndRun \| Backtrack \| RequestHuman \| Stop` |
-| compose | manager | Abstract intent → concrete typed DAG; P6 tools inlined |
-| validate | manager | Five gates then dry-run; rejection returns a reason to the policy |
+| observe | manager | Builds a `CampaignObservation` — front, population stats, budget, failures, and the `ToolkitView` a reasoner chooses from |
+| **specify** | **policy** | `Specifier.revise` returns a `SpecRevision` — objectives to add, delete or re-status. The executor applies it and is the only writer |
+| **plan** | **policy** | `Planner.plan` returns a candidate `Stage` of `TaskMapping`s, or `None`. `replan` answers a rejection; `RequestHuman` and a stop request remain available through the session |
+| compose | manager | A Stage (or abstract intent) → concrete typed DAG; P6 tools inlined |
+| review | manager | Coverage against the applied Spec, five gates, budget, then dry-run; rejection returns the gate and reason to the Planner |
 | execute | exec layer | Generic dispatch to asyncflow, per compute pattern |
 | analyze | task agents | Typed metrics extracted; **QC gates enforced** |
 | update | manager | Nodes appended, front recomputed, provenance written, budget charged |

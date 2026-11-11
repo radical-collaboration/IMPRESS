@@ -283,7 +283,17 @@ def test_an_acceptance_threshold_needs_a_presence_check(reg):
 
 
 def test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance(reg):
+    """What the name says: the REAL toolkits, which is why the mock ones are filtered out.
+
+    `toolkits/mock/tools/mock_{rfd3_design,mpnn_design,...}` deliberately carry the same
+    acceptance gates with the same thresholds - that is the whole point of the laptop
+    surrogate, and `tests/test_mock_smb.py` asserts each one against the real spec it
+    mirrors. Letting them into this set would mean adding six copies of every row below,
+    and the list would then stop reading as "the quality thresholds the campaign is judged
+    on".
+    """
     acceptance = {(t, g.params["metric"]) for t in reg.specs
+                  if reg.get(t).toolkit != "mock"
                   for g in reg.get(t).qc_gates if g.role == "acceptance"}
     assert acceptance == {("ligandmpnn_design", "overall_confidence"),
                           ("ligandmpnn_design", "ligand_confidence"),
