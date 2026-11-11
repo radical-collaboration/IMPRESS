@@ -2,8 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This project lives in the IMPRESS repository under `agent/`; paths below are relative to `agent/`,
-and nothing here may change IMPRESS's own `src/`, `tests/`, `examples/`, `docs/` or root packaging.
+This project lives in the IMPRESS repository under `agent/`. Paths below are relative to `agent/`,
+except documentation paths, which are repo-root-relative — saying so beats letting you infer it from
+a mixture.
+
+**What is shared with IMPRESS, and therefore top-level.** CI (one `.github/workflows/ci.yml`), lint
+(`tox -e lint`, which checks both packages; each keeps its own `[tool.ruff]` table), tests (one
+`tox.ini`), and documentation (one mkdocs site; this project's pages are `docs/impress-a/`).
+Changing those is expected rather than forbidden. An earlier version of this file said "nothing here
+may change IMPRESS's own `src/`, `tests/`, `examples/`, `docs/` or root packaging" — which is why
+this project went unlinted and why the tree the same file called "shipping reference" was published
+by nothing.
+
+**What that rule was really protecting, and what still holds:**
+
+- **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.10` with
+  langgraph, rhapsody and biopython. The dependency runs one way: `impress` is installed editable
+  into this project's environment, root first, because it is on no index. The reverse must never
+  happen — do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
+  front of a root test, and do not add an agent install to the 3.9 leg.
+- **`examples/` is IMPRESS's**, not this project's.
+- **`agent/.gitignore` stays**, and its trailing `!*.pdb` / `!*.fa` with it — they undo the root
+  ignore and three tracked fixtures depend on them. Move files those lines cover out from under
+  `agent/` and they go silently untracked.
+- **The two pytest configurations stay separate.** `toolkits/*/tools/*/tests/` holds gate fixtures
+  rather than collectible tests, so a merged `testpaths` would start trying to collect them.
 
 **Read `README.md` first** for what IMPRESS-A is and how it fits together. This file covers what you need
 to *work on* it: commands, invariants that must not be broken, and behaviours that are easy to get wrong.
@@ -15,6 +38,10 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
 
 ruff check src tests                                 # reports; never rewrites. Ceiling: ZERO
+
+# From the REPOSITORY ROOT, shared with IMPRESS (see "What is shared" above):
+#   tox -e lint     ruff over BOTH packages, each under its own table; must leave the tree clean
+#   tox -e docs     build the site and fail on a broken link or a missing nav target
 pytest tests -q                                      # the whole local tier, no allocation (~19s local, ~2min on a login node)
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
@@ -83,7 +110,7 @@ included `$USER`. `impress-a preflight` flags a venv still on HDD.
 | `src/impress_a/` | The package. `runtime/` owns the executor, session and run service; `manager.py` is a facade over them |
 | `toolkits/` | Declarative tool specs + skill docs, discovered at runtime — not package data |
 | `campaigns/`, `sites/` | Campaign specs and per-machine configuration |
-| `docs/` | **Shipping reference.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` |
+| `../docs/impress-a/` | **Shipping reference, and actually shipped.** `reference/`, `decisions/`, `limitations.md`, `roadmap/` — published in the site's `IMPRESS-A` nav section |
 | `src/impress_a/analysis/` | Scoring and figures that run *beside* a campaign, never inside one. May not import `policy` or `control` |
 | `plans/` | **Working plans.** `backlog.md` is the live outstanding list; `done/` records completed work *for the rulings it contains*, not the task lists |
 | `planning/` | **Process history, not reference.** The design record; superseded in places. Where it disagrees with `docs/` or the code, the code is right |
