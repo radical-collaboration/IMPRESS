@@ -102,7 +102,7 @@ def test_dragon_is_pinned_by_policy_and_never_by_the_env(fake_dragon, monkeypatc
     assert "SHARED" not in tmpl["env"], "sending our whole env would overwrite the node's"
     assert tmpl["policy"].kw == {"placement": "HOST_NAME", "host_name": "gpub001",
                                  "gpu_affinity": [3]}
-    assert d["timeout"] == 600 + 2 * KILL_GRACE_S, "Dragon's own bound sits past ours"
+    assert d["timeout"] == 600 + KILL_GRACE_S, "Dragon enforces the walltime itself"
 
 
 def test_a_dragon_cpu_stage_on_one_host_carries_no_policy(fake_dragon):
@@ -230,3 +230,26 @@ async def test_outside_the_engine_run_cmd_still_runs_the_command_itself(tmp_path
 def test_a_placement_is_the_only_thing_that_names_a_backend_route():
     assert COMPUTE == "compute"
     assert Placement(backend_kind="Dragon", threads=1).dragon
+
+
+async def test_under_dragon_the_walltime_is_dragons_and_the_command_is_not_wrapped(tmp_path):
+    """Coreutils `timeout` makes itself a process-group leader, and Dragon's local services
+    reaps only children in its own group (`os.waitpid(0, ...)`). A wrapped command therefore
+    exits, is never reaped, and its task never completes - job 23814643, both rfd3 commands
+    left as `[timeout] <defunct>`. Under Dragon the bound is Dragon's own `timeout`; the
+    concurrent backend keeps the wrapper, because its cancel kills nothing.
+
+    The engine here is concurrent - it ignores a process template - so what is asserted is
+    the command each placement SUBMITS, which is what Dragon would have been handed.
+    """
+    flow, _ = await make_engine("concurrent", {"workers": 1}, work_dir=str(tmp_path))
+    try:
+        for kind in ("dragon", "concurrent"):
+            launcher = Launcher(flow, flow.loop, f"n-{kind}",
+                                placement_for(CPU, kind, threads=1))
+            await _launch(flow, lambda la=launcher: la.run(["true"], timeout_s=30))
+        submitted = {c["description"]["name"]: c["description"]["executable"]
+                     for c in flow.components.values() if c["description"].get("executable")}
+    finally:
+        await flow.shutdown()
+    assert submitted == {"n_dragon.true": "true", "n_concurrent.true": "timeout"}, submitted

@@ -47,7 +47,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 ## Upstream
 
 Defects in the middleware, written to be filed with asyncflow and rhapsody. F13 is the older
-asyncflow list; these six were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
+asyncflow list; these seven were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
 works around each in code and tracks them as `agent/plans/backlog.md` I2/I4. None is reported
 upstream yet.
 
@@ -57,6 +57,7 @@ upstream yet.
 - [asyncflow: `start_telemetry` does not expose rhapsody's `drain_on_stop`](upstream/asyncflow-start-telemetry-no-drain-on-stop.md)
 - [rhapsody: vLLM chat endpoint ignores sampling parameters and fakes token counts](upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)
 - [rhapsody + asyncflow: a `prompt_task` routed to the vLLM backend never resolves](upstream/rhapsody-vllm-prompt-result-not-stdout.md)
+- [dragon: a process that leads its own process group is never reaped, so its task never completes](upstream/dragon-unreaped-process-group-leader.md) (job 23814643)
 
 ## Order
 

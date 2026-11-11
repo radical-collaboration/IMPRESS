@@ -2175,14 +2175,23 @@ The gate: `impress-a preflight campaigns/delta-small-molecule-smoke.yaml`, then
 and each command's stderr, then compare `6/6 tasks ok` against job 22692304. Closes on that job id.
 **Submitted 2026-11-11 as job 23814643** (commit `d22f5cd`, `replicas: 2`, model D,
 `gpuA40x4-interactive`, 1 h, venv upgraded in place to asyncflow/rhapsody 0.7.0 + dragonhpc 0.15.0;
-deep preflight 16/16 on the login node beforehand).
+deep preflight 16/16 on the login node beforehand). **Result: stuck at stage 1, fixed, not yet
+re-run.** What held: Dragon up in 4.5 s; topology 4 GPUs; telemetry on; r0001 admitted at width
+2; the two rfd3 commands ran as engine tasks on DIFFERENT GPUs (`gpusample.csv`: GPU 0 peak
+1659 MiB, GPU 1 peak 5415 MiB, GPUs 2-3 idle) and wrote their designs by 16:40:21. What broke:
+both commands' coreutils `timeout` wrappers were left `<defunct>` - Dragon reaps only its own
+process group, and `timeout` leads its own - so neither task ever completed and nothing
+downstream started ([upstream](../../plans/upstream/dragon-unreaped-process-group-leader.md)).
+Fixed by not wrapping under Dragon and letting Dragon's own task `timeout` bound the command
+(`exec/launch.py`, regression test `test_under_dragon_the_walltime_is_dragons_...`).
 
 **I2. Upstream gaps, each worked around in code and marked for removal.** File them; none needs
 anything from us beyond the report.
 
 - *rhapsody, concurrent backend:* `cancel_task` cancels its own coroutine and leaves the child
-  process running (reproduced with a `sleep`). Workaround: every command carries
-  `timeout --kill-after` (`exec/launch.py`). [Upstream doc](../../plans/upstream/rhapsody-concurrent-cancel-leaves-process-running.md).
+  process running (reproduced with a `sleep`). Workaround: on the concurrent backend every
+  command carries `timeout --kill-after` (`exec/launch.py`) - and ONLY there, because under
+  Dragon that wrapper hangs the task (I1, job 23814643). [Upstream doc](../../plans/upstream/rhapsody-concurrent-cancel-leaves-process-running.md).
 - *rhapsody, concurrent backend:* executables run as unbounded asyncio subprocesses; `workers`
   bounds only function tasks. Workaround: a per-engine command semaphore sized from `workers`
   (`exec/stage.command_slots`, `Launcher.slots`). Concurrent backend only.

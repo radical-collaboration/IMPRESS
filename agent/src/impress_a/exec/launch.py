@@ -192,7 +192,13 @@ class Launcher:
         every backend.
         """
         argv = list(cmd)
-        if timeout_s:
+        if timeout_s and not self.placement.dragon:
+            # NOT under Dragon, which bounds the command itself (`Placement.describe` passes
+            # its `timeout`) - and must: coreutils `timeout` makes itself a process-group
+            # leader, and Dragon's local services reaps only children in ITS group
+            # (`os.waitpid(0, ...)`, dragon localservices/server.py), so a wrapped command
+            # exits, is never reaped, and its task never completes. Measured on job 23814643:
+            # both rfd3 commands finished at 16:40 and sat as `[timeout] <defunct>` zombies.
             argv = ["timeout", f"--kill-after={KILL_GRACE_S}", f"{float(timeout_s):g}", *argv]
         line = shlex.join(argv)
 
@@ -234,6 +240,12 @@ class Launcher:
         self.ran_s += finished - started
 
         if fut.cancelled():
+            if (self.placement.dragon and timeout_s and not self.cancelled
+                    and finished - started >= timeout_s):
+                # Dragon reports its own timeout as a cancellation. Nobody cancelled this
+                # Stage, and the command ran its full walltime: say what happened.
+                raise SubprocessError(cmd, -1, "", f"timed out after {timeout_s}s "
+                                                   "(Dragon's task timeout)")
             raise asyncio.CancelledError
         desc = getattr(fut, "task", None) or {}
         stdout, stderr = _read(desc.get("stdout")), _read(desc.get("stderr"))

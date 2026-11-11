@@ -134,7 +134,9 @@ class Placement:
                 template["policy"] = _dragon_policy(self.host, self.gpu_index)
             out: dict[str, Any] = {"process_template": template}
             if timeout_s:
-                out["timeout"] = float(timeout_s) + 2 * KILL_GRACE_S
+                # Dragon enforces this one itself; no `timeout` wrapper runs under Dragon
+                # (`exec/launch.py` says why).
+                out["timeout"] = float(timeout_s) + KILL_GRACE_S
             return out
         out = {"env": {**(env if env is not None else os.environ), **self.placement_env()}}
         if cwd:
