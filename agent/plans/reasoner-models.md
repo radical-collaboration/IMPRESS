@@ -169,7 +169,7 @@ commit.
 |---|---|---|
 | `claude-sonnet` hosted API | 23112484 (1 h), **23114775 (4 h, 192 designs — the headline)** | profile survives the purge; `llm.py` has changed only additively since (`reasoning_content` carried only when the provider sends one; a `bind_pipeline` hook) |
 | `beam` hosted reasoning model | 23225651 (1 h), 23231797 (self-stopped at 37 min of a 4 h allocation) | both ran **at or after** `484bd06`, so they are tests of the current `_completion_from_response`; profile survives; needs `REFLECTION_API_KEY` |
-| `scripted` | 23110801 | survives, but its own CLAUDE.md records it is **not** a faithful `run_nonadaptive` replay (6-stage cycle against the reference's 7) — a plumbing fixture, not a baseline |
+| `scripted` | 23110801 | survives, but its own CLAUDE.md records it is **not** a faithful replay of the reference pass-through route (`run_small_molecule_binding.py --nonadaptive`, formerly `run_nonadaptive.py`) (6-stage cycle against the reference's 7) — a plumbing fixture, not a baseline |
 | reference pipeline | 23114772, and 22701168 rescored from archive | unaffected by any of this |
 
 ### Tested on code that only partially survives

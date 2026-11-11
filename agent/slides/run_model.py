@@ -298,14 +298,25 @@ def baseline_code() -> dict | None:
     asserted because the authors of the file are in the room.
     """
     pipeline, runner = REF / "small_molecule_binding.py", REF / "run_small_molecule_binding.py"
-    nonadaptive = REF / "run_nonadaptive.py"
     if not pipeline.exists() or not runner.exists():
         return None
     body = runner.read_text(errors="replace").splitlines()
-    start = next(i for i, l in enumerate(body) if l.startswith("def _adaptive_decision_sync"))
-    end = next(i for i, l in enumerate(body[start + 1:], start + 1)
-               if l.startswith(("def ", "async def ", "@")))
-    decision = body[start:end]
+
+    def _fn(name: str) -> list[str]:
+        # Both policies are `async def` bodies in the runner: the adaptive one since F19, and
+        # the pass-through one since `run_nonadaptive.py` was folded in as `--nonadaptive`.
+        start = next((i for i, l in enumerate(body)
+                      if l.startswith(f"async def {name}(")), None)
+        if start is None:
+            return []
+        end = next((i for i, l in enumerate(body[start + 1:], start + 1)
+                    if l.startswith(("def ", "async def ", "@"))), len(body))
+        while end > start and not body[end - 1].strip():
+            end -= 1
+        return body[start:end]
+
+    decision = _fn("adaptive_decision")
+    nonadaptive = _fn("nonadaptive_decision")
     text = pipeline.read_text(errors="replace")
     prod = {}
     m = re.search(r"^PROD = RunConfig\((.*?)^\)", runner.read_text(errors="replace"),
@@ -317,7 +328,7 @@ def baseline_code() -> dict | None:
         prod[k] = None if v == "None" else float(v)
     return {
         "lines": {"pipeline": _lines(pipeline), "runner": _lines(runner),
-                  "nonadaptive": _lines(nonadaptive) if nonadaptive.exists() else None},
+                  "nonadaptive": len(nonadaptive) or None},
         "decision_fn_lines": len(decision),
         "next_step_sites": sum(1 for l in decision if re.search(r"next_step\s*=", l)),
         "steps": re.findall(r"^STEP_(\w+)\s*=", text, re.M),

@@ -258,7 +258,11 @@ def test_scripted_route() -> None:
     stages = _stages(pipeline)
     expected_cycle = ["backbone", "sequence", "packmin", "fastrelax",
                       "interface", "fold"]
-    check("first cycle matches run_nonadaptive's route",
+    # The scripted client's own fixed cycle, NOT the reference's pass-through
+    # route: that one runs a second design_sequence inside the refine cycle (see
+    # models.yaml `scripted`). The reference route is pinned by
+    # test_reference_passthrough_route below.
+    check("first cycle is the scripted client's fixed route",
           stages[:6] == expected_cycle, f"{stages[:6]}")
     check("every result is well-formed JSON", len(stages) == len(
         [s for s in stages if s]), str(stages))
@@ -369,6 +373,55 @@ def test_rules_are_the_reference_s() -> None:
           probe.next_step == rules_client.STEP_RFD3, f"{probe.next_step!r}")
 
 
+def test_reference_passthrough_route() -> None:
+    print("\n[2d] the reference's pass-through route, as --nonadaptive runs it")
+    # run_nonadaptive.py was folded into the reference runner as
+    # `run_small_molecule_binding.py --nonadaptive`. This pins that the route
+    # table survived the move: every analysis step advances regardless of
+    # pass/fail, and a finished fold starts a fresh, unguided rfd3.
+    import small_molecule_binding as smb
+    from run_small_molecule_binding import nonadaptive_decision
+
+    class _Log:
+        def pipeline_log(self, _m): pass
+
+    class _P:
+        logger = _Log()
+
+        def __init__(self, step):
+            self.next_step = None
+            self.state = {"last_analysis_step": step, "ensemble": [],
+                          "rfd3_input_pdb": "guided.pdb",
+                          "last_analysis_metrics": {"pass": False}}
+
+    expected = {
+        "backbone": smb.STEP_MPNN,
+        "sequence": smb.STEP_MPNN,
+        "packmin": smb.STEP_MPNN,
+        "fastrelax": smb.STEP_INTERFACE,
+        "interface": smb.STEP_AF2,
+        "fold": smb.STEP_RFD3,
+        "no-such-step": smb.STEP_DONE,
+    }
+    got = {}
+    for step in expected:
+        probe = _P(step)
+        asyncio.run(nonadaptive_decision(probe))
+        got[step] = probe.next_step
+        if step == "fold":
+            check("a finished fold starts an unguided rfd3",
+                  probe.state["rfd3_input_pdb"] is None,
+                  repr(probe.state["rfd3_input_pdb"]))
+        elif step != "no-such-step":
+            check(f"{step}: input left alone",
+                  probe.state["rfd3_input_pdb"] == "guided.pdb")
+    check("pass-through routes every step, ignoring pass/fail",
+          got == expected, f"{got}")
+    # Asserted as well as check()ed, so a pytest run fails too, not only the
+    # script entry point.
+    assert got == expected, f"pass-through route drifted: {got}"
+
+
 async def _reference_stages(max_tasks: int) -> list[str]:
     """The REFERENCE pipeline's own stage sequence on the same mock inputs."""
     base = tempfile.mkdtemp(prefix="ref-smb-")
@@ -403,7 +456,7 @@ async def _reference_stages(max_tasks: int) -> list[str]:
 
 
 def test_rules_match_the_reference_loop() -> None:
-    print("\n[2d] model D routes exactly as the reference's own state machine")
+    print("\n[2e] model D routes exactly as the reference's own state machine")
     from rules_client import RulesClient
 
     # This is the arm's whole claim. Model D exists to hold the rules fixed
@@ -811,6 +864,7 @@ if __name__ == "__main__":
     test_scripted_route()
     test_rules_route()
     test_rules_are_the_reference_s()
+    test_reference_passthrough_route()
     test_rules_match_the_reference_loop()
     test_bad_calls()
     test_turn_budget()

@@ -15,7 +15,12 @@ minute 10, with 0 failures
 - no argv config;
 - no GPU pinning (smb 10);
 - no staggered start (smb 14, which OOM-killed `22714785`);
-- no telemetry and no `runner_status`.
+- no telemetry and no `runner_status`;
+- no `mpnn_ensemble_size`, so it ran on the pipeline default of **1** cycle-0 sequence
+  candidate per backbone, where `PROD` (and so `--nonadaptive`) uses **10**. Intended, since
+  both policies then draw from the same candidate pool, but it means numbers from the old
+  runner are not comparable with this baseline on cycle 0. (Recorded 2026-11-11 while
+  porting to `main`; the original list missed it.)
 
 ## Change
 

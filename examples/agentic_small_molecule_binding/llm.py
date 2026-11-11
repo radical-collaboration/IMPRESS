@@ -232,7 +232,8 @@ def _completion_from_response(resp) -> Completion:
 
 # ── Offline stand-in ───────────────────────────────────────────────────────
 
-# The reference non-adaptive route table (run_nonadaptive.py), expressed as the
+# The reference pass-through route table (`nonadaptive_decision` in
+# run_small_molecule_binding.py, run with --nonadaptive), expressed as the
 # tool the agent would call next given the stage that just finished. Starting
 # from nothing, the first call is design_backbone.
 _SCRIPTED_ROUTE = {

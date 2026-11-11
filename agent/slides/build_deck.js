@@ -273,8 +273,8 @@ Read it as a floor. What it proves is that the plumbing survives contact with re
   text(s, [
     { text: "And what it costs to change it: ", options: { bold: true, color: C.ink } },
     { text: BC ? `one use case is a ${BC.lines.pipeline.toLocaleString()}-line pipeline class ` +
-      `plus a ${BC.lines.runner}-line runner; its non-adaptive variant is ` +
-      `${BC.lines.nonadaptive} lines.` : "the reference example is absent.",
+      `plus a ${BC.lines.runner}-line runner; its non-adaptive variant is a ` +
+      `${BC.lines.nonadaptive}-line function in that runner.` : "the reference example is absent.",
       options: { color: C.text } },
   ], M, 3.22, 12.33, 0.26, { fontSize: 12 });
   tbl(s, ["where the pipeline's shape lives", "what is actually written down", "file"],
