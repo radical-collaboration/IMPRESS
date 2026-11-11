@@ -286,6 +286,10 @@ class CampaignExecutor:
         self._counted_through = 0
         self._failed_runs = 0
         self.flow = None
+        #: What the compute backend reports it has, `[{"id", "cores", "gpus"}, ...]`, probed
+        #: once at `start()`. `[]` means unknown. Placement reads it; `spec.site` remains the
+        #: declaration the validator checks graphs against.
+        self.topology: list[dict[str, Any]] = []
         self.dispatcher: Dispatcher | None = None
         self.last_rejection: ValidationFailure | None = None
         self._runs: dict[str, RunRecord] = {}
@@ -1387,7 +1391,7 @@ class CampaignExecutor:
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
-        from ..exec.backend import make_engine_bounded
+        from ..exec.backend import make_engine_bounded, probe_topology
         # Logged either side because this call is the only stretch of a campaign that
         # precedes its own provenance: rhapsody's Dragon backend builds `Batch()` - the
         # results DDict, the worker pool, telemetry - synchronously in its constructor, so
@@ -1400,6 +1404,8 @@ class CampaignExecutor:
             self.spec.backend, self.spec.backend_config, self.spec.backend_startup_timeout_s,
             self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
         log.info("engine: %s backend ready", self.spec.backend)
+        self.topology = await probe_topology(self._backend)
+        self._check_site_against_topology()
         if self.spec.runner == "impress":
             self.dispatcher = StageRunner(
                 self.flow, self.reg, self.spec.backend, workdir=None,
@@ -1508,6 +1514,27 @@ class CampaignExecutor:
             self._fail_waiters(err or CampaignStopped(self.stop_reason))
             if self.flow is not None:
                 await self._shutdown_engine()
+
+    def _check_site_against_topology(self) -> None:
+        """Say so when the declared site promises more GPUs than the backend can see.
+
+        A warning, not a refusal: the probe is best effort, and a concurrent backend on a
+        login node or laptop truthfully sees no GPU while running a mock campaign that
+        declares one. But on a real allocation, round-robin pinning to a device that does
+        not exist fails inside a science tool rather than anywhere the campaign can read.
+        """
+        if not self.topology:
+            log.info("engine: compute backend reports no topology; placement uses the "
+                     "declared site (%d GPU/node)", self.spec.site.gpus_per_node)
+            return
+        seen = min(int(n.get("gpus") or 0) for n in self.topology)
+        log.info("engine: compute topology %s",
+                 ", ".join(f"{n.get('id')}: {n.get('cores')} cores/{n.get('gpus')} GPUs"
+                           for n in self.topology))
+        if seen and seen < self.spec.site.gpus_per_node:
+            log.warning("engine: the campaign declares %d GPUs per node but the compute "
+                        "backend sees %d on its smallest node", self.spec.site.gpus_per_node,
+                        seen)
 
     async def _shutdown_engine(self) -> None:
         """Tear the engine down, bounded, and never let teardown sink the campaign.

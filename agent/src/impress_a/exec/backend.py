@@ -30,6 +30,23 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+#: The engine's backends, by the name each task is routed with (`backend=` on its decorator).
+#: There is ONE engine per campaign and these are its only routes:
+#:
+#: * `compute` - the campaign's execution backend (Dragon on Delta, concurrent elsewhere). The
+#:   engine's default, so a task that names no backend goes here. Tool work runs here.
+#: * `local` - a thread pool in the engine's own process, for Python that must see the
+#:   campaign's own objects or is too small to ship: parsing a tool's output, QC gates.
+#:
+#: Named once here, so a misspelt route is an import error rather than asyncflow's
+#: decoration-time `ValueError` in the middle of a campaign.
+COMPUTE = "compute"
+LOCAL = "local"
+
+#: Threads behind the `local` backend. Its work is parsing and gating, which is short and
+#: mostly I/O; the bound only keeps a burst of finishing lineages from spawning a thread each.
+LOCAL_WORKERS = 4
+
 # Kinds whose constructor is pure bookkeeping - a pool object or an empty shell. None of
 # them can stall, so bounding them buys nothing and would only add a thread hop.
 _CHEAP_KINDS = frozenset({"concurrent", "local_process", "mock", "noop", "local"})
@@ -46,7 +63,8 @@ class BackendConstructionTimeout(RuntimeError):
     """
 
 
-def _construct_backend_sync(kind: str, config: dict[str, Any] | None = None):
+def _construct_backend_sync(kind: str, config: dict[str, Any] | None = None,
+                            name: str = COMPUTE):
     """The SYNCHRONOUS half of backend construction: returns an un-awaited backend.
 
     This is the part that can stall - `get_backend()` runs the backend's `__init__`, and
@@ -66,20 +84,21 @@ def _construct_backend_sync(kind: str, config: dict[str, Any] | None = None):
                 if config.get("executor", "process") == "thread"
                 else ProcessPoolExecutor(max_workers=workers))
         from rhapsody.backends import ConcurrentExecutionBackend
-        return ConcurrentExecutionBackend(pool)
+        return ConcurrentExecutionBackend(pool, name=name)
 
     if kind == "noop":
         from radical.asyncflow import NoopExecutionBackend
-        return NoopExecutionBackend()
+        return NoopExecutionBackend(name=name)
 
     if kind == "local":
         from radical.asyncflow import LocalExecutionBackend
-        return LocalExecutionBackend()
+        return LocalExecutionBackend(name=name)
 
     # Everything else (dragon, radical, dask) resolves by NAME through rhapsody's
-    # registry, so no rhapsody backend class is named in our source.
+    # registry, so no rhapsody backend class is named in our source. `config` is the
+    # backend's first constructor argument (Dragon's `batch_kwargs`).
     from rhapsody.backends import get_backend
-    return get_backend(kind, config)
+    return get_backend(kind, config, name=name)
 
 
 async def _init_backend(be):
@@ -94,10 +113,43 @@ async def make_backend(kind: str, config: dict[str, Any] | None = None):
     return await _init_backend(_construct_backend_sync(kind, config))
 
 
+async def _engine_over(compute, work_dir: str):
+    """The one engine: `compute` first, so it is the default route, then `local`.
+
+    Called on the caller's loop - the `local` backend's async init and the engine both bind
+    to it (module docstring). `local` is asyncflow's own thread backend rather than rhapsody's
+    concurrent one: it needs no rhapsody, and nothing routed there is ever pickled.
+    """
+    from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+    local = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=LOCAL_WORKERS),
+                                        name=LOCAL)
+    return await WorkflowEngine.create(backend=[compute, local], work_dir=work_dir)
+
+
 async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir: str = ""):
-    from radical.asyncflow import WorkflowEngine
+    """`(engine, compute_backend)`. The engine carries the `compute` and `local` routes."""
     backend = await make_backend(kind, config)
-    return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
+    return await _engine_over(backend, work_dir), backend
+
+
+async def probe_topology(backend: Any) -> list[dict[str, Any]]:
+    """What the compute backend says it has: `[{"id": host, "cores": n, "gpus": n}, ...]`.
+
+    rhapsody's `BaseBackend.topology()`. Dragon answers from `Batch.topology()` plus an NVML
+    probe of the local node; concurrent answers for this host. Off the loop, because it may
+    block (Dragon runtime calls, NVML) - rhapsody's own Session does the same. Best effort:
+    `[]` means unknown, never "no GPUs", and a backend without the method (asyncflow's own)
+    is unknown too.
+    """
+    fn = getattr(backend, "topology", None)
+    if fn is None:
+        return []
+    try:
+        return list(await asyncio.to_thread(fn) or [])
+    except Exception:                                   # noqa: BLE001 - best effort
+        log.warning("engine: %s topology probe failed; placement falls back to the "
+                    "campaign's declared site", getattr(backend, "name", "?"), exc_info=True)
+        return []
 
 
 def _construct_backend_in_thread(kind: str, config: dict[str, Any] | None,
@@ -170,9 +222,8 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
         remaining = timeout_s - (time.monotonic() - t0)
 
         async def _finish():
-            from radical.asyncflow import WorkflowEngine
             backend = await _init_backend(be)
-            return await WorkflowEngine.create(backend=backend, work_dir=work_dir), backend
+            return await _engine_over(backend, work_dir), backend
 
         try:
             if remaining <= 0:
