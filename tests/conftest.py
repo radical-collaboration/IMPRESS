@@ -1,12 +1,36 @@
 # tests/conftest.py
 import functools
+import importlib.util
 import shutil
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from impress import ImpressManager
+
+COLAB_DIR = Path(__file__).resolve().parent.parent / "examples" / "colab"
+
+
+def load_colab_module(name):
+    """Import a module from examples/colab by path.
+
+    That directory is the Colab quickstart's helper: it is not a package and is
+    not installed, because the notebook clones the repository and appends the
+    directory to `sys.path`. Loading it the same way here keeps the tests
+    honest about what the notebook actually does, and keeps `examples/` off
+    every other test's import path.
+    """
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, COLAB_DIR / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    # Registered before exec, because these modules import each other by bare
+    # name the way they do under the notebook's sys.path.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def pytest_sessionfinish(session, exitstatus):
