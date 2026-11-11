@@ -58,8 +58,8 @@ langgraph, rhapsody and biopython.
 | [Architecture](reference/architecture.md) | The loop, layers, import contract, invariants |
 | [Resolution](reference/resolution.md) | How the toolkit, goal, budget and parameters become specified targets and a programmed Stage — step by step, with what refuses each one |
 | [Observation](reference/observation.md) | How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller |
+| [Pluggable Frontends](reference/frontends.md) | The two frontend axes: which seams are swappable, the protocols they implement, and how to write one |
 | [Control Models](reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
-| [Pluggable Frontends](reference/frontends.md) | Control models and control-plane adapters in detail |
 | [Compute Patterns](reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
 | [Authoring Tools](reference/authoring-tools.md) | Writing tools, gates and skill documents |
 | [Middleware Integration](reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |

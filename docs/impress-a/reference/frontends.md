@@ -1,7 +1,8 @@
 # Pluggable Frontends
 
 IMPRESS-A has two independent frontend axes. Both plug into the same engine; neither requires changes
-below the layer it occupies.
+below the layer it occupies. The substrate beneath them is not a third axis — nothing above it
+chooses it — but it is selected by name rather than hard-coded; see the end of this page.
 
 ```
         ┌──── INTERFACE FRONTEND ─────┐        who talks to the campaign
@@ -23,19 +24,19 @@ below the layer it occupies.
 Exactly one is active per campaign, **fixed at launch** ([decision 0005](../decisions/0005-control-model-fixed-at-launch.md)): a campaign has one
 stated methodology and its results are attributable to it.
 
-| Model | Mode | Specifier half | Planner half | Reproducible |
-|---|---|---|---|---|
-| **A** four-node loop | autonomous | `hypothesize → analyze` | `select_tasks → parameterize` | structurally |
-| **B** oracle | autonomous | one `SPEC_SCHEMA` call per signal | one `STAGE_SCHEMA` call per round | weakly |
-| **C** external steering | **headless** | a `{"role": "specifier"}` inbox | a `{"role": "planner"}` inbox | caller-dependent |
-| **D** explicit policy | autonomous | Goal → Spec, deterministically | Tasks by output type | **fully** |
+Four ship — A, B, C and D — plus `null` and `replay` outside the taxonomy. Three run
+autonomously; model **C is the headless mode** ([decision 0002](../decisions/0002-model-c-is-control-mode-2.md)), not an extra
+option bolted onto the side. Model D is the one that is reproducible end to end, which is what
+makes it the baseline the other three justify their cost against.
 
-Model **C is the headless mode** ([decision 0002](../decisions/0002-model-c-is-control-mode-2.md)) — not an extra option bolted onto the side.
-
-This section is the catalogue. For what each model is **shown**, what it may choose, how its reply
-is constrained, and which campaign fields reach a half, see
-[`control-models.md`](control-models.md); for the pipeline all of them drive — caller inputs to
-specified targets to a programmed Stage — see [`resolution.md`](resolution.md).
+**The roster itself is not duplicated here.** It lives in `policy/registry.MODELS`, which
+`impress-a models` prints and `tests/test_reasoner_registry.py` checks — a table in prose is a
+claim nobody runs, and this page once described as "implemented" something nobody could run
+(backlog C5). For each model's halves, call count and status, run `impress-a models` or see
+[`control-models.md`](control-models.md), which also covers what each model is **shown**, what it
+may choose, how its reply is constrained, and which campaign fields reach a half. For the pipeline
+all of them drive — caller inputs to specified targets to a programmed Stage — see
+[`resolution.md`](resolution.md).
 
 ### Two contracts, and why not one
 
@@ -144,9 +145,17 @@ pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
 
 ### Degraded mode is declared, not improvised
 
-Models B and C depend on something outside the job. Both take a `fallback` (a model-D policy) activated
-on oracle failure or caller timeout, and the transition is an **explicit logged state change** — never a
-silent no-op that leaves an allocation idling while the campaign quietly stops adapting.
+Every model that depends on something outside the job has a defined answer when it does not
+arrive, and the transition is an **explicit logged state change** — never a silent no-op that
+leaves an allocation idling while the campaign quietly stops adapting. `reasoning.degraded` writes
+one event name whatever degraded, so one query over `transitions` finds them all.
+
+Which models, and what each one does, is in
+[`control-models.md`](control-models.md#degraded-mode-is-declared-never-improvised). Read it there
+rather than here: this section used to say "Models B and C" and omit model A's rule cascade, and to
+describe a `fallback` as what a caller timeout activates when `on_timeout` in fact defaults to
+`stop` and `ExternalPlanner` refuses `fallback` unless one is declared
+(`policy/planners/external.py:56`).
 
 ## 2. The interface frontend — control-plane adapters
 
@@ -191,7 +200,7 @@ to the caller through `replan` with the gate and the reason, for another turn. A
 delete objectives but may **not** declare one satisfied: satisfaction is computed, not asserted
 (see [`resolution.md`](resolution.md) step 8).
 
-## 3. The substrate is pluggable too
+## The substrate beneath the two axes
 
 Backends are selected **by name** from site configuration and resolved through
 `rhapsody.backends.get_backend()`, so no backend class is named outside `exec/backend.py`:
