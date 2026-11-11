@@ -1,0 +1,826 @@
+"""Offline test for the agentic example: no GPU, no network, no API key.
+
+Covers the four things that can be checked without an allocation:
+
+  1. Task descriptors are byte-identical to the reference pipeline's. This is
+     what "equivalent task allocation" actually means, so it is asserted rather
+     than described.
+  2. The scripted client drives the same stage sequence as the reference
+     non-adaptive runner, over mock tools on a local backend.
+  3. A bad tool call returns an error payload instead of raising.
+  4. Both budgets -- turns and ensemble entries -- terminate the loop.
+
+Run it with the reference example's venv:
+
+    PYTHONPATH=../../src python test_agentic_smb.py
+"""
+
+import asyncio
+import json
+import os
+import re
+import sys
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REF_DIR = os.path.abspath(os.path.join(_HERE, os.pardir, "small_molecule_binding"))
+for _p in (_HERE, _REF_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+# The reference pipeline requires these even in mock mode (it validates them in
+# __init__, before it ever looks at self.mock).
+os.environ.setdefault("MPNN_DIR", "/nonexistent/mpnn")
+os.environ.setdefault("FOUNDRY_SIF_PATH", "/nonexistent/foundry.sif")
+os.environ.setdefault("BOLTZ_CACHE", "/nonexistent/boltz")
+
+from agentic_pipeline import AgenticSMBPipeline  # noqa: E402
+from llm import Completion, ScriptedClient, ToolCall  # noqa: E402
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine  # noqa: E402
+from run_small_molecule_binding import (  # noqa: E402
+    adaptive_decision as _reference_adaptive_decision,
+)
+from small_molecule_binding import SmallMoleculeBindingPipeline  # noqa: E402
+from tools import TOOL_NAMES  # noqa: E402
+
+from impress import ImpressManager, PipelineSetup  # noqa: E402
+
+FAILURES: list[str] = []
+
+
+def check(name: str, ok: bool, detail=None) -> None:
+    # Detail only on failure, and truncated: the concurrent-backend task
+    # descriptors carry a merged copy of os.environ.
+    suffix = ""
+    if not ok and detail is not None:
+        suffix = f" -- {str(detail)[:200]}"
+    print(f"  {'PASS' if ok else 'FAIL'}  {name}{suffix}")
+    if not ok:
+        FAILURES.append(name)
+
+
+# ── 1. Task descriptors ────────────────────────────────────────────────────
+
+class _DragonishBackend:
+    """Anything that is not a ConcurrentExecutionBackend takes the Dragon path."""
+
+
+class _RecordingFlow:
+    """Captures each task's task_description default, and runs nothing."""
+
+    def __init__(self, backend):
+        self.backend = backend
+        self.descriptors: dict[str, dict] = {}
+
+    def executable_task(self, **kwargs):
+        import inspect
+
+        def decorator(func):
+            param = inspect.signature(func).parameters.get("task_description")
+            self.descriptors[func.__name__] = (
+                param.default if param and param.default is not param.empty else {}
+            )
+
+            async def noop(*a, **kw):
+                return None
+            noop.__name__ = func.__name__
+            return noop
+        return decorator
+
+    def function_task(self, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+
+_STAGES = ("rfd3", "mpnn", "packmin", "fastrelax", "filter_shape", "boltz")
+
+
+def _descriptors(cls, backend, **extra) -> dict[str, dict]:
+    flow = _RecordingFlow(backend)
+    cls(name="d1", flow=flow, base_path="/tmp/none",
+        scripts_path="/tmp/none", input_dir="/tmp/none", gpu_index=2, **extra)
+    return {s: d for s, d in flow.descriptors.items() if s in _STAGES}
+
+
+def _concurrent_backend():
+    """A ConcurrentExecutionBackend instance without running its async setup."""
+    from rhapsody.backends import ConcurrentExecutionBackend
+    return object.__new__(ConcurrentExecutionBackend)
+
+
+def test_descriptors() -> None:
+    print("\n[1] task descriptors match the reference")
+    for label, backend in (("concurrent", _concurrent_backend()),
+                           ("dragon", _DragonishBackend())):
+        ref = _descriptors(SmallMoleculeBindingPipeline, backend)
+        agentic = _descriptors(AgenticSMBPipeline, backend)
+        check(f"[{label}] same stages registered",
+              sorted(ref) == sorted(agentic), f"{sorted(ref)} vs {sorted(agentic)}")
+        for stage in sorted(ref):
+            check(f"[{label}] {stage} descriptor identical",
+                  ref[stage] == agentic[stage],
+                  f"{ref.get(stage)} vs {agentic.get(stage)}")
+
+    # And that the descriptors still have the reference's documented shape, so a
+    # refactor that quietly drops the thread caps or the GPU pin is caught here
+    # rather than on the allocation. Read off the concurrent branch, where the
+    # values are plain env vars.
+    ref = _descriptors(SmallMoleculeBindingPipeline, _concurrent_backend())
+    for stage, threads in (("rfd3", "8"), ("boltz", "8"), ("mpnn", "4"),
+                           ("packmin", "1"), ("fastrelax", "1"),
+                           ("filter_shape", "1")):
+        env = (ref.get(stage) or {}).get("env", {})
+        check(f"{stage} capped at {threads} thread(s)",
+              env.get("OMP_NUM_THREADS") == threads, env.get("OMP_NUM_THREADS"))
+    for stage in ("rfd3", "mpnn", "boltz"):
+        env = (ref.get(stage) or {}).get("env", {})
+        check(f"{stage} pinned to its GPU",
+              env.get("CUDA_VISIBLE_DEVICES") == "2",
+              env.get("CUDA_VISIBLE_DEVICES"))
+    for stage in ("packmin", "fastrelax", "filter_shape"):
+        env = (ref.get(stage) or {}).get("env", {})
+        check(f"{stage} takes no GPU", "CUDA_VISIBLE_DEVICES" not in env)
+
+
+def test_pin_host() -> None:
+    print("\n[8] pin_host adds host placement and changes nothing else")
+    # Unset: the agentic descriptors must stay byte-identical to the
+    # reference's. This is the invariant every comparison rests on, so it is
+    # checked again here with the option present but off.
+    ref = _descriptors(SmallMoleculeBindingPipeline, _DragonishBackend())
+    off = _descriptors(AgenticSMBPipeline, _DragonishBackend(), pin_host=None)
+    for stage in sorted(ref):
+        check(f"pin_host unset: {stage} unchanged", ref[stage] == off[stage],
+              f"{ref.get(stage)} vs {off.get(stage)}")
+
+    try:
+        from dragon.infrastructure.policy import Policy  # noqa: F401
+    except Exception as exc:
+        check("dragon policy importable", False, repr(exc))
+        return
+    on = _descriptors(AgenticSMBPipeline, _DragonishBackend(),
+                      pin_host="gpub999")
+    for stage in sorted(ref):
+        rt = (ref[stage] or {}).get("process_template", {})
+        ot = (on[stage] or {}).get("process_template", {})
+        check(f"pin_host set: {stage} env unchanged",
+              rt.get("env") == ot.get("env"),
+              f"{rt.get('env')} vs {ot.get('env')}")
+        pol = ot.get("policy")
+        check(f"pin_host set: {stage} placed on the named host",
+              getattr(pol, "host_name", None) == "gpub999",
+              getattr(pol, "host_name", None))
+        # The GPU pin is the reference's, carried over untouched -- losing it
+        # would silently hand every tool every GPU on the node.
+        ref_gpu = list(getattr(rt.get("policy"), "gpu_affinity", []) or [])
+        own_gpu = list(getattr(pol, "gpu_affinity", []) or [])
+        check(f"pin_host set: {stage} keeps the reference GPU affinity",
+              ref_gpu == own_gpu, f"{ref_gpu} vs {own_gpu}")
+
+
+# ── 2-4. The loop, over mock tools ─────────────────────────────────────────
+
+def _setup_mock_inputs(base: str, name: str) -> str:
+    in_dir = os.path.join(base, f"{name}_in")
+    os.makedirs(in_dir, exist_ok=True)
+    for fname, body in (("ALR_binder_design.json", "{}"),
+                        ("ALR.params", "NAME A:R\n"),
+                        ("ALR.smiles", "CC\n")):
+        with open(os.path.join(in_dir, fname), "w") as fh:
+            fh.write(body)
+    return in_dir
+
+
+async def _run_pipeline(client, *, max_llm_turns=60, max_tasks=12, name="p1"):
+    base = tempfile.mkdtemp(prefix="agentic-smb-")
+    in_dir = _setup_mock_inputs(base, name)
+
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
+    manager = ImpressManager(flow)
+
+    # The manager drops finished pipelines from pipeline_tasks, so hold on to
+    # the object here instead of looking it up afterwards.
+    holder: list = []
+
+    async def adaptive_fn(pipeline):
+        if not holder:
+            holder.append(pipeline)
+        pipeline.state['_llm_tool_calls'] = pipeline.llm_turn()
+
+    # The manager rejects a plain coroutine: the callback has to arrive as an
+    # engine task so it runs on a thread pool rather than the event loop. The
+    # engine's only backend here is already a thread pool, so no name is
+    # needed; the runner names `local` because its default backend is `compute`.
+    adaptive_task = flow.function_task(adaptive_fn)
+
+    setup = PipelineSetup(
+        name=name,
+        type=AgenticSMBPipeline,
+        adaptive_fn=adaptive_task,
+        kwargs={
+            "base_path": base,
+            "scripts_path": os.path.join(_REF_DIR, "scripts"),
+            "input_dir": in_dir,
+            "mock": True,
+            "max_tasks": max_tasks,
+            "max_llm_turns": max_llm_turns,
+            "llm_client": client,
+            "num_refine_cycles": 2,
+            "mpnn_ensemble_size": 2,
+        },
+    )
+    try:
+        await manager.start(pipeline_setups=[setup])
+    finally:
+        await flow.shutdown()
+
+    return holder[0], base
+
+
+def _stages(pipeline) -> list[str]:
+    out = []
+    for msg in pipeline.messages:
+        if msg.get("role") != "tool":
+            continue
+        try:
+            out.append(json.loads(msg["content"]).get("stage"))
+        except json.JSONDecodeError:
+            pass
+    return out
+
+
+def test_scripted_route() -> None:
+    print("\n[2] scripted client reproduces the reference route")
+    pipeline, base = asyncio.run(_run_pipeline(ScriptedClient(), max_tasks=9))
+    stages = _stages(pipeline)
+    expected_cycle = ["backbone", "sequence", "packmin", "fastrelax",
+                      "interface", "fold"]
+    check("first cycle matches run_nonadaptive's route",
+          stages[:6] == expected_cycle, f"{stages[:6]}")
+    check("every result is well-formed JSON", len(stages) == len(
+        [s for s in stages if s]), str(stages))
+    check("ensemble budget terminated the run",
+          len(pipeline.state["ensemble"]) >= 9,
+          f"{len(pipeline.state['ensemble'])} entries")
+    transcript = os.path.join(base, pipeline.name, "llm_transcript.jsonl")
+    check("transcript written", os.path.isfile(transcript))
+    if os.path.isfile(transcript):
+        with open(transcript) as fh:
+            events = [json.loads(line)["event"] for line in fh]
+        check("transcript has start and end",
+              events[0] == "start" and events[-1] == "end", str(events[:2]))
+
+
+def test_rules_route() -> None:
+    print("\n[2b] control model D reproduces the reference's refine cycle")
+    from rules_client import RulesClient
+    pipeline, base = asyncio.run(_run_pipeline(RulesClient(), max_tasks=14))
+    stages = _stages(pipeline)
+
+    # The reference's cycle, which is NOT the scripted route's. run() dispatches
+    # STEP_MPNN into _run_refine_cycle(), and with num_refine_cycles=2 that is
+    # mpnn -> packmin -> mpnn before relax. The scripted table sends packmin
+    # straight to relax and so emits six stages here, not seven.
+    expected_cycle = ["backbone", "sequence", "packmin", "sequence",
+                      "fastrelax", "interface", "fold"]
+    check("first cycle matches the reference's refine structure",
+          stages[:7] == expected_cycle, f"{stages[:7]}")
+    check("the refine cycle is not the scripted route's",
+          stages[:7] != ["backbone", "sequence", "packmin", "fastrelax",
+                         "interface", "fold"], f"{stages[:6]}")
+
+    # A RulesClient that raises is caught by llm_turn() and the pipeline
+    # finishes on the scripted route, which would silently publish
+    # reference-route results as model D's. That is job 23219379's trap, so the
+    # arm asserts it never happened.
+    check("model D never degraded to the scripted route",
+          pipeline.llm_degraded is False, f"degraded={pipeline.llm_degraded}")
+
+    # score_interface reads the fastrelax output dir at the current taskcount,
+    # so the rules must never emit it anywhere else. The handler would refuse,
+    # but a control arm that needed refusing is already wrong.
+    for i, stage in enumerate(stages):
+        if stage == "interface":
+            check(f"interface at {i} follows a relax",
+                  i > 0 and stages[i - 1] == "fastrelax",
+                  f"preceded by {stages[i - 1] if i else None!r}")
+
+    # cycle 0 resequences from the backbone, later cycles from the packed
+    # structure -- the handler sets _current_cycle_i from `source`, which is the
+    # reference's own selector.
+    sources = [tc["function"]["arguments"]
+               for m in pipeline.messages if m.get("role") == "assistant"
+               for tc in (m.get("tool_calls") or [])
+               if tc["function"]["name"] == "design_sequence"]
+    first_source = json.loads(sources[0])["source"] if sources else None
+    check("the first sequence of a cycle reads the backbone",
+          first_source == "backbone", f"{first_source!r}")
+    after_packmin = stages.index("packmin") if "packmin" in stages else -1
+    check("the sequence after packmin reads the packed structure",
+          after_packmin > 0 and stages[after_packmin + 1] == "sequence"
+          and json.loads(sources[1])["source"] == "packed",
+          f"{sources[1] if len(sources) > 1 else None!r}")
+
+    # Zero tokens is also the degraded signature, so the start record has to say
+    # which decision-maker this was.
+    transcript = os.path.join(base, pipeline.name, "llm_transcript.jsonl")
+    with open(transcript) as fh:
+        start = json.loads(fh.readline())
+    check("the transcript labels the control model",
+          start.get("control_model") == "D", str(start)[:160])
+    check("model D spends no tokens",
+          pipeline.llm_prompt_tokens == 0 and pipeline.llm_completion_tokens == 0,
+          f"{pipeline.llm_prompt_tokens}+{pipeline.llm_completion_tokens}")
+
+
+def test_rules_are_the_reference_s() -> None:
+    print("\n[2c] model D calls the reference's own rules, unmodified")
+    import rules_client
+    from run_small_molecule_binding import adaptive_decision
+
+    # Imported, not restated. If this ever becomes a local reimplementation the
+    # arm stops being a control, so the identity is asserted rather than
+    # trusted.
+    check("rules_client uses the reference's adaptive_decision",
+          rules_client.adaptive_decision is adaptive_decision)
+
+    # _apply_rules relies on the body being synchronous; it raises rather than
+    # degrade if that stops holding. Check it runs and routes.
+    class _Log:
+        def pipeline_log(self, _m): pass
+
+    class _P:
+        logger = _Log()
+        max_tasks = 10
+        num_refine_cycles = 2
+
+        def __init__(self):
+            self.next_step = None
+            self.state = {"last_analysis_step": "fold", "ensemble": [],
+                          "rfd3_input_pdb": None}
+
+    probe = _P()
+    rules_client._apply_rules(probe)
+    # fold always ends a cycle: the reference sets STEP_RFD3 unconditionally.
+    check("the rules run synchronously and route",
+          probe.next_step == rules_client.STEP_RFD3, f"{probe.next_step!r}")
+
+
+async def _reference_stages(max_tasks: int) -> list[str]:
+    """The REFERENCE pipeline's own stage sequence on the same mock inputs."""
+    base = tempfile.mkdtemp(prefix="ref-smb-")
+    in_dir = _setup_mock_inputs(base, "p1")
+    # The reference reads two inputs the agentic harness does not need.
+    for extra in ("fixed_residues.txt", "common_filenames.txt"):
+        with open(os.path.join(in_dir, extra), "w") as fh:
+            fh.write("\n")
+
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
+    manager = ImpressManager(flow)
+    seen: list[str] = []
+
+    async def adaptive_fn(pipeline):
+        seen.append(pipeline.state.get('last_analysis_step'))
+        await _reference_adaptive_decision(pipeline)
+
+    setup = PipelineSetup(
+        name="p1", type=SmallMoleculeBindingPipeline,
+        adaptive_fn=flow.function_task(adaptive_fn),
+        kwargs={"base_path": base,
+                "scripts_path": os.path.join(_REF_DIR, "scripts"),
+                "input_dir": in_dir, "mock": True, "max_tasks": max_tasks,
+                "num_refine_cycles": 2, "mpnn_ensemble_size": 2},
+    )
+    try:
+        await manager.start(pipeline_setups=[setup])
+    finally:
+        await flow.shutdown()
+    return seen
+
+
+def test_rules_match_the_reference_loop() -> None:
+    print("\n[2d] model D routes exactly as the reference's own state machine")
+    from rules_client import RulesClient
+
+    # This is the arm's whole claim. Model D exists to hold the rules fixed
+    # while the harness changes, so if the two loops route differently on
+    # identical inputs the arm is not a control and its numbers mean nothing.
+    # The shim in rules_client is the only logic not inherited from the
+    # reference, and it is exactly where a divergence would hide: STEP_MPNN is
+    # not one tool call, it is a position inside _run_refine_cycle().
+    ref = asyncio.run(_reference_stages(14))
+    pipeline, _ = asyncio.run(
+        _run_pipeline(RulesClient(), max_tasks=14, max_llm_turns=200))
+    mod = _stages(pipeline)
+
+    n = min(len(ref), len(mod))
+    check("both loops actually ran", n >= 12,
+          f"ref={len(ref)} modelD={len(mod)}")
+    div = next((i for i in range(n) if ref[i] != mod[i]), None)
+    lo, hi = max(0, (div or 0) - 2), (div or 0) + 3
+    check("model D's stage sequence is the reference's", div is None,
+          f"diverges at {div}: ref={ref[lo:hi]} modelD={mod[lo:hi]}")
+    # check() only sets the exit status of the script entry point. Assert too:
+    # an arm that silently stopped matching the reference is not a control, and
+    # that must fail a pytest run as well.
+    assert div is None, (
+        f"model D diverges from the reference at stage {div}: "
+        f"ref={ref[lo:hi]} modelD={mod[lo:hi]}. The shim in rules_client.py is "
+        f"the only logic not inherited from the reference -- fix it there.")
+
+
+class _BadCallClient:
+    """Asks for things the model might plausibly get wrong, then finishes."""
+
+    name = "bad-calls"
+
+    def __init__(self):
+        self._script = [
+            ("no_such_tool", {}),                      # unknown tool
+            ("relax", {}),                             # out of order
+            ("design_sequence", {"source": "sideways"}),  # bad enum
+            ("inspect_ensemble", {"kind": "nonsense"}),   # bad argument
+            ("design_backbone", {"guide_model": "/no/such/file.pdb"}),
+            ("finish", {"reason": "done probing"}),
+        ]
+        self._i = 0
+
+    def complete(self, messages, tools):
+        name, args = self._script[min(self._i, len(self._script) - 1)]
+        self._i += 1
+        call = ToolCall(id=f"bad-{self._i}", name=name, arguments=args)
+        return Completion(
+            text="", tool_calls=[call],
+            raw_message={"role": "assistant", "content": "",
+                         "tool_calls": [{"id": call.id, "type": "function",
+                                         "function": {"name": name,
+                                                      "arguments": json.dumps(args)}}]},
+        )
+
+
+def test_bad_calls() -> None:
+    print("\n[3] bad tool calls return errors, not exceptions")
+    pipeline, _ = asyncio.run(_run_pipeline(_BadCallClient(), max_tasks=50))
+    results = []
+    for msg in pipeline.messages:
+        if msg.get("role") == "tool":
+            results.append(json.loads(msg["content"]))
+    check("ran to completion without raising", len(results) >= 6, str(len(results)))
+    check("unknown tool reported", results[0].get("ok") is False
+          and "no such tool" in results[0].get("error", ""), str(results[0]))
+    check("out-of-order relax refused", results[1].get("ok") is False, str(results[1]))
+    check("bad enum refused", results[2].get("ok") is False, str(results[2]))
+    check("bad inspect kind refused", results[3].get("ok") is False, str(results[3]))
+    check("missing guide file refused", results[4].get("ok") is False, str(results[4]))
+    check("finish accepted", results[5].get("ok") is True, str(results[5]))
+    check("nothing ran after finish", len(results) == 6, str(len(results)))
+
+
+class _NeverFinishesClient(ScriptedClient):
+    name = "never-finishes"
+
+
+def test_turn_budget() -> None:
+    print("\n[4] the turn budget stops a model that never finishes")
+    pipeline, _ = asyncio.run(_run_pipeline(
+        _NeverFinishesClient(), max_llm_turns=4, max_tasks=10_000))
+    check("stopped at the turn budget", pipeline.llm_turns == 4,
+          f"{pipeline.llm_turns} turns")
+    check("ensemble below its own budget",
+          len(pipeline.state["ensemble"]) < 10_000)
+
+
+class _SilentClient:
+    name = "silent"
+
+    def complete(self, messages, tools):
+        return Completion(text="I am thinking.", tool_calls=[],
+                          raw_message={"role": "assistant",
+                                       "content": "I am thinking."})
+
+
+def test_no_tool_calls() -> None:
+    print("\n[5] a model that calls nothing is nudged once, then stopped")
+    pipeline, _ = asyncio.run(_run_pipeline(_SilentClient(), max_llm_turns=20))
+    check("stopped after the nudge", pipeline.llm_turns == 2,
+          f"{pipeline.llm_turns} turns")
+
+
+def test_compaction() -> None:
+    print("\n[7] history compaction keeps the transcript valid")
+    import agentic_pipeline as ap
+
+    # Built directly rather than run: compaction is pure message surgery, and a
+    # real run long enough to cross the thresholds costs a minute of polling.
+    pipeline = AgenticSMBPipeline(
+        name="c1", flow=_RecordingFlow(_concurrent_backend()),
+        base_path="/tmp/none", scripts_path="/tmp/none", input_dir="/tmp/none")
+    pipeline.messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "open"},
+    ]
+    for i in range(60):
+        call_id = f"c{i}"
+        pipeline.messages.append({
+            "role": "assistant", "content": "",
+            "tool_calls": [{"id": call_id, "type": "function",
+                            "function": {"name": "relax", "arguments": "{}"}}],
+        })
+        pipeline.messages.append({
+            "role": "tool", "tool_call_id": call_id,
+            "content": json.dumps({"stage": "fastrelax", "ok": True,
+                                   "pass": i % 2 == 0}),
+        })
+    pipeline.llm_turns = 60
+    before = len(pipeline.messages)
+    pipeline._compact_history()
+
+    check("compaction ran", pipeline._summarised_through == 1,
+          pipeline._summarised_through)
+    check("conversation got shorter", len(pipeline.messages) < before,
+          f"{before} -> {len(pipeline.messages)}")
+    check("kept the most recent results",
+          len([m for m in pipeline.messages if m.get("role") == "tool"])
+          == ap._HISTORY_KEEP_RESULTS,
+          len([m for m in pipeline.messages if m.get("role") == "tool"]))
+
+    msgs = pipeline.messages
+    check("system prompt untouched", msgs[0]["role"] == "system")
+    check("opening message untouched", msgs[1]["role"] == "user")
+    check("summary inserted as a user turn", msgs[2]["role"] == "user"
+          and json.loads(msgs[2]["content"])["stage"] == "history",
+          msgs[2])
+    check("summary counts the dropped results",
+          json.loads(msgs[2]["content"])["by_stage"]["fastrelax"]["runs"]
+          == 60 - ap._HISTORY_KEEP_RESULTS,
+          json.loads(msgs[2]["content"])["by_stage"])
+    check("tail resumes at an assistant turn", msgs[3]["role"] == "assistant",
+          msgs[3].get("role"))
+
+    # Every tool result must answer a tool_call from the assistant message
+    # before it; an orphan is a 400 on an OpenAI-compatible endpoint, and
+    # naive slicing produces one.
+    orphans, unanswered = [], []
+    open_ids: set = set()
+    for msg in msgs:
+        if msg.get("role") == "assistant":
+            unanswered.extend(open_ids)
+            open_ids = {tc["id"] for tc in (msg.get("tool_calls") or [])}
+        elif msg.get("role") == "tool":
+            if msg.get("tool_call_id") in open_ids:
+                open_ids.discard(msg["tool_call_id"])
+            else:
+                orphans.append(msg.get("tool_call_id"))
+    unanswered.extend(open_ids)
+    check("no orphaned tool results", not orphans, orphans[:5])
+    check("no unanswered tool calls", not unanswered, unanswered[:5])
+
+    # Idempotent below the threshold: a second pass must not keep trimming.
+    pipeline._compact_history()
+    check("no further compaction while under the threshold",
+          pipeline._summarised_through == 1, pipeline._summarised_through)
+
+
+def test_service_task_signatures() -> None:
+    print("\n[9] vLLM service tasks survive asyncflow's decorator validation")
+    # asyncflow validates signatures at decoration time -- a task_description
+    # default of None raises TypeError. That used to surface only once a job
+    # was running on two nodes (job 23174527), so it is checked here now.
+    import run_agentic_smb as r
+
+    flow = _RecordingFlow(_concurrent_backend())
+    for fn in (r._vllm_launch, r._vllm_stop):
+        try:
+            flow.executable_task(capture_stdio=True)(fn)
+            ok, detail = True, ""
+        except Exception as exc:
+            ok, detail = False, repr(exc)
+        check(f"{fn.__name__} decorates cleanly", ok, detail)
+
+    import vllm_service as v
+    cmd = v.serve_command(venv="/v", model="m", host="h", port=1,
+                          log_file="/l/x.log", tool_parser="llama3_json",
+                          tp_size=1)
+    check("serve command detaches and echoes its address",
+          "setsid" in cmd and "echo h:1" in cmd, cmd[:120])
+    check("serve command enables tool calling",
+          "--enable-auto-tool-choice" in cmd and "--tool-call-parser" in cmd,
+          cmd[:160])
+    check("stop command targets the right port",
+          "--port 1" in v.stop_command(1), v.stop_command(1))
+    # The pattern is matched against every command line, this task's shell
+    # included. An unbracketed pattern makes the stop task kill itself before
+    # pkill finishes (job 23180011: RuntimeError('-15'), failed stop task).
+    _stop = v.stop_command(8000)
+    _pat = re.search(r'pkill -f "([^"]+)"', _stop).group(1)
+    check("stop pattern does not match the command carrying it",
+          re.search(_pat, _stop) is None, f"{_pat!r} vs {_stop!r}")
+    check("stop pattern still matches a real server command line",
+          re.search(_pat, "/v/bin/vllm serve Q --host 0.0.0.0 --port 8000")
+          is not None, _pat)
+    # The endpoint must come from the host/port we chose. An executable task's
+    # future resolves to the PATH of its stdout file under capture_stdio, so
+    # parsing the address out of the task result yields a filename (job
+    # 23175312 spent its allocation polling one).
+    check("endpoint is derived, not parsed from task output",
+          v.endpoint_for("h", 1) == "http://h:1", v.endpoint_for("h", 1))
+    check("server binds every interface, not a single FQDN",
+          "--host 0.0.0.0" in cmd, cmd[:160])
+    # vLLM shells out to its own build tools (ninja) during engine start, so
+    # the venv's bin has to be on PATH -- invoking {venv}/bin/vllm is not
+    # enough. Job 23178420 died exactly there, after loading the model.
+    check("serve command puts the venv's bin on PATH",
+          "export PATH=/v/bin:$PATH" in cmd, cmd[:200])
+    check("serve command sets CUDA_HOME", "CUDA_HOME=" in cmd, cmd[:200])
+
+    # The comparison arms are profile-only: no code changes, so the profiles
+    # themselves are what the tests have to hold.
+    from llm import load_profiles
+    profiles = load_profiles(os.path.join(os.path.dirname(__file__), "models.yaml"))
+
+    beam = profiles.get("beam")
+    check("beam profile exists and is openai_compat",
+          beam is not None and beam.kind == "openai_compat", beam)
+    # Verified against GET /openai/v1/models. The developer docs say
+    # "Beam-1.0-501B-A23B"; the endpoint serves this.
+    check("beam uses the id the endpoint actually serves",
+          beam is not None and beam.model == "Beam-501B-A23B",
+          getattr(beam, "model", None))
+    # Beam always reasons and charges reasoning against max_tokens, so the
+    # 4096 the other profiles use can be spent entirely on thinking, returning
+    # a turn with no tool call -- which stops the pipeline after two in a row.
+    check("beam has headroom for reasoning plus a tool call",
+          beam is not None and beam.max_tokens >= 16384,
+          getattr(beam, "max_tokens", None))
+    check("beam requests a reasoning effort",
+          beam is not None and "reasoning_effort" in (beam.extra_body or {}),
+          getattr(beam, "extra_body", None))
+
+    served = profiles.get("local-llama-8b")
+    check("local-llama-8b profile is served in-allocation",
+          served is not None and served.kind == "dragon_vllm", served)
+    served_cmd = v.serve_command(
+        venv=served.serve["venv"], model=served.model, host="h", port=8000,
+        log_file="/l/x.log", tool_parser=served.serve["tool_parser"],
+        tp_size=int(served.serve["tp_size"]),
+        gpu_fraction=float(served.serve["gpu_fraction"]),
+        extra_args=served.serve.get("extra_args", ""))
+    # The parser belongs to the checkpoint, not to the serving code. Llama 3.x
+    # returns tool calls as JSON and its own chat template carries `tools` and
+    # `tool_calls`, so vLLM's separate jinja -- which pip does not install --
+    # is not needed; a mismatched parser would hand that syntax back as text.
+    check("local-llama-8b serves with the parser its model card calls for",
+          "--tool-call-parser llama3_json" in served_cmd, served_cmd[:240])
+    # Native context is 131k; reserving KV for all of it holds the GPU for
+    # nothing, since the prompt plateaus near 10k.
+    check("local-llama-8b bounds the context it reserves KV for",
+          "--max-model-len" in served_cmd, served_cmd[:240])
+    # 16 GB of bf16 weights fit one 48 GB A40. tp is a per-checkpoint fact and
+    # the profile has to state it, so assert the profile's value reaches vLLM.
+    check("local-llama-8b passes its tensor-parallel size through",
+          f"--tensor-parallel-size {int(served.serve['tp_size'])}" in served_cmd,
+          served_cmd[:240])
+
+    # The serving path is model-agnostic, which only holds if every profile
+    # carries its own parser: serve_command() has no vendor default left, so an
+    # omission is a TypeError at submit time rather than a server that quietly
+    # reports no tool calls. REPLACE-ME is the template profile's placeholder
+    # and the runner rejects it by name.
+    for _name, _p in profiles.items():
+        if _p.kind != "dragon_vllm":
+            continue
+        _parser = (_p.serve or {}).get("tool_parser")
+        check(f"{_name} names its own tool parser", bool(_parser), _p.serve)
+
+    # Model provenance is settled machine-wide in ~/.claude/CLAUDE.md: no model
+    # developed by a Chinese organisation, by any route -- staged weights, a
+    # server in the allocation, or a hosted API arm. This is the enforcement
+    # point. Roughly 405 GB of Qwen checkpoints were removed on 2026-10-27 and
+    # four `local-qwen*` profiles deleted; the guard is what stops them coming
+    # back by way of a convenient profile. If it fails, the fix is the profile.
+    _barred = (
+        "qwen", "tongyi", "qwq", "qvq", "deepseek", "chatglm", "glm-", "thudm",
+        "zhipu", "kimi", "moonshot", "01-ai", "yi-", "internlm", "baichuan",
+        "minicpm", "openbmb", "minimax", "abab", "hunyuan", "tencent", "ernie",
+        "baidu", "doubao", "bytedance", "skywork", "stepfun", "pangu",
+    )
+    _barred_found = []
+    for _name, _p in profiles.items():
+        _hits = [b for b in _barred if b in (_p.model or "").lower()]
+        check(f"{_name} names a model of permitted provenance",
+              not _hits, f"{_p.model} matches {_hits}")
+        if _hits:
+            _barred_found.append(f"{_name}={_p.model}")
+    # check() only sets the exit status of the script entry point. This one
+    # assertion as well, so the guard also fails a pytest run: a policy that
+    # binds only when the suite is invoked one particular way does not bind.
+    assert not _barred_found, (
+        f"models.yaml names models of barred provenance: {_barred_found}. "
+        f"See ~/.claude/CLAUDE.md -- the fix is the profile, not the test.")
+
+    # A reasoning model's own reasoning has to survive into the message we send
+    # back. Beam rejects a follow-up whose earlier assistant messages lack
+    # reasoning_content, and because turn ONE still succeeds, a single-turn
+    # endpoint check passes while the run degrades to the scripted route on its
+    # second decision -- which is exactly what happened on job 23219379.
+    from llm import _completion_from_response
+
+    class _Fn:
+        name = "design_backbone"
+        arguments = "{}"
+
+    class _TC:
+        id = "call-1"
+        type = "function"
+        function = _Fn()
+
+    class _Msg:
+        content = ""
+        tool_calls = [_TC()]
+        reasoning_content = "I should start with a backbone."
+        model_extra = {"reasoning_content": "I should start with a backbone."}
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = None
+
+    comp = _completion_from_response(_Resp())
+    _want = "I should start with a backbone."
+    check("reasoning_content survives into the assistant message",
+          comp.raw_message.get("reasoning_content") == _want,
+          comp.raw_message)
+    check("the tool call survives alongside it",
+          [c.name for c in comp.tool_calls] == ["design_backbone"], comp.tool_calls)
+
+    class _PlainMsg:
+        content = "hi"
+        tool_calls = None
+        model_extra = {}
+
+    class _PlainChoice:
+        message = _PlainMsg()
+
+    class _PlainResp:
+        choices = [_PlainChoice()]
+        usage = None
+
+    plain = _completion_from_response(_PlainResp())
+    # Providers that never return the field must not have it invented for them.
+    check("a non-reasoning reply gains no reasoning_content key",
+          "reasoning_content" not in plain.raw_message, plain.raw_message)
+
+
+def test_absent_sentinels() -> None:
+    print("\n[10] a sentinel string is read as an absent argument")
+    from tools import TOOL_SCHEMAS, _absent_if_sentinel
+
+    # Job 23229812 sent guide_model="None" on 10 of 255 turns, across all four
+    # pipelines, and every one came back `no such file: None`.
+    for word in ("None", "none", "null", "NULL", " none ", "", "N/A"):
+        check(f"{word!r} reads as absent", _absent_if_sentinel(word) is None,
+              _absent_if_sentinel(word))
+    for keep in ("/path/to/model.pdb", "none_of_your_business.pdb"):
+        check(f"{keep!r} is kept", _absent_if_sentinel(keep) == keep,
+              _absent_if_sentinel(keep))
+    check("non-strings pass through", _absent_if_sentinel(None) is None)
+
+    schema = next(t for t in TOOL_SCHEMAS
+                  if t["function"]["name"] == "design_backbone")
+    desc = schema["function"]["parameters"]["properties"]["guide_model"][
+        "description"]
+    check("schema tells the model to send JSON null", "null" in desc, desc)
+
+
+def test_schemas() -> None:
+    print("\n[6] schemas and handlers agree")
+    from tools import HANDLERS
+    check("every schema has a handler", sorted(TOOL_NAMES) == sorted(HANDLERS),
+          f"{sorted(TOOL_NAMES)} vs {sorted(HANDLERS)}")
+
+
+if __name__ == "__main__":
+    test_schemas()
+    test_descriptors()
+    test_scripted_route()
+    test_rules_route()
+    test_rules_are_the_reference_s()
+    test_rules_match_the_reference_loop()
+    test_bad_calls()
+    test_turn_budget()
+    test_no_tool_calls()
+    test_compaction()
+    test_pin_host()
+    test_service_task_signatures()
+    test_absent_sentinels()
+    print()
+    if FAILURES:
+        print(f"{len(FAILURES)} check(s) failed: {FAILURES}")
+        sys.exit(1)
+    print("all checks passed")

@@ -45,6 +45,7 @@ nav:
     - Protein Binding: examples/protein-binding.md
     - Discontinuous Scaffolds: examples/discontinuous-scaffolds.md
     - Small Molecule Binding: examples/small-molecule-binding.md
+    - Agentic Small Molecule Binding: examples/agentic-small-molecule-binding.md
   - API Reference:
     - Overview: reference/index.md
     - ImpressManager: reference/manager.md

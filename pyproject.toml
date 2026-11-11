@@ -30,6 +30,13 @@ Issues = "https://github.com/radical-collaboration/IMPRESS/issues"
 
 lint = ["ruff"]
 
+# examples/agentic_small_molecule_binding: an LLM reasoner reached through an
+# OpenAI-compatible endpoint. Not needed by any other example.
+agentic = [
+    "openai>=1.40",
+    "pyyaml"
+]
+
 # All test deps
 dev = [
     "pytest",

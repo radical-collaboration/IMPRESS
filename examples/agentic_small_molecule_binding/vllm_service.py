@@ -1,0 +1,174 @@
+"""Host the LLM inside the allocation: a vLLM server as a Dragon task.
+
+The server is reached through the same OpenAI-compatible client as a hosted
+model, so nothing in the agent loop changes -- only where the endpoint points.
+That is the whole reason this route serves vLLM's own OpenAI server rather than
+rhapsody's `DragonVllmInferenceBackend`: that backend's chat endpoint flattens
+the message list into one string and has no tool-calling path at all
+(`rhapsody/src/rhapsody/backends/ai/vllm.py:519-549`), and this example is built
+entirely on native tool calls.
+
+Dragon is still reached through rhapsody and the server is still an asyncflow
+task on the `DragonExecutionBackend`; only the serving layer differs.
+
+**Why the server detaches instead of being a service task.** asyncflow has a
+`service=True` flag, but only the RADICAL-Pilot backend reads it, and even there
+the "service is ready" callback is dead code (`radical_pilot.py:425-430`).
+`DragonExecutionBackend` ignores it, so a task's future resolves only when its
+process exits. A server held as a normal task would therefore never resolve and
+could not hand back its address. Instead the launch task starts the server in
+the background, prints `host:port`, and exits -- so its stdout carries the
+endpoint, which is how asyncflow passes values between tasks at all.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+
+
+def node_hostnames() -> list[str]:
+    """Hostnames of the allocation's nodes, in Dragon's own order.
+
+    Dragon's order is what `Policy(host_name=...)` is matched against, so the
+    split between the model's node and the pipelines' node has to be made from
+    this list rather than from Slurm's.
+    """
+    from dragon.native.machine import Node, System
+
+    return [Node(h).hostname for h in System().nodes]
+
+
+_DEFAULT_CUDA_HOME = "/opt/nvidia/hpc_sdk/Linux_x86_64/26.5/cuda/13.2"
+
+
+def endpoint_for(host: str, port: int) -> str:
+    """The address the runner will poll and the clients will use.
+
+    Derived from the host and port we chose, never from the launch task's
+    result: with `capture_stdio=True` an executable task's future resolves to
+    the *path* of its stdout file, not its contents, so parsing an address out
+    of it yields a filename (seen on job 23175312).
+    """
+    return f"http://{host}:{port}"
+
+
+def serve_command(venv: str, model: str, host: str, port: int, log_file: str,
+                  tool_parser: str, tp_size: int = 1,
+                  gpu_fraction: float = 0.90, extra_args: str = "") -> str:
+    """Shell command that starts the server detached and prints its address.
+
+    `--enable-auto-tool-choice` with a parser matching the model family is what
+    makes the server emit real `tool_calls`; without it the model's tool syntax
+    comes back as ordinary text and the agent sees no calls at all.
+
+    `tool_parser` is deliberately required and has no default. It is a property
+    of the checkpoint being served, not of this module, and the wrong parser
+    fails the way a model with no tool training fails -- zero `tool_calls`,
+    ordinary prose in `content`, nothing in the log to say which of the two it
+    was. A profile states its own (see `models.yaml`); vLLM's registered names
+    are in `vllm/tool_parsers/__init__.py`.
+    """
+    # Bind every interface and advertise the node's own name: binding to a
+    # specific FQDN can fail outright if it does not resolve to a local
+    # interface, and the failure would only show up as a health-check timeout.
+    cmd = (
+        f"{venv}/bin/vllm serve {model}"
+        f" --host 0.0.0.0 --port {port}"
+        f" --tensor-parallel-size {tp_size}"
+        f" --gpu-memory-utilization {gpu_fraction}"
+        " --enable-auto-tool-choice"
+        f" --tool-call-parser {tool_parser}"
+        f" {extra_args}"
+    ).strip()
+    # The venv's bin must be on PATH, not just used to find `vllm`: vLLM
+    # shells out to its own build tools during engine start. Invoking
+    # {venv}/bin/vllm directly is not enough -- the engine died with
+    # FileNotFoundError: 'ninja' on job 23178420 having already loaded the
+    # model and captured CUDA graphs, because ninja sits in that same bin and
+    # nothing had put it on PATH. CUDA_HOME likewise lets it find nvcc.
+    env = (
+        f"export PATH={venv}/bin:$PATH; "
+        f"export CUDA_HOME=${{CUDA_HOME:-{_DEFAULT_CUDA_HOME}}}; "
+    )
+    # setsid so the server outlives the launching task's process group, and
+    # </dev/null so it never blocks on stdin.
+    return (
+        f"bash -c '{env}mkdir -p $(dirname {log_file}); "
+        f"setsid nohup {cmd} > {log_file} 2>&1 < /dev/null & "
+        f"echo {host}:{port}'"
+    )
+
+
+def stop_command(port: int) -> str:
+    """Shell command that stops the server. Harmless if it is already gone.
+
+    The `[v]` is not a typo. `pkill -f` matches the pattern against every
+    process's full command line -- including the shell that carries the
+    pattern, whose own command line contains the literal text `vllm
+    serve.*--port N`. A plain pattern therefore makes this task SIGTERM
+    itself: on job 23180011 teardown reported `RuntimeError('-15')` and the
+    runner logged a failed stop task. Bracketing the first character leaves
+    the regex matching `vllm` while the command line spells `[v]llm`, which
+    the regex does not match -- so only the server is hit.
+    """
+    return (
+        "bash -c 'pkill -f \"[v]llm serve.*--port "
+        f"{port}\" || true; echo stopped'"
+    )
+
+
+def wait_healthy(endpoint: str, timeout_s: float = 1800.0,
+                 interval_s: float = 10.0, log=print) -> str:
+    """Block until the server answers, and return the model id it serves.
+
+    A 7B model takes minutes to load, and every pipeline's first turn would
+    fail against a server that is still loading -- which the client's retry
+    path would convert into a degraded, scripted run. So the workflow does not
+    start until this returns.
+    """
+    url = endpoint.rstrip("/") + "/v1/models"
+    deadline = time.time() + timeout_s
+    last = ""
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                data = json.load(r)
+            models = [m.get("id") for m in data.get("data", [])]
+            if models:
+                waited = int(time.time() - deadline + timeout_s)
+                log(f"[vllm] ready after {waited}s: {models}")
+                return models[0]
+            last = "no models listed"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            last = repr(exc)
+        time.sleep(interval_s)
+    raise TimeoutError(
+        f"vLLM at {endpoint} not ready after {timeout_s:.0f}s (last: {last})"
+    )
+
+
+def model_node_policy(host: str, gpus: list[int]):
+    """Dragon placement for the server: a named node, and that node's GPUs.
+
+    `DragonExecutionBackend` takes `num_nodes` but no node offset
+    (`rhapsody/.../execution/dragon.py:68-86`), so the only way to keep the
+    model and the pipelines off each other is to name the host explicitly on
+    both sides.
+    """
+    from dragon.infrastructure.policy import Policy
+
+    return Policy(placement=Policy.Placement.HOST_NAME, host_name=host,
+                  gpu_affinity=list(gpus))
+
+
+def service_task_description(host: str, gpus: list[int]) -> dict:
+    """`task_description` that pins the launch task to the model's node."""
+    return {"process_template": {
+        "policy": model_node_policy(host, gpus),
+        "env": {k: v for k, v in os.environ.items()
+                if k.startswith(("HF_", "HUGGING_FACE_", "VLLM_"))},
+    }}

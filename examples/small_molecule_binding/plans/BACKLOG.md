@@ -44,6 +44,22 @@ counterparts there (F5, F11, F11, F4, F6).
 - **10** — GPU tools all on GPU 0. Spread confirmed at 8 nodes: 32/32 GPUs at 9.4–15.3 % mean. Doc: [gpu0-only](2026-10-05-gpu0-only.md).
 - **13** — follow-up on job `22701168`. Done; it passed every criterion.
 
+## In flight
+
+| Submitted | Jobs | What |
+|---|---|---|
+| 2026-10-22 | `23114772` (reference, adaptive) + `23114775` (agentic, `claude-sonnet-5-5`) | **Paired 4 h / 1 node / 4 pipelines comparison on `gpuA40x4`**, identical shape and inputs, submitted together. Answers whether an LLM reasoner directs the search better than `adaptive_decision()`, and at what cost. Compared on passing folds per node-hour, GPU-h per passing fold, rfd3 per pipeline-hour (same toolkit both sides, so a gap is decision latency) and the decision layer's share of wall clock (reference ~1 %). A paired run rather than the recorded figures because those predate the PR #76 merge, which changed `small_molecule_binding.py`, the runner and `src/impress/`. Prior 1 h runs: `23110801` (scripted smoke, 0 failures, 13.1 rfd3/pipeline-h) and `23112484` (live, `COMPLETED` 37:54, 10/16 folds, ~$2.21). |
+
+## Related
+
+- An agentic variant of this workflow lives in
+  [`examples/agentic_small_molecule_binding/`](../../agentic_small_molecule_binding/README.md):
+  the same toolkit and the same task allocation, with an LLM calling the tools in place of
+  `run()` and `adaptive_decision()`. It subclasses `SmallMoleculeBindingPipeline` and
+  overrides only `run()`, so changes to `_register_real_tasks()` here reach it directly —
+  its offline test asserts the two classes' `task_description` defaults are identical, and
+  will fail if they diverge. Experimental; never run on Delta as of 2026-10-21.
+
 ## Conventions
 
 - Cite the job ID and the archived artifact path for every claim, the way the CLAUDE.md
