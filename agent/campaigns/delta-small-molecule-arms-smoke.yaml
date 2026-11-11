@@ -46,8 +46,14 @@ backend_config: {}
 backend_startup_timeout_s: 600
 backend_startup_heartbeat_s: 30
 backend_shutdown_timeout_s: 300
-# Arm C runs as `impress-a serve --model C` with a caller steering it, so the liveness
-# timeout is not what bounds that arm; it matters for any arm driven from a control process.
+# This is what bounds arm C, which runs as a bare `impress-a serve` driven by the control
+# sidecar - NOT as `serve --model C`, which waits to be steered by a caller that does not
+# exist (backlog G12). The bound is armed by `plane.register`, suspended while any run is in
+# flight, and refreshed by every `observe()`, so the only window it actually watches is the
+# caller thinking between cycles. Measured on arm B of job 23675869, that window - two Beam
+# calls and the deploy - is 9-13 s (23:42:44.9 -> 23:42:57.4 on its sixth cycle), so 120 s is
+# about ten times the observed need. It is a liveness bound and not a patience budget: raising
+# it to cover a caller that has actually died is the failure it exists to prevent.
 control_liveness_timeout_s: 120
 tool_delivery: real
 
@@ -66,8 +72,18 @@ tool_delivery: real
 # the shipped limit an arm would end about fifteen minutes into a four-hour allocation.
 max_cycles: 6
 stagnation_limit: 7
-# Ten is the target; the rate is the endpoint. 0 would leave each model its own default of 3,
-# which is a demo's number and an arbitrary cap on a campaign asked for ten.
+# Ten is the target; the rate is the endpoint. It sets `SatisfactionRule.n` on every BOUNDED
+# objective, so the Spec is satisfied when ten designs clear each bar rather than one - which
+# is what the Goal asks for and what the endpoint counts. 0 means "one is enough".
+#
+# Until backlog G11 this value reached NOTHING: it was parsed, forwarded into
+# `ReasonerOptions`, and read by no code anywhere, so a campaign declaring ten stopped on the
+# first design that cleared every bar. Arm C of the first four-arm smoke did exactly that -
+# 24 tasks, cycle 0, "every spec objective satisfied".
+#
+# What `n` counts is READINGS over the bar, not distinct designs: the harness clusters
+# sequences and this rule does not. At one scoring task per lineage the two track closely
+# enough to stop on, but the stopping rule is not the score.
 # 10 here too, so the smoke cannot stop for a reason the production run would not.
 target_front: 10
 site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}

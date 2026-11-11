@@ -98,6 +98,28 @@ class CampaignObservation(BaseModel):
     #: campaign over a socket had no way to learn it at all, which is the parity of evidence
     #: ADR 0007 requires of every adapter.
     stages: list[str] = Field(default_factory=list)
+    #: How many designs over every bounded bar the campaign asked for; 0 means one is enough.
+    #: Carried for the same reason `stages` is: an external caller builds its `Goal` from this
+    #: observation and from nothing else, so without this field a served campaign's Specifier
+    #: would use the default while an in-process one used the spec's. For the four-arm
+    #: experiment that is a difference between arms which is not the model - arm C would stop
+    #: at one design while A, B and D ran to ten - which is precisely the confound
+    #: `impress-a compare`'s one-variable guard exists to refuse (backlog G11).
+    target_front: int = 0
+    #: How the campaign is DRIVEN, carried for the same reason `target_front` is. A remote
+    #: driver builds itself from this observation and from nothing else, and
+    #: `cli.control_campaign` had no way to learn either number - so it drove with
+    #: `max_turns=10_000` while every in-process arm used the spec's `max_cycles`. In the
+    #: four-arm experiment that is arm C running until its budget or its wall clock ran out
+    #: while A, B and D stopped at six cycles: a difference between arms which is not the
+    #: model, which is what `impress-a compare`'s one-variable guard exists to refuse.
+    #: 0 means "not declared" and leaves the driver's own default, so no existing caller moves.
+    max_cycles: int = 0
+    max_attempts: int = 0
+    #: Independent lineages per experiment, as the campaign declared them. Carried for the
+    #: same reason, and because a remotely driven arm composing a different width from the
+    #: in-process ones is backlog G13's confound arriving by a second route.
+    replicas: int = 0
     #: The applied Spec. Carried so a Planner plans against objectives the executor has
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).

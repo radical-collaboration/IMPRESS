@@ -513,6 +513,60 @@ def test_every_documented_sbatch_entry_point_requests_its_own_resources():
             )
 
 
+def test_the_validate_wrapper_refuses_the_same_disagreement_as_the_launcher():
+    """The guard has to hold at the hop that reaches the launcher, not only inside it.
+
+    C11 was recorded resolved on the strength of "the wrapper resolves its sibling the same
+    way". It did not. `delta_validate_tasks.sh` tried `$IMPRESS_A_DIR` BEFORE
+    `$SLURM_SUBMIT_DIR`, so on job 23680592 a stale `IMPRESS_A_DIR=/work/hdd/...` inherited
+    through `sbatch --export=ALL` won, and the wrapper exec'd THAT tree's
+    `delta_gpu_run.sh` - a copy predating the `validate-tasks` branch, which ignored the
+    exported `IMPRESS_A_COMMAND`, fell back to its own `run`/`MODEL=D` defaults, and spent
+    19m49s on four A40s running an arm-D campaign where a validation pass was asked for.
+
+    The launcher's own refusal could not help: it lives in the file the wrapper declined to
+    run. **A check that only exists in the file you failed to reach is not a check**, which is
+    the general lesson and the reason this test exists beside the other one rather than
+    inside it.
+    """
+    import subprocess
+    import tempfile
+
+    path = pathlib.Path("scripts/delta_validate_tasks.sh")
+    text = path.read_text()
+    repo = str(pathlib.Path.cwd())
+    # The real script, with only the `exec` replaced - so the resolution under test is the
+    # shipped one rather than a copy of it that could drift.
+    block = text.replace('exec "${HERE}/delta_gpu_run.sh" "$@"',
+                         'echo "RESOLVED=${HERE}"')
+    assert "RESOLVED=" in block, "the exec line this test rewrites has moved"
+
+    def run(env: dict[str, str], cwd: str = repo):
+        # Written to a file in a directory with no `delta_gpu_run.sh` beside it, which is
+        # exactly the position sbatch puts it in: `${BASH_SOURCE[0]}` is the spool copy, the
+        # sibling is not there, and the fallback loop is what decides. `bash -c` would leave
+        # BASH_SOURCE unset and make the test pass without reaching that loop.
+        with tempfile.TemporaryDirectory() as spool:
+            script = pathlib.Path(spool) / "slurm_script"
+            script.write_text(block)
+            return subprocess.run(["bash", str(script), "campaigns/x.yaml"],
+                                  capture_output=True, text=True, cwd=cwd,
+                                  env={"PATH": "/usr/bin:/bin", **env})
+
+    stale = run({"IMPRESS_A_DIR": "/nonexistent/other-checkout", "SLURM_SUBMIT_DIR": repo})
+    assert stale.returncode == 1, (
+        "the wrapper accepted an IMPRESS_A_DIR naming another tree - this is job 23680592 "
+        f"again: {stale.stdout}")
+    assert "different checkout" in stale.stdout
+
+    clean = run({"SLURM_SUBMIT_DIR": repo})
+    assert clean.returncode == 0 and f"RESOLVED={repo}/scripts" in clean.stdout, \
+        f"the submission directory must win when nothing is inherited: {clean.stdout}"
+
+    agreeing = run({"IMPRESS_A_DIR": repo, "SLURM_SUBMIT_DIR": repo})
+    assert agreeing.returncode == 0, "an IMPRESS_A_DIR naming the submitted tree is fine"
+
+
 def test_the_launcher_refuses_a_checkout_that_is_not_the_one_submitted():
     """A job that cannot say which tree it is running must not run.
 

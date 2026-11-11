@@ -469,11 +469,31 @@ case "${IMPRESS_A_COMMAND}" in
         # nothing schedulable beside it. That is an inference from the resource request rather
         # than a guarantee, so `--exclusive` is the flag to add if it ever needs to be one.
         #
-        # The sidecar below is the other half of the arrangement, and without it arm C is a
-        # served campaign nobody steers: the halves wait `--caller-timeout` and the planner
-        # stops, which is the designed refusal and not a run.
-        RUNNER_ARGS=( serve "${CAMPAIGN}" --model "${MODEL}"
-                      --caller-timeout "${IMPRESS_A_CALLER_TIMEOUT:-120}" )
+        # NO --model, and that is the fix for what killed arm C of job 23675997.
+        #
+        # `serve --model C` registers model C's inbox halves IN THIS PROCESS and then runs
+        # `mgr.run()`, so the served process drives the campaign itself and waits to be
+        # STEERED. The sidecar below is not a steerer: `impress-a control` is the same
+        # `RolesDriver` the in-process arms use, pointed at a `RemoteSession`, and it drives
+        # by calling `submit_stage` over the plane - it never calls `plane.steer`. So the two
+        # were a second driver each: the sidecar planned and submitted r0001 at 23:39:42 and
+        # the served driver sat at turn 0 waiting for a directive that nothing would ever
+        # send, timed out after `--caller-timeout`, and stopped the campaign at cycle 0 while
+        # r0001 was still running. Raising the timeout could not have helped - it would have
+        # bought the same stop later. The `cycle 0` in that stop reason is the proof: the
+        # served driver never completed a turn, which is impossible if the timeout had fired
+        # between cycles.
+        #
+        # Without `--model`, `serve` attaches `_Idle` - "a reasoner that is not there" - which
+        # is what the two-process split is for, and the sidecar is then the campaign's one and
+        # only reasoner. That is also the contrast arm C claims: B and C run the same
+        # Beam-backed halves and differ in whether they sit in the executor's process or drive
+        # it over the plane.
+        #
+        # What this arrangement does NOT exercise is model C's own code - the external inbox
+        # halves, `on_timeout`, directive validation. Nothing shipped steers a campaign, so
+        # nothing could exercise them here; see backlog G12.
+        RUNNER_ARGS=( serve "${CAMPAIGN}" )
         _SIDECAR=yes
         ;;
     validate-tasks)
@@ -514,10 +534,9 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 # ── Arm C's other half: the control sidecar ───────────────────────────────────
-# `serve --model C` registers the inbox halves and then waits to be steered. Nothing in this
-# job steered it, so arm C would have served a campaign, waited `--caller-timeout`, and
-# stopped on the planner's `on_timeout="stop"` - the designed refusal, correctly reported, and
-# not a run. This is the caller.
+# `serve` with no --model runs the executor and no reasoner. This process is the reasoner, and
+# without it arm C is a served campaign nobody drives: it would sit on `_Idle` until the
+# liveness bound or the wall clock ended it.
 #
 # It is STARTED BEFORE Dragon and polls, because the URL does not exist until `serve` is up:
 # the port is ephemeral (deliberately - see the serve branch above), so the sidecar discovers
@@ -528,10 +547,11 @@ fi
 # the YAML here could.
 #
 # --model B, not --model C. The caller IS the reasoner; `--model C` on this side would build
-# the inbox halves a second time and stop after one `--caller-timeout` with nobody steering the
-# steerer. B is the same Beam-backed oracle arm B runs in-process, so B and C differ in exactly
-# one thing - whether the reasoner sits in the executor's process or drives it over the plane -
-# which is the only contrast arm C can honestly claim.
+# inbox halves nobody steers, on the side that does the steering. B is the same Beam-backed
+# oracle arm B runs in-process, so B and C differ in exactly one thing - whether the reasoner
+# sits in the executor's process or drives it over the plane - which is the only contrast arm C
+# can honestly claim. The driver takes `max_cycles` and `max_attempts` from the observation, so
+# it stops where the in-process arms stop rather than at its own default of 10,000 turns.
 if [ "${_SIDECAR:-}" = "yes" ]; then
     _SIDECAR_MODEL="${IMPRESS_A_SIDECAR_MODEL:-B}"
     _SIDECAR_WAIT="${IMPRESS_A_SIDECAR_WAIT_S:-1800}"

@@ -57,6 +57,10 @@ that moves this item, and it should now surface the real LigandMPNN error instea
   never run (A10); and no measurement has superseded a prediction, so calibration is untested.
   (Promotion has since happened: job 22726105, see A12.)
 
+  **C11 provenance:** the evidence above is jobs 22536706, 22669509, 22692304, 22726105, which ran
+  the `/work/hdd` checkout rather than this one. The measurements stand as measurements; what they
+  cannot be read as is evidence about *this* code. See C11.
+
 **A2. `ligand_smiles` was empty** in both Delta campaigns - RESOLVED for the ALR target: both
 campaigns now set it to the real value borrowed from the original IMPRESS project's small-molecule
 benchmark (`campaigns/data/alr/ALR.smiles`), and `_check_ligand_smiles` (`cli/__init__.py`, wired
@@ -91,6 +95,10 @@ minutes instead of consuming the whole allocation silently. What remains open: *
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
 needs a person on a real allocation, with the bounded timeout now giving a fast, clear failure to
 iterate against instead of another silent multi-hour loss.
+
+  **C11 provenance:** the evidence above is job 22318678, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
 
 **A4. The rfd3_design rewrite needs a real smoke-run confirmation.** The Hydra contract and
 `DesignInputSpecification` JSON shape are verified against the installed `rfd3` CLI's own source,
@@ -130,6 +138,10 @@ glob finds the structures; confirm on the first real run, and see G2 for using t
   `out_dir` of structures with no metadata raises instead of guessing. Pinned by
   `test_rfd3_never_hands_downstream_a_trajectory` and
   `test_rfd3_refuses_an_out_dir_it_cannot_identify_a_design_in`.
+
+  **C11 provenance:** the evidence above is jobs 22536706, 22669509, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A6. LigandMPNN cannot import under this venv's numpy — RESOLVED in code, unexecuted.** Job
 22669509's recovered stderr: `run.py` dies in its **module-level imports**, before parsing an
@@ -218,6 +230,10 @@ what the job runs*. A second thing worth keeping - the other FAIL in that same o
 `boltz not on PATH`, was an artefact of invoking `.venv/bin/impress-a` without activating the
 venv. Real on its face, caused by the harness. The launcher activates, so it never sees it.
 
+  **C11 provenance:** the evidence above is jobs 22669509, 22684607, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
+
 **A7. `boltz_predict` has never executed, and a budget correction is why — RESOLVED.** Not a tool failure. The
 `cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
 against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,
@@ -237,6 +253,10 @@ run was unwinnable from the moment it was admitted and nothing said so.
   gates and produced `complex_plddt` 0.507 and `ligand_iptm` 0.752 - the two objectives that had
   never had a producer in a completed graph. Its own cost model was the last literature guess
   standing (0.15 against 0.0160 measured, 9.3x) and is now 0.05.
+
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A8. Nothing checks that an admitted graph can produce the campaign's objectives.** `grep -rn
 "objective" src/impress_a/compose` returns nothing - the composer and validator never receive them.
@@ -280,6 +300,10 @@ signature, same estimate, same rejection - and only attempt 4 reached the stage-
 `max_attempts` is 4: one more rejection and the campaign would have run nothing at all. The policy
 should see the effective replica count.
 
+  **C11 provenance:** the evidence above is job 22675512, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
+
 **A10. `replicas > 1` has never executed.** `plans/first-real-run.md` calls the four-lineage
 independence check the invariant most likely to be silently wrong: `replicas: N` must produce N
 `DesignNode`s carrying DIFFERENT metrics, which is the only evidence the per-lineage seed plumbing
@@ -303,7 +327,15 @@ does anything. Every real run so far has been `replicas: 1`.
   multiplicity (`f5b21d82…` at 1, `f8bcefed…` at 2, `78e730c6…` at 4), so trust earned at
   width 1 does not transfer, and width 4 can never be admitted untrusted at a 6.0 GPU-h budget,
   so it can never earn trust there either. Width 4 needs route (b), or a deliberate ruling on
-  whether multiplicity belongs in the signature. Separately, concurrent GPU tasks are not pinned:
+  whether multiplicity belongs in the signature.
+
+  **Annotation (2026-11-09): the *Trust* half below is incomplete rather than wrong.**
+  `--replicas 1 --replicas 4` presumes every arm composes the same width, and on array 23680876
+  they did not: A, B and C composed 4 and model D composed 2, so D's `f8bcefed…` was in no
+  arm's ledger and D alone ran three cycles untrusted. The remedy here made width 4 *runnable*;
+  it does not make the arms *comparable*. See **G13** and
+  [replica-width-confound](replica-width-confound.md). The budget and pinning halves are
+  unaffected. Separately, concurrent GPU tasks are not pinned:
   every task sees `CUDA_VISIBLE_DEVICES=0,1,2,3`, and `exec/resources.to_backend_description` is
   called by nothing. `plans/next-run-replicas.md` pins lineages to GPUs before running width 2.
 
@@ -361,6 +393,10 @@ a band rather than a value for exactly this reason.
   **Reproduced off-cluster (2026-10-09)** from `impress_a_runs_2026-10-08.tar.gz` alone, on this
   laptop, at the same commit: every figure above holds to the digit except the 16-of-17, corrected
   here. So these are archive-derived, not Delta-session-derived - the distinction G9 is about.
+
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, which ran the `/work/hdd`
+  checkout rather than this one. The measurements stand as measurements; what they cannot be read
+  as is evidence about *this* code. See C11.
 
 **A12. The trust ledger reset every job, so promotion was unreachable on Delta — RESOLVED.**
 `executor.py` loaded it from `Path(spec.root) / "_trust"`, and `spec.root` defaults to the
@@ -466,6 +502,10 @@ means the next slower task blocks the smoke again. `filter_shape` left at **0.01
 deliberately not adjusted: it has still never produced a cost measurement, so there is nothing
 to derive a figure from, and the re-run is what will say.
 
+  **C11 provenance:** the evidence above is jobs 22684607, 22692304, 22702568, 22726105, 22728140,
+  which ran the `/work/hdd` checkout rather than this one. The measurements stand as measurements;
+  what they cannot be read as is evidence about *this* code. See C11.
+
 **G9. The code that reports a QC failure could not survive one.** **RESOLVED**
 (2026-11-08). Found by the first four-arm smoke, job 23671024: all four arms died inside
 their allocation with
@@ -539,8 +579,9 @@ It needed a property on `CampaignManager` too - `__getattr__` delegates reads of
 and nothing delegates writes, so a bare assignment would have landed on the manager while the
 executor kept its default, leaving the bound disarmed for arm C as well.
 
-**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **OPEN - needs a
-decision.** Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
+**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **RESOLVED** in code
+on `agent/stopping-rules`, **unrun on hardware**. Doc:
+[stopping-rules](stopping-rules.md). Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
 That was CORRECT behaviour, and the diagnosis is the interesting part.
 
 `ThresholdSpecifier` translates each declared objective into a `SatisfactionRule` and leaves
@@ -560,8 +601,66 @@ stopping rules disagree and the laxer one wins - backlog X1's shape, inverted.
 Prereg section 3 pre-registers `C_T3 = 0`, on the evidence that `complex_plddt` measured
 0.426 / 0.486 / 0.507 across every run this project had recorded - "0 of 3". **Those three
 runs came from the `/work/hdd` checkout** (C11), so that baseline describes different code.
+
+**The cure, and what it turned out to be.** `target_front` did not merely fail to reach the
+rule - it was read by **no code anywhere**: parsed into `CampaignSpec`, forwarded into
+`ReasonerOptions`, consumed by nothing. Both Delta arm specs had declared `target_front: 10`
+since they were written and it had never done anything. Section E's category, surviving because
+the field existed in two places and so looked wired.
+
+It now lives on the `Goal`, which `core/goal.py`'s own docstring argues for: the Goal carries
+what success means and not how the campaign is driven, and "ten designs" is success criteria
+rather than a loop knob. That placement also lets `ThresholdSpecifier` read it while `_spec_d`
+keeps its ruling that a deterministic `Goal -> Spec` takes nothing from the options.
+`SatisfactionRule.n` is set from it on **bounded** objectives only - an unbounded objective
+ranks, and ten readings of a number nobody has to beat say nothing more than one. Campaigns
+declaring no target are unaffected, because `CampaignSpec.target_front` defaults to 0.
+
+It also crosses the control plane as `CampaignObservation.target_front`. A remote caller builds
+its `Goal` from the observation and nothing else, so without that field arm C would stop at one
+design while A, B and D ran to ten - a difference between arms that is not the model, and one
+`impress-a compare`'s one-variable guard cannot see, since every arm would still complete with
+plausible numbers.
+
+**What `n` is not:** it counts READINGS over the bar (`len(metrics(metric)) >= n`), not distinct
+designs. The endpoint clusters sequences; this does not. A stopping condition, not a score.
 The pre-registered expectation should be read against this before the next smoke, and the
 tier arithmetic in sections 12-13 rests on the same numbers.
+
+**G12. Arm C served a campaign that two reasoners drove, and neither finished.** **PARTLY
+RESOLVED** in code on `agent/stopping-rules`, **unrun on hardware**. Doc:
+[external-control-arm-c](external-control-arm-c.md). Evidence: job 23675997.
+
+`impress-a serve --model C` builds model C's inbox halves **in the serving process** and then
+calls `mgr.run()`, so that process drives the campaign and waits to be `steer`ed.
+`impress-a control` is not a steerer: it is the same `RolesDriver` the in-process arms use,
+against a `RemoteSession`, and it drives by calling `submit_stage` over the plane. **Nothing
+shipped calls `plane.steer`.** So job 23675997 ran two reasoners against one executor - the
+sidecar planned and submitted r0001's 24 tasks, all of which passed, and the served driver sat
+at turn 0 waiting for a directive nothing would send, timed out after `--caller-timeout`, and
+stopped the campaign while r0001 was still running.
+
+The first diagnosis - G10's shape, a 120 s patience expiring while a ~180 s cycle ran - was
+wrong, and the stop reason is the proof: it names *cycle 0*, and `RolesDriver` increments
+`turn` the moment a stage is deployed, so a planner that had already placed r0001 could not
+report cycle 0. Raising the timeout would have bought the same stop later. It also explains
+23671367, where arm C stopped at cycle 0 on "every spec objective satisfied": the served
+driver's Specifier saw a Spec the sidecar's run had already satisfied at `n=1`.
+
+**Fixed:** arm C now serves **bare** (`scripts/delta_gpu_run.sh` drops `--model` and
+`--caller-timeout`), so `serve` attaches `_Idle` and the sidecar is the campaign's one and only
+reasoner - which is the two-process split C5 built and the only contrast arm C can honestly
+claim. And `CampaignObservation` gains `max_cycles`/`max_attempts`, because
+`cli.control_campaign` drove with `max_turns=10_000` - a number no campaign declares - while
+every in-process arm uses `spec.max_cycles`; arm C has never survived past cycle 1, so nothing
+could notice. That is G11's observation gap again, in the half that says how a campaign is
+driven rather than what it is for.
+
+**Still open:** model C's own code - the inbox halves, `on_timeout`, directive validation, the
+`steer` route - is exercised by `tests/` and by nothing on Delta, because the steering caller
+does not exist. Writing it carries a design question of its own (what a directive should carry
+that a Stage does not). Until then arm C measures the out-of-process split rather than the
+inbox halves, and the pre-registration should say so.
 
 ## B. Silent-failure defences — unmet for the real toolkits
 
@@ -619,8 +718,17 @@ ports satisfied from that `DesignNode.artifacts`, matched by declared TYPE, and
 **no inputs at all** (only `outputs.backbone`) and no `partial_t`, so there is no port for a
 parent structure to arrive on and no way to ask RFD3 for partial diffusion. The reference's
 `num_refine_cycles: 2` / `rfd3_partial_t: 10.0` therefore has no equivalent here, and the
-measured consequence is already on the record: `complex_plddt` 0.426 / 0.486 / 0.507 against a
-0.75 bound, 0 of 3.
+measured consequence was taken to be on the record: `complex_plddt` 0.426 / 0.486 / 0.507
+against a 0.75 bound, 0 of 3.
+
+  **Those three numbers no longer support that conclusion** (C11, and G11's own evidence). All
+  three runs were produced by the `/work/hdd` checkout, so they describe different code; and on
+  the current tree arm C of job 23671367 measured `complex_plddt` **0.904**, one for one over
+  the same bound, with rfd3 refinement still unreachable. So whatever is wrong here, those
+  three numbers are not the measurement of it. The argument that partial diffusion is
+  unreachable stands on the spec declaring no inputs and no `partial_t`, which is checkable by
+  reading the file; the fold-quality consequence is unmeasured. The pre-registration quotes
+  the same three numbers in sections 3 and 13 and has not yet been re-derived.
 
   This is **not** blocking the four-arm experiment, and the specs are honest about it:
   `delta-small-molecule-arms{,-smoke}.yaml` keep `rfd3_design.num_designs: 1` with the reason
@@ -754,8 +862,30 @@ every documented submission wraps across three lines with `\` and the regex was 
 the same shape of mistake as the bug it was written for.
 
 **C11. Every submitted job has run a different checkout than the one submitted.**
-**RESOLVED** (2026-11-08). The most serious thing this deployment pass found, and it was
-invisible by construction.
+**REOPENED 2026-11-09, RESOLVED AGAIN** on `agent/stopping-rules`. The most serious thing this
+deployment pass found, and it was invisible by construction.
+
+**It recurred the day after it was closed.** Job **23680592** was submitted as
+`sbatch scripts/delta_validate_tasks.sh <smoke spec>` and ran
+`dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py run ... --model D`:
+19m49s on four A40s, an arm-D campaign where a validation pass was asked for. The sentence
+below that reads "the wrapper resolves its sibling the same way" was false. It tried
+`$IMPRESS_A_DIR` **before** `$SLURM_SUBMIT_DIR`, the submitting shell carried a stale
+`/work/hdd` value that predated the `~/.bashrc` repoint, `sbatch --export=ALL` handed it over,
+and the wrapper exec'd that tree's `delta_gpu_run.sh` - a copy predating the `validate-tasks`
+branch, which ignored the exported `IMPRESS_A_COMMAND` and used its own `run`/`MODEL=D`
+defaults.
+
+**The launcher's refusal could not fire, because it is in the file the wrapper declined to
+run.** That is the general lesson and it is worth more than the lost allocation: *a check that
+only exists in the file you failed to reach is not a check*. The wrapper now prefers
+`$SLURM_SUBMIT_DIR` and refuses a disagreeing `$IMPRESS_A_DIR` at its own hop, and
+`tests/test_toolchain.py::test_the_validate_wrapper_refuses_the_same_disagreement_as_the_
+launcher` runs the shipped script from a directory with no sibling beside it - the position
+sbatch actually puts it in - rather than trusting that the two files agree. The four arms of
+job 23675376 and the validation pass 23675119 all record
+`Checkout: /work/nvme/bdyk/hooten1/IMPRESS/agent`, so this recurrence cost one job and no
+results.
 
 Two causes, and the second hid the first. `${BASH_SOURCE[0]}` **is not the repo under
 sbatch**: Slurm copies the submitted script to the compute node as
@@ -789,7 +919,26 @@ Pinned by `tests/test_toolchain.py::test_the_launcher_refuses_a_checkout_that_is
 submitted`, which runs the resolution block itself in four environments.
 
 **Not retrospectively fixable:** results recorded before this commit were produced by the
-`/work/hdd` tree. Anything cited from them should say so.
+`/work/hdd` tree. Anything cited from them should say so, and now does: every item below whose
+evidence is a job before the cutover carries a **C11 provenance** note naming its jobs. The rule
+is mechanical - **any job id below 23670000 ran the other checkout** - and the sweep found ten
+items, derived from the file rather than from memory:
+
+| item | pre-cutover jobs it cites |
+|---|---|
+| A1 | 22536706, 22669509, 22692304, 22726105 |
+| A4 | 22536706, 22669509 |
+| A5 | 22318678 |
+| A6 | 22669509, 22684607 |
+| A7 | 22684607, 22692304 |
+| A9 | 22675512 |
+| A11 | 22684607, 22692304 |
+| A12 | 22684607, 22692304, 22702568, 22726105, 22728140 (and 23670171, 23670891, which are this tree) |
+| G4 | 22702568 |
+| G6 | 22536706 |
+
+A3 and G8 cite no job id at all, so neither needed one - which is worth recording, because both
+were on the list this sweep was planned from and that list was written from memory.
 
 **C12. Arm C's serve/control pair had never been executed.** **RUN, 2026-11-08**, on a login
 node with mock tools - the first time the two processes have talked to each other anywhere.
@@ -1040,6 +1189,10 @@ an integrity failure: a wrong guess would not merely be useless, it would refuse
 demote the pattern. Backlog A3 is the standing lesson about flags nobody has run. The adapter logs
 the sidecar's actual keys, so one real run resolves it; the gates land then.
 
+  **C11 provenance:** the evidence above is job 22702568, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
+
 **G5. `filter_shape` may be measuring the wrong interface.** **DONE** (phase 10), and not by
 copying upstream. Upstream splits by chain (`Chain chains="A"` against `chains="B"`), which is
 right only when the ligand is its own chain - a property of the input, not of the tool. The pair
@@ -1075,6 +1228,10 @@ The LigandMPNN stderr, the actual failure, was lost with it.
   report, not a vendored patch. We have no per-run wall-clock bound that would catch the hang
   either, so any third-party exception with the same shape (a required-arg `__init__` that does
   not forward those args to `super()`) reproduces it.
+
+  **C11 provenance:** the evidence above is job 22536706, which ran the `/work/hdd` checkout
+  rather than this one. The measurements stand as measurements; what they cannot be read as is
+  evidence about *this* code. See C11.
 
 **G7. A run's seed comes from its run label, so every job samples the same five designs.**
 `_replica_seed(run_label, lineage)`, and labels restart at r0001 in every job. Found by
@@ -1183,6 +1340,81 @@ assumption, already fixed:
 had never run anywhere but Delta's 3.12.
 
 ---
+
+**G13. The arms do not compose the same replica width, and the control arm fell through the
+gap.** **FIXED** in code on `agent/stopping-rules`, **unrun on hardware**. Diagnosed on the
+four-arm smoke of 2026-11-09. Doc:
+[replica-width-confound](replica-width-confound.md). Evidence: array 23680876 (arms 23680888,
+23680907, 23681055, 23680876).
+
+Arms A, B and C composed **4 lineages** per cycle and arm D composed **2**, on one campaign
+declaring `replicas: 4`. `ThresholdPlanner.__init__` carries `base_replicas: int = 2`
+(`policy/planners/explicit.py:79`, used at `:127`) and nothing overrides it - `_plan_d`
+(`policy/registry.py:147-154`) passes only `stages`, and `ReasonerOptions` has no replicas
+field. The declared width cannot correct it, because `runtime/executor.py:763-765` applies
+`min(intent.replicas, spec.replicas)`: `replicas` is a **ceiling, not a target**, so it is a
+number only the arms with a model in them ever reach.
+
+**It cost twice.** Replica multiplicity is part of the pattern signature
+(`compose/graph.py:56-65` sorts one entry per node, so four lineages contribute four copies
+where two contribute two - despite the docstring's "SHAPE ONLY"). Trust was asserted at widths 1
+and 4, as `plans/arms-preregistration.md` §10 step 2 prescribes, so D's `f8bcefed63c493ae` was
+in no arm's ledger and **D alone ran untrusted for r0001-r0003** - forced dry-run, 10% cost cap,
+one instance in flight - earning trust at r0004, while A, B and C ran trusted from r0001. The
+control arm therefore spent half its campaign at half the width under a different admission
+regime from the arms it is the control for, and anything per-cycle measures that as well as the
+model.
+
+A10 predicted the signature half of this and `impress-a trust --replicas` was built for it. What
+nobody enumerated is that **the arms do not all agree on width**, so no assertion list can cover
+them all, and the arm that falls through is the control.
+
+**Ruling: breadth is held FIXED across the arms, and the campaign declares it.** The comparison
+exists to observe differences that follow from the reasoning track and from what that reasoning
+costs; an arm targeting a smaller ensemble spends differently per cycle for a reason the
+endpoint cannot separate from reasoning quality, so every arm targets an ensemble of similar
+size. Model A's inherited explore-3 / exploit-2 breadth (`PROFILES`,
+`policy/planners/agentic.py:64`, carried over from `FourNodePolicy`) is **not** a rigorous part
+of model A - its purpose is projecting LLM reasoning onto a research-cycle structure - so the
+declared width overrides it. A's quality and diversity fractions are untouched: those are the
+strategy.
+
+**The fix was not one wire, and a test comparing the arms to each other is what showed it.**
+All four planners built `ThresholdPlanner(stages=stages)` and inherited `base_replicas = 2`, so
+the declared width reached **none** of them. Three routes to one confound: (1) D's and C's
+mechanics took the hardcoded 2 - the one the smoke measured; (2) A and B override with their
+own numbers, reaching 4 only because a live Beam model asked for 4 every cycle, so **a degraded
+turn would have silently halved that arm's width** and dropped it into the untrusted interlock
+with the model blamed for it (probed: with no client they compose 3); (3)
+`ExternalPlanner._to_stage` read `directive.get("replicas") or 1`, so a caller silent about
+breadth composed **one** lineage.
+
+`ReasonerOptions.replicas` now carries it, fed from `spec.replicas` and from
+`CampaignObservation.replicas` for a remote driver; every planner forwards `base_replicas` to
+its mechanics; A and B treat a declared width as authoritative over their own; `ExternalPlanner`
+passes `lineages=None` rather than 1 when the directive is silent. 0 everywhere still means the
+planner's own default, so no campaign declaring no width moves. `CampaignSpec.replicas` stays a
+ceiling in the executor, which can clamp a graph down but cannot add lineages - the planners are
+where width has to be composed.
+
+**And `impress-a trust --assert` now covers every width from 1 to the declared one** rather than
+the declared width alone, because a width nobody asserted runs under forced dry-run and a 10%
+cost cap. On the smoke spec that is four signatures rather than two - `f5b21d82…` at 1,
+`f8bcefed…` at 2 (the one D fell through), `fa8f3389…` at 3 (the one a degraded model-A arm
+would have hit, never asserted by anyone), `78e730c6…` at 4.
+
+**Tests:** `test_every_arm_composes_the_width_the_campaign_declared` builds a Stage from each of
+the four arms against a spec declaring `replicas: 4` and asserts they agree - the comparison the
+suite never made, since every other test checks one arm alone where a narrower width is merely
+different. `test_a_campaign_that_declares_no_width_keeps_the_planners_own_default` pins the 0
+case. Arm D now costs ~0.68 gpu-h per run (4.08 over six cycles, inside the 6.0 budget) and runs
+trusted from r0001.
+
+**Forces a pre-registration amendment** before any production arm (§10 step 2, §11's width-4
+abort criterion and §12's admissions-under-scrutiny line). Drafted verbatim in the doc and
+deliberately **not applied**: the prereg's own header rules that an amendment after the first
+arm has run voids the comparison, `impress-a compare` enforces it through `prereg_sha`, and all
+four smoke manifests record `c710f017…`.
 
 ## H. Reasoner models
 
@@ -1449,6 +1681,13 @@ paid for out of the first allocation.
     second bound at all behind it, and is now a declared `CampaignSpec` field (0 keeps the model's
     own 3) rather than an inferred one, because how many designs a campaign wants is a property of
     the Goal and `core.pareto.Objective` says nothing about it.
+12. ~~**G13 the replica-width confound**~~ — **FIXED in code, unrun on hardware.** It was not
+    the one wire it looked like: the declared width reached no planner at all, and two of the
+    three routes were latent rather than measured. The pre-registration amendment it forces is
+    drafted and still unapplied, and is only legitimate before the production arms are
+    submitted - so that ordering is not a preference. **A smoke rerun is what closes it**, and
+    the thing to read is whether all four arms report the same lineage count and all four run
+    trusted from r0001.
 
 ## The legacy decision path is gone (phase 11)
 

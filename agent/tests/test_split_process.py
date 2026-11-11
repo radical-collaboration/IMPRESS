@@ -298,6 +298,69 @@ async def test_serve_and_control_drive_a_campaign_in_two_processes(tmp_path):
                 await proc.wait()
 
 
+async def test_a_remotely_driven_campaign_stops_where_the_campaign_said_to(tmp_path):
+    """The cycle bound is the campaign's, not the control process's.
+
+    `cli.control_campaign` built its driver with `max_turns=10_000`, a number no campaign
+    declared, while every in-process arm is driven through `spec.max_cycles` by
+    `manager.py`. So a remotely driven campaign ran until its budget, its stagnation limit or
+    its wall clock stopped it - and in the four-arm experiment that is arm C running on while
+    A, B and D stop at six cycles, a difference between arms which is not the model. Same
+    observation gap as G11's, in the half that says how a campaign is driven rather than what
+    it is for.
+
+    `target_front` is declared here so satisfaction cannot reach the stop first and make the
+    assertion pass for the wrong reason: this test has to fail on the cycle bound and on
+    nothing else.
+
+    Two processes, because that is the only arrangement that exercises the entry point -
+    and it is the arrangement `scripts/delta_gpu_run.sh` gives arm C.
+    """
+    spec_path = tmp_path / "bounds.yaml"
+    spec_path.write_text(yaml.safe_dump({
+        "campaign_id": "bounds-cli", "goal": "stabilize", "backend": "concurrent",
+        "backend_config": {"workers": 3}, "max_cycles": 2, "stagnation_limit": 99,
+        "target_front": 10, "control_liveness_timeout_s": 0, "root": str(tmp_path),
+        "site": {"gpu_api": "cuda", "gpus_per_node": 1},
+        "budget": {"gpu_hours": 4.0, "cpu_hours": 24.0}, "stages": CHAIN,
+        "objectives": [{"name": "sc_rmsd", "direction": "minimize", "max": 3.0},
+                       {"name": "iptm", "direction": "maximize", "min": 0.55}]}))
+
+    env = dict(os.environ, IMPRESS_A_TRUST_DIR=str(tmp_path / "trust"),
+               IMPRESS_A_HEARTBEAT_S="0")
+    server = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "impress_a", "serve", str(spec_path), "--port", "0",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+    try:
+        url = None
+        for _ in range(200):
+            line = await asyncio.wait_for(server.stdout.readline(), timeout=30)
+            if not line:
+                break
+            text = line.decode(errors="replace")
+            if "serving on" in text:
+                url = text.strip().split()[-1]
+                break
+        assert url, "the server must print the URL it bound"
+
+        control = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "impress_a", "control", "--connect", url,
+            "--campaign", "bounds-cli", "--model", "D",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+        out, _ = await asyncio.wait_for(control.communicate(), timeout=180)
+        assert control.returncode == 0, out.decode(errors="replace")[-2000:]
+
+        rest, _ = await asyncio.wait_for(server.communicate(), timeout=180)
+        served = rest.decode(errors="replace")
+        assert "max_cycles=2 reached" in served, (
+            "the remote driver must take the bound from the observation; anything else is "
+            f"a campaign driven by a number nobody declared:\n{served[-2000:]}")
+    finally:
+        if server.returncode is None:
+            server.kill()
+            await server.wait()
+
+
 async def test_model_c_is_refused_by_run_rather_than_silently_becoming_d(tmp_path, caplog):
     """Backlog C6, closed by refusing rather than by detecting.
 

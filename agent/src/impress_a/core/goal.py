@@ -57,6 +57,17 @@ class Goal(BaseModel):
     #: Spendable limits, by budget dimension. The same keys `BudgetLedger.limits` uses.
     budget: dict[str, float] = Field(default_factory=dict)
 
+    #: How many designs clearing every bounded objective the caller wants. 0 means "one is
+    #: enough", which is the old behaviour and stays the default.
+    #:
+    #: It lives HERE, and not only on `CampaignSpec`, by this class's own test: the Goal
+    #: carries what success means, and not how the campaign is driven. "Design at least ten
+    #: distinct binders meeting every declared threshold" is a statement about success -
+    #: unlike `stagnation_limit` or `max_cycles`, which are statements about the loop. Putting
+    #: it here is also what lets `ThresholdSpecifier` read it while `Goal -> Spec` stays a
+    #: function of the Goal alone (backlog G11).
+    target_front: int = 0
+
     #: Wall-clock limit in seconds, when the caller set one. `None` means unbounded here and
     #: bounded only by the allocation - which is the usual case on HPC, where SLURM's `--time`
     #: is the real backstop and this field would only duplicate it less reliably.

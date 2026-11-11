@@ -79,6 +79,19 @@ class ReasonerOptions:
     #: Models A and D.
     max_cycles: int = 6
     target_front: int = 3
+    #: How many independent lineages a Planner that has no opinion should compose. 0 means
+    #: "the planner's own default", so no existing campaign moves.
+    #:
+    #: **This is the arms' one-variable guard, not a tuning knob.** `ThresholdPlanner` carried
+    #: `base_replicas = 2` and nothing overrode it, while `CampaignSpec.replicas` is only a
+    #: CEILING - `runtime/executor` applies `min(intent.replicas, spec.replicas)`. So on the
+    #: four-arm smoke of 2026-11-09 (array 23680876) arms A, B and C proposed the declared 4
+    #: and got 4, and model D proposed a hardcoded 2 and got 2, from one campaign. Replica
+    #: multiplicity is part of the pattern signature, so D's shape was also not one of the two
+    #: that `impress-a trust --assert` had been told to cover, and D alone ran three cycles
+    #: under the untrusted interlock. The control arm was therefore running at half the width
+    #: under a different admission regime from the arms it is the control for (backlog G13).
+    replicas: int = 0
     #: Model D's replay variant. There is no default that makes sense: a replay with no
     #: records is not a degraded replay, it is a different campaign.
     records: list[dict[str, Any]] | None = None
@@ -150,7 +163,15 @@ def _plan_d(o: ReasonerOptions) -> ThresholdPlanner:
     Takes the campaign's chain for the same reason `_threshold` does: without it the planner
     falls back to whatever the Toolkit happens to hold, and on a real campaign that is the mock
     toolkit sitting beside the real one.
+
+    And it takes the campaign's replica width, for the reason `ReasonerOptions.replicas`
+    records: the model-driven arms propose the declared width themselves, so a planner that
+    keeps its own default is the one arm composing something else - and on array 23680876 that
+    was the control (backlog G13). 0 keeps `ThresholdPlanner`'s own default, which is what a
+    campaign declaring no `replicas` gets.
     """
+    if o.replicas:
+        return ThresholdPlanner(stages=o.stages, base_replicas=o.replicas)
     return ThresholdPlanner(stages=o.stages)
 
 
@@ -167,7 +188,8 @@ def _spec_a(o: ReasonerOptions) -> AgenticSpecifier:
 
 def _plan_a(o: ReasonerOptions) -> AgenticPlanner:
     """Model A's Planner half: node 2, as `select_tasks -> parameterize`."""
-    return AgenticPlanner(stages=o.stages, reasoner=o.reasoner, sink=o.sink)
+    return AgenticPlanner(stages=o.stages, reasoner=o.reasoner, sink=o.sink,
+                          base_replicas=o.replicas)
 
 
 def _spec_c(o: ReasonerOptions) -> ExternalSpecifier:
@@ -184,7 +206,8 @@ def _plan_c(o: ReasonerOptions) -> ExternalPlanner:
     """
     fallback = (o.fallback or _plan_d(o)) if o.on_timeout == "fallback" else None
     return ExternalPlanner(stages=o.stages, timeout_s=o.timeout_s,
-                           on_timeout=o.on_timeout, fallback=fallback, sink=o.sink)
+                           on_timeout=o.on_timeout, fallback=fallback, sink=o.sink,
+                           base_replicas=o.replicas)
 
 
 def _spec_replay(o: ReasonerOptions) -> ReplaySpecifier:
@@ -220,7 +243,8 @@ def _spec_b(o: ReasonerOptions) -> OracleSpecifier:
 def _plan_b(o: ReasonerOptions) -> OraclePlanner:
     """Model B's Planner half: one `STAGE_SCHEMA` call per planning round."""
     return OraclePlanner(stages=o.stages, oracle=_oracle(o),
-                         fallback=o.fallback or _plan_d(o), sink=o.sink)
+                         fallback=o.fallback or _plan_d(o), sink=o.sink,
+                         base_replicas=o.replicas)
 
 
 MODELS: dict[str, ReasonerModel] = {

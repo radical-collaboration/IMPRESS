@@ -1163,6 +1163,71 @@ async def test_the_listener_stops_the_campaign_when_every_objective_is_satisfied
     assert res.cycles >= 1
 
 
+async def test_a_campaign_asked_for_ten_designs_is_not_satisfied_by_one(reg, tmp_path):
+    """`target_front` is how many designs clear each bar, and it used to reach nothing.
+
+    The test above is the same campaign without a front target: its bounded objectives are met
+    by the first run and the Spec completes. That is right when one design is all the caller
+    asked for. It is wrong when the Goal says ten - and a campaign declaring `target_front: 10`
+    behaved identically, because `ThresholdSpecifier` left `SatisfactionRule.n` at 1 and the
+    declared value reached NOTHING: `target_front` was parsed into `CampaignSpec`, forwarded
+    into `ReasonerOptions`, and read by no code anywhere (backlog G11).
+
+    Arm C of the first four-arm smoke ran 24 tasks and stopped at cycle 0 on "every spec
+    objective satisfied", correctly, having produced one design where the experiment's endpoint
+    counts distinct designs per node-hour. Both Delta arm specs declare `target_front: 10`.
+
+    So: same objectives, same mock tools that clear both bars on the first run, one extra
+    declaration - and the campaign must keep going. It stops on `max_cycles` instead, which is
+    the point: a yield is something you measure over a budget, not something you stop at the
+    first instance of.
+    """
+    s = spec("t-front-ten", max_cycles=3, target_front=10,
+             trust_root=str(tmp_path / "trust"))
+    s.objectives = [Objective(name="iptm", direction=Direction.MAX, min=0.1),
+                    Objective(name="sc_rmsd", direction=Direction.MIN, max=99.0)]
+    s.root = str(tmp_path)
+    res = await CampaignManager(s, _pair(), reg).run()
+
+    assert res.stop_reason != "every spec objective satisfied", (
+        "ten designs were asked for and the Spec was satisfied by the first one - "
+        "target_front reached nothing")
+    assert res.stop_reason == "max_cycles=3 reached"
+    assert res.cycles == 3, "the campaign must spend its cycles, not stop at the first hit"
+
+    # The count lands on the BOUNDED objectives only. Ten readings of a number nobody has to
+    # beat say nothing more than one, which is the ruling the next test down makes.
+    goal = Goal(text="g", target_front=10, objectives=[
+        Objective(name="iptm", direction=Direction.MAX, min=0.1),
+        Objective(name="ddg", direction=Direction.MIN)])
+    rules = {o.targets[0]: o.satisfied_when
+             for o in (await ThresholdSpecifier().initial_spec(goal)).objectives.values()}
+    assert rules["iptm"].n == 10, "a bounded objective carries the Goal's count"
+    assert rules["ddg"].n == 1, "an unbounded one ranks; a count would be meaningless"
+
+
+async def test_the_front_target_reaches_a_remotely_driven_campaign_too(reg, tmp_path):
+    """An external caller builds its Goal from the observation and from nothing else.
+
+    So `target_front` has to cross with it. Dropped, a served campaign's Specifier would use
+    the default while an in-process one used the spec's - and in the four-arm experiment that
+    is arm C stopping at one design while A, B and D run to ten. A difference between arms
+    which is not the model is exactly what `impress-a compare`'s one-variable guard refuses,
+    and it would have been invisible: every arm would have completed, with plausible numbers.
+    """
+    s = spec("t-front-remote", max_cycles=1, target_front=10,
+             trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, _pair(), reg)
+    obs = mgr.executor.observe()
+    assert obs.target_front == 10, "the observation must carry what the caller cannot see"
+
+    from impress_a.runtime.roles import goal_from_spec
+
+    goal = goal_from_spec(s)
+    assert goal.target_front == 10, "and the in-process Goal must carry it as well"
+
+
 async def test_an_unbounded_objective_gets_a_measurement_rule_not_a_vacuous_one(reg, tmp_path):
     """`total_score: minimize` is an optimisation target, never a finish line.
 

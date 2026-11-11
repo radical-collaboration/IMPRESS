@@ -53,7 +53,8 @@ class ExternalPlanner(BasePlanner):
     name = "external-plan"
 
     def __init__(self, stages: list[str] | None = None, timeout_s: float = 5.0,
-                 on_timeout: str = "stop", fallback: Any = None, sink: Any = None) -> None:
+                 on_timeout: str = "stop", fallback: Any = None, sink: Any = None,
+                 base_replicas: int = 0) -> None:
         if on_timeout not in ON_TIMEOUT:
             raise ValueError(f"on_timeout must be one of {ON_TIMEOUT}")
         if on_timeout == "fallback" and fallback is None:
@@ -67,7 +68,13 @@ class ExternalPlanner(BasePlanner):
         self.fallback, self.sink = fallback, sink
         self.directives = 0
         self.rejections: list[ValidationFailure] = []
-        self._mechanics = ThresholdPlanner(stages=stages)
+        #: The campaign's declared lineage width, handed to the mechanics so an arm whose
+        #: model says nothing about breadth still composes what the campaign asked for. A
+        #: model that does name a width still wins, clamped by `CampaignSpec.replicas` in the
+        #: executor as before. 0 keeps the mechanics' own default (backlog G13).
+        self._mechanics = ThresholdPlanner(
+            stages=stages,
+            **({"base_replicas": base_replicas} if base_replicas else {}))
 
     @property
     def stages(self) -> list[str]:
@@ -149,7 +156,13 @@ class ExternalPlanner(BasePlanner):
         # campaign kept running while measuring less. See `ThresholdPlanner.plan`.
         stage = await self._mechanics.plan(
             spec, ctx, chain=list(directive["stages"]) if directive.get("stages") else None,
-            lineages=max(1, int(directive.get("replicas") or 1)))
+            # `None`, not 1, when the caller named no width: the mechanics then apply the
+            # campaign's declared `replicas`. `or 1` meant a directive silent about breadth
+            # composed ONE lineage against a campaign asking for four - a third route into
+            # backlog G13, and the one that would have hit arm C the moment its caller
+            # stopped naming a number.
+            lineages=(max(1, int(directive["replicas"]))
+                      if directive.get("replicas") else None))
         if stage is None:
             return None
 
