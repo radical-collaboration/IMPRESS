@@ -152,7 +152,7 @@ non-destructive backtracking.
   single most important coupling in the system: these tools fail silently, so a successful exit code is
   never sufficient evidence.
 - `replicas: N` means **N independent lineages**, one design node each.
-- A measurement **supersedes but never deletes** a prediction (`docs/decisions/0012`), so the front is
+- A measurement **supersedes but never deletes** a prediction ([decision 0012](../decisions/0012-one-property-two-sources.md)), so the front is
   **not monotonic** once assays arrive — a node promoted on an optimistic prediction can be demoted by
   its own measurement.
 

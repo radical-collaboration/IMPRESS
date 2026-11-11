@@ -20,7 +20,7 @@ below the layer it occupies.
 
 ## 1. The decision frontend — control models
 
-Exactly one is active per campaign, **fixed at launch** (`docs/decisions/0005`): a campaign has one
+Exactly one is active per campaign, **fixed at launch** ([decision 0005](../decisions/0005-control-model-fixed-at-launch.md)): a campaign has one
 stated methodology and its results are attributable to it.
 
 | Model | Mode | Specifier half | Planner half | Reproducible |
@@ -30,7 +30,7 @@ stated methodology and its results are attributable to it.
 | **C** external steering | **headless** | a `{"role": "specifier"}` inbox | a `{"role": "planner"}` inbox | caller-dependent |
 | **D** explicit policy | autonomous | Goal → Spec, deterministically | Tasks by output type | **fully** |
 
-Model **C is the headless mode** (`docs/decisions/0002`) — not an extra option bolted onto the side.
+Model **C is the headless mode** ([decision 0002](../decisions/0002-model-c-is-control-mode-2.md)) — not an extra option bolted onto the side.
 
 This section is the catalogue. For what each model is **shown**, what it may choose, how its reply
 is constrained, and which campaign fields reach a half, see
@@ -150,7 +150,7 @@ silent no-op that leaves an allocation idling while the campaign quietly stops a
 
 ## 2. The interface frontend — control-plane adapters
 
-One transport-agnostic protocol; adapters translate transport only (`docs/decisions/0007`).
+One transport-agnostic protocol; adapters translate transport only ([decision 0007](../decisions/0007-transport-agnostic-control-plane.md)).
 **No adapter may add an operation absent from the core**, or the semantics fork between consumers.
 
 | Operation | Purpose |
