@@ -188,6 +188,36 @@ their arguments are checked, their environments are not.
 (`overall_confidence` 0.525, `ligand_confidence` 0.496). `MPNN_SHIM` and the pinned `ml-collections`
 both hold on real hardware.
 
+**A6b. The batch-flags probe bypassed the shim and blamed LigandMPNN for it.** **RESOLVED**
+(2026-11-08), found by running the deep preflight on a login node before the smoke - which is
+the first time it had been run since the probe was added.
+
+`preflight` carried two probes of one binary. The imports probe ran `run.py --help` through
+`MPNN_SHIM`; the batch-flags probe, three lines below, ran `run.py` **directly** - which is the
+one thing A6 above establishes you cannot do, since the vendored openfold dies on `np.int`,
+removed in numpy 1.24. The traceback landed on stderr, so `helptext` was non-empty, neither
+flag appeared in it, and the probe reported `installed run.py does not offer --batch_size,
+--number_of_batches - the adapter passes them and would fail inside the job`. Both flags are
+declared at `run.py:846,852` and the adapter is right to pass them.
+
+So the deep preflight returned `12/14 ok` with two FAILs on a correct environment, one of them
+pointing at the wrong component, on a run whose §10 gate is **0 FAIL**. A reader following the
+message would have gone looking at LigandMPNN's version. The neighbouring row said `ligandmpnn
+imports [ok] run.py --help exited 0 in 15s` at the same moment - two probes of one binary
+disagreeing, with no way to tell from the output which to believe.
+
+One shim invocation serves both checks now, which also halves the deep probe's cost, and a
+non-zero exit is **undetermined** rather than a missing flag: a program that did not reach its
+argument parser has said nothing about its arguments. Re-run clean: **14/14 ok, exit 0**, with
+`--batch_size and --number_of_batches both offered`. Pinned by
+`tests/test_toolchain.py::test_the_batch_flag_probe_goes_through_the_shim_and_abstains_on_a_
+crash`, confirmed to fail against the old probe on the invocation itself.
+
+The general lesson is A4's, from inside the tool written to prevent it: *the probe must run
+what the job runs*. A second thing worth keeping - the other FAIL in that same output,
+`boltz not on PATH`, was an artefact of invoking `.venv/bin/impress-a` without activating the
+venv. Real on its face, caused by the harness. The launcher activates, so it never sees it.
+
 **A7. `boltz_predict` has never executed, and a budget correction is why — RESOLVED.** Not a tool failure. The
 `cost_model` figures were literature guesses 6-69x over measurement; the gpu side summed to 0.65
 against the untrusted-pattern cap of 0.60 (10% of a 6.0 budget), the chain was refused three times,
@@ -367,6 +397,172 @@ runs: `22684607/campaigns/_runs/_trust/cuda.jsonl` with 0 clean events and
   five trusted nodes so far missed an acceptance threshold, at a ~31% acceptance rate, so this
   wants more trusted draws, not code. `plans/next-run-sustained-trust.md`.
 
+**G2b / G5b / A11b. What `validate-tasks` found on real hardware (job 23670171).**
+**RESOLVED in code 2026-11-08, re-run pending.** The first per-Task validation this project
+has run. Three tools failed integrity rows; two passed clean (`ligandmpnn_design` 9/9,
+`packmin` 9/9). None of the three was visible to a dry run, and none was introduced by the
+deployment work - they were waiting.
+
+**G2b. `rfd3_design` declared two metrics it never reported** - `ca_deviation`,
+`ligand_clashes` - failing `metrics_declared_and_finite`. The spec said this would happen:
+"the key names are inferred rather than observed ... the gates land when one real out_dir
+confirms the names". This is that out_dir. Of four guesses, two were right
+(`helix_fraction`, `sheet_fraction`, both reported fine) and two wrong:
+
+    ca_deviation    -> metrics.max_ca_deviation            wrong NAME; it is a max, not a mean
+    ligand_clashes  -> metrics.n_clashing.ligand_clashes   right name, wrong DEPTH
+
+**The second of those was then misdiagnosed, and the re-run caught it.** The dot is part
+of the key: `metrics` is a FLAT dict holding the literal key `"n_clashing.ligand_clashes"`,
+and there is no `n_clashing` object. It was first read as two levels of nesting and "fixed"
+by making the flattener descend twice - which job 23670891 duly failed, still missing
+`ligand_clashes` while `ca_deviation` now came back fine.
+
+The cause of the misreading is worth keeping: the diagnostic was a recursive key-printer that
+joins nested keys with dots, so it renders `{"a": {"b": 1}}` and `{"a.b": 1}` identically. It
+could not answer the question it was being asked, and nothing about its output said so.
+Settled by printing `list(metrics)` instead. The speculative two-level descent was removed
+rather than left in as insurance - an unexercised branch written against a shape nobody has
+seen is the same guesswork that put the wrong names in this file to begin with - and the
+regression test is built from `list(metrics)` on the real file, so a nested fixture cannot
+make it pass again. `max_ca_deviation` being a maximum matters for anything that later gates
+on it.
+
+**G5b. `filter_shape` could not run at all.** PyRosetta rejected the RosettaScripts XML:
+`Element 'ResidueProperty': This element is not expected`. 0 of 1 rows, and the chain stopped
+there - `boltz_predict` was never reached, which is why it also shows 0/1. The adapter refused
+loudly rather than falling back to a jump or chain split, which is the behaviour the port was
+built to have and the reason this is a clean diagnosis rather than a plausible wrong number.
+
+Its own comment had named the gap exactly: "this XML is the one part of the port that no local
+test can exercise". The filter is now built through the **Python API** -
+`ResiduePropertySelector(LIGAND)`, `NotResidueSelector`, `selector1`/`selector2`/`quick` - the
+same pair of calls `interaction_energy` already makes, so the two ports agree by construction
+rather than by two spellings being kept in step, and no schema is in the path. Verified on job
+23670171's own relaxed pose: 1 ligand residue selected, **SC = 0.612**, which also clears T2's
+`shape_complementarity >= 0.55`. The `beta_nov16` scorefunction went with the XML: SC is
+geometric and takes no scorefunction, so it was decoration.
+
+**A11b. The rosetta toolkit's cpu cost models were a UNITS ERROR, not stale numbers.**
+`fastrelax` failed `cost_ratio[cpu_hours]` at measured/declared = 2.38 - a declared figure
+*below* measurement, the direction that makes gate 5 and the untrusted-pattern cap refuse work
+that fits. The cause: every comment computed `wall_seconds / 3600` and called it cpu_hours,
+while the executor measures wall x cores. So the believed headroom was `cores` times smaller
+than it read:
+
+    fastrelax   believed ~4x   actually 0.52x   -> measured 2.38, FAIL
+    packmin     believed ~5x   actually 1.14x   -> measured 0.81, passed by luck
+    filter_shape believed ~4x  actually ~2x     -> never executed
+
+`tests/test_real_toolkits.py::test_cost_models_are_within_an_order_of_magnitude_of_measurement`
+was a **third** instance of the same error - it parametrised wall seconds and divided by 3600 -
+so the specs and the test agreed with each other and with nothing that runs. Corrected to
+`wall x cores` for cpu dimensions; gpu dimensions stay wall-based, since the declared figure
+is device-time and `cores` is the CPU request.
+
+`fastrelax` 0.03 -> **0.25** (3.5x measured, matching the 3.2x wall-time swing A11 records).
+`packmin` 0.02 -> **0.06** (3.7x) although its row passed, because 1.14x of real headroom
+means the next slower task blocks the smoke again. `filter_shape` left at **0.01** and
+deliberately not adjusted: it has still never produced a cost measurement, so there is nothing
+to derive a figure from, and the re-run is what will say.
+
+**G9. The code that reports a QC failure could not survive one.** **RESOLVED**
+(2026-11-08). Found by the first four-arm smoke, job 23671024: all four arms died inside
+their allocation with
+
+    executor.py:1197  "failed_gates": [g.gate for g in task.qc.failed()],
+    AttributeError: 'dict' object has no attribute 'gate'
+
+`QCReport.failed()` returns provenance-shaped **dicts** - its own docstring says "in the form
+provenance records them", and the executor's other caller (`:506`) records them whole. This
+one reached for an attribute.
+
+**Why nothing caught it, which is the part worth keeping.** A list comprehension over an
+EMPTY list never dereferences, and `failed_gates: []` is what a passing task logs. So the line
+was exercised constantly and the bug was unreachable until a task actually failed a gate on
+hardware. Every campaign-tier test, every prior Delta run and - decisively -
+`impress-a validate-tasks` all produced the empty case. **The clean validation that authorised
+this smoke was structurally incapable of finding it**: a validation pass whose Tasks all pass
+their integrity rows has nothing to put in that list. One gate failure in a real campaign, and
+the executor takes the campaign down while reporting it.
+
+Cost: four arms x ~4 minutes, about 1.1 GPU-h, and the arms had already produced real work -
+arm A ran `rfd3_design` at **width 4 with four distinct lineages, seeds and metrics** (A10's
+independence invariant, executing for the first time) and a full `ligandmpnn_design` stage
+before it died.
+
+Pinned by `tests/test_core.py::test_the_failed_gate_list_is_logged_in_the_shape_failed_
+actually_returns`, asserted against `failed()`'s contract rather than through a campaign, so it
+holds whatever the executor does around it.
+
+**The coverage gap behind it, which is the more useful finding.**
+`test_lying_tool_is_caught_by_qc` is the only test in the suite that produces a QC FAIL, and
+it drives `Dispatcher` directly - so `_log_task_telemetry` never runs for it. Every test that
+DOES go through the executor uses tools that pass. So the expression was exercised on every
+task in the suite and never once on a non-empty list.
+
+Closed by
+`tests/test_campaign.py::test_a_failed_gate_reaches_tasks_provenance_through_the_executor`,
+which runs `mock_noodle` at the HEAD of a real chain - same `Backbone` output as
+`mock_generate`, no inputs - through a real `CampaignManager`, and asserts the gate NAMES land
+in `tasks` provenance. The chain matters: a noodle-only campaign plans nothing and reaps
+nothing, which is how the first draft of this test was written and would have passed against
+the bug. Asserting names rather than absence-of-crash matters for the same reason - a silent
+drop of the field would also not raise. Confirmed to reproduce the exact `AttributeError`.
+
+**The general lesson, and it is not the first time in this pass:** the failure path is the
+untested path, and a green validation run is evidence about the success path only. There are
+only two callers of `failed()` today and the other is correct.
+
+**G10. The liveness bound killed the three arms that had no control plane.** **RESOLVED**
+(2026-11-08). Second four-arm smoke, job 23671367: all four arms exited 0, no crashes - and
+A, B and D each terminated after ONE cycle with `control plane lost after 267s/182s/185s of
+silence` against `control_liveness_timeout_s: 120`. Arm C, the only arm with a caller, ran to
+its own stop.
+
+Two things were wrong. `touch()` records "any session operation", and an in-process campaign's
+"caller" is the role driver in the same process - silent exactly when it is busy awaiting the
+tasks it just asked for. And a cycle of this chain runs ~180s of tasks with no session
+traffic, so **any bound shorter than a cycle turns normal progress into a lost plane**, for a
+served campaign as much as an in-process one.
+
+The spec's own comment said the bound "matters for any arm driven from a control process",
+which is the opposite of what it did. `cli/__init__.py` records that `control_liveness_
+timeout_s: 120` did nothing in all three Delta specs until the loader began reading it - so
+its first real outing was the one that lost three arms.
+
+Armed now only when a control plane has REGISTERED the campaign, and suspended entirely while
+work is in flight. The flag is explicit (`under_external_control`, set by
+`ControlPlane.register`) rather than inferred from `prov_sink`, which the plane also happens
+to set: a bound that stops campaigns must not rest on a side effect of provenance mirroring.
+It needed a property on `CampaignManager` too - `__getattr__` delegates reads of a known set
+and nothing delegates writes, so a bare assignment would have landed on the manager while the
+executor kept its default, leaving the bound disarmed for arm C as well.
+
+**G11. The Goal asks for ten designs; the Spec is satisfied by one.** **OPEN - needs a
+decision.** Arm C ran 24 tasks and stopped on "every spec objective satisfied" at cycle 0.
+That was CORRECT behaviour, and the diagnosis is the interesting part.
+
+`ThresholdSpecifier` translates each declared objective into a `SatisfactionRule` and leaves
+`n` at its default of **1** (`policy/specifiers/explicit.py:72`). The campaign's
+`target_front: 10` never reaches it. So the Spec is satisfied the moment ONE node clears each
+threshold, while the Goal reads "Design at least ten distinct small-molecule binders meeting
+every declared threshold" and the endpoint counts distinct T2 designs per node-hour. Two
+stopping rules disagree and the laxer one wins - backlog X1's shape, inverted.
+
+**And a node did clear them.** Arm C's own tasks:
+
+    complex_plddt         0.904   bar 0.75   PASS
+    ligand_iptm           0.851   bar 0.40   PASS
+    shape_complementarity 0.731   bar 0.55   PASS
+    interaction_energy  -25.47    bar -8     PASS (T2)
+
+Prereg section 3 pre-registers `C_T3 = 0`, on the evidence that `complex_plddt` measured
+0.426 / 0.486 / 0.507 across every run this project had recorded - "0 of 3". **Those three
+runs came from the `/work/hdd` checkout** (C11), so that baseline describes different code.
+The pre-registered expectation should be read against this before the next smoke, and the
+tier arithmetic in sections 12-13 rests on the same numbers.
+
 ## B. Silent-failure defences — unmet for the real toolkits
 
 The project's central claim is that these tools fail *silently*. For the real toolkits that defence
@@ -415,6 +611,38 @@ reconciles what a previous process left open — but nothing *resumes* a campaig
 reasoner's problem: with C5 the reasoner is a separate process that can die and come back, and
 `RemoteSession.as_completed` holds a stream cursor it cannot currently persist.
 
+**C8. Refinement is reachable generically but not for rfd3, so partial diffusion is unreachable.**
+The generic half of phase 8 landed: a `Stage` carrying `parent_node` has its root task's input
+ports satisfied from that `DesignNode.artifacts`, matched by declared TYPE, and
+`test_campaign.py::test_a_refinement_stage_starts_from_its_parents_artifacts` proves it on
+`mock_design`. The rfd3 half did not. `toolkits/rfd3/tools/rfd3_design/spec.yaml` declares
+**no inputs at all** (only `outputs.backbone`) and no `partial_t`, so there is no port for a
+parent structure to arrive on and no way to ask RFD3 for partial diffusion. The reference's
+`num_refine_cycles: 2` / `rfd3_partial_t: 10.0` therefore has no equivalent here, and the
+measured consequence is already on the record: `complex_plddt` 0.426 / 0.486 / 0.507 against a
+0.75 bound, 0 of 3.
+
+  This is **not** blocking the four-arm experiment, and the specs are honest about it:
+  `delta-small-molecule-arms{,-smoke}.yaml` keep `rfd3_design.num_designs: 1` with the reason
+  recorded in the spec, the trust assertion covers widths 1 and 4 and **no refinement variant**,
+  and `plans/arms-preregistration.md` §14 pre-registers the Goal as probably unreachable. What
+  the item protects against is reading the prereg's "best-of-N plus refinement" sentence - which
+  describes the *reference* - as a mechanism these arms have.
+
+  **When this lands, `length` must be dropped from the guided spec.** RFD3's
+  `DesignInputSpecification` validator rejects `length` outright whenever `partial.input` /
+  `partial_t` are set (`ValidationError: ... Length argument must not be provided during partial
+  diffusion`) - length is inferred from the input structure in that mode. The committed
+  `campaigns/data/alr/ALR_binder_design.json` carries both `partial.input` and
+  `"length": "70-170"`, which is correct and safe **today** precisely because partial diffusion
+  is unreachable: that `length` is the from-scratch contig. The sibling example learned this by
+  losing a production run - job `21928556`, 3 of 3 pipelines that reached guided feedback crashed
+  on their first attempt - and fixed it in `_write_guided_rfd3_json()` with `partial.pop('length',
+  None)`. `_inputs_with_absolute_paths` in `tools/rfd3_agents.py` rewrites `input` paths and
+  nothing else, so it would carry `length` straight through.
+  `test_real_toolkits.py::test_rfd3_partial_diffusion_would_have_to_drop_length` is a guard that
+  abstains while `partial_t` is undeclared and fails the moment it is added without the drop.
+
 **C3. P5 network-service governor** — caching, per-service concurrency caps, `Retry-After` backoff.
 
 **C4. Cancellation cannot reclaim a running GPU.** Measured, not unknown: queued work is reclaimed,
@@ -462,6 +690,133 @@ then is. Blocked on C5.
 the node rather than a token nobody rotates. `--host` exists for a deliberate choice, and the
 plane still has no auth and no TLS - so anything other than loopback is a decision this item
 should be reopened for, not a flag to set casually.
+
+**C9. The Delta launcher could not run arm C, and gave every arm one trust ledger.** **RESOLVED**
+(2026-11-08), both found by reading `scripts/delta_gpu_run.sh` against
+`plans/arms-preregistration.md` §10 rather than by a run.
+
+*Arm C died at launch.* `IMPRESS_A_COMMAND` defaulted to `run` with no reference to the arm, and
+`impress-a run --model C` is refused outright (C6). So the §10 submission - `sbatch --array=0-3`,
+one job, four arms - would have had argparse kill index 2 while the other three queued normally,
+printing a message about the environment. The launcher now selects `serve` when the arm is C and
+starts an `impress-a control` sidecar beside it; an exported command still wins, which is how
+`delta_validate_tasks.sh` keeps working. The sidecar polls for the 0600 `control_plane.url`
+`serve` writes rather than being told a port (the port is ephemeral on purpose - see A9/C7), and
+takes the campaign id from that file's own parent directory, which cannot disagree with the
+server because `InProcessControlPlane.register` keys on the same `spec.campaign_id`. It drives
+with `--model B`, not `--model C`: the caller **is** the reasoner, and C on that side would build
+the inbox halves a second time and stop after one `--caller-timeout` with nobody steering the
+steerer. The refusal message at `cli/__init__.py:742` still prints `--model C` for the control
+line and is wrong about it; left alone here because amending the text would change nothing that
+runs, but it is the one place a reader is told the deadlocking thing.
+
+*Every arm shared one trust ledger.* The per-arm block interpolated `${MODEL}` a hundred lines
+**above** where `MODEL` is resolved from `SLURM_ARRAY_TASK_ID`. There is no `set -u`, so it
+expanded to nothing and all four arms resolved to `_trust_arms/<experiment>/` - exactly the
+shared ledger §10 calls mandatory to avoid, since four concurrent processes would each admit an
+instance of the same untrusted signature, breaking one-instance-in-flight across processes, and
+one arm's evidence would subsidise the other three. Silent in every way: the directory exists,
+`trust --assert` seeds it, and the arms differ only by which ran first. The arm block now sits
+above the ledger block, with the ordering constraint written where someone moving it will read
+it. **Nothing has run under the broken form**, so no recorded result is affected.
+
+Both pinned in `tests/test_toolchain.py` (`..._sends_arm_c_to_serve_...`,
+`..._forwards_a_model_profile_...`), each confirmed to fail with the fix reverted. **Unrun on
+hardware.**
+
+**C10. `delta_validate_tasks.sh` could not be submitted.** **RESOLVED** (2026-11-08), found
+by running the pre-registration's own step 1 - the first time that command line had been sent
+to sbatch.
+
+The wrapper sets `IMPRESS_A_COMMAND=validate-tasks` and `exec`s `delta_gpu_run.sh`, which is the
+right shape: everything that makes a Delta job work here was bought one burned allocation at a
+time, and two copies would be two things to keep in step. But **Slurm parses `#SBATCH` out of
+the file it is handed, at submit time**, and the `exec` happens at run time. So none of
+`delta_gpu_run.sh`'s ten directives applied to a job submitted through the wrapper, which
+declared none of its own. The documented command died at submit with
+
+    sbatch: error: Jobs requesting no GPU resources must be submitted under CPU type accounts
+
+- a message naming the ACCOUNT, for a missing GPU request, on the one step the entire trust
+assertion cites as its evidence. A reader would have gone to check their allocations.
+
+The resource shape now lives in the wrapper, mirroring the launcher's and for the same reason:
+4 GPUs already reserves and bills the whole node, so 64 cores and 240G are free at that price,
+and a validation pass on a narrower shape would not be validating the arms' hardware.
+`--output=impress_a_%j.out` is load-bearing - the EXIT trap looks for that exact name.
+`--time` and `--partition` stay on the command line, where the submission shows them.
+
+Pinned by `tests/test_toolchain.py::test_every_documented_sbatch_entry_point_requests_its_own_
+resources`, which reads every documented submission out of the docs and the scripts and checks that
+the named script declares its own resources. Confirmed to fail against the old wrapper. One
+detail worth keeping: the first version of that test passed against the broken script, because
+every documented submission wraps across three lines with `\` and the regex was line-bounded -
+the same shape of mistake as the bug it was written for.
+
+**C11. Every submitted job has run a different checkout than the one submitted.**
+**RESOLVED** (2026-11-08). The most serious thing this deployment pass found, and it was
+invisible by construction.
+
+Two causes, and the second hid the first. `${BASH_SOURCE[0]}` **is not the repo under
+sbatch**: Slurm copies the submitted script to the compute node as
+`/var/spool/slurmd/job<ID>/slurm_script`, so `delta_gpu_run.sh`'s computed fallback resolves
+to `/var/spool/slurmd`, which has no `.venv` and no `scripts/`. That never surfaced, because
+`sbatch` exports the submitting environment and `~/.bashrc` carried
+`export IMPRESS_A_DIR=/work/hdd/bdyk/hooten1/impress_a` - a DIFFERENT CHECKOUT - which the
+`${IMPRESS_A_DIR:-...}` default preferred. Job 22692304's own `slurm.out` records it:
+`dragon -s /work/hdd/bdyk/hooten1/impress_a/scripts/delta_run_campaign.py`, with that tree's
+campaign spec. The launcher, the runner, the spec and the package were all the other repo's.
+
+So **every result this project has recorded was produced by a tree nobody was reading**, and
+`git_sha` in those manifests is that repo's HEAD rather than this one's - detectable
+afterwards only by a reader who already suspects it. For the four-arm comparison, which is an
+argument about code, an arm that ran another tree is not a result that can be corrected later;
+it is a void arm that would not have been named void.
+
+Found when `delta_validate_tasks.sh` failed at 7s with exit 127 - the `exec` of its sibling
+looked in the spool directory (C10's cousin, same root). Had the wrapper worked, the job would
+have run the old tree silently.
+
+The launcher now prefers `$SLURM_SUBMIT_DIR`, requires the result to contain
+`scripts/delta_gpu_run.sh`, and **refuses outright** when an inherited `$IMPRESS_A_DIR`
+disagrees with the submission rather than picking a winner - a job that cannot say which
+checkout it runs must not run. It also refuses when it can locate no checkout at all, instead
+of proceeding with a path under `/var/spool`. The wrapper resolves its sibling the same way.
+`~/.bashrc` was repointed at this checkout as well (and `IMPRESS_A_VENV` with it), so the
+default is right and the guard is the backstop rather than the only defence.
+
+Pinned by `tests/test_toolchain.py::test_the_launcher_refuses_a_checkout_that_is_not_the_one_
+submitted`, which runs the resolution block itself in four environments.
+
+**Not retrospectively fixable:** results recorded before this commit were produced by the
+`/work/hdd` tree. Anything cited from them should say so.
+
+**C12. Arm C's serve/control pair had never been executed.** **RUN, 2026-11-08**, on a login
+node with mock tools - the first time the two processes have talked to each other anywhere.
+Nothing in the suite covers `control_campaign`, and no document carried a worked pairing.
+
+Two clean runs. With a model-D caller: `control` exited 0 and the served campaign stopped on
+"every spec objective satisfied" after 2 cycles - steered, not timed out, which is the
+distinction that matters, since an unsteered arm C stops on the planner's `on_timeout="stop"`
+and reports a plausible campaign either way. With the Beam-backed `--model B` caller the smoke
+will use: exit 0, 8 cycles, 15 nodes, stopping on the untrusted-pattern cost cap (an interlock
+refusal that will not bind in the smoke, where trust is asserted).
+
+Also confirmed: `serve` writes `control_plane.url` at 0600, the campaign id is recoverable from
+that file's parent directory, and it agrees with what `InProcessControlPlane.register` keys on.
+
+**One failure that did not reproduce, recorded rather than dropped.** An earlier attempt died
+with `httpx.ConnectError: All connection attempts failed` against a URL that matched what
+`serve` had printed, on a port later confirmed LISTEN, with no proxy variables set and `curl`
+and `httpx` both reaching that port at +0/2/5/10/20s in a separate probe. Not seen again in
+the runs since. `serve` writes the URL inside its own `async with`, so the window between the
+file appearing and the accept loop running is small but not provably zero.
+
+Undiagnosed, so the sidecar now **retries five times, two seconds apart**, before failing the
+arm. That is insurance and not a fix: an unattended arm must not be lost to one refused
+connection, and a transient nobody has explained is not a thing to spend an allocation
+discovering. If it recurs inside a job, the retry line in the log is the evidence to reopen
+this with.
 
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
@@ -540,6 +895,15 @@ fail on the network.
 
 **E1. `sites/*.yaml` is read by no code** — both files say so in their own comments. Its
 `tool_delivery: {real|mock}` switch is exactly what would have prevented the mock-chain-on-a-GPU bug.
+**The switch is DONE** (phase 10): it is `tool_delivery: real` on each Delta campaign spec, enforced
+by validation **gate 6**, which refuses any graph containing a tool whose declared toolkit is
+`mock`. Moved to the campaign spec because `cli.load_spec` already reads that file and a key in
+`sites/` nobody reads is how it stayed inert for so long; `sites/*.yaml` now spells it
+`copy_to_campaign_spec`, so it reads as a value to copy rather than as a control. A **gate** and not
+`RuleCorrectionsPolicy(forbid_tools=...)` because `--no-guard` must not be able to switch off "is
+this real", and it checks the declared toolkit rather than a `mock_` prefix because a prefix is a
+convention. A test asserts every `delta-*.yaml` declares it and that the value reaches the spec.
+**The rest of E1 stands:** nothing else in `sites/*.yaml` is read by any code.
 
 **E2. Cost models are unmeasured literature guesses**, and gate 5 plus the interlock's 10% cap refuse
 graphs against them. Already concrete: the smoke campaign's original budget rejected its own first
@@ -600,12 +964,23 @@ renamed `..._does_not_count_toward_stagnation` and asserts the opposite of what 
 its own docstring said would be the first thing to change. Raising the limit remains the wrong
 fix and was not what happened.
 
-**G2. rfd3 output parsing ignores the metrics rfd3 reports.** See B1 and A4. Switching
-`RFD3DesignAgent` to read the sidecar `*_model_*.json` would give a genuine structural gate
-(`ligand_clashes == 0`), replace our non-DSSP phi/psi estimate with rfd3's own `helix_fraction`/
-`sheet_fraction`, and let us select the *best* model rather than `cif_models[0]`. Deferred
-deliberately until a real run shows what an `out_dir` actually contains - it changes what the gates
-measure, and A1 is still open.
+**G2. rfd3 output parsing ignores the metrics rfd3 reports.** **HALF DONE** (phase 10). The
+adapter reads the sidecar `*_model_*.json` it was already selecting candidates by and had never
+opened, and reports `ca_deviation`, `ligand_clashes`, `helix_fraction` and `sheet_fraction` -
+declared in the spec so a reasoner can see them and the campaign records them.
+
+**Nothing gates on them, and that is the remaining half.** The key names are inferred rather
+than observed: no sidecar from a real `out_dir` has been read. An acceptance gate needs an
+integrity `metrics_reported` partner, so a partner naming a wrong key would fail every real run
+as an INTEGRITY failure - refusing the chain and demoting the pattern on a guess. Backlog A3 is
+the standing lesson about flags nobody has run. `rfd3_agents.SIDECAR_KEYS` holds the candidate
+names and the adapter **logs the sidecar's actual keys**, so one real run resolves it from the
+log; `impress-a validate-tasks` is the run that will. Selecting the best of several models is
+also still open, for the reason the spec records at `num_designs`.
+
+The other half of the original item is settled differently than proposed: the structural gate it
+wanted (`ligand_clashes == 0`) waits on the names above, and the phi/psi estimate stays as the
+integrity floor at 0.3 with upstream's own 0.5 as an acceptance gate beside it.
 
   **Half of it landed early, forced by A4:** *discovery* now reads the sidecar JSON, because a bare
   `*.cif.gz` glob was selecting trajectories. What G2 still asks for is the rest - reading
@@ -629,18 +1004,60 @@ each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a camp
   G2 changes *which* file the agent reads for its metrics, while this changes whether a file
   nothing reads is written at all, so flipping it early costs G2 nothing.
 
-**G4. The fastrelax gates are far looser than upstream's calibrated ones.** Ours:
-`total_score max: 0.0`, `fa_rep max: 500.0`, no `interaction_energy` at all. Upstream PROD:
-`total_score < -250.0`, `fa_rep < 100.0`, `interaction_energy < -8.0`. `interaction_energy` is the
-one that actually measures binding and our worker does not compute it (`rosetta_agents.py:88-91`).
-`toolkits/rosetta/SKILL.md` already admits these are uncalibrated.
+**G4. The fastrelax gates are far looser than upstream's calibrated ones.** **DONE** (phase 10).
+Every number verified against `run_small_molecule_binding.py`'s own `PROD` instance rather than
+against the plan's copy of it: `fastrelax_max_fa_rep=100.0`, `fastrelax_max_score=-250.0` (data
+range -193 to -510), `fastrelax_max_interact=-8.0` (p75 -8.8), `interface_min_sc=0.55`,
+`backbone_min_ss_fraction=0.5`, `fold_min_plddt=75.0`. They land as **acceptance** gates beside
+the existing wide divergence bounds, which stay integrity - two gates on one metric with
+different roles is what decision 0013 is for, and `+1500` meaning "the tool broke" must not be
+the same sentence as `-12` meaning "the design fell short". `complex_plddt` rises 0.5 -> 0.75
+(PROD's 75.0 is a 0-100 figure; this metric is the 0-1 one), and `ligand_iptm >= 0.4` is kept and
+is **stricter than PROD**, which leaves that gate off - every T3 figure has to say so.
 
-**G5. `filter_shape` may be measuring the wrong interface.** Ours hardcodes
-`<ShapeComplementarity name="sc" jump="1"/>` with the default scorefunction
-(`rosetta_agents.py:104`); upstream uses explicit chain selectors (`residue_selector1="chainA"`,
-`residue_selector2="chainB"`) under `beta_nov16`. `jump="1"` assumes a particular chain/jump
-arrangement in the relaxed pose - if the ligand is not across jump 1 the gate is meaningless
-rather than obviously wrong.
+`interaction_energy` is computed now, ported from upstream's own `scripts/fastrelax.py`:
+`InteractionEnergyMetric` over `ResiduePropertySelector(LIGAND)` against its complement.
+Selector-based rather than `jump="1"` or `chains="A"/"B"`, because which chain a ligand is in is
+a property of the input and a chain split would silently measure the energy between two halves
+of the protein instead. An empty ligand selection omits the metric rather than computing a
+confident zero.
+
+**What closing it cost, which is the finding.** A replay of job 22702568 - five runs recorded
+`6/6 tasks ok` - now **fails integrity on every one**, because none of them computed
+`interaction_energy`: those runs were never evidence that the chain worked, since the chain was
+not measuring what the campaign was for. And with the fold bar at upstream's own 0.75, **not one
+of the five contains a design the reference would have accepted** (two passed at 0.5). Both are
+pinned as tests. Also fixed while there: `scores.get("fa_rep", 0.0)` fabricated a zero for a term
+Rosetta had not computed, and 0.0 is a *passing* fa_rep, so a broken score function read as a
+perfectly packed structure.
+
+**rfd3's two new metrics are declared and ungated, deliberately.** `ca_deviation` and
+`ligand_clashes` are read from the sidecar `*_model_*.json` the adapter was already selecting
+candidates by and had never opened (G2's remaining half), but the key names are **inferred rather
+than observed** - no sidecar from a real out_dir has been read. An acceptance gate needs an
+integrity `metrics_reported` partner, so a partner naming a wrong key would fail every real run as
+an integrity failure: a wrong guess would not merely be useless, it would refuse the chain and
+demote the pattern. Backlog A3 is the standing lesson about flags nobody has run. The adapter logs
+the sidecar's actual keys, so one real run resolves it; the gates land then.
+
+**G5. `filter_shape` may be measuring the wrong interface.** **DONE** (phase 10), and not by
+copying upstream. Upstream splits by chain (`Chain chains="A"` against `chains="B"`), which is
+right only when the ligand is its own chain - a property of the input, not of the tool. The pair
+is now the ligand **residue property** against its complement, the same pair the
+`interaction_energy` port uses, so it is correct whatever the chain layout is. `quick="0"` is
+explicit because the default is Rosetta's and quick mode is a faster, less accurate SC;
+`beta_nov16` is declared to match upstream's protocol, with the honest note that
+ShapeComplementarity is geometric and takes no scorefunction, so it does not change the number.
+
+A failure to build the selector filter **refuses** rather than falling back: a fallback would
+keep producing numbers while measuring a different interface, and nothing downstream could tell.
+An empty ligand selection refuses too, naming the commonest cause (a missing `-extra_res_fa`,
+which drops the ligand entirely).
+
+**`sc_selector_mode` is reported as a metric** - 0.0 the old jump filter, 1.0 the selector pair -
+so one real run settles this from provenance, and a number recorded before phase 10 cannot be
+compared with one recorded after without noticing. Every number this project has recorded is
+mode 0.0.
 
 **G6. A worker exception that cannot be unpickled hangs the run.** Measured on job 22536706:
 ligandmpnn failed and `run_cmd` raised `SubprocessError`. Dragon pickles a worker's exception into
@@ -692,7 +1109,15 @@ coarse as 2.2x. It is variance reduction and not exact pairing: rfd3 is not repr
 coordinates (median Ca RMSD 2.4 A), and the pairing holds only for runs composing the same
 shape with the same parameters.
 
-**G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.**
+**G8. Hardware use is unmeasured, and the ledger's `cost` is not a measurement.** **The
+measurement half is DONE** (phase 5), and phase 10 added the thing that reads it:
+`impress-a compare` reports `sum(cost_measured) / sum(cost_estimated)` per tool and dimension,
+which is the figure this item asks for, and `impress-a validate-tasks` fails a Task whose ratio
+exceeds 1.0 - above that a declared figure sits below measurement and gate 5 starts refusing
+work that would in fact fit. The GPU-sampling half still needs an allocation: the launcher
+writes `gpusample.csv`, and nothing has yet produced one to read.
+
+The original finding, for the record:
 - **The `cost` field:** each run's ledger `cost` repeats its admission estimate (0.17 in every
   trust run). Measured task time exists only as asyncflow state lines in `campaign.log`, which
   is what `performance_analysis/timeline.py` parses.
@@ -776,9 +1201,38 @@ invented a strategy and degrade on the spot without ever telling it what the str
 Exhausting the attempts falls back to the rule cascade and writes a `reasoner_degraded`
 transition, named the same way model B's `oracle_degraded` is, so one query over `transitions`
 finds every degraded decision in a campaign whatever model made it - which is what the four-arm
-experiment's void rule needs. **Still open:** nothing constructs a client, so `--model A` runs
-the cascades and `llm_calls` is honestly 0; that lands with H2's live client, which is the whole
-reason H1 was sequenced after it. A is no longer behaviourally D, though: it retires an
+experiment's void rule needs.
+
+**RESOLVED** (2026-11-08). `cli._options_for` built the profile's client into `oracle` and left
+`reasoner` at `None`, so `--model-profile` reached model B alone and `--model A --model-profile
+X` ran the rule cascade while reporting nothing wrong - the quiet form of the failure the flag
+exists to prevent, arriving by the other door. One client now fills both slots, which is sound
+because `OpenAICompatOracle` implements `policy/reasoning.NodeReasoner` and no letter uses both
+shapes; a second build would only be a second connection to one endpoint. Same change in
+`_role_pair`, so `impress-a control --model A --model-profile X` is live too. `llm_calls: 0` in
+`impress-a models` now means "with no profile named", which is what it always meant for B.
+Pinned by `tests/test_reasoner_registry.py::test_a_model_profile_reaches_model_as_four_nodes_
+and_not_only_model_bs_oracle`, confirmed to fail with the `reasoner=` assignment removed.
+**PROBED on a login node, 2026-11-08**, against Reflection Beam (`Beam-501B-A23B`) on
+`campaigns/mock-stabilize.yaml` and on a copy with thresholds raised so the campaign could not
+stop early: exit 0 both times, a live model id on every call, **zero `reasoner_degraded`
+transitions** and zero corrective retries. The seam carries a client. Unrun on *hardware*; that
+is the smoke.
+
+**And the probe corrected the record.** Only **two** of model A's four nodes ever call the
+model: `hypothesize` and `select_tasks`. `_analyze` (`policy/specifiers/agentic.py:139`) and
+`_parameterize` (`policy/planners/agentic.py:161`) make no `reasoning.ask` call at all - they
+act on the strategy the node before them chose. The registry note claimed "each node is a
+bounded schema-checked call", which has never been true, and it was believed well enough to be
+written into the pre-registration's amendment as "A makes ~4 calls per cycle to B's ~2". The
+measurement is **2 per cycle for both**: 3 `hypothesize` + 3 `select_tasks` over 3 cycles for A,
+8 spec + 8 stage over 8 cycles for B. Corrected in the note and in prereg §14. Not a code defect
+- the two-call shape is a reasonable design - but an A-vs-B contrast at *equal* call cost is a
+different claim from one at double, and the figure was wrong in the direction that flatters the
+experiment. **What is still unexercised:** both halves' corrective-retry path, since nothing was
+rejected; a rejection has still never been seen against a live endpoint.
+
+A is no longer behaviourally D, though: it retires an
 objective the Toolkit cannot measure (D names it and leaves it open) and it moves the diversity
 knobs (D never does), both asserted in `tests/test_planner.py`.
 
@@ -956,6 +1410,23 @@ paid for out of the first allocation.
    **C7 remains**: the plane has no auth and no TLS, settled for the loopback configuration in
    ADR 0014 and open for any other - and `--model C` raises the stakes, because a directive is
    now the campaign's parameter vector rather than a suggestion.
+
+   What the loopback configuration actually rests on, since `impress-a serve --model C` makes it
+   load-bearing: **loopback** (`--host` defaults to `127.0.0.1`, and the launcher does not
+   override it), **an ephemeral port** (`--port` defaults to 0; the Delta launcher pinned 8711
+   for one commit, which was a regression against that default - a fixed port is guessable and
+   collides with a second `serve` on the same node), and **the URL in a 0600 file** that a
+   sidecar reads instead of being told a number. All three are asserted in
+   `tests/test_split_process.py`.
+
+   **A token would add nothing to this, and that is worth recording so it is not proposed
+   again.** The one threat loopback does not exclude is another process of the *same user* on
+   the same node, and that process can read a token file as easily as the sidecar can. What
+   rules it out is the node being the job's - 4 of 4 GPUs, 64 of 64 cores and 240G of ~249G
+   leaves nothing schedulable beside it - which is an inference from the resource request rather
+   than a guarantee. `--exclusive` is the flag that would make it one, and a Unix domain socket
+   with 0700 is the stronger fix if the plane ever needs to run where the node is shared; both
+   are what closing C7 properly would involve.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
@@ -979,7 +1450,56 @@ paid for out of the first allocation.
     own 3) rather than an inferred one, because how many designs a campaign wants is a property of
     the Goal and `core.pareto.Objective` says nothing about it.
 
+## The legacy decision path is gone (phase 11)
+
+`decide(obs) -> Decision` and everything that implemented it were deleted: `policy/driver.py`,
+`policy/legacy.py`, `policy/base.py`, the four policy classes, `NullPolicy`, the policy-level
+wrappers, `CampaignSpec.control`, `CampaignObservation.available_tools`, and the `Decision` union
+(`ComposeAndRun`, `Backtrack`, `Stop`). A reasoner is now a Specifier/Planner pair or a `conduct`
+implementation, and `manager._reasoner` raises `TypeError` for anything else -
+`tests/test_layering.py::test_no_module_defines_decide` is the mechanical proof.
+
+**Three rulings the deleted modules carried survive, and here is where each landed.** Bounded
+retry per experiment is `Planner.replan`, bounded by `runtime/roles.py::_deploy` and
+independently by the executor. The concurrency hold is the Deployer's in-flight cap. And
+`_collect`'s rule that the reasoner owns `interpret` is the Listener owning ingestion - which is
+the structural version of it rather than a hook, so the executor never reaches into a reasoner
+at all.
+
+**Two names survive with reasons.** `RequestHuman` is the payload of
+`CampaignSession.request_human`, a live operation. `ExperimentIntent` is the composer's input: a
+chain and a width, which is what `impress-a trust --assert` needs to compute a signature at a
+declared replica width and what `impress-a validate-tasks` needs to run a chain once. ADR 0010 is
+amended accordingly rather than the type deleted.
+
+**Two tests were deleted because their purpose finished**, not because they became inconvenient.
+`test_roles_pipeline_reproduces_the_legacy_campaign` was the strangler's seam - it ran the same
+policy down both control paths over five policy shapes, and it is what made every phase's failure
+attributable to that phase. There is one path now. `test_a_stage_round_trips_through_an_intent`
+pinned the two adapters that let phase 1 avoid touching `compose/` and `exec/`; both are gone.
+What they protected lives in `test_split_process.py` (one process against a socket) and
+`test_remote_session.py` (inside the process against outside it).
+
+**One defect surfaced by the deletion.** Removing the tail truncation showed that it had been
+defeating the interlock's one-instance-in-flight rule: truncation changes the graph's SHAPE, so a
+refused instance was re-admitted as a different pattern. Two concurrency tests were passing
+because of it, and both stopped admitting anything the moment it went.
+
 ## Verification that applies to any item
+
+**`impress-a validate-tasks <spec>` on an allocation, before trusting a toolkit.** It executes
+each Task of the chain once, in dependency order, through the ordinary composer and dispatcher,
+and checks: it ran; it is not from the `mock` toolkit; the `[phase]` breakdown is there, so
+import time is separable from work; every declared output port produced, with its declared
+`ArtifactType`, on disk, above a size floor; every declared metric reported and **finite**;
+integrity gates passed, with acceptance reported separately; measured wall time within the
+declared `walltime_s`; and `cost_measured / cost_estimated <= 1.0` per dimension.
+
+It is the only check shaped like all four defects that reached real hardware - what a tool
+writes, whether it can import, where the bytes live, and an estimate that refuses work - none
+of which a dry run can find, because "checked against the binary" is not "executed". Exits
+non-zero on any integrity row, which is the gate `impress-a trust --assert` cites as its reason.
+
 
 `pytest tests -q` green, no allocation. `ruff check src tests` **must report nothing** — the one
 number worth stating, and it is zero rather than a budget, so any finding is a regression. It was

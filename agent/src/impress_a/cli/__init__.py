@@ -25,7 +25,7 @@ from ..core.pareto import Objective
 from ..core.session import CampaignStopped
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
-from ..policy.wrappers import RuleCorrectionsPolicy, StageGuard
+from ..policy.wrappers import StageGuard
 from ..runtime.roles import RolesDriver
 from ..tools.registry import Registry
 
@@ -37,14 +37,17 @@ log = logging.getLogger(__name__)
 # Derived, not restated. The taxonomy lives in `policy/registry.py` so that it is not a
 # CLI detail; this name is kept because `slides/api/run_model.py` reads it to generate the
 # deck's model count, and a deck that disagrees with the code is the drift this avoids.
-POLICIES = reasoners.CLASSES
+#
+# `LETTERS` rather than the old `CLASSES`: a model is no longer a `ControlPolicy` class, so
+# there is no class to name. It is two builders, and the letter is what selects them.
+POLICIES = reasoners.LETTERS
 
 #: The subcommands `main` registers. Declared once because `slides/api/run_model.py` reads
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
 SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
-               "trust")
+               "trust", "validate-tasks", "compare")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -93,11 +96,11 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # `sites/*.yaml`'s `tool_delivery` switch has been doing since it was written (E1),
         # and what `control_liveness_timeout_s: 120` did in all three Delta specs until this
         # line existed.
-        control=d.get("control", "legacy"),
         runner=d.get("runner", "dispatcher"),
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
         target_front=int(d.get("target_front", 0)),
+        tool_delivery=d.get("tool_delivery", "any"),
         stages=d.get("stages", []) or [],
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
@@ -119,89 +122,91 @@ def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
             "Boltz will silently model no ligand. Set it to the real target's SMILES.")
 
 
-def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
-                 records: list[dict[str, Any]] | None = None,
-                 profile: str | None = None):
-    """Adapt a `CampaignSpec` into the registry's options, and construct the reasoner.
-
-    This function is the adapter and nothing more. `policy/registry.py` owns which models
-    exist and how each is built; it cannot do this part itself, because `CampaignSpec`
-    lives in `runtime/` and `policy` may import `core` only (ADR 0010, asserted by
-    `tests/test_layering.py`). Putting the spec on the other side of that line is what
-    would make control models stop being swappable.
-
-    `stages` has to reach the policy or every model falls back to its built-in default,
-    which is the mock chain - so a real campaign would validate the real toolkits and
-    then execute mocks.
-    """
-    # `max_cycles` IS forwarded now, and the earlier reasoning for withholding it was half
-    # right. Withholding avoided bounding the same thing from two places, which is how an
-    # off-by-one became invisible (the driver counted a Backtrack as a cycle for three Delta
-    # jobs). But it left every model carrying `ReasonerOptions.max_cycles`'s default of 6,
-    # which does not merely duplicate the campaign's bound - it is TIGHTER than it. A 4-hour
-    # arm with `max_cycles: 200` would have made six decisions in about twenty minutes and then
-    # stopped itself, spending roughly 8% of the allocation. That is the worse of the two
-    # failures, and it is silent.
-    #
-    # Forwarding the spec's own value makes the policy's self-stop no tighter than the
-    # campaign's, so the driver remains the authority and a policy can still stop early for its
-    # own reasons. `target_front` comes from the spec for the same reason: 3 is a sensible
-    # default for a demo and an arbitrary cap on a campaign asked for ten designs, and a
-    # campaign that declares neither keeps the model's own number.
-    pol = reasoners.build(model, reasoners.ReasonerOptions(
-        stages=list(spec.stages) or None,
-        oracle=_oracle_for(profile, spec),
-        max_cycles=spec.max_cycles,
-        target_front=spec.target_front or reasoners.ReasonerOptions().target_front,
-        records=records,
-    ))
-    if guard:
-        pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
-    return pol
-
-
 def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 records: list[dict[str, Any]] | None = None,
                 specifier: str | None = None, planner: str | None = None,
                 spec_records: list[dict[str, Any]] | None = None,
                 stage_records: list[dict[str, Any]] | None = None,
                 profile: str | None = None, caller_timeout_s: float | None = None):
-    """The same adapter, for the two halves.
+    """Adapt a `CampaignSpec` into the registry's options, and build the two halves.
 
-    Two guard shapes, because there are two kinds of half. A pair derived from a
-    `ControlPolicy` is guarded by wrapping that policy once - it is the thing making the
-    decisions, so wrapping it is wrapping both halves. A model with real halves is guarded by
-    `StageGuard` on the planner, which is narrower than its predecessor on purpose: the
-    replica cap now binds in the executor and a task serving no objective is refused by the
-    Reviewer, so what is left to wrap is `forbid_tools` until phase 10's gate 6 takes it over.
+    This function is the adapter and nothing more. `policy/registry.py` owns which models
+    exist and how each half is built; it cannot do this part itself, because `CampaignSpec`
+    lives in `runtime/` and `policy` may import `core` only (ADR 0010, asserted by
+    `tests/test_layering.py`). Putting the spec on the other side of that line is what would
+    make control models stop being swappable.
 
-    `--no-guard` therefore stops being able to switch off either of the two checks that
-    matter, which it never should have been able to do.
+    `stages` has to reach the halves or a model falls back to its built-in default, which is
+    the mock chain - so a real campaign would validate the real toolkits and then execute
+    mocks.
+
+    The guard is `StageGuard` on the planner, and it is narrower than the policy-level
+    wrapper it replaces: the replica cap now binds in the executor and a task serving no
+    objective is refused by the Reviewer, so what is left to wrap is `forbid_tools` until
+    gate 6 takes that over too. `--no-guard` therefore cannot switch off either of the two
+    checks that matter, which it never should have been able to.
     """
-    opts = reasoners.ReasonerOptions(
+    # `max_cycles` and `target_front` are forwarded, and the reasoning for once withholding
+    # them was half right (backlog X1). Withholding avoided bounding the same thing from two
+    # places, which is how an off-by-one went invisible for three Delta jobs. But it left every
+    # model carrying `ReasonerOptions.max_cycles`'s default of 6, which does not merely
+    # duplicate the campaign's bound - it is TIGHTER than it: a four-hour arm declaring
+    # `max_cycles: 200` would have decided six times in about twenty minutes, stopped itself,
+    # and reported a clean campaign on 8% of its allocation. That is the worse of the two
+    # failures, and the silent one. `target_front` is the same shape with nothing else behind
+    # it at all, and 0 keeps the model's own number.
+    opts = _options_for(spec, records, spec_records, stage_records, profile,
+                        caller_timeout_s)
+    pair = reasoners.build_roles(specifier or model, planner or model, opts)
+    if guard:
+        pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    return pair
+
+
+def _options_for(spec: CampaignSpec,
+                 records: list[dict[str, Any]] | None = None,
+                 spec_records: list[dict[str, Any]] | None = None,
+                 stage_records: list[dict[str, Any]] | None = None,
+                 profile: str | None = None,
+                 caller_timeout_s: float | None = None) -> reasoners.ReasonerOptions:
+    """A `CampaignSpec` as the registry's plain-data options. The whole adapter, named.
+
+    Named so a test can assert what reaches the halves without building them, which is what
+    backlog X1 is about: the bound a model carries must not be tighter than the campaign's.
+
+    **One client, two slots, and that is deliberate** (backlog H1's last half). `_client_for`
+    is built once and reaches `oracle` - model B's single-call seam - and `reasoner` - model
+    A's four per-node calls - because `OpenAICompatOracle` implements `NodeReasoner` and the
+    same bounded corrective retry in `policy/reasoning.ask` serves both. No campaign uses both
+    slots: a letter picks one shape or the other, so a second client would only be a second
+    connection to the same endpoint. Before this, `reasoner` was left `None` and
+    `--model-profile` reached model B alone, so `--model A --model-profile X` ran the rule
+    cascade and reported no error - the quiet form of the failure the profile was named to
+    prevent.
+    """
+    client = _client_for(profile, spec)
+    return reasoners.ReasonerOptions(
         stages=list(spec.stages) or None, records=records,
         spec_records=spec_records, stage_records=stage_records,
-        oracle=_oracle_for(profile, spec),
+        oracle=client, reasoner=client,
         timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
         max_cycles=spec.max_cycles,
         target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
-    if specifier or planner or _declares_halves(specifier or model, planner or model):
-        pair = reasoners.build_roles(specifier or model, planner or model, opts)
-        if guard:
-            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
-        return pair
-    pol = build_policy(model, spec, guard, records)
-    return reasoners.RolePair(*_halves_of(pol), label=model)
 
 
-def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
-    """The model model B talks to, from `--model-profile`.
+def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
+    """The model a live arm talks to, from `--model-profile`.
+
+    Named for the client rather than for model B's slot because it now fills model A's too:
+    `OpenAICompatOracle` implements `policy/reasoning.NodeReasoner`, which is the protocol
+    model A's four nodes call, so one object serves both shapes and `_options_for` puts it in
+    both slots.
 
     `None` leaves the registry to build `RehearsalOracle` with the campaign's chain, which is
     what `--model B` runs with no profile named - and `impress-a models` reports `llm_calls: 0`
-    for exactly that reason. Loaded here rather than in `policy/` because `policy` may import
-    `core` only and reading a YAML file is not `core`'s business either; the same reason
-    `_replay_records` lives here.
+    for exactly that reason. Model A with no profile falls to its rule cascade the same way.
+    Loaded here rather than in `policy/` because `policy` may import `core` only and reading a
+    YAML file is not `core`'s business either; the same reason `_replay_records` lives here.
     """
     if not profile:
         return None
@@ -406,7 +411,6 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
         return 1
     for var, val in _thread_caps(spec).items():
         os.environ.setdefault(var, val)
-    spec.control = "roles"
     reg = Registry().load()
     reasoner: Any = _Idle()
     if model:
@@ -421,11 +425,24 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
         heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
 
     async with ControlPlaneServer(plane, host=host, port=port) as server:
-        # Printed, not only logged: a control process needs the URL, and on Delta the two are
-        # started by the same script from the same job.
+        # Printed AND written to a file, because the port is ephemeral by default and that is
+        # the hardening rather than an inconvenience: a fixed port is guessable, collides with
+        # a second `serve` on the same node, and is the one piece of this arrangement an
+        # unrelated process could find without looking. A sidecar reads the URL; it is not
+        # told a number.
+        #
+        # 0600, and the directory is the job's own run root. The plane has no auth and no TLS
+        # (backlog C7), so loopback plus a URL only the owner can read is the whole boundary -
+        # and a token would add nothing against the one threat that remains, another process
+        # of the same user, since that process could read the token too.
+        url_file = Path(spec.root) / spec.campaign_id / "control_plane.url"
+        url_file.parent.mkdir(parents=True, exist_ok=True)
+        url_file.write_text(f"{server.base_url}\n")
+        url_file.chmod(0o600)
         print(f"campaign {cid} serving on {server.base_url}", flush=True)
-        log.info("serving campaign %s on %s (liveness timeout %.0fs)", cid,
-                 server.base_url, spec.control_liveness_timeout_s)
+        print(f"url written to {url_file}", flush=True)
+        log.info("serving campaign %s on %s (liveness timeout %.0fs, url in %s)", cid,
+                 server.base_url, spec.control_liveness_timeout_s, url_file)
         res = await mgr.run()
     print(f"\n  campaign : {res.campaign_id}\n  cycles   : {res.cycles}"
           f"\n  stop     : {res.stop_reason}\n  nodes    : {len(res.tree)}"
@@ -473,19 +490,92 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     `mock_design` precedes `mock_generate` and the sequence step would be planned before the
     backbone it consumes.
     """
+    client = _client_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
+                                               stages=list(stages)))
+    # Both slots, for the reason `_options_for` gives: a remote driver may be `--model A` as
+    # easily as `--model B`, and filling only one would make `--model-profile` silently
+    # inert for half the letters it is offered for.
     opts = reasoners.ReasonerOptions(
-        stages=stages or None,
-        oracle=_oracle_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
-                                                 stages=list(stages))))
-    if specifier or planner or _declares_halves(specifier or model, planner or model):
-        pair = reasoners.build_roles(specifier or model, planner or model, opts)
-        if guard:
-            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
-        return pair
-    pol = reasoners.build(model, opts)
+        stages=stages or None, oracle=client, reasoner=client)
+    pair = reasoners.build_roles(specifier or model, planner or model, opts)
     if guard:
-        pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
-    return reasoners.RolePair(*_halves_of(pol), label=model)
+        pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+    return pair
+
+
+def compare_command(dirs: list[str], control: str = "D", theta: float | None = None,
+                    t_cut_h: float | None = None, chain: str | None = None,
+                    json_out: str | None = None) -> int:
+    """`impress-a compare <dir>...`: the four-arm comparison, scored and reported.
+
+    Exits non-zero when the comparison must not be published - an arm that ran a mock tool,
+    an arm that degraded to a fallback, or arms that disagree on the spec, the seed salt or
+    the git sha. Those are not caveats for the discussion: each one means the figures measure
+    two things at once, and the exit code is what stops a script publishing them anyway.
+    """
+    import dataclasses
+
+    from ..analysis.compare_arms import T_CUT_H, compare, load_arm, mde
+
+    arms = [load_arm(d) for d in dirs]
+    tools = tuple(t.strip() for t in chain.split(",")) if chain else ()
+    result = compare(arms, tools, control, theta, t_cut_h or T_CUT_H)
+
+    print(result.report())
+    counts = [f.distinct_t2 for f in result.figures]
+    if (smallest := mde(counts)) is not None:
+        print(f"\n  smallest detectable rate ratio at these counts: {smallest:.2f}x. "
+              f"The honest claim is the interval, not the p-value; one allocation per arm "
+              f"gives no degrees of freedom for overdispersion.")
+    if json_out:
+        Path(json_out).write_text(
+            json.dumps({"figures": [dataclasses.asdict(f) for f in result.figures],
+                        "contrasts": [dataclasses.asdict(c) for c in result.contrasts],
+                        "blocked": result.blocked}, indent=2, default=str) + "\n")
+        print(f"  figures: {json_out}")
+    if not result.publishable:
+        print("\n  NOT PUBLISHABLE - see the reasons above")
+    return 0 if result.publishable else 1
+
+
+async def validate_tasks_command(spec_path: str, out: str | None = None) -> int:
+    """`impress-a validate-tasks <spec>`: run each Task once and report every check.
+
+    Exits non-zero if any Task fails an **integrity** row, because that is the exit code the
+    experiment's step 1 gates on: `impress-a trust --assert` cites this run as its reason, and
+    asserting trust on the strength of a run nobody checked would be asserting trust on
+    untested Tasks.
+
+    An acceptance row that fails does NOT fail the run. A weak design is not a broken Task
+    (decision 0013), and a validation pass that demanded good designs would refuse a working
+    chain on its first mediocre draw.
+    """
+    from ..analysis.validate_tasks import validate_tasks
+
+    spec = load_spec(spec_path)
+    if err := _check_ligand_smiles(spec):
+        log.error("%s", err)
+        return 1
+    for var, val in _thread_caps(spec).items():
+        os.environ.setdefault(var, val)
+
+    out_dir = Path(out) if out else Path(spec.root) / spec.campaign_id / "validation"
+    log.info("validating %d task(s) of %s; writing to %s",
+             len(spec.stages), spec.campaign_id, out_dir)
+    report = await validate_tasks(spec, Registry().load(), out_dir)
+
+    print(report.table())
+    failed = [t.tool for t in report.tasks if not t.ok]
+    weak = [t.tool for t in report.tasks if t.ok and any(not r.ok for r in t.rows)]
+    print(f"\n  {len(report.tasks) - len(failed)}/{len(report.tasks)} task(s) clean on "
+          f"every integrity row")
+    if weak:
+        print(f"  acceptance rows fell short on: {', '.join(weak)} - a weak design is not a "
+              f"broken Task, so this does not fail the run")
+    if failed:
+        print(f"  FAILED: {', '.join(failed)}")
+    print(f"  report: {out_dir / 'validate_tasks.json'}")
+    return 0 if report.ok else 1
 
 
 def print_models() -> int:
@@ -514,22 +604,6 @@ def print_models() -> int:
     return 0
 
 
-def _replay_records(path: str) -> list[dict[str, Any]]:
-    """Load a recorded decision sequence from a campaign's provenance directory.
-
-    `provenance/decisions.jsonl` is what `LoggingPolicy` and the models that carry their
-    own sink write. Reading it here rather than in `ReplayPolicy` keeps the policy layer
-    off the filesystem, which is the same reason policies never touch `tools`.
-    """
-    p = Path(path)
-    if p.is_dir():
-        p = p / "provenance" / "decisions.jsonl" if (p / "provenance").is_dir() \
-            else p / "decisions.jsonl"
-    if not p.is_file():
-        raise FileNotFoundError(f"no decisions.jsonl under {path}")
-    return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
-
-
 def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """`(specs, stages)` from a recorded campaign, for the two replay halves.
 
@@ -537,8 +611,9 @@ def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str
     why the halves can replay a campaign run by a model that kept no notes of its own, where
     `decisions.jsonl` only holds what a model chose to record about itself.
 
-    Read here rather than in the policy layer, for the reason `_replay_records` gives: a
-    policy that touches the filesystem is a policy that can reach past `core`.
+    Read here rather than in the policy layer: a reasoner that touches the filesystem is one
+    that can reach past `core`, which is the import contract `tests/test_layering.py`
+    asserts.
     """
     root = Path(path)
     prov = root / "provenance" if (root / "provenance").is_dir() else root
@@ -549,7 +624,8 @@ def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str
             raise FileNotFoundError(
                 f"no {name} under {path}. The replay halves read the executor's own record; "
                 f"a campaign recorded before `specs`/`stages` provenance existed can only be "
-                f"replayed with `--control legacy`")
+                f"replayed at all - the `decisions.jsonl` path was deleted with "
+                f"the `decide` contract in phase 11")
         out.append([json.loads(line) for line in f.read_text().splitlines() if line.strip()])
     return out[0], out[1]
 
@@ -631,7 +707,7 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
-                       replay_from: str | None = None, control: str | None = None,
+                       replay_from: str | None = None,
                        specifier: str | None = None, planner: str | None = None,
                        profile: str | None = None) -> int:
     t0 = time.monotonic()
@@ -666,27 +742,18 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
             "    impress-a control --connect <url> --campaign <id> --model C",
             reasoners.ReasonerOptions().timeout_s, spec_path)
         return 1
-    if specifier or planner:
-        control = "roles"
-    if control:
-        spec.control = control
     label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
     spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
-        # Only the record the chosen path will actually use is loaded. The halves read the
-        # executor's own `specs.jsonl` and `stages.jsonl`; the legacy path reads the
-        # `decisions.jsonl` each model wrote for itself. Loading both would mean a campaign
-        # recorded before `specs`/`stages` provenance existed could not be replayed even
-        # under `--control legacy`, which is the one path that needs nothing from them.
-        if spec.control == "roles":
-            spec_records, stage_records = (
-                _replay_role_records(replay_from) if replay_from else (None, None))
-            policy = build_roles(model, spec, guard, None, specifier, planner,
-                                 spec_records, stage_records, profile)
-        else:
-            policy = build_policy(model, spec, guard,
-                                  _replay_records(replay_from) if replay_from else None,
-                                  profile)
+        # The replay halves read the executor's own `specs.jsonl` and `stages.jsonl`. The
+        # `decisions.jsonl` each model used to write for itself is no longer a replay source:
+        # `ReplayPolicy` and the `decide` contract it replayed were deleted in phase 11, and
+        # the executor-written records are strictly better anyway - they exist for every model
+        # whether or not it kept notes, and a reasoner cannot write a flattering one.
+        spec_records, stage_records = (
+            _replay_role_records(replay_from) if replay_from else (None, None))
+        policy = build_roles(model, spec, guard, None, specifier, planner,
+                             spec_records, stage_records, profile)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -707,9 +774,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                  _m.letter, _m.name, _m.mode, _m.llm_shape, _m.status)
         if _m.note:
             log.info("control model %s caveat: %s", _m.letter, _m.note)
-    log.info("control vocabulary: %s%s", spec.control,
-             f" (specifier={specifier or model}, planner={planner or model})"
-             if spec.control == "roles" else "")
+    log.info("halves: specifier=%s planner=%s", specifier or model, planner or model)
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
@@ -751,12 +816,25 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     return 0
 
 
-def preflight(spec: CampaignSpec | None = None) -> int:
+def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
     """Check a real toolkit's environment BEFORE anything is queued.
 
     Every real adapter raises on a missing env var - but only once a task is running,
     which on HPC means inside the allocation, after the queue wait. Run this on the
     login node instead.
+
+    `quick` keeps the tier-1 checks - env vars, paths, executables, storage, the registry,
+    `ml_collections` - and skips every probe that shells out to import a heavy science stack
+    (pyrosetta, and LigandMPNN's import chain and `--help` contract), which together bound at
+    1320s. That is the form `scripts/delta_gpu_run.sh` runs inside the allocation before
+    Dragon comes up: the question there is whether `$MPNN_DIR` is unset, not whether torch can
+    page off Lustre, and the answer has to arrive in seconds. The deep form runs once on a
+    login node, where the 900s probe is free and its printed elapsed time is the early warning
+    for `ligandmpnn_design`'s declared `walltime_s`.
+
+    A skipped probe is reported as skipped and never as `ok` or as undetermined - `None` means
+    a probe ran and reached no conclusion, and letting it also mean "not attempted" is how the
+    warn column stops being worth reading.
     """
     import shutil
     import subprocess
@@ -774,6 +852,7 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # a FAIL, while a pyrosetta *timeout* is undetermined. The moment `warn` starts meaning
     # "a failure we would rather not block on", this column is worth nothing.
     checks: list[tuple[str, bool | None, str]] = []
+    skipped: list[str] = []
     if spec is not None and (err := _check_ligand_smiles(spec)):
         checks.append(("ligand_smiles", False, err))
 
@@ -811,21 +890,24 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         found = shutil.which(exe)
         checks.append((exe, bool(found), found or f"not on PATH - needed by {what}"))
 
-    # PyRosetta in a subprocess: importing it here would initialise a process-global
+    # Tier 2. PyRosetta in a subprocess: importing it here would initialise a process-global
     # singleton in the very interpreter that has to stay clean for P2 fan-out.
-    try:
-        out = subprocess.run([sys.executable, "-c", "import pyrosetta"],
-                             capture_output=True, timeout=120, check=False)
-        ok = out.returncode == 0
-        checks.append(("pyrosetta", ok,
-                       "importable" if ok
-                       else out.stderr.decode().strip().splitlines()[-1:][0]
-                       if out.stderr else "import failed"))
-    except subprocess.TimeoutExpired:
-        checks.append(("pyrosetta", None, ("timed out after 120s - a loaded login node "
-                                           "can take that long to import it; re-run")))
-    except (OSError, subprocess.SubprocessError) as e:
-        checks.append(("pyrosetta", False, f"could not check: {e}"))
+    if quick:
+        skipped.append("pyrosetta")
+    else:
+        try:
+            out = subprocess.run([sys.executable, "-c", "import pyrosetta"],
+                                 capture_output=True, timeout=120, check=False)
+            ok = out.returncode == 0
+            checks.append(("pyrosetta", ok,
+                           "importable" if ok
+                           else out.stderr.decode().strip().splitlines()[-1:][0]
+                           if out.stderr else "import failed"))
+        except subprocess.TimeoutExpired:
+            checks.append(("pyrosetta", None, ("timed out after 120s - a loaded login node "
+                                               "can take that long to import it; re-run")))
+        except (OSError, subprocess.SubprocessError) as e:
+            checks.append(("pyrosetta", False, f"could not check: {e}"))
 
     # $WORK_DIR must be on NVMe, not HDD. This is the whole point of the migration and it
     # is invisible otherwise: an HDD path works perfectly, just ~8x slower, and the cost
@@ -870,7 +952,34 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     # paging off Lustre (measured ~360s wall for 9s of CPU on a login node). That is also
     # why the elapsed time is printed - it is the early warning for ligandmpnn_design's
     # walltime_s, which this measurement is what set.
-    deep = stages is None or "ligandmpnn_design" in stages
+    deep = (stages is None or "ligandmpnn_design" in stages) and not quick
+    if quick and os.environ.get("MPNN_DIR"):
+        skipped.append("ligandmpnn imports")
+    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
+    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
+    # does not have, and that survived review because nobody had run it. So the flags are
+    # checked against the installed `run.py --help` rather than trusted.
+    #
+    # ONE invocation, two checks, and THROUGH THE SHIM - which is the whole of what went wrong
+    # before. The flags probe ran `run.py` directly while this probe ran it through
+    # `MPNN_SHIM`, so the two disagreed about the same binary: the shim exits 0 in 15s and the
+    # raw call dies in its vendored openfold on `np.int`, removed in numpy 1.24. That is the
+    # documented reason the shim exists and the adapter never calls run.py directly, so a probe
+    # that bypasses it is not probing what runs. The traceback then went to stderr, `helptext`
+    # was non-empty, and the probe concluded "installed run.py does not offer --batch_size,
+    # --number_of_batches - the adapter passes them and would fail inside the job". Both flags
+    # are declared (`run.py:846,852`). So a FAIL that blocks the smoke, naming the wrong
+    # component, from a probe whose neighbour three lines up had already passed - A4's lesson
+    # arriving from inside the tool meant to prevent it.
+    #
+    # A non-zero exit is now UNDETERMINED rather than a missing flag: a program that did not
+    # reach its argument parser has said nothing about its arguments. `None` is for a probe
+    # that ran and reached no conclusion, which is exactly this.
+    mpnn_flags = ("--batch_size", "--number_of_batches")
+    want_flags = bool(stages) and "ligandmpnn_design" in (stages or ()) \
+        and bool(os.environ.get("MPNN_DIR"))
+    if quick and want_flags:
+        skipped.append("ligandmpnn batch flags")
     if (mpnn := os.environ.get("MPNN_DIR")) and deep:
         from ..tools.ligandmpnn_agents import MPNN_SHIM
         t0 = time.monotonic()
@@ -886,31 +995,14 @@ def preflight(spec: CampaignSpec | None = None) -> int:
                            f"run.py --help exited 0 in {took:.0f}s" if ok
                            else out.stderr.decode().strip().splitlines()[-1:][0]
                            if out.stderr else f"exited {out.returncode} after {took:.0f}s"))
-        except subprocess.TimeoutExpired:
-            checks.append(("ligandmpnn imports", None,
-                           ("no result in 900s - undetermined, NOT a pass; a loaded "
-                            "Lustre mount can do this. Re-run before submitting")))
-        except (OSError, subprocess.SubprocessError) as e:
-            checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
-
-    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
-    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
-    # does not have, and that survived review because nobody had run it. So the flag is checked
-    # against the installed `run.py --help` rather than trusted.
-    mpnn_dir = os.environ.get("MPNN_DIR")
-    if stages and "ligandmpnn_design" in stages and mpnn_dir:
-        run_py = Path(mpnn_dir) / "run.py"
-        if run_py.is_file():
-            try:
-                helped = subprocess.run(
-                    [sys.executable, str(run_py), "--help"], capture_output=True, text=True,
-                    timeout=300, cwd=mpnn_dir)
-                helptext = helped.stdout + helped.stderr
-                missing = [f for f in ("--batch_size", "--number_of_batches")
-                           if f not in helptext]
-                if not helptext.strip():
+            if want_flags:
+                helptext = out.stdout.decode(errors="replace") + \
+                    out.stderr.decode(errors="replace")
+                missing = [f for f in mpnn_flags if f not in helptext]
+                if not ok:
                     checks.append(("ligandmpnn batch flags", None,
-                                   "`run.py --help` produced no output - undetermined"))
+                                   "run.py never reached its argument parser - undetermined; "
+                                   "see the import row above, which is the same invocation"))
                 elif missing:
                     checks.append(("ligandmpnn batch flags", False,
                                    f"installed run.py does not offer {', '.join(missing)} - "
@@ -918,11 +1010,16 @@ def preflight(spec: CampaignSpec | None = None) -> int:
                 else:
                     checks.append(("ligandmpnn batch flags", True,
                                    "--batch_size and --number_of_batches both offered"))
-            except subprocess.TimeoutExpired:
-                checks.append(("ligandmpnn batch flags", None,
-                               "`run.py --help` did not answer in 300s - undetermined"))
-            except (OSError, subprocess.SubprocessError) as e:
-                checks.append(("ligandmpnn batch flags", False, f"could not check: {e}"))
+        except subprocess.TimeoutExpired:
+            undetermined = ("no result in 900s - undetermined, NOT a pass; a loaded "
+                            "Lustre mount can do this. Re-run before submitting")
+            checks.append(("ligandmpnn imports", None, undetermined))
+            if want_flags:
+                checks.append(("ligandmpnn batch flags", None, undetermined))
+        except (OSError, subprocess.SubprocessError) as e:
+            checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
+            if want_flags:
+                checks.append(("ligandmpnn batch flags", None, f"could not check: {e}"))
 
     # The `impress` dependency is published on no index, so if pip ever went looking for that
     # name it installed something else - and the failure is silent, because the import succeeds
@@ -956,7 +1053,7 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))
 
-    print("\n  preflight\n")
+    print(f"\n  preflight{' (quick)' if quick else ''}\n")
     for name, ok, detail in checks:
         mark = "ok  " if ok else "warn" if ok is None else "FAIL"
         print(f"    [{mark}] {name:20s} {detail}")
@@ -965,12 +1062,22 @@ def preflight(spec: CampaignSpec | None = None) -> int:
     print(f"\n  {len(checks) - len(failed) - len(unknown)}/{len(checks)} ok"
           + (f", {len(unknown)} undetermined ({', '.join(unknown)})" if unknown else "")
           + (f" - missing: {', '.join(failed)}" if failed else ""))
+    if skipped:
+        print(f"  {len(skipped)} skipped by --quick ({', '.join(skipped)})"
+              f" - not checked here, and NOT a pass; run the deep form on a login node")
     if stages:
         print(f"  (a campaign using {', '.join(stages)} needs the entries above)")
     return 1 if failed else 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> argparse.ArgumentParser:
+    """The command line, built apart from `main` so it can be parsed without being run.
+
+    Two committed documents spell out the Delta procedure as shell, and a flag that argparse
+    refuses turns a documented step into exit code 2 at the point where an allocation is
+    already held. `test_documented_command_lines_parse` walks those documents through this
+    parser, which it can only do if building it executes nothing.
+    """
     ap = argparse.ArgumentParser(prog="impress-a")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run a campaign")
@@ -978,15 +1085,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", default="D", choices=sorted(POLICIES))
     # The two halves. `--model X` takes both from one row, which keeps a four-arm comparison
     # one-variable; naming them separately takes one from each, which is what makes it
-    # measurable whether specification or planning is where a model earns its cost. Either
-    # form implies `--control roles`, because a Specifier has nowhere to run in the legacy
-    # single-`decide` path.
+    # measurable whether specification or planning is where a model earns its cost.
+    #
+    # `--control` is gone (phase 11). It chose between the `decide` vocabulary and the role
+    # one, and there is only one now.
     r.add_argument("--specifier", default=None, choices=sorted(POLICIES),
-                   help="Specifier half (implies --control roles)")
+                   help="Specifier half, when it should come from a different model")
     r.add_argument("--planner", default=None, choices=sorted(POLICIES),
-                   help="Planner half (implies --control roles)")
-    r.add_argument("--control", default=None, choices=("legacy", "roles"),
-                   help="control vocabulary (default: the campaign spec's, which is legacy)")
+                   help="Planner half, when it should come from a different model")
     r.add_argument("--no-guard", action="store_true")
     r.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS",
                    help="liveness log cadence (default $IMPRESS_A_HEARTBEAT_S or 60; "
@@ -1003,6 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
+    pf.add_argument("--quick", action="store_true",
+                    help="tier-1 checks only - skip the pyrosetta and LigandMPNN import "
+                         "probes, which bound at 1320s together. What the Delta launcher runs "
+                         "inside the allocation before Dragon comes up")
     sv = sub.add_parser("serve", help="run the execution process and serve it over HTTP")
     sv.add_argument("spec")
     sv.add_argument("--model", default=None, choices=sorted(POLICIES),
@@ -1030,10 +1140,35 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--no-guard", action="store_true")
     ct.add_argument("--model-profile", default=None, metavar="NAME",
                     help="models.yaml profile naming a live endpoint (--model B)")
+    cp = sub.add_parser("compare",
+                        help="score several arms of one experiment against the control")
+    cp.add_argument("dirs", nargs="+", metavar="DIR",
+                    help="one campaign run directory per arm")
+    cp.add_argument("--control", default="D",
+                    help="the model every other arm's cost is justified against")
+    cp.add_argument("--theta", type=float, default=None, metavar="F",
+                    help="amino-acid identity above which two designs are one cluster "
+                         "(default: the pre-registered 0.90)")
+    cp.add_argument("--t-cut", type=float, default=None, metavar="HOURS",
+                    help="the common scoring window, from each arm's FIRST TASK START")
+    cp.add_argument("--chain", default=None, metavar="T1,T2,...",
+                    help="tools a complete design must have run; a lineage missing one "
+                         "cannot reach T1 on the gates of the stages it did run")
+    cp.add_argument("--json", default=None, metavar="FILE",
+                    help="also write every figure as JSON")
+    vt = sub.add_parser("validate-tasks",
+                        help="execute each Task in a campaign's chain once and check it")
+    vt.add_argument("spec")
+    vt.add_argument("--out", default=None, metavar="DIR",
+                    help="where to write validate_tasks.json and the per-Task table "
+                         "(default: <root>/<campaign>/validation)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
                     help="grant trust to the patterns this campaign composes")
+    tr.add_argument("--list", dest="do_list", action="store_true",
+                    help="list what this site knows. The listing is printed either way; the "
+                         "flag exists so the documented procedure runs verbatim")
     tr.add_argument("--revoke", default=None, metavar="SIGNATURE")
     tr.add_argument("--reason", default="",
                     help="why (required for --assert; it is the record)")
@@ -1041,12 +1176,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="replica width to assert at, repeatable. The signature includes "
                          "replica multiplicity, so width 1 does not cover width 4 "
                          "(backlog A10). Default: the campaign's own `replicas`")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = _parser().parse_args(argv)
     if a.cmd == "run":
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat, a.replay_from,
-                                        control=a.control, specifier=a.specifier,
-                                        planner=a.planner, profile=a.model_profile))
+                                        specifier=a.specifier, planner=a.planner,
+                                        profile=a.model_profile))
     if a.cmd == "models":
         return print_models()
     if a.cmd == "serve":
@@ -1057,13 +1196,17 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
                                             a.specifier, a.planner, not a.no_guard,
                                             a.model_profile))
+    if a.cmd == "compare":
+        return compare_command(a.dirs, a.control, a.theta, a.t_cut, a.chain, a.json)
+    if a.cmd == "validate-tasks":
+        return asyncio.run(validate_tasks_command(a.spec, a.out))
     if a.cmd == "trust":
         widths = a.replicas
         if widths is None:
             widths = [max(1, load_spec(a.spec).replicas)] if a.spec else [1]
         return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
-        return preflight(load_spec(a.spec) if a.spec else None)
+        return preflight(load_spec(a.spec) if a.spec else None, a.quick)
     reg = Registry().load(a.toolkits)
     for tid in reg.ids():
         s = reg.get(tid)

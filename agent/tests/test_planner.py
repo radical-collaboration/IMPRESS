@@ -185,7 +185,7 @@ def _campaign(cid, tmp_path, **kw):
                         budget={"gpu_hours": 2.0, "cpu_hours": 12.0},
                         site=SiteCaps(gpu_api="cuda", gpus_per_node=1),
                         backend="concurrent", backend_config={"workers": 2},
-                        control="roles", stages=CHAIN,
+                        stages=CHAIN,
                         root=str(tmp_path / "runs"),
                         trust_root=str(tmp_path / "trust"), **kw)
 

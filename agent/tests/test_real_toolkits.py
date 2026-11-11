@@ -10,6 +10,7 @@ and each toolkit's SKILL.md Pitfalls).
 """
 from __future__ import annotations
 
+import json
 import pathlib
 from pathlib import Path
 from typing import Any
@@ -95,11 +96,11 @@ def test_real_chain_refuses_over_budget(reg):
 def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
     """The headline bug: a real campaign would have run mocks on a GPU allocation.
 
-    `CampaignSpec` had no `stages`, `load_spec` read none, and every policy falls back
+    `CampaignSpec` had no `stages`, `load_spec` read none, and every reasoner falls back
     to its own default chain - which is the mock one. So `sbatch delta_gpu_run.sh`
     loaded the real toolkits, validated them, and then composed `mock_generate...`.
     """
-    from impress_a.cli import build_policy, load_spec
+    from impress_a.cli import build_roles, load_spec
     from impress_a.manager import CampaignManager
 
     spec = load_spec("campaigns/delta-small-molecule-smoke.yaml")
@@ -109,9 +110,9 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
 
     spec.root = str(tmp_path)
     spec.backend, spec.backend_config = "concurrent", {"workers": 1}
-    mgr = CampaignManager(spec, build_policy("D", spec, guard=False), reg)
+    mgr = CampaignManager(spec, build_roles("D", spec, guard=False), reg)
 
-    intent = ExperimentIntent(goal=spec.goal)          # a policy that asks for nothing
+    intent = ExperimentIntent(goal=spec.goal)          # a reasoner that asks for nothing
     merged = mgr.executor._apply_campaign_defaults(intent)
     assert merged.stages == spec.stages
     assert merged.params["rfd3_design"]["input_spec_path"] == \
@@ -120,27 +121,26 @@ def test_campaign_selects_the_real_chain_not_the_mock_one(reg, tmp_path):
     assert not any(s.startswith("mock_") for s in merged.stages)
 
 
-def test_campaign_params_defer_to_the_policy_and_replicas_is_a_cap(reg, tmp_path):
-    from impress_a.cli import load_spec
+def test_campaign_params_defer_to_the_reasoner_and_replicas_is_a_cap(reg, tmp_path):
+    from impress_a.cli import build_roles, load_spec
     from impress_a.manager import CampaignManager
-    from impress_a.policy.explicit import ThresholdPolicy
 
     spec = load_spec("campaigns/delta-small-molecule-smoke.yaml")
     spec.root = str(tmp_path)
     spec.replicas = 2
-    ex = CampaignManager(spec, ThresholdPolicy(stages=spec.stages), reg).executor
+    ex = CampaignManager(spec, build_roles("D", spec, guard=False), reg).executor
 
     asked = ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=9,
                              params={"rfd3_design": {"input_spec_path": "/tmp/other.json"}})
     merged = ex._apply_campaign_defaults(asked)
     assert merged.params["rfd3_design"]["input_spec_path"] == "/tmp/other.json", \
-        "the policy wins on keys it set"
+        "the reasoner wins on keys it set"
     assert merged.params["rfd3_design"]["num_designs"] == \
         spec.params["rfd3_design"]["num_designs"], "campaign fills the rest"
     assert merged.replicas == 2, "campaign replicas is a cap on breadth"
     assert ex._apply_campaign_defaults(
         ExperimentIntent(goal="g", stages=["rfd3_design"], replicas=1)).replicas == 1, \
-        "a policy may still ask for fewer"
+        "a reasoner may still ask for fewer"
 
 
 def test_real_tools_get_an_independent_reproducible_seed_per_lineage(reg):
@@ -968,11 +968,21 @@ def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
     declared figures deliberately sit a few multiples above what was measured and this
     test must not tighten toward equality.
     """
-    measured_h = measured_s / 3600
-    declared = reg.get(tool).cost_model.cost[dim]
+    # CPU-HOURS ARE WALL x CORES. This line read `measured_s / 3600` and so carried the same
+    # units error as the specs it was checking - which is why it passed while
+    # `impress-a validate-tasks` on job 23670171 failed `fastrelax` at measured/declared =
+    # 2.38. The executor has always measured the ratio the right way; the spec comments, and
+    # this test, were the two places that did not, so they agreed with each other and with
+    # nothing that runs. GPU dimensions stay wall-based: the declared figure is device-time,
+    # and `cores` is the CPU request.
+    spec = reg.get(tool)
+    cores = spec.resources.cores if dim == "cpu_hours" else 1
+    measured_h = measured_s * cores / 3600
+    declared = spec.cost_model.cost[dim]
     assert declared >= measured_h, \
-        f"{tool} declares {declared} {dim} but measured {measured_h:.4f} - an estimate " \
-        "below the real cost lets a campaign overrun its budget"
+        f"{tool} declares {declared} {dim} but measured {measured_h:.4f} " \
+        f"({measured_s}s x {cores} cores) - an estimate below the real cost makes gate 5 " \
+        "and the untrusted-pattern cap refuse work that fits"
     assert declared <= measured_h * 10, \
         f"{tool} declares {declared} {dim} against {measured_h:.4f} measured " \
         f"({declared / measured_h:.0f}x). Over-estimating by this much is what got " \
@@ -1011,18 +1021,28 @@ def test_packmin_does_not_gate_on_a_relaxed_score(reg):
     Upstream (`small_molecule_binding.py:678`) gates nothing on packmin either.
     """
     def bounds(tool):
-        return {g.params["metric"]: (g.params.get("max"), g.role)
+        # Keyed by (metric, role), not by metric. One metric now carries two gates with
+        # different roles and different bounds - which is decision 0013's whole point - and
+        # keying on the metric alone let the acceptance gate shadow the divergence bound this
+        # test exists to protect.
+        return {(g.params["metric"], g.role): g.params.get("max")
                 for g in reg.get(tool).qc_gates if g.id == "metric_in_range"}
 
-    assert "total_score" not in bounds("packmin"), \
+    assert not [m for m, _ in bounds("packmin") if m == "total_score"], \
         "a bound inside the normal spread of a pre-relax score carries no information"
     assert any(g.id == "metrics_reported" and "total_score" in g.params["metrics"]
                and g.role == "integrity" for g in reg.get("packmin").qc_gates), \
         "packmin must still REPORT a score - a worker that exits without one has broken"
-    assert bounds("fastrelax") == {"total_score": (0.0, "integrity"),
-                                   "fa_rep": (500.0, "integrity")}, \
-        "fastrelax converging is now the only judgement of an exploded pose, so both " \
-        "of its gates must stay integrity"
+
+    relax = bounds("fastrelax")
+    assert relax[("total_score", "integrity")] == 0.0
+    assert relax[("fa_rep", "integrity")] == 500.0, \
+        "fastrelax converging is still the only judgement of an exploded pose, so the WIDE " \
+        "divergence bounds must stay integrity whatever the acceptance thresholds are"
+    assert relax[("total_score", "acceptance")] == -250.0
+    assert relax[("fa_rep", "acceptance")] == 100.0
+    assert relax[("interaction_energy", "acceptance")] == -8.0, \
+        "upstream's own calibrated PROD values, as acceptance gates (backlog G4)"
 
 
 async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
@@ -1613,3 +1633,241 @@ async def test_model_a_also_varies_a_real_tools_parameter(reg):
         "FourNodePolicy's exploring 170 as a fraction of the 20-200 range it was written "
         f"against (0.83), rounded to the declared int type; got {steps}")
     assert varied["ligandmpnn_design"]["temperature"] == 0.35
+
+
+def _without_comments(worker: str) -> str:
+    """A worker's code with its comments removed.
+
+    Every rule asserted against a worker's source is about what it DOES, and these workers
+    carry comments naming the defect each fix replaced - `jump="1"`, `scores.get("fa_rep",
+    0.0)` - so a naive text match trips over the explanation of the thing it is checking for.
+    Both of these tests caught their own documentation on the first run.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in worker.splitlines())
+
+
+def test_the_fastrelax_worker_computes_interaction_energy_by_selector(reg):
+    """Backlog G4's missing metric, and the one choice in it that could be silently wrong.
+
+    `interaction_energy` is the only number this stage reports that measures BINDING rather
+    than geometry, and it was not computed at all: a converged, well-packed pose that does not
+    bind was indistinguishable from a real binder by anything the campaign measured.
+
+    The port is **selector-based**, matching upstream's own `scripts/fastrelax.py`:
+    `ResiduePropertySelector(LIGAND)` against its complement. A chain-based split
+    (`jump="1"`, or `chains="A"/"B"`) would be correct only if the ligand were its own chain,
+    which is a property of the input rather than of the tool - and wrong silently, by
+    measuring the energy between two halves of the protein.
+
+    Asserted against the worker source because pyrosetta is not installed in the local tier
+    and the real call needs a pose. That is a weaker test than running it, and it is the part
+    that can be checked without hardware: `impress-a validate-tasks` is what proves the
+    number arrives.
+    """
+    from impress_a.tools import rosetta_agents
+
+    worker = _without_comments(rosetta_agents._FASTRELAX_WORKER)
+    assert "InteractionEnergyMetric" in worker
+    assert "ResiduePropertySelector(ResidueProperty.LIGAND)" in worker, \
+        "the selector pair must be upstream's own, not a chain or jump split"
+    assert "NotResidueSelector(ligand_sel)" in worker
+    assert "jump" not in worker, \
+        "a jump-based interface is right only if the ligand is its own chain"
+    assert "no LIGAND-property residue in the pose" in worker, \
+        "an empty ligand selection must omit the metric, not compute a confident zero"
+
+
+def test_no_rosetta_metric_is_defaulted_to_zero(reg):
+    """`scores.get("fa_rep", 0.0)` reported a fabricated zero for a term Rosetta had not
+    computed - and 0.0 is a *passing* fa_rep, so a broken score function read as a perfectly
+    packed structure. The invariant is that an adapter omits what it could not read and
+    `metrics_reported` turns that into an integrity failure; a default silently converts "the
+    tool broke" into "the design is good".
+    """
+    from impress_a.tools import rosetta_agents
+
+    for name in ("_PACKMIN_WORKER", "_FASTRELAX_WORKER", "_FILTER_SHAPE_WORKER"):
+        code = _without_comments(getattr(rosetta_agents, name))
+        assert ", 0.0)" not in code, (
+            f"{name}: a metric defaulted to 0.0. Omit it instead - the presence gate is what "
+            f"catches an unreadable value, and a fabricated zero PASSES a max-bound gate, so "
+            f"a broken score function reads as a perfectly packed structure")
+
+
+def test_every_calibrated_threshold_matches_upstreams_prod_value(reg):
+    """The four numbers, once, with their source - so a later edit has to argue with it.
+
+    Read off `examples/small_molecule_binding/run_small_molecule_binding.py`'s `PROD`
+    instance, which has months of multi-node campaigns behind it:
+    `fastrelax_max_fa_rep=100.0`, `fastrelax_max_score=-250.0` (data range -193 to -510),
+    `fastrelax_max_interact=-8.0` (p75 = -8.8), `interface_min_sc=0.55`,
+    `backbone_min_ss_fraction=0.5`, `fold_min_plddt=75.0`.
+
+    `fold_min_plddt` is the one that needs its rescale stated: it is a 0-100 figure upstream
+    and `complex_plddt` here is the 0-1 one, so 75.0 becomes 0.75. And `fold_min_ligand_iptm`
+    is **None** in PROD - upstream leaves that gate off - so this project is stricter than the
+    reference on exactly one axis, which every T3 figure has to say.
+    """
+    def acceptance(tool, metric):
+        for g in reg.get(tool).qc_gates:
+            if (g.role == "acceptance" and g.id == "metric_in_range"
+                    and g.params.get("metric") == metric):
+                return g.params.get("min"), g.params.get("max")
+        raise AssertionError(f"no acceptance gate on {tool}.{metric}")
+
+    assert acceptance("fastrelax", "fa_rep") == (None, 100.0)
+    assert acceptance("fastrelax", "total_score") == (None, -250.0)
+    assert acceptance("fastrelax", "interaction_energy") == (None, -8.0)
+    assert acceptance("filter_shape", "shape_complementarity")[0] == 0.55
+    assert acceptance("rfd3_design", "ss_fraction")[0] == 0.5
+    assert acceptance("boltz_predict", "complex_plddt") == (0.75, 1.0), \
+        "PROD's fold_min_plddt is 75.0 on a 0-100 scale; complex_plddt is the 0-1 one"
+    assert acceptance("boltz_predict", "ligand_iptm")[0] == 0.4, \
+        "kept, and stricter than PROD, which leaves this gate off entirely"
+
+
+def test_filter_shape_measures_the_protein_ligand_interface(reg):
+    """Backlog G5: `jump="1"` measures whatever jump 1 happens to be.
+
+    If the ligand is not across jump 1 the number is not wrong in any visible way - it is a
+    shape complementarity between two parts of the protein, in exactly the range a real
+    interface produces. Upstream splits by chain instead, which is right only when the ligand
+    is its own chain, and that is a property of the input rather than of the tool. So the pair
+    is the ligand residue PROPERTY against its complement, the same pair the interaction
+    energy port uses.
+
+    Asserted against the worker source, like the interaction-energy port and for the same
+    reason: pyrosetta is not in the local tier. `impress-a validate-tasks` is what proves it
+    builds.
+
+    **The selectors are built through the Python API now, not a RosettaScripts XML string.**
+    The XML was rejected outright by the PyRosetta build on Delta - `Element
+    'ResidueProperty': This element is not expected` - so `filter_shape` ran 0 of 1 rows on
+    job 23670171 and the chain stopped there with `boltz_predict` never reached. The old
+    version of this test asserted the XML spelling, which is the one thing it could check and
+    was never evidence that the schema would accept it; the previous docstring said as much
+    ("the XML is the one part of this that no local test can exercise"). The Python route has
+    no schema in it, and it is the same pair of calls the interaction-energy port already
+    makes, so the two ports agree by construction instead of by two spellings kept in step.
+    Confirmed against job 23670171's own relaxed pose: 1 ligand residue, SC = 0.612.
+    """
+    from impress_a.tools import rosetta_agents
+
+    worker = rosetta_agents._FILTER_SHAPE_WORKER
+    code = _without_comments(worker)
+    assert 'jump="1"' not in code, "the interface must not be chosen by jump number"
+    assert 'chains="A"' not in code, "nor by chain letter - that is the input's business"
+    assert "XmlObjects" not in code, (
+        "the RosettaScripts schema rejected this build's selector names; building the filter "
+        "in Python removes the schema from the path")
+    assert "ResiduePropertySelector(_ResidueProperty.LIGAND)" in code, \
+        "the ligand is selected by residue PROPERTY, whatever the chain layout is"
+    assert "NotResidueSelector(ligand_sel)" in code, "against its own complement"
+    assert "sc_filter.selector1(" in code and "sc_filter.selector2(" in code, \
+        "both sides of the interface must be set explicitly"
+    assert "sc_filter.quick(False)" in code, \
+        "quick mode is a faster, less accurate SC; upstream sets it explicitly and so must we"
+    assert "Refusing rather than falling back" in worker, (
+        "a fallback to a jump or chain split would keep producing numbers while measuring a "
+        "different interface, and nothing downstream could tell")
+    assert "sc_selector_mode" in worker, \
+        "which interface produced the number must be a reported metric, not a log line"
+
+
+def test_rfd3_partial_diffusion_would_have_to_drop_length():
+    """A guard that abstains today and fires the moment partial diffusion is declared.
+
+    RFD3's `DesignInputSpecification` validator rejects `length` outright whenever
+    `partial.input`/`partial_t` are set - length is inferred from the input structure in that
+    mode (`ValidationError: ... Length argument must not be provided during partial
+    diffusion`). The committed `ALR_binder_design.json` carries BOTH `partial.input` and
+    `"length": "70-170"`, and that is correct today only because `rfd3_design` declares no
+    `partial_t` and no input port, so partial diffusion cannot be requested.
+
+    The sibling example paid for this: job `21928556`, 3 of 3 pipelines that reached guided
+    feedback crashed on their first attempt, fixed with `partial.pop('length', None)`. Our
+    `_inputs_with_absolute_paths` rewrites `input` paths and nothing else, so it would carry
+    `length` straight through. Backlog C8.
+
+    So this does not assert the fix exists - it asserts that the day someone declares
+    `partial_t`, they cannot also leave `length` in place unnoticed.
+    """
+    import json as _json
+
+    spec_yaml = pathlib.Path("toolkits/rfd3/tools/rfd3_design/spec.yaml").read_text()
+    declares_partial = "partial_t" in spec_yaml
+
+    base = pathlib.Path("campaigns/data/alr/ALR_binder_design.json")
+    carries_length = any(
+        isinstance(entry, dict) and "length" in entry
+        for entry in _json.loads(base.read_text()).values())
+
+    if not declares_partial:
+        # The abstaining branch, pinned so it cannot quietly become vacuous: `length` is the
+        # from-scratch contig and must stay, because from-scratch is the only mode there is.
+        assert carries_length, (
+            f"{base} no longer carries `length`, and nothing declares `partial_t` - so "
+            f"from-scratch diffusion has lost its contig. If partial diffusion was just "
+            f"added, this test's other branch is the one to read")
+        return
+
+    source = pathlib.Path("src/impress_a/tools/rfd3_agents.py").read_text()
+    assert not carries_length or 'pop("length"' in source or "pop('length'" in source, (
+        "rfd3_design now declares `partial_t`, so partial diffusion is reachable, and "
+        f"{base} still carries `length` - RFD3's validator rejects that combination and every "
+        "guided run would fail its input validation. Drop `length` when writing the guided "
+        "spec, as examples/small_molecule_binding's _write_guided_rfd3_json does (backlog C8)")
+
+
+def test_the_rfd3_sidecar_metrics_come_from_the_shape_rfd3_actually_writes(tmp_path):
+    """Every declared metric must be readable from a real `*_model_*.json`, at its real depth.
+
+    The spec declared `ca_deviation` and `ligand_clashes` with the key names GUESSED, and said
+    so: "the key names are inferred rather than observed ... the gates land when one real
+    out_dir confirms the names". Job 23670171 is that out_dir, and it failed the
+    `metrics_declared_and_finite` integrity row on exactly those two - while `helix_fraction`
+    and `sheet_fraction`, guessed in the same breath, came back fine.
+
+    What the file actually holds, inside one top-level `metrics` object:
+
+        max_ca_deviation            the name was wrong - it is a MAX, not a mean
+        n_clashing.ligand_clashes   the name was right, the SPELLING wrong
+        helix_fraction              guessed right
+        sheet_fraction              guessed right
+
+    **The dot in `n_clashing.ligand_clashes` is part of the key, not a path.** `metrics` is
+    flat; there is no `n_clashing` object. That was misread once in the other direction, and
+    the fixture below is written from `list(metrics)` on the real file precisely so the
+    distinction is pinned: a test built from a nested fixture would pass against a lookup
+    that descends and fail against the file that exists.
+    """
+    import gzip
+
+    from impress_a.tools.rfd3_agents import _sidecar_metrics
+
+    cif = tmp_path / "ALR_binder_design_partial_0_model_0.cif.gz"
+    cif.write_bytes(gzip.compress(b"# not read by _sidecar_metrics\n"))
+    cif.with_name("ALR_binder_design_partial_0_model_0.json").write_text(json.dumps({
+        "metrics": {
+            "max_ca_deviation": 0.053571462631225586,
+            "n_chainbreaks": 0,
+            "n_clashing.interresidue_clashes_w_sidechain": 0,
+            "n_clashing.interresidue_clashes_w_backbone": 0,
+            "n_clashing.ligand_clashes": 0,
+            "n_clashing.ligand_min_distance": 2.9610626697540283,
+            "helix_fraction": 0.7112676056338029,
+            "sheet_fraction": 0.0,
+            "num_residues": 142,
+        },
+        "seed": 1602315461,
+    }))
+
+    got = _sidecar_metrics(cif)
+    assert got["ca_deviation"] == pytest.approx(0.0536, abs=1e-4), \
+        "ca_deviation must be read from `max_ca_deviation`"
+    assert got["ligand_clashes"] == 0.0, \
+        "`n_clashing.ligand_clashes` is one key with a dot in it, not a nested lookup"
+    assert got["helix_fraction"] == pytest.approx(0.7113, abs=1e-4)
+    assert got["sheet_fraction"] == 0.0
+    # Every metric the spec declares, so the integrity gate that failed on hardware passes.
+    assert {"ca_deviation", "ligand_clashes", "helix_fraction", "sheet_fraction"} <= set(got)

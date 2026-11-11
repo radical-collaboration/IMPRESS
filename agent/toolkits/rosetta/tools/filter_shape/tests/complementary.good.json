@@ -1,10 +1,13 @@
 {
-  "why": "A well-packed interface, comfortably over the floor. Subject to the same G5 caveat as poor_interface.bad.json: this value is trusted only as far as jump=\"1\" is the right jump.",
+  "why": "A well-packed interface, comfortably over the floor. Subject to the same G5 caveat as poor_interface.bad.json: this value is trusted only as far as jump=\"1\" is the right jump. `sc_selector_mode: 1.0` is the ligand-property selector pair - what the filter measures after backlog G5, as opposed to the `jump=\"1\"` interface every recorded number came from.",
   "failing_gates": [],
   "output": {
     "result": "structure",
     "count": 1,
     "outputs": {},
-    "metrics": {"shape_complementarity": 0.68}
+    "metrics": {
+      "shape_complementarity": 0.68,
+      "sc_selector_mode": 1.0
+    }
   }
 }

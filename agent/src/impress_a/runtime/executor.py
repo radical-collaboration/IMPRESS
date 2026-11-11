@@ -89,6 +89,12 @@ class CampaignSpec:
     # `objectives`, because `Objective` declares a metric target and says nothing about how
     # many designs satisfying it are wanted; the count is a property of the Goal.
     target_front: int = 0
+    # `real` | `mock` | `any`. Gate 6 (backlog E1): refuses a graph whose tools come from the
+    # wrong side. `sites/*.yaml` has carried this switch, read by no code, since before the
+    # mock-chain-on-a-GPU run it would have prevented; it lives here because `cli.load_spec`
+    # reads this file and a key nobody reads is how it stayed inert. `any` keeps every
+    # existing campaign working, and a campaign that cares declares it.
+    tool_delivery: str = "any"
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
     # Backstop for runs exempted from the stagnation counter. A run that could not reach the
@@ -163,12 +169,6 @@ class CampaignSpec:
     # a policy asks for, so a policy never has to know a tool's parameter names.
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
     replicas: int = 0         # cap on lineages per experiment; 0 = policy decides
-    # Which control vocabulary drives this campaign. `legacy` is the single `decide(obs)`
-    # seam; `roles` is the Spec Loop + Planning Loop pipeline. Both run the same composition,
-    # validation, execution and state, which is what makes the two comparable - see
-    # `test_roles_pipeline_reproduces_the_legacy_campaign`. Phase 11 deletes `legacy` and this
-    # field with it.
-    control: str = "legacy"
 
 
 @dataclass
@@ -238,7 +238,8 @@ class CampaignExecutor:
         trust_dir = Path(spec.trust_root) if spec.trust_root else Path(spec.root) / "_trust"
         self.trust = TrustLedger.load(trust_dir / f"{spec.site.gpu_api}.jsonl")
         self.composer = Composer(self.reg, seed_salt=spec.seed_salt)
-        self.validator = Validator(self.reg, spec.site, self.budget)
+        self.validator = Validator(self.reg, spec.site, self.budget,
+                                   tool_delivery=spec.tool_delivery)
         self.reviewer = StageReviewer(self.validator, self.budget)
         self.cycle = 0
         # The APPLIED Spec. A Specifier authors revisions; this is the only writer, so `specs`
@@ -260,6 +261,13 @@ class CampaignExecutor:
         self.max_attempts = spec.max_attempts
         self.pending_human: RequestHuman | None = None
         self.prov_sink: Any = None
+        #: Whether a control plane registered this campaign - i.e. whether there IS an
+        #: external caller that could go away. Set by `ControlPlane.register`; an
+        #: `impress-a run` campaign never has one, and the liveness timeout is meaningless
+        #: for it. Deliberately explicit rather than inferred from `prov_sink`, which the
+        #: plane also happens to set: a liveness bound that stops campaigns must not rest on
+        #: a side effect of provenance mirroring.
+        self.under_external_control: bool = False
         self._stagnant = 0
         # Consecutive absorbed runs that could not have reached the front. Reset by any run
         # that could.
@@ -421,8 +429,27 @@ class CampaignExecutor:
         self._last_contact = time.monotonic()
 
     def _control_lost_for(self) -> float | None:
-        """Seconds since the last contact, if the timeout is enabled and has expired."""
+        """Seconds since the last contact, if the timeout is enabled and has expired.
+
+        **Only ever armed for a campaign under EXTERNAL control.** A campaign driven
+        in-process has no control plane, so there is none to lose: the "caller" is the role
+        driver in this same process, and it is silent precisely when it is busy awaiting the
+        tasks it just asked for. Armed everywhere, this killed all three in-process arms of
+        the first four-arm smoke - A, B and D, each after one cycle, at 267s/182s/185s of
+        "silence" against a 120s bound - while arm C, the only arm that actually had a
+        caller, ran to its own stop. The spec's own comment had it backwards, and
+        `cli/__init__.py` records that the setting did nothing at all until the loader began
+        reading it, so its first real outing was the one that lost three arms.
+
+        **And silence while work is in flight is not evidence either.** A cycle of the real
+        chain runs ~180s of tasks with no session traffic, so any bound shorter than a cycle
+        converts normal progress into a lost plane - for arm C too, whose caller legitimately
+        observes once per cycle. The clock is therefore only consulted when nothing is
+        running, which is when a vanished caller is the only thing that would explain silence.
+        """
         if not self.spec.control_liveness_timeout_s or self._last_contact is None:
+            return None
+        if not self.under_external_control or self._inflight:
             return None
         silent = time.monotonic() - self._last_contact
         return silent if silent > self.spec.control_liveness_timeout_s else None
@@ -456,7 +483,7 @@ class CampaignExecutor:
             # toolkit was available - the mock-chain-on-a-GPU hazard surviving in the half
             # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
             # this one is derived from the other.
-            budget=self.budget, available_tools=self._toolkit.ids,
+            budget=self.budget,
             toolkit=self._toolkit, stages=list(self.spec.stages), spec=self.spec_state,
             orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)
@@ -1193,7 +1220,18 @@ class CampaignExecutor:
                 if task.task_id in rec.graph.nodes else None,
                 "metrics": task.metrics,
                 "qc": task.qc.verdict.value,
-                "failed_gates": [g.gate for g in task.qc.failed()],
+                # `QCReport.failed()` returns provenance-shaped DICTS, not gate objects - its
+                # docstring says so, and the other caller (line ~506) records them whole. This
+                # read `g.gate` and crashed the executor with `AttributeError: 'dict' object
+                # has no attribute 'gate'` the first time a task actually failed a gate.
+                #
+                # It survived every previous run because the comprehension never dereferences
+                # an EMPTY list: `failed_gates: []` is what a passing task logs, and until a
+                # real campaign had a gate fail on hardware, nothing else had ever been in it.
+                # `impress-a validate-tasks` could not find it either - a validation pass whose
+                # Tasks all pass their integrity rows produces exactly the empty case. So the
+                # code that reports a QC failure was the thing that could not survive one.
+                "failed_gates": [g["gate"] for g in task.qc.failed()],
                 "cost_estimated": task.cost, "cost_measured": task.cost_measured,
                 "started_at": usage.get("started_at"),
                 "finished_at": usage.get("finished_at"),

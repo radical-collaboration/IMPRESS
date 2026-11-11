@@ -55,9 +55,14 @@ from typing import Any
 from ...core.decision import ValidationFailure
 from ...core.spec import Deferral, Spec, SpecObjective, Stage, TaskMapping
 from ...core.toolkit import TaskCard, ToolkitView
-from ..explicit import SELF_CONSISTENCY
 from ..planner import BasePlanner, PlanningContext
 from ._knobs import kind_of, step_up, tunable
+
+#: The mock self-consistency loop: generate a backbone, design a sequence for it, fold it,
+#: score it. The default chain for a campaign that declares none, and the harmless one -
+#: see `ThresholdPlanner.stages` for why the alternative is not "every tool in the Toolkit".
+#: It lived in the deleted `policy/explicit.py`, beside the policy that defaulted to it.
+SELF_CONSISTENCY = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
 
 #: How many escalation steps span a parameter's declared headroom. Four, so a refinement
 #: campaign reaches the declared maximum in four refinements rather than in one jump - the
@@ -311,4 +316,4 @@ class ThresholdPlanner(BasePlanner):
         return out
 
 
-__all__ = ["ESCALATION_STEPS", "ThresholdPlanner"]
+__all__ = ["ESCALATION_STEPS", "SELF_CONSISTENCY", "ThresholdPlanner"]

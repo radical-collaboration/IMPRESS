@@ -125,10 +125,47 @@ for _ in range(max(1, nstruct)):
 
 best.dump_pdb(out_pdb)
 scores = best.scores
-json.dump({
-    "total_score": best_score,
-    "fa_rep": scores.get("fa_rep", 0.0) if hasattr(scores, "get") else 0.0,
-}, open(result_json, "w"))
+metrics = {"total_score": best_score}
+
+# OMITTED, not defaulted. `scores.get("fa_rep", 0.0)` reported a fabricated zero for a term
+# Rosetta had not computed - and 0.0 is a PASSING fa_rep, so a broken score function read as
+# a perfectly packed structure. An adapter omits what it could not read; `metrics_reported`
+# is what turns that into an integrity failure.
+try:
+    metrics["fa_rep"] = float(scores["fa_rep"])
+except Exception as exc:
+    sys.stderr.write("fa_rep unavailable: %r\n" % (exc,))
+
+# Interaction energy between the ligand and everything else - the one number this stage
+# reports that measures BINDING rather than geometry, and it was never computed at all
+# (backlog G4). A converged, well-packed pose that does not bind was indistinguishable from
+# a real binder by anything the campaign measured.
+#
+# SELECTOR-BASED, so it is correct whatever the chain layout is. Upstream's own
+# `scripts/fastrelax.py` uses exactly this pair - ResiduePropertySelector(LIGAND) against
+# its complement - and that is the port: a `Chain chains="A"/"B"` split would only be right
+# if the ligand were its own chain, which is a property of the input rather than of the tool.
+try:
+    from pyrosetta.rosetta.core.simple_metrics.metrics import InteractionEnergyMetric
+    from pyrosetta.rosetta.core.select.residue_selector import (
+        NotResidueSelector, ResiduePropertySelector)
+    from pyrosetta.rosetta.core.chemical import ResidueProperty
+
+    ligand_sel = ResiduePropertySelector(ResidueProperty.LIGAND)
+    if not any(ligand_sel.apply(best)):
+        # No ligand residue: there is no interface to measure, and a number computed against
+        # an empty selection would be a confident zero. Omitted, loudly.
+        raise RuntimeError("no LIGAND-property residue in the pose")
+    metric = InteractionEnergyMetric()
+    metric.set_scorefunction(sfxn)
+    metric.set_residue_selectors(ligand_sel, NotResidueSelector(ligand_sel))
+    metric.apply(best)            # also records it in the pose's energies, as upstream does
+    metrics["interaction_energy"] = float(metric.calculate(best))
+except Exception as exc:
+    sys.stderr.write("interaction_energy unavailable: %r\n" % (exc,))
+phase("interaction_energy")
+
+json.dump(metrics, open(result_json, "w"))
 """
 
 _FILTER_SHAPE_WORKER = r"""
@@ -158,13 +195,83 @@ phase("pyrosetta.init")
 
 pose = pyrosetta.pose_from_pdb(in_pdb)
 phase("pose_from_pdb")
-xml = ('<SCOREFXNS/><RESIDUE_SELECTORS/>'
-       '<FILTERS><ShapeComplementarity name="sc" jump="1"/></FILTERS>')
-objs = pyrosetta.rosetta.protocols.rosetta_scripts.XmlObjects.create_from_string(xml)
-sc_filter = objs.get_filter("sc")
+
+# WHICH INTERFACE IS MEASURED (backlog G5). This was `jump="1"` with the default
+# scorefunction, and `jump="1"` assumes a particular chain and jump arrangement in the
+# relaxed pose: if the ligand is not across jump 1 the number is not wrong in an obvious way,
+# it is a shape complementarity between two parts of the protein. Upstream splits by chain
+# instead (`Chain chains="A"` against `Chain chains="B"`), which is right only when the ligand
+# is its own chain - a property of the input, not of the tool.
+#
+# So: the ligand RESIDUE PROPERTY against its complement, which is the same pair the
+# interaction_energy port uses and is correct whatever the chain layout is.
+#
+# `quick=False` is explicit because the default is Rosetta's, not ours, and quick mode is a
+# faster and less accurate SC - upstream sets it too. No scorefunction is built: this used to
+# declare `beta_nov16` so that a filter added later would inherit the same energy model, but
+# ShapeComplementarity is GEOMETRIC and takes no scorefunction, so it was decoration on a
+# construction that is now a Python call with nowhere to put it. A filter that needs an energy
+# model can build one where it is used.
+#
+# BUILT THROUGH THE PYTHON API, NOT A ROSETTASCRIPTS XML STRING. The XML was rejected outright
+# by this PyRosetta build's schema - `Element 'ResidueProperty': This element is not expected`
+# - so `filter_shape` could not run at all, 0 of 1 rows, and the chain stopped there with
+# `boltz_predict` never reached. It failed the same way it would on any build whose selector
+# schema differs, which is precisely the risk the old code's own comment named and could not
+# test: "this XML is the one part of the port that no local test can exercise."
+#
+# The Python route removes the schema from the path entirely, and it is the SAME pair of
+# selectors `interaction_energy` already builds this way a few lines above - so the two ports
+# now agree by construction rather than by two spellings being kept in step. Confirmed on job
+# 23670171's own relaxed pose: 1 ligand residue selected, SC = 0.612.
+from pyrosetta.rosetta.core.chemical import ResidueProperty as _ResidueProperty
+from pyrosetta.rosetta.core.select.residue_selector import (
+    NotResidueSelector as _NotResidueSelector,
+)
+from pyrosetta.rosetta.core.select.residue_selector import (
+    ResiduePropertySelector as _ResiduePropertySelector,
+)
+from pyrosetta.rosetta.protocols.simple_filters import (
+    ShapeComplementarityFilter as _ShapeComplementarityFilter,
+)
+
+try:
+    ligand_sel = _ResiduePropertySelector(_ResidueProperty.LIGAND)
+    sc_filter = _ShapeComplementarityFilter()
+    # Properties on this build, not `set_*` methods. Checked rather than assumed, because the
+    # whole reason this code changed is a contract that was assumed and was wrong.
+    sc_filter.selector1(ligand_sel)
+    sc_filter.selector2(_NotResidueSelector(ligand_sel))
+    sc_filter.quick(False)
+except Exception as exc:
+    # Loudly, never by falling back to a chain split: a fallback would keep producing numbers
+    # while measuring a different interface, and nothing downstream could tell.
+    sys.stderr.write("selector-based ShapeComplementarity could not be built: %r\n" % (exc,))
+    raise RuntimeError(
+        "filter_shape: the selector-based ShapeComplementarity filter failed to build. "
+        "Check ResiduePropertySelector/NotResidueSelector and ShapeComplementarityFilter's "
+        "selector1/selector2/quick against this PyRosetta build - see backlog G5. "
+        "Refusing rather than falling back to jump=1 or a chain split, which would "
+        "measure a different interface silently.")
+
+# An empty ligand selection means there is nothing to measure against. SC of a selection
+# against everything-but-nothing is a confident number about the wrong question.
+if not any(ligand_sel.apply(pose)):
+    raise RuntimeError(
+        "filter_shape: no LIGAND-property residue in the pose, so there is no "
+        "protein-ligand interface to measure. Check that -extra_res_fa was passed with the "
+        "ligand .params; without it the ligand is dropped by -ignore_unrecognized_res.")
+
 value = sc_filter.report_sm(pose)
 phase("ShapeComplementarity")
-json.dump({"shape_complementarity": value}, open(result_json, "w"))
+json.dump({
+    "shape_complementarity": value,
+    # Which interface produced the number, as a metric rather than a log line, so one real
+    # run settles G5 from provenance. 1.0 = the ligand-property selector pair above. A future
+    # change that reverts to a jump or chain split must report a different value here, or the
+    # harness cannot tell two campaigns' numbers apart.
+    "sc_selector_mode": 1.0,
+}, open(result_json, "w"))
 """
 
 

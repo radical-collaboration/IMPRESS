@@ -483,3 +483,43 @@ def test_reserving_and_settling_are_untouched_by_the_new_dimensions():
     assert led.would_exceed({"gpu_hours": 0.2}) == ["gpu_hours"]
     led.settle("r1", {"gpu_hours": 0.4})
     assert led.spent == {"gpu_hours": 0.4} and led.holds == {}
+
+
+def test_the_failed_gate_list_is_logged_in_the_shape_failed_actually_returns():
+    """The code that reports a QC failure must survive one.
+
+    `_log_task_telemetry` read `g.gate` over `QCReport.failed()`, which returns provenance
+    shaped DICTS - its own docstring says "in the form provenance records them", and the
+    executor's other caller records them whole. So the first task in the four-arm smoke that
+    actually failed a gate took the executor down with
+    `AttributeError: 'dict' object has no attribute 'gate'`, and three arms died inside their
+    allocation having already produced real work.
+
+    It survived everything before it because a comprehension over an EMPTY list never
+    dereferences: `failed_gates: []` is what a passing task logs, and nothing else had ever
+    been in there. `impress-a validate-tasks` could not have found it either - a validation
+    pass whose Tasks all pass their integrity rows produces exactly the empty case, so the
+    clean run that authorised the smoke was structurally incapable of exercising the line.
+
+    Asserted on `failed()`'s contract rather than through a campaign, so it holds whatever the
+    executor does around it: the elements are subscriptable dicts carrying `gate`, and a list
+    comprehension over them must not reach for an attribute.
+    """
+    report = QCReport()
+    report.add(GateResult(gate="has_secondary_structure", outcome=GateOutcome.FAIL,
+                          observed=0.1, threshold=0.5, role="integrity"))
+    report.add(GateResult(gate="metric_in_range[fa_rep]", outcome=GateOutcome.FAIL,
+                          observed=180.0, threshold=100.0, role="acceptance"))
+    report.add(GateResult(gate="ran", outcome=GateOutcome.PASS))
+
+    failed = report.failed()
+    assert len(failed) == 2, "only the FAIL rows belong in failed()"
+    assert all(isinstance(row, dict) for row in failed), \
+        "failed() returns dicts; a caller reaching for .gate crashes on the failure path"
+    assert [row["gate"] for row in failed] == \
+        ["has_secondary_structure", "metric_in_range[fa_rep]"]
+    # The exact expression the executor uses, which must not raise.
+    assert [g["gate"] for g in failed] == [row["gate"] for row in failed]
+    for row in failed:
+        assert {"gate", "role", "observed", "threshold", "detail"} <= set(row), \
+            "provenance shape - the harness reads these without a schema"

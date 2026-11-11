@@ -5,8 +5,8 @@ login node talking to an executor inside a batch allocation". Everything needed 
 was true - the surface is request/response, every value is serializable, the HTTP adapter
 carries the whole control plane - except that nothing implemented `CampaignSession` over
 that transport. A caller on the far side could submit and then poll, which is not the
-same thing: `SequentialPolicyDriver` blocks in `result()`, and a `conduct` reasoner
-collects with `as_completed`, and neither of those crossed the wire.
+same thing: a driver blocks in `result()`, a `conduct` reasoner collects with
+`as_completed`, and neither of those crossed the wire.
 
 The assertion that matters is the first one: an UNMODIFIED model-D policy, driven by the
 unmodified driver, reaches the same tree and the same Pareto front from outside the
@@ -35,8 +35,10 @@ from impress_a.core.session import (
     SubmissionRejected,
 )
 from impress_a.manager import CampaignManager, CampaignSpec
-from impress_a.policy.driver import SequentialPolicyDriver
-from impress_a.policy.explicit import ThresholdPolicy
+from impress_a.policy.planners import ThresholdPlanner
+from impress_a.policy.registry import RolePair
+from impress_a.policy.specifiers import ThresholdSpecifier
+from impress_a.runtime.roles import RolesDriver, goal_from_spec
 from impress_a.tools.registry import Registry
 
 CHAIN = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
@@ -78,6 +80,17 @@ async def _guarded(caller, plane, cid):
         await plane.stop(cid, "caller finished")
 
 
+def _pair():
+    """Model D's two halves - which, since phase 11, is what model D *is*.
+
+    `ThresholdPolicy` and the `decide(obs) -> Decision` contract are gone, so there is no
+    "unchanged policy" to drive over the wire any more. The claim this file exists for is
+    unchanged: where a reasoner runs is a deployment decision rather than an architectural
+    one, and the same reasoner must reach the same campaign from outside the process.
+    """
+    return RolePair(ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN))
+
+
 def _shape(nodes):
     """Compare campaigns by what they FOUND, not by the ids they minted.
 
@@ -115,14 +128,14 @@ def test_a_remote_session_is_a_campaign_session():
 
 
 async def test_an_unchanged_policy_reaches_the_same_campaign_out_of_process(reg, tmp_path):
-    """Model D, driven by the standard driver, over a socket - same result.
+    """Model D, driven by its own two halves, over a socket - same result.
 
     Both halves get their own campaign root so each starts from an empty trust ledger;
     sharing one would let the first campaign promote the pattern the second then runs
     under different scrutiny, and the comparison would be measuring the ledger.
     """
     reference = await CampaignManager(
-        _spec("t-parity", tmp_path / "in-process"), ThresholdPolicy(), reg).run()
+        _spec("t-parity", tmp_path / "in-process"), _pair(), reg).run()
 
     s = _spec("t-parity", tmp_path / "remote")
     mgr = CampaignManager(s, Idle(), reg)
@@ -134,11 +147,12 @@ async def test_an_unchanged_policy_reaches_the_same_campaign_out_of_process(reg,
             async with ControlPlaneClient(server.base_url) as api:
                 session = RemoteSession(api, cid, wait_s=10.0)
                 assert isinstance(session, CampaignSession)
-                # Exactly what `CampaignManager._reasoner()` builds in process, around a
-                # policy that has no idea it is not there.
-                await SequentialPolicyDriver(
-                    ThresholdPolicy(), max_turns=s.max_cycles,
-                    max_attempts=s.max_attempts,
+                # Exactly what `CampaignManager._reasoner()` builds in process, around
+                # halves that have no idea they are not there.
+                pair = _pair()
+                await RolesDriver(
+                    goal_from_spec(s), pair.specifier, pair.planner,
+                    max_turns=s.max_cycles, max_attempts=s.max_attempts,
                     concurrency=s.concurrency).conduct(session)
 
         t = asyncio.create_task(_guarded(drive, plane, cid))
@@ -147,7 +161,7 @@ async def test_an_unchanged_policy_reaches_the_same_campaign_out_of_process(reg,
 
     assert len(res.tree) == len(reference.tree) > 0
     assert _shape(res.tree) == _shape(reference.tree), \
-        "the same policy must explore the same design space from outside the process"
+        "the same halves must explore the same design space from outside the process"
     assert _shape(res.front) == _shape(reference.front), \
         "and rank it the same way"
     assert res.stop_reason == reference.stop_reason
@@ -352,50 +366,50 @@ async def test_the_rest_of_the_session_reaches_the_executor(reg, tmp_path):
         "a request for a human must reach the executor, not just the socket"
 
 
-class _RecordsInterpret(ThresholdPolicy):
-    """A model-D policy that writes down every outcome `interpret` is handed."""
-
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.interpreted: list[str] = []
-
-    async def interpret(self, results, obs):
-        self.interpreted.append(results.run_id)
-        return await super().interpret(results, obs)
-
-
-async def test_interpret_reaches_a_policy_on_the_far_side_of_the_socket(reg, tmp_path):
-    """The hook has to cross the wire, or a policy quietly changes behaviour remotely.
+async def test_a_remote_reasoner_sees_its_own_results(reg, tmp_path):
+    """The hook has to cross the wire, or a reasoner quietly changes behaviour remotely.
 
     This is the one thing the parity test could not catch. `interpret` was called by the
     executor, on the executor's OWN policy - which in a split campaign is the placeholder
     holding the allocation, not the reasoner that is deciding anything. So a policy that
-    accumulates across runs stopped accumulating the moment it moved out of process:
-    `ThresholdPolicy._stalled` stayed at 0, and the `Backtrack` it guards
-    (`explicit.py:53`) became unreachable. Nothing failed; the policy just silently
-    became a different policy.
+    accumulated across runs stopped accumulating the moment it moved out of process:
+    `ThresholdPolicy._stalled` stayed at 0 and the `Backtrack` it guarded became unreachable.
+    Nothing failed; the policy just silently became a different policy.
+
+    `interpret` is gone with the `decide` contract (phase 11), and what replaced it is the
+    structural fix rather than a hook: the **Listener** collects every outcome and ingests it
+    into its own `DataRegistry`, so a reasoner's view of its results is built on its own side
+    of the socket and the executor never reaches into a reasoner at all. That is
+    `policy/driver.py`'s own ruling about who collects an outcome, surviving the driver's
+    deletion - so this test asserts the same property against the mechanism that holds it.
     """
-    s = _spec("t-remote-interpret", tmp_path, max_cycles=3)
+    s = _spec("t-remote-ingest", tmp_path, max_cycles=3)
     mgr = CampaignManager(s, Idle(), reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
-    pol = _RecordsInterpret()
+    driver: list = []
 
     async with ControlPlaneServer(plane) as server:
         async def drive():
             async with ControlPlaneClient(server.base_url) as api:
-                await SequentialPolicyDriver(
-                    pol, max_turns=s.max_cycles, max_attempts=s.max_attempts,
-                    concurrency=s.concurrency).conduct(
-                        RemoteSession(api, cid, wait_s=10.0))
+                pair = _pair()
+                d = RolesDriver(goal_from_spec(s), pair.specifier, pair.planner,
+                                max_turns=s.max_cycles, max_attempts=s.max_attempts,
+                                concurrency=s.concurrency)
+                driver.append(d)
+                await d.conduct(RemoteSession(api, cid, wait_s=10.0))
 
         t = asyncio.create_task(_guarded(drive, plane, cid))
         await asyncio.wait_for(mgr.run(), timeout=180)
         await t
 
-    assert pol.interpreted, \
-        "interpret never reached the remote policy - the reasoner is not seeing its own results"
-    assert len(pol.interpreted) == len(set(pol.interpreted)), \
-        f"interpret called twice for the same run: {pol.interpreted}"
-    assert mgr.executor.policy is not pol, \
+    assert driver, "the remote driver never started"
+    data = driver[0].data
+    assert data.realized, \
+        "the remote reasoner ingested nothing - it is not seeing its own results"
+    runs = [d.from_run for d in data.realized if d.from_run]
+    assert runs, "no datum records which run produced it"
+    assert len(set(runs)) == len({r["run"] for r in mgr.prov.read("executions")}), \
+        f"the reasoner saw {sorted(set(runs))} of the runs the executor settled"
+    assert mgr.executor.policy is not driver[0], \
         "the placeholder, not the reasoner, is what the executor holds - the point of the test"

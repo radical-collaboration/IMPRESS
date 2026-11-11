@@ -5,7 +5,8 @@ Working notes on what is being built and why. Not shipping reference — `docs/`
 | | |
 |---|---|
 | [`backlog.md`](backlog.md) | **The live list.** Everything outstanding, grouped, with a recommended order |
-| [`control-plane-refactor.md`](control-plane-refactor.md) | **The exception to the row below: a full plan, approved and being executed.** The Spec/Planning/Execution split, the Specifier/Planner halves of the four reasoners, and the four-arm experiment. Eleven phases in four branch groups |
+| [`control-plane-refactor.md`](control-plane-refactor.md) | **The exception to the row below: a full plan, approved and EXECUTED.** The Spec/Planning/Execution split, the Specifier/Planner halves of the four reasoners, and the four-arm experiment. All eleven phases are landed; what remains of it is the experiment itself, which needs an allocation |
+| [`arms-preregistration.md`](arms-preregistration.md) | **Frozen before any arm runs.** The four-arm comparison's endpoint, tiers, distinctness rule, decision rule, prerequisite gate and go/no-go. Its sha256 is recorded in every arm's `manifest.json`, and `impress-a compare` refuses to publish a comparison whose arms disagree about it |
 | `*.md` (this directory) | Stubs for the next tracks — enough to start from, not full plans |
 | [`done/`](done/) | Completed work, kept for the decisions it records |
 

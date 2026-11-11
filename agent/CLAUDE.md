@@ -22,6 +22,12 @@ pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
 
 impress-a tools                                      # list registered tools
 impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, BEFORE sbatch
+impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and check it, ON
+#   hardware. Exits non-zero if any Task fails an INTEGRITY row; an acceptance row that falls
+#   short does not fail it (a weak design is not a broken Task). This is what justifies
+#   `impress-a trust --assert`, whose --reason cites the job id.
+#   On Delta: sbatch --partition=gpuA40x4-interactive --time=00:40:00 \
+#                    scripts/delta_validate_tasks.sh campaigns/<spec>.yaml
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
 #   --control roles          the Specifier/Planner halves rather than the legacy `decide`
@@ -84,7 +90,8 @@ Each exists because of a specific failure mode. Details in `docs/reference/archi
 | Pattern signatures ignore **parameter values** — shape only | `compose/graph.py` | Otherwise every parameter tweak resets a pattern's accumulated trust |
 | A measurement **supersedes but never deletes** a prediction | `core/tree.ingest_measurement` | The predicted-vs-measured gap is the surrogate-calibration signal |
 | The Pareto front is **not monotonic** once measurements arrive | `core/pareto.py` | A node promoted on an optimistic prediction can be demoted by its own assay |
-| Rejection triggers **bounded retry per experiment**, not a discarded cycle | `policy/driver.py` *and* an independent cap in `runtime/executor.py` | `on_rejected` hands the policy a reason and another attempt. The executor caps admissions separately, because a `conduct` reasoner is under no obligation to honour `max_attempts` |
+| Rejection triggers **bounded retry per experiment**, not a discarded cycle | `runtime/roles.py::_deploy` *and* an independent cap in `runtime/executor.py` | `Planner.replan` is handed the gate and the reason and gets another attempt. The executor caps admissions separately, because a `conduct` reasoner is under no obligation to honour `max_attempts` |
+| A reasoner is a **Specifier/Planner pair or a `conduct` implementation**, never a third thing | `manager.py::_reasoner` raises `TypeError` otherwise | `decide(obs) -> Decision` answered what the campaign is for and which tool runs next in one call, so no transcript could say which half earned a model its cost. Deleted in phase 11, with `CampaignSpec.control` - there is one vocabulary now. `tests/test_layering.py::test_no_module_defines_decide` is the mechanical proof |
 | `execute()` is not overridden by tool adapters | `tools/agent.py` | Pattern dispatch belongs to the exec layer; overriding bypasses P6-inline and P4-ledger rules |
 | A tool's `outputs` are **typed `ArtifactRef`s**, never bare strings | `tools/agent.py::_as_artifacts` | The type comes from the spec's declared port, so a handle cannot disagree with what the composer type-checked. Return a `Path` for a file |
 | An **untrusted** pattern has at most one instance in flight | `runtime/executor.py::_admit_once` | Promotion counts *consecutive* clean runs; concurrent instances are one draw sampled N times |

@@ -1,0 +1,143 @@
+# THE FOUR-ARM SMOKE. Identical science to `delta-small-molecule-arms.yaml`, differing ONLY in
+# how long it runs and what it may spend - which is the point: a smoke that differs in the
+# science proves nothing about the run it is a smoke for.
+#
+# Width 4 ON PURPOSE. This is the first execution of `replicas > 1` anywhere, and it is the
+# production shape, so the thing most likely to be silently wrong is exercised before four
+# hours per arm depend on it: four `DesignNode`s per run with DISTINCT metrics, four distinct
+# GPU indices, and at least two GPUs busy at once.
+#
+#   sbatch --array=0-3 --partition=gpuA40x4 --time=01:00:00 \
+#          --job-name=impress_a_arms_smoke scripts/delta_gpu_run.sh \
+#          campaigns/delta-small-molecule-arms-smoke.yaml
+#
+# AND NOT BEFORE step 1 and step 2 of `plans/arms-preregistration.md`:
+#   1. `sbatch --partition=gpuA40x4-interactive --time=00:40:00 \
+#              scripts/delta_validate_tasks.sh campaigns/delta-small-molecule-arms-smoke.yaml`
+#      Every Task of the chain, executed once on real hardware and checked. Non-zero exit on
+#      any integrity row stops the experiment here.
+#   2. `impress-a trust --assert ... --replicas 1 --replicas 4 --reason "... job <id> clean"`
+#      per arm, citing step 1's job id. Asserting trust on Tasks nobody ran would be asserting
+#      trust in code nobody ran.
+#
+# `scripts/delta_gpu_run.sh` derives `MODEL` from `SLURM_ARRAY_TASK_ID` and appends it to
+# `campaign_id`, so four arms share one spec file and keep four separate output trees. One
+# submission means one submit time and one priority; `--array` is the right device for that.
+#
+# READ `plans/arms-preregistration.md` BEFORE SUBMITTING. The endpoint, the tiers, the
+# distinctness rule, the decision rule and the go/no-go are frozen there, and its sha is
+# recorded in every arm's `manifest.json` as `prereg_sha`. A comparison whose rules were
+# chosen after the numbers arrived is not a comparison.
+#
+# HELD IDENTICAL ACROSS ARMS: this file (its sha256 is recorded, and `impress-a compare`
+# refuses to publish if the four disagree), the target and ligand, every threshold, the git
+# sha and dirty flag, ONE seed salt, the budget, `replicas`, `concurrency`, `max_cycles`,
+# `stagnation_limit`, the partition/nodes/GPUs/cores/memory/wall clock, the submit time and
+# priority, the thread caps, and four trust ledgers pre-seeded identically.
+# VARIED: exactly the `--model` letter.
+#
+# Target: ALR, a sulfonated azo-dye ligand, from the reference `small_molecule_binding`
+# example. The ligand resname is the literal `A:R`, not `ALR` - RFD3 misresolves the bare
+# code and the colon is a deliberate, verified workaround (see CLAUDE.md).
+campaign_id: delta-small-molecule-arms-smoke
+goal: "Design at least ten distinct small-molecule binders meeting every declared threshold"
+backend: dragon
+backend_config: {}
+backend_startup_timeout_s: 600
+backend_startup_heartbeat_s: 30
+backend_shutdown_timeout_s: 300
+# Arm C runs as `impress-a serve --model C` with a caller steering it, so the liveness
+# timeout is not what bounds that arm; it matters for any arm driven from a control process.
+control_liveness_timeout_s: 120
+tool_delivery: real
+
+# `max_cycles: 200` with `stagnation_limit: 201`, and both numbers need their reason on the
+# record (they are the two the pre-registration calls out).
+#
+# 6 cycles in a one-hour allocation: enough to see a refinement cycle follow an exploring one,
+# and short enough that an arm which cannot reach three cycles in forty minutes is a finding
+# rather than an unlucky queue. The production spec's 200 is what cannot bind.
+#
+# `stagnation_limit > max_cycles` is NOT the fix backlog G1 forbids. G1's complaint is that
+# raising the limit HIDES a defect in the engine's notion of progress, and the
+# characterization tests that pin the fix are untouched. This removes stagnation from the role
+# of a stopping rule and records `_stagnant` per cycle as a DEPENDENT VARIABLE - necessary
+# because the front will likely stay empty (most nodes miss `complex_plddt >= 0.75`), so at
+# the shipped limit an arm would end about fifteen minutes into a four-hour allocation.
+max_cycles: 6
+stagnation_limit: 7
+# Ten is the target; the rate is the endpoint. 0 would leave each model its own default of 3,
+# which is a demo's number and an arbitrary cap on a campaign asked for ten.
+# 10 here too, so the smoke cannot stop for a reason the production run would not.
+target_front: 10
+site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+
+# Sized so that NEITHER gate 5 NOR the interlock's 10%-of-available cap can bind (backlog
+# A11's instruction, which is to raise the budget rather than retune a cost model). One
+# width-4 pass of this chain declares ~0.68 gpu-h and ~3.1 cpu-h at the eight-sample setting;
+# the 10% caps here are 2.0 and 1.5, so an untrusted admission has ~3x gpu headroom and would
+# be refused on cpu - which is exactly why trust is ASSERTED before this runs, and why a
+# `budget` or `interlock` rejection here means the assertion did not take.
+# Trust is asserted before the run anyway, so the cap should never be reached - a rejection
+# at `budget` or `interlock` in these arms means the sizing or the assertion is wrong, and the
+# smoke's abort criteria say to stop and fix rather than proceed.
+budget:
+  gpu_hours: 20.0
+  cpu_hours: 15.0
+
+stages: [rfd3_design, ligandmpnn_design, packmin, fastrelax, filter_shape, boltz_predict]
+params:
+  rfd3_design:
+    input_spec_path: "data/alr/ALR_binder_design.json"
+    # STAYS AT 1, and this is the one tool where that is still the honest setting at the
+    # eight-sample operating point. LigandMPNN and Boltz select the best member of their own
+    # ensemble, so raising their sampling pays; rfd3's adapter still keeps `cif_models[0]`,
+    # and selecting among its designs needs the sidecar `*_model_*.json`'s metric NAMES
+    # confirmed against a real out_dir (backlog G2's remaining half, which `validate-tasks`
+    # will resolve from the adapter's log). Until then, 8 would pay 8x for one design.
+    num_designs: 1
+    diffusion_steps: 50
+  ligandmpnn_design:
+    fixed_residues: "A16"
+    # ONE WIDE BATCH, not several narrow ones: `batch_size` is candidates per pass and is
+    # near-free on a GPU until memory, while `number_of_batches` is serial passes and linear
+    # in time. Both are the spec's own defaults; stated here so an arm's parameter vector is
+    # legible in one file rather than inferred from three spec files.
+    batch_size: 8
+    number_of_batches: 1
+  packmin:
+    ligand_params_path: "data/alr/ALR.params"
+  fastrelax:
+    ligand_params_path: "data/alr/ALR.params"
+    # STAYS AT 1 pending a measurement, and this is the deliberate exception to the
+    # eight-sample setting. `nstruct` is 8 SERIAL CPU trajectories, not a GPU batch, so its
+    # cost scales LINEARLY where the three GPU tools are close to sublinear - and
+    # `cost_model.cost` (0.03 cpu-h, ~4x a measured 25.9 s) would then sit below measurement,
+    # at which point `impress-a validate-tasks` fails the Task and gate 5 starts refusing real
+    # work. Raising it requires re-deriving that figure from a measurement, which is what the
+    # smoke is for; raising it now would make the smoke fail its own cost check for a reason
+    # already known.
+    nstruct: 1
+  filter_shape:
+    ligand_params_path: "data/alr/ALR.params"
+  boltz_predict:
+    ligand_smiles: "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12"
+    # Batched co-folding, and the adapter selects the best sample by `complex_plddt` - which
+    # is what makes raising this pay rather than cost 8x for one answer. The spec's default.
+    diffusion_samples: 8
+
+# Width 4 and one experiment in flight. Four independent lineages per cycle is the production
+# shape and the first execution of `replicas > 1` on hardware; `concurrency: 1` keeps the
+# serial cycle every parity test was written against, so an arm's cycle count is comparable.
+replicas: 4
+concurrency: 1
+
+# The objectives an arm steers by are the thresholds it is JUDGED on, which is the point of
+# closing backlog G4: `complex_plddt` is 0.75 here, not the 0.5 the gates used to carry, so
+# the front's feasibility filter is not slacker than the acceptance gate. An arm optimising a
+# weaker target than the one it is scored against would be a comparison of two things.
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

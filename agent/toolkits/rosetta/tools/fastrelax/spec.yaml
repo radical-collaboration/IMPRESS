@@ -17,18 +17,47 @@ parameters:
   # Without it, pose_from_pdb() on a PDB containing a non-standard ligand HETATM residue
   # will raise (confirmed: old IMPRESS's fastrelax.py always passes this).
   ligand_params_path: {type: str, default: ""}
-metrics: [total_score, fa_rep]
+metrics: [total_score, fa_rep, interaction_energy]
 qc_gates:
   - {id: output_present, params: {key: result}}
   # Convergence, and integrity on purpose: a relax that cannot reach a negative score, or
   # leaves heavy repulsion, has not relaxed. These two gates are also the ONLY judgement of
   # whether packmin's pose blew up - packmin no longer bounds its own pre-relax score
-  # (see packmin/spec.yaml, job 22726105 r0004).
+  # (see packmin/spec.yaml, job 22726105 r0004). The bounds stay WIDE deliberately: they are
+  # divergence detectors, not quality thresholds, and the quality thresholds are below.
   - {id: metric_in_range, params: {metric: total_score, max: 0.0}}
   - {id: metric_in_range, params: {metric: fa_rep, max: 500.0}}
-# Measured on job 22684607 (NVMe, 1 node): 25.9s = 0.0072 h. Declared 0.5 was
-# 69x that - a literature guess, and on the gpu dimension those guesses summed
-# past the interlock's 10%-of-budget cap and got boltz_predict truncated off the chain.
-# 0.03 keeps ~4x headroom: one run is one sample, and this figure feeds a gate
-# that REFUSES graphs, so it should err high - just not by two orders of magnitude.
-cost_model: {unit: invocation, cost: {cpu_hours: 0.03}}
+  # The integrity half of every acceptance gate below (decision 0013). An adapter that could
+  # not compute a value must OMIT it, and then this - not a threshold - is what catches it:
+  # a fabricated 0.0 would turn "the tool broke" into "the design is weak", and an acceptance
+  # failure does not count against a pattern's trust. `interaction_energy` is here because it
+  # is the one metric this tool reports that measures BINDING rather than geometry, and it was
+  # not computed at all until phase 10.
+  - {id: metrics_reported,
+     params: {metrics: [total_score, fa_rep, interaction_energy]}}
+  # ---- acceptance: upstream's own calibrated PROD values (backlog G4) -------------------
+  # From examples/small_molecule_binding's PROD profile, which has months of multi-node
+  # campaigns behind it: `relax_max_total_score: -250.0`, `relax_max_fa_rep: 100.0`,
+  # `relax_max_interaction_energy: -8.0`. Two gates on one metric with different roles is
+  # exactly what decision 0013 is for: +1500 means the tool broke, -12 means the design fell
+  # short, and only the first should cost a pattern its trust.
+  #
+  # Job 22692304 - this project's best run, `6/6 tasks ok` - FAILS two of these (fa_rep 109.4
+  # against 100) and was unscorable on the third. That is the point of closing G4: the figures
+  # a campaign steers by and the figures it is judged on were different numbers.
+  - {id: metric_in_range, role: acceptance, params: {metric: total_score, max: -250.0}}
+  - {id: metric_in_range, role: acceptance, params: {metric: fa_rep, max: 100.0}}
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: interaction_energy, max: -8.0}}
+# COST IS CPU-HOURS, WHICH IS WALL x CORES - and this figure was computed as wall alone.
+# That is a units error, not a stale measurement, and it ran through every cpu_hours tool in
+# this toolkit: each comment divided seconds by 3600, called the result cpu_hours, and then
+# multiplied by a headroom factor that was therefore 8x smaller than it looked. The
+# executor measures the ratio the right way, so `impress-a validate-tasks` on job 23670171
+# failed fastrelax at measured/declared = 2.38 - a declared figure BELOW measurement, which
+# is the direction that makes gate 5 and the untrusted-pattern cap refuse work that fits.
+# Measured: 32.1s x 8 cores = 0.0713 cpu-h (job 23670171). Declared 0.25 = 3.5x.
+# 3.5x, matching the 3.2x wall-time swing this project has measured between two
+# runs of one tool on one allocation (CLAUDE.md, backlog A11). One sample is one
+# sample, and this figure feeds a gate that REFUSES graphs.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.25}}

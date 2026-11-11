@@ -1,8 +1,16 @@
-"""The five validation gates plus dry-run.
+"""The six validation gates plus dry-run.
 
 Rejection at any gate produces a structured ValidationFailure returned to the policy via
 `on_rejected`. A rejected graph costs one cycle - that is what makes free composition
 affordable to get wrong (Part B doc 05).
+
+**Gate 6 is `tool_delivery`, and it is a gate rather than a guard deliberately.** Backlog E1:
+`sites/*.yaml` has carried a `tool_delivery: {default: real|mock}` switch read by no code since
+it was written - the very switch that would have prevented a documented mock-chain-on-a-GPU
+run. The campaign spec is where it belongs, because `cli.load_spec` already reads that file and
+a `sites/` key nobody reads is how it stayed inert; and it is a **gate** because
+`RuleCorrectionsPolicy(forbid_tools=...)` is bypassed by `--no-guard`, and the one thing that
+must not be switchable from the command line is "is this real".
 """
 from __future__ import annotations
 
@@ -24,12 +32,18 @@ class SiteCaps:
 
 
 class Validator:
-    def __init__(self, reg: Registry, site: SiteCaps, budget: BudgetLedger):
+    def __init__(self, reg: Registry, site: SiteCaps, budget: BudgetLedger,
+                 tool_delivery: str = "any"):
         self.reg, self.site, self.budget = reg, site, budget
+        #: `real` refuses a graph containing a tool from the `mock` toolkit; `mock` refuses one
+        #: containing anything else; `any` (the default) refuses neither, which is what every
+        #: existing campaign gets. Defaulting to `real` would be the safer-looking choice and
+        #: would break the whole mock test tier, so a campaign that cares says so.
+        self.tool_delivery = tool_delivery
 
     def validate(self, g: TaskGraph) -> ValidationFailure | None:
         for gate in (self._g1_types, self._g2_structure, self._g3_params,
-                     self._g4_resources, self._g5_budget):
+                     self._g4_resources, self._g5_budget, self._g6_delivery):
             if (f := gate(g)) is not None:
                 return f
         return None
@@ -140,6 +154,34 @@ class Validator:
                 detail={"estimate": est,
                         "remaining": {d: self.budget.remaining(d) for d in blown}})
         return None
+
+    # -- gate 6: tool delivery ---------------------------------------------
+    def _g6_delivery(self, g: TaskGraph) -> ValidationFailure | None:
+        """Is this campaign running real tools, and does the graph agree (backlog E1)?
+
+        The failure this exists for is documented and silent: a mock chain completes
+        `6/6 tasks ok` with plausible metrics on a GPU allocation, and nothing in the campaign
+        log says the designs were invented. `mock_noodle` goes further - it reports a
+        confident `designability` for a structure with no secondary structure - so a mock run
+        is not merely uninformative, it produces numbers a reader would act on.
+
+        Checked against `ToolSpec.toolkit`, not against a tool-id prefix: a name beginning
+        `mock_` is a convention, and the toolkit a spec declares is a fact.
+        """
+        if self.tool_delivery not in ("real", "mock"):
+            return None
+        want_real = self.tool_delivery == "real"
+        wrong = sorted({node.tool for node in g.nodes.values()
+                        if (self.reg.get(node.tool).toolkit == "mock") is want_real})
+        if not wrong:
+            return None
+        return ValidationFailure(
+            gate="tool_delivery",
+            reason=(f"campaign declares tool_delivery: {self.tool_delivery}, and this graph "
+                    f"uses {'mock' if want_real else 'real'} tool(s) {wrong}"),
+            detail={"tool_delivery": self.tool_delivery, "offending_tools": wrong,
+                    "hint": ("a mock chain completes with plausible metrics and invented "
+                             "designs; set tool_delivery: any to allow both")})
 
     async def dry_run(self, g: TaskGraph) -> ValidationFailure | None:
         """Every task agent parameterizes WITHOUT executing."""

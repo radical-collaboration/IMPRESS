@@ -42,10 +42,25 @@ def evaluate(spec: ToolSpec, out: dict[str, Any]) -> QCReport:
 
     The one place a QCReport is built from a spec - `TaskAgent.post_process` and the
     fixture tests both call this, so the fixtures test exactly what runs.
+
+    **A label that two gates would share gets its role appended.** Decision 0013's whole
+    point is that one metric can carry two gates with different roles and different bounds -
+    `total_score <= 0.0` means the relax diverged, `total_score <= -250` means the design
+    fell short - and `metric_in_range` labels itself by metric alone, so both results came
+    back as `metric_in_range[total_score]`. A `QCReport`'s gates are read as a set in several
+    places, so the two collapsed into one and a report could not say which had fired:
+    "the tool broke" and "the design is weak" became the same sentence. Suffixed only on
+    collision, so no existing label changes.
     """
     qc = QCReport()
-    for g in spec.qc_gates:
-        qc.add(get(g.id)(out, g.params).model_copy(update={"role": g.role}))
+    results = [get(g.id)(out, g.params).model_copy(update={"role": g.role})
+               for g in spec.qc_gates]
+    seen: dict[str, int] = {}
+    for r in results:
+        seen[r.gate] = seen.get(r.gate, 0) + 1
+    for r in results:
+        qc.add(r.model_copy(update={"gate": f"{r.gate} ({r.role})"})
+               if seen[r.gate] > 1 else r)
     return qc
 
 

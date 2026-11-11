@@ -1,10 +1,10 @@
 {
-  "why": "A properly relaxed complex. Chosen to clear UPSTREAM's calibrated PROD thresholds too (total_score < -250, fa_rep < 100), not merely ours - so the good fixture is not itself a quiet example of backlog G4.",
+  "why": "A properly relaxed, binding complex. Clears every gate including upstream's calibrated PROD values (total_score < -250, fa_rep < 100, interaction_energy < -8), so the good fixture is not itself a quiet example of the thing backlog G4 was about.",
   "failing_gates": [],
   "output": {
     "result": "structure",
     "count": 1,
     "outputs": {},
-    "metrics": {"total_score": -318.2, "fa_rep": 92.0}
+    "metrics": {"total_score": -318.2, "fa_rep": 92.0, "interaction_energy": -14.6}
   }
 }

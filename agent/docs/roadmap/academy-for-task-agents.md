@@ -13,7 +13,7 @@ re-derived, and the three properties of the current design that keep the option 
 | Layer | Decision | Status |
 |---|---|---|
 | Outer loop and campaign state | **LangGraph** | Decided |
-| Control model A's four-node loop | **LangGraph** `StateGraph` | Implemented — `src/impress_a/policy/agentic.py` |
+| Control model A's four-node loop | **LangGraph** `StateGraph` | Implemented — `src/impress_a/policy/specifiers/agentic.py` + `planners/agentic.py` |
 | **Task agents** (per-tool: pre-process → parameterize → execute → post-process) | **Open** | Currently plain Python classes (`src/impress_a/tools/agent.py`) |
 
 The task-agent layer is where Academy would attach, if anywhere. It is deliberately the

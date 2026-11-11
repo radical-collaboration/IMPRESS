@@ -1,0 +1,11 @@
+{
+  "why": "JOB 22692304'S REAL NUMBERS - this project's best run, `6/6 tasks ok`, admitted on the first attempt with every stage passing its gates - as a known-bad fixture for the raised fold gate. complex_plddt 0.507 against the 0.75 bar that upstream's PROD has always used (`fold_min_plddt: 75.0` on a 0-100 figure). Every recorded complex_plddt in this project is 0.426 / 0.486 / 0.507: 0 of 3, which is a missing mechanism rather than bad luck, and is why phase 8 built the refinement loop before phase 10 raised the bar. It fails one acceptance gate and no integrity gate, so `acceptance_only` is set: the tool worked exactly as it should and the design is not good enough.",
+  "acceptance_only": true,
+  "failing_gates": ["metric_in_range[complex_plddt]"],
+  "output": {
+    "result": "complex",
+    "count": 1,
+    "outputs": {},
+    "metrics": {"complex_plddt": 0.507, "ligand_iptm": 0.752}
+  }
+}

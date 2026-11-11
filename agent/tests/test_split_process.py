@@ -18,9 +18,11 @@ What the split buys, and what these assert:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import sys
+import time
 
 import pytest
 import yaml
@@ -33,8 +35,6 @@ from impress_a.control.session import RemoteSession
 from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.manager import CampaignManager, CampaignSpec
-from impress_a.policy.explicit import ThresholdPolicy
-from impress_a.policy.legacy import DecideAsRoles
 from impress_a.policy.planner import PlanningContext
 from impress_a.policy.planners import ExternalPlanner, ThresholdPlanner
 from impress_a.policy.registry import RolePair
@@ -63,7 +63,7 @@ def _spec(cid, tmp_path, **kw):
         budget={"gpu_hours": 40.0, "cpu_hours": 200.0},
         site=SiteCaps(gpu_api="cuda", gpus_per_node=1), backend="concurrent",
         backend_config={"workers": 3}, root=str(tmp_path),
-        trust_root=str(tmp_path / f"trust-{cid}"), stages=CHAIN, control="roles", **kw)
+        trust_root=str(tmp_path / f"trust-{cid}"), stages=CHAIN, **kw)
 
 
 class _Idle:
@@ -112,7 +112,7 @@ async def test_the_roles_drive_a_campaign_over_a_socket(reg, tmp_path):
     `CampaignSession` in phase 1 rather than against the executor.
     """
     local = await CampaignManager(
-        _spec("t-local", tmp_path, max_cycles=3), ThresholdPolicy(), reg).run()
+        _spec("t-local", tmp_path, max_cycles=3), RolePair(*_halves()), reg).run()
 
     # Built with the same bounds `CampaignManager._roles()` gives the in-process driver, so
     # the only difference between the two campaigns is the transport.
@@ -128,8 +128,13 @@ async def test_the_roles_drive_a_campaign_over_a_socket(reg, tmp_path):
 
 
 def _halves():
-    pair = DecideAsRoles(ThresholdPolicy())
-    return pair.specifier, pair.planner
+    """Model D's two halves - which, since phase 11, is what model D *is*.
+
+    These tests used to drive `DecideAsRoles(ThresholdPolicy())`, a `ControlPolicy` presented
+    as a pair, so that the split could be shown to change nothing before anything moved. The
+    strangler is finished and the adapter is gone; the pair is the real one.
+    """
+    return ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN)
 
 
 async def test_the_pump_reaps_while_the_control_side_is_slow(reg, tmp_path):
@@ -330,9 +335,7 @@ async def test_naming_c_as_either_half_is_refused_too():
 
 
 # ---------------------------------------------------------------------------
-# The real halves over the wire. Everything above drives `DecideAsRoles` - a
-# `ControlPolicy` presented as a pair - which proves the transport and nothing about the
-# halves phase 9 actually built.
+# The real halves over the wire, in one process and across a socket.
 # ---------------------------------------------------------------------------
 
 async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_path):
@@ -351,7 +354,7 @@ async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_pa
 
     remote = await _drive_remotely(
         reg, _spec("t-halves-remote", tmp_path, max_cycles=3),
-        lambda goal: RolesDriver(goal, *_role_halves(), max_turns=3, max_attempts=4,
+        lambda goal: RolesDriver(goal, *_halves(), max_turns=3, max_attempts=4,
                                  concurrency=1))
 
     assert _shape(remote.tree.nodes.values()) == _shape(local.tree.nodes.values()), \
@@ -359,10 +362,6 @@ async def test_a_models_own_halves_reproduce_the_in_process_campaign(reg, tmp_pa
     assert remote.cycles == local.cycles
     assert remote.stop_reason == local.stop_reason
     assert len(remote.front) == len(local.front)
-
-
-def _role_halves():
-    return ThresholdSpecifier(), ThresholdPlanner(stages=CHAIN)
 
 
 async def test_an_external_caller_steers_both_halves_over_the_socket(reg, tmp_path):
@@ -431,7 +430,7 @@ async def test_an_unaddressed_half_is_refused_with_its_reason_over_http(reg, tmp
     silently dropping them would report an arm as externally steered while it steered itself.
     """
     spec = _spec("t-unroutable", tmp_path, max_cycles=1)
-    mgr = CampaignManager(spec, RolePair(*_role_halves()), reg)
+    mgr = CampaignManager(spec, RolePair(*_halves()), reg)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
 
@@ -439,3 +438,120 @@ async def test_an_unaddressed_half_is_refused_with_its_reason_over_http(reg, tmp
     assert answer["accepted"] is False
     assert "takes no external directives" in answer["reason"]
     assert "threshold-plan" in answer["reason"], "it must say which half refused"
+
+
+async def test_serve_binds_loopback_on_an_ephemeral_port_and_writes_the_url(reg, tmp_path):
+    """The whole boundary this arrangement can defend, asserted against a real `serve`.
+
+    The plane has no auth and no TLS (backlog C7), and ADR 0014 settles that for exactly this
+    configuration: both ends on one compute node, bound to loopback. So three things have to
+    hold, and one was briefly broken by the launcher.
+
+    **Loopback**, because a host-reachable plane with no auth is a different proposition.
+    **An ephemeral port**, because a fixed one is guessable, collides with a second `serve` on
+    the same node, and is the one piece of this arrangement an unrelated process could find
+    without looking - the Delta launcher pinned it to 8711 for one commit, which was a
+    regression against this default. **And the URL in a 0600 file**, so a sidecar reads it
+    rather than being told a number.
+
+    What none of this defends against is another process of the SAME user, and a token would
+    not either: the same user can read the token. What rules that out is the node being the
+    job's, which is a property of the resource request rather than of this code.
+    """
+    import os
+    import stat
+
+    from impress_a.cli import serve_campaign
+
+    spec_file = tmp_path / "c.yaml"
+    spec_file.write_text(
+        "campaign_id: t-serve-url\ngoal: g\nbackend: concurrent\n"
+        "backend_config: {workers: 1}\nmax_cycles: 1\nstages: [mock_generate]\n"
+        f"root: {tmp_path / 'runs'}\n"
+        f"trust_root: {tmp_path / 'trust'}\n"
+        "objectives:\n  - {name: ss_fraction, direction: maximize, min: 0.1}\n")
+
+    # No --model, so the campaign is served with no reasoner and ends on the liveness path or
+    # its own cycle bound. What is under test is the socket it opened, not the science.
+    served = asyncio.create_task(serve_campaign(str(spec_file)))
+    url_file = tmp_path / "runs" / "t-serve-url" / "control_plane.url"
+    for _ in range(200):
+        if url_file.is_file():
+            break
+        await asyncio.sleep(0.05)
+    assert url_file.is_file(), "serve must write the URL where a sidecar can read it"
+
+    url = url_file.read_text().strip()
+    assert url.startswith("http://127.0.0.1:"), \
+        f"a plane with no auth must bind loopback, got {url}"
+    port = int(url.rsplit(":", 1)[1].rstrip("/"))
+    assert port not in (0, 8711), (
+        f"port {port} is either unassigned or the fixed one the launcher briefly pinned; an "
+        f"ephemeral port is the hardening")
+    assert stat.S_IMODE(os.stat(url_file).st_mode) == 0o600, \
+        "the url file must be owner-only - it is the whole of what a caller needs"
+
+    served.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await served
+
+
+def test_the_launcher_does_not_pin_the_control_planes_port():
+    """The regression this file's test above describes, pinned at its source.
+
+    `serve`'s own default is an ephemeral port. The launcher passed `--port 8711` for one
+    commit, which replaced a hardening with a guessable constant - and a launcher flag is
+    exactly where such a thing survives, because nothing about the server would look wrong.
+    """
+    import pathlib
+
+    launcher = pathlib.Path("scripts/delta_gpu_run.sh").read_text()
+    serve_branch = launcher.split("    serve)")[1].split(";;")[0]
+    code = "\n".join(line.split("#", 1)[0] for line in serve_branch.splitlines())
+    assert "--port" not in code, \
+        "the launcher must not pin the port: serve's ephemeral default is the hardening"
+    assert "--host" not in code, \
+        "nor the host: loopback is the only boundary a plane with no auth can defend"
+
+
+async def test_the_liveness_bound_is_armed_only_for_a_registered_campaign(reg, tmp_path):
+    """An in-process campaign has no control plane, so there is none to lose.
+
+    `control_liveness_timeout_s: 120` killed three arms of the first four-arm smoke - A, B
+    and D, each after ONE cycle, at 267s/182s/185s of "silence" against a 120s bound - while
+    arm C, the only arm that actually had a caller, ran to its own stop. Nothing external
+    existed for those three: the "caller" was the role driver in the same process, and it is
+    silent exactly when it is busy awaiting the tasks it just asked for.
+
+    The spec's comment claimed the bound "matters for any arm driven from a control process",
+    which is the opposite of what it did. `cli/__init__.py` records that the setting did
+    nothing at all until the loader began reading it, so its first real outing was the one
+    that lost three arms.
+
+    Two conditions, both asserted here: registration is what arms it, and work in flight
+    suspends it - because a cycle of the real chain runs ~180s with no session traffic, so
+    any bound shorter than a cycle turns normal progress into a lost plane for arm C too.
+    """
+    from impress_a.control.plane import InProcessControlPlane
+
+    spec = _spec("t-liveness", tmp_path, control_liveness_timeout_s=120.0)
+    mgr = CampaignManager(spec, _Idle(), reg)
+    assert mgr.under_external_control is False, \
+        "a campaign nobody registered must not be under external control"
+    mgr.executor._last_contact = time.monotonic() - 10_000
+    assert mgr.executor._control_lost_for() is None, \
+        "an in-process campaign has no plane to lose, however long it is quiet"
+
+    InProcessControlPlane().register(mgr)
+    assert mgr.under_external_control is True, "registering IS what arms the bound"
+    assert mgr.executor.under_external_control is True, \
+        "and it must reach the executor, which is what consults it - not stop at the manager"
+    assert mgr.executor._control_lost_for() is not None, \
+        "a registered campaign silent past its bound has lost its caller"
+
+    mgr.executor._inflight["r0001"] = object()
+    try:
+        assert mgr.executor._control_lost_for() is None, \
+            "work in flight explains the silence; a long cycle is not a dead caller"
+    finally:
+        mgr.executor._inflight.clear()

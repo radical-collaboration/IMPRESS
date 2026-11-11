@@ -8,7 +8,8 @@ from impress_a.compose.graph import TaskGraph, TaskNode
 from impress_a.compose.interlock import Scrutiny, TrustLedger
 from impress_a.compose.validate import SiteCaps, Validator
 from impress_a.core.budget import BudgetLedger
-from impress_a.core.decision import ExperimentIntent
+from impress_a.core.decision import ExperimentIntent, ValidationFailure
+from impress_a.core.pareto import Direction, Objective
 from impress_a.core.spec import (
     Aim,
     Deferral,
@@ -288,7 +289,14 @@ def test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance
                           ("ligandmpnn_design", "ligand_confidence"),
                           ("filter_shape", "shape_complementarity"),
                           ("boltz_predict", "complex_plddt"),
-                          ("boltz_predict", "ligand_iptm")}, \
+                          ("boltz_predict", "ligand_iptm"),
+                          # Backlog G4: upstream's own calibrated PROD values, verified
+                          # against `run_small_molecule_binding.py`'s PROD instance -
+                          # fa_rep 100.0, score -250.0, interact -8.0, ss_fraction 0.5.
+                          ("fastrelax", "total_score"),
+                          ("fastrelax", "fa_rep"),
+                          ("fastrelax", "interaction_energy"),
+                          ("rfd3_design", "ss_fraction")}, \
         "every other gate - presence, structure, the Rosetta divergence bounds - is integrity"
 
 
@@ -361,12 +369,65 @@ _JOB_22702568 = {
 }
 
 
-def test_replaying_job_22702568_promotes_at_its_third_run(reg, tmp_path):
+#: What the calibrated specs require and neither recorded job measured. Supplying them is a
+#: stated COUNTERFACTUAL, never a measurement: the value is chosen to pass, so that a test
+#: about the trust counter is testing the trust counter. `interaction_energy` was not computed
+#: by any recorded run - the adapter did not compute it at all until phase 10 - and
+#: `num_models` is a count the ledger rows did not carry.
+#: `sc_selector_mode` is the exception: it is not a counterfactual but a FACT about these
+#: runs. 0.0 says their shape complementarity came from the historical `jump="1"` filter, so
+#: those numbers are not comparable with a calibrated run's - which is the point of recording
+#: the mode at all (backlog G5).
+_AS_IF_MEASURED = {"fastrelax": {"interaction_energy": -12.0},
+                   "rfd3_design": {"num_models": 1},
+                   "filter_shape": {"sc_selector_mode": 0.0}}
+
+
+def _as_if_measured(metrics: dict) -> dict:
+    """A recorded run's metrics, plus the ones the calibrated gates now require."""
+    return {tool: {**values, **_AS_IF_MEASURED.get(tool, {})}
+            for tool, values in metrics.items()}
+
+
+def test_a_recorded_job_cannot_promote_a_pattern_under_the_calibrated_gates(reg, tmp_path):
+    """The point of closing backlog G4, stated as what it costs.
+
+    Neither recorded Delta job computed `interaction_energy` - the one metric fastrelax
+    reports that measures binding rather than geometry - because the adapter did not compute
+    it at all. Under the calibrated gates its absence is an INTEGRITY failure, so a replay of
+    job 22702568's five `6/6 tasks ok` runs demotes the pattern on every one of them.
+
+    That is the correct reading and it is the finding: those runs were never evidence that the
+    chain worked, because the chain was not measuring what the campaign was for. A gate that
+    only noticed a LOW interaction energy would have let this pass as five clean runs.
+    """
     from types import SimpleNamespace
 
-    runs = [_results(reg, m) for m in _JOB_22702568.values()]
-    assert [r.all_gates_passed for r in runs] == [False, True, False, False, True], \
-        "the old rule's verdicts, reproduced from the recorded metrics"
+    ex = _executor_with_memory_ledger(tmp_path)
+    for run_id, metrics in _JOB_22702568.items():
+        failed = ex._record_evidence(SimpleNamespace(signature="sig"), _results(reg, metrics))
+        assert failed is True, f"{run_id}: a run that never measured binding is not clean"
+    assert not ex.trust.is_trusted("sig")
+
+
+def test_the_promotion_rule_still_promotes_at_the_third_clean_run(reg, tmp_path):
+    """Decision 0013's arithmetic, unchanged by the calibration.
+
+    Replayed with `_as_if_measured`, which is a stated counterfactual rather than data: the
+    recorded runs did not measure `interaction_energy`, and a passing value is supplied so
+    that what is under test is the trust counter rather than the gate inventory. The original
+    prediction - failure/clean/failure/failure/clean under the OLD every-gate rule, promoting
+    nothing, and promotion at r0003 under 0013 - still holds for the same five runs.
+    """
+    from types import SimpleNamespace
+
+    runs = [_results(reg, _as_if_measured(m)) for m in _JOB_22702568.values()]
+    assert [r.all_gates_passed for r in runs] == [False] * 5, (
+        "NOT ONE of the five passes every gate now. Under the old every-gate rule two of "
+        "them did (r0002, r0005), and the difference is the fold bar: at 0.5 their 0.678 and "
+        "0.561 passed, and at upstream's own 0.75 neither does. Five runs this project "
+        "recorded as `6/6 tasks ok` contain no design the reference would have accepted, "
+        "which is the gap backlog G4 was about, priced")
 
     ex = _executor_with_memory_ledger(tmp_path)
     promoted_at = None
@@ -438,8 +499,11 @@ def test_replaying_job_22726105_stays_trusted_once_promoted(reg, tmp_path):
     ex.trust.on_clean_run("sig")      # the site ledger going in: one clean run (22702568 r0005)
     trusted_after = {}
     for run_id, metrics in _JOB_22726105.items():
+        # `_as_if_measured` for the reason given at its definition: this job did not compute
+        # `interaction_energy` either, and what is under test here is that a promoted pattern
+        # is no longer demoted by a pre-relax score - not the gate inventory.
         assert ex._record_evidence(SimpleNamespace(signature="sig"),
-                                   _results(reg, metrics)) is False, \
+                                   _results(reg, _as_if_measured(metrics))) is False, \
             f"{run_id}: every tool worked and every relax converged"
         trusted_after[run_id] = ex.trust.is_trusted("sig")
     assert trusted_after == {"r0001": False, "r0002": True, "r0003": True,
@@ -694,3 +758,140 @@ async def test_the_reviewer_marks_a_budget_refusal_transient(reg):
 
     failure = rev.affordable(graph)
     assert failure is not None and failure.gate == "budget" and failure.transient is True
+
+
+# ---------------------------------------------------------------------------
+# Gate 6: tool delivery (backlog E1).
+# ---------------------------------------------------------------------------
+
+def test_gate_6_refuses_a_mock_tool_under_tool_delivery_real(reg):
+    """Backlog E1, finally wired - and a gate rather than a guard, deliberately.
+
+    `sites/*.yaml` carried a `tool_delivery` switch read by no code from the day it was
+    written, and it is the switch that would have refused the documented mock-chain-on-a-GPU
+    run. A mock chain completes `6/6 tasks ok` with plausible metrics and invented designs;
+    `mock_noodle` goes further and reports a confident `designability` for a structure with no
+    secondary structure, so such a run does not merely waste an allocation - it produces
+    numbers a reader would act on.
+
+    A gate and not `RuleCorrectionsPolicy(forbid_tools=...)` because `--no-guard` must not be
+    able to switch off "is this real".
+    """
+    budget = BudgetLedger(limits={"gpu_hours": 100.0, "cpu_hours": 100.0})
+    site = SiteCaps(gpu_api="cuda", gpus_per_node=4)
+    mock_graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["mock_generate", "mock_design"], replicas=1), "r")
+    real_graph = Composer(reg).compose(
+        ExperimentIntent(goal="g", stages=["rfd3_design", "ligandmpnn_design"], replicas=1),
+        "r")
+
+    # `any` is the default, so every existing campaign is unaffected.
+    for graph in (mock_graph, real_graph):
+        assert Validator(reg, site, budget)._g6_delivery(graph) is None
+
+    failure = Validator(reg, site, budget, tool_delivery="real")._g6_delivery(mock_graph)
+    assert failure is not None and failure.gate == "tool_delivery"
+    assert failure.detail["offending_tools"] == ["mock_design", "mock_generate"]
+    assert Validator(reg, site, budget,
+                     tool_delivery="real")._g6_delivery(real_graph) is None
+
+    # And the other way, so a mock test tier cannot accidentally reach a real tool.
+    assert Validator(reg, site, budget,
+                     tool_delivery="mock")._g6_delivery(real_graph) is not None
+    assert Validator(reg, site, budget,
+                     tool_delivery="mock")._g6_delivery(mock_graph) is None
+
+
+def test_gate_6_reads_the_declared_toolkit_not_the_tool_id(reg):
+    """A name beginning `mock_` is a convention; the toolkit a spec declares is a fact.
+
+    A real tool named `mock_affinity_predictor` would be refused by a prefix check, and a
+    mock one named `fast_screen` would be admitted. `ToolSpec.toolkit` is what the registry
+    loaded it under.
+    """
+    mock_tools = {t for t in reg.ids() if reg.get(t).toolkit == "mock"}
+    assert mock_tools, "precondition: the mock toolkit is loaded"
+    assert all(reg.get(t).toolkit != "mock" for t in reg.ids() if t not in mock_tools)
+    # The one that would break a prefix check in the other direction, if it ever exists.
+    assert not [t for t in reg.ids()
+                if t.startswith("mock_") and reg.get(t).toolkit != "mock"]
+
+
+def test_every_delta_campaign_declares_real_tool_delivery():
+    """The gate is worth nothing on a campaign that does not ask for it.
+
+    Checked here rather than left to review, because the failure it prevents is a GPU
+    allocation producing invented designs and the cost of forgetting is one allocation.
+    """
+    import yaml
+
+    from impress_a.cli import load_spec
+
+    for path in sorted(pathlib.Path("campaigns").glob("delta-*.yaml")):
+        doc = yaml.safe_load(path.read_text())
+        assert doc.get("tool_delivery") == "real", f"{path.name} does not declare it"
+        assert load_spec(str(path)).tool_delivery == "real", \
+            f"{path.name}: declared but did not reach the spec"
+
+
+@pytest.mark.asyncio
+async def test_no_planner_answers_a_rejection_by_truncating_its_chain(reg):
+    """Job 22675512, refused by construction - and it was defeating a second rule too.
+
+    Dropping the tail to fit a budget took `boltz_predict` off that campaign's chain, solely
+    because it is listed last, and `boltz_predict` is the only producer of `complex_plddt` and
+    `ligand_iptm` - two of its four objectives. The run was unwinnable from the moment it was
+    admitted and the admitted graph records `rejected: null`.
+
+    Removing it exposed the second effect, which nothing had noticed: truncation produces a
+    different SHAPE, so it also produced a different pattern signature - and an instance
+    refused by the interlock's one-instance-in-flight rule was then admitted as a different
+    pattern. Two concurrency tests in `test_campaign.py` were passing because of it.
+
+    Checked **behaviourally**, over every planner half rather than the two deleted policies
+    that had an `on_rejected`. The first version of this walked the AST for a slice, which is
+    a proxy for the property and fired on a `reason[:80]` in a rationale string - a test that
+    forbids the shape of the fix rather than the thing being forbidden.
+    """
+    from impress_a.core.decision import CampaignObservation
+    from impress_a.core.goal import Goal
+    from impress_a.policy.planner import PlanningContext
+    from impress_a.policy.planners import (
+        AgenticPlanner,
+        ExternalPlanner,
+        OraclePlanner,
+        ThresholdPlanner,
+    )
+    from impress_a.policy.specifiers import ThresholdSpecifier
+    from impress_a.tools.view import view_of
+
+    chain = ["mock_generate", "mock_design", "mock_fold", "mock_score"]
+    objectives = [Objective(name="iptm", direction=Direction.MAX, min=0.5),
+                  Objective(name="ddg", direction=Direction.MIN)]
+    goal = Goal(text="g", objectives=objectives)
+    spec_state = await ThresholdSpecifier().initial_spec(goal)
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal="g", objectives=objectives,
+                              toolkit=view_of(reg, chain), stages=chain, spec=spec_state)
+    ctx = PlanningContext(goal, obs)
+
+    for make in (lambda: ThresholdPlanner(stages=chain, base_replicas=3),
+                 lambda: AgenticPlanner(stages=chain),
+                 lambda: OraclePlanner(stages=chain),
+                 lambda: ExternalPlanner(stages=chain, timeout_s=0.01)):
+        planner = make()
+        if isinstance(planner, ExternalPlanner):
+            planner.steer({"stages": chain, "replicas": 3})
+        stage = await planner.plan(spec_state, ctx)
+        assert stage is not None, f"{planner.name} planned nothing to begin with"
+        tools = {t.tool for t in stage.runs}
+
+        answer = await planner.replan(
+            stage, ValidationFailure(gate="budget", transient=True, reason="no room"),
+            spec_state, ctx)
+        if answer is None:
+            continue          # giving up is always allowed; measuring less is not
+        assert {t.tool for t in answer.runs} == tools, (
+            f"{planner.name} dropped {sorted(tools - {t.tool for t in answer.runs})} to fit a "
+            f"budget. Breadth may shrink - a lineage is a whole chain - but the chain may not")
+        assert answer.lineages <= stage.lineages, \
+            f"{planner.name} answered a budget rejection by asking for MORE"

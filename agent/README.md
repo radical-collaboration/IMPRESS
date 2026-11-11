@@ -46,8 +46,11 @@ rule cascade exercises identical machinery to one steered by a frontier LLM.
 
 There are two ways to be a reasoner:
 
-- **`decide(obs) -> Decision`** — answer one question at a time. Models A-D do this, and a driver
-  plays the part the old loop played: observe, ask, submit, wait, repeat.
+- **a Specifier and a Planner** — two halves with separate contracts. The Specifier turns the
+  caller's `Goal` into a mutable `Spec` of atomic objectives and revises it as data arrives; the
+  Planner maps the ready objectives onto Tasks and emits a candidate `Stage`. This replaced
+  `decide(obs) -> Decision`, which answered what the campaign should be trying to achieve and which
+  tool should run next in one call — so nothing could say which half of a model earned its cost.
 - **`conduct(session)`** — drive yourself. Submit as many experiments as you like, then collect them
   with `as_completed` in the order they *finish*. This is what makes a federation of task agents
   generating an ensemble in parallel expressible at all.
@@ -66,7 +69,7 @@ occupies.
         │      DECISION FRONTEND        │      who decides what runs next
         │    A · B · C · D · your own   │
         └───────────────┬───────────────┘
-                        │  ControlPolicy — decide() → ComposeAndRun | Backtrack | RequestHuman | Stop
+                        │  Specifier: Goal → Spec   ·   Planner: objectives → Stage
         ═════════════════════════════════       shared engine
            runtime executor · CampaignSession
            compose · validate · tools · exec

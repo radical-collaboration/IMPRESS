@@ -12,7 +12,7 @@ below the layer it occupies.
         │     DECISION FRONTEND        │        who decides what runs next
         │   A · B · C · D · your own   │
         └──────────────┬───────────────┘
-                       │  ControlPolicy (one protocol)
+                       │  Specifier + Planner (two protocols)
         ════════════════════════════════        everything below is shared
           manager · compose · validate
           tools · exec · rhapsody backends
@@ -23,35 +23,50 @@ below the layer it occupies.
 Exactly one is active per campaign, **fixed at launch** (`docs/decisions/0005`): a campaign has one
 stated methodology and its results are attributable to it.
 
-| Model | Mode | What `decide` does | Reproducible |
-|---|---|---|---|
-| **A** four-node loop | autonomous | A LangGraph `StateGraph`: hypothesize → parameterize. Auditable node by node | structurally |
-| **B** oracle | autonomous | One structured call to a heavyweight LLM over rich campaign state | weakly |
-| **C** external steering | **headless** | Blocks on the control plane until a caller supplies a directive | caller-dependent |
-| **D** explicit policy | autonomous | Deterministic or statistical: rules, bandit, Bayesian optimization, replay | **fully** |
+| Model | Mode | Specifier half | Planner half | Reproducible |
+|---|---|---|---|---|
+| **A** four-node loop | autonomous | `hypothesize → analyze` | `select_tasks → parameterize` | structurally |
+| **B** oracle | autonomous | one `SPEC_SCHEMA` call per signal | one `STAGE_SCHEMA` call per round | weakly |
+| **C** external steering | **headless** | a `{"role": "specifier"}` inbox | a `{"role": "planner"}` inbox | caller-dependent |
+| **D** explicit policy | autonomous | Goal → Spec, deterministically | Tasks by output type | **fully** |
 
 Model **C is the headless mode** (`docs/decisions/0002`) — not an extra option bolted onto the side.
 
-### One contract
+### Two contracts, and why not one
 
 ```python
-class ControlPolicy(Protocol):
+class Specifier(Protocol):
     name: str
-    async def decide(self, obs: CampaignObservation) -> Decision: ...
-    async def interpret(self, results, obs) -> str | None: ...          # optional
-    async def on_rejected(self, decision, failure) -> Decision: ...     # mandatory
+    async def initial_spec(self, goal: Goal) -> Spec: ...
+    async def revise(self, spec: Spec, ev: SpecEvidence) -> SpecRevision: ...
+    async def satisfied(self, spec: Spec, ev: SpecEvidence) -> list[str]: ...
+
+class Planner(Protocol):
+    name: str
+    async def plan(self, spec: Spec, ctx: PlanningContext) -> Stage | None: ...
+    async def replan(self, stage, rejection, spec, ctx) -> Stage | None: ...
 ```
 
-`Decision` is a closed union: `ComposeAndRun | Backtrack | RequestHuman | Stop`. Policies emit **abstract
-intent**, never a concrete DAG — that is what keeps them out of tool-invocation details and genuinely
-swappable.
+There was one contract, `decide(obs) -> Decision`, and it was deleted in phase 11. It answered
+"what should the campaign be trying to achieve" and "which tool should run next" in a single
+call, so nothing in a transcript could say which half of a control model earned its cost — and
+that is precisely what a four-arm comparison of control models has to be able to say.
 
-`on_rejected` is mandatory and easy to overlook. Validation can refuse a composed graph, and every policy
-needs a defined answer to "your proposed experiment is illegal, too expensive, or type-incoherent."
+A reasoner still emits **abstract intent**, never a concrete DAG: a `Stage` of `TaskMapping`s,
+which the composer turns into a typed graph. That is what keeps a reasoner out of
+tool-invocation details and genuinely swappable, and `tests/test_layering.py` asserts the
+import contract that enforces it — `policy` may import `core` and nothing else.
+
+`replan` is the counterpart of the old mandatory `on_rejected`: validation can refuse a composed
+graph, and every Planner needs a defined answer to "your proposed experiment is illegal, too
+expensive, or type-incoherent". Returning `None` — "I have no better Stage" — is a valid answer
+and ends the campaign with the gate that refused it named.
 
 ### Writing your own
 
-Subclass `BasePolicy`, implement `decide`, register it. Nothing else changes.
+Implement the two protocols (or subclass `BaseSpecifier`/`BasePlanner`, whose defaults are a
+fixed Spec and a planner that gives up loudly), add a row to `policy/registry.py` with both
+builders, and register it. Nothing else changes.
 
 ```python
 from impress_a.policy.base import BasePolicy
