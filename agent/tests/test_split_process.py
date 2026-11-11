@@ -1,8 +1,8 @@
 """T5 - the control plane in its own process.
 
 Backlog C5: the out-of-process split was reachable from `tests/` and from no shell, so
-`docs/reference/frontends.md` described as "implemented" something nobody could run. Three of
-these tests drive the roles over a loopback socket, which exercises the same code path the
+`docs/impress-a/reference/frontends.md` described as "implemented" something nobody could run.
+Three of these tests drive the roles over a loopback socket, which exercises the same code path the
 split uses; the last one spawns `impress-a serve` and `impress-a control` as real processes,
 because "reachable from a shell" is the part a same-process test cannot claim.
 

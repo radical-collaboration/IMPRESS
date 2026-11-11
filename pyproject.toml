@@ -57,9 +57,18 @@ doc = [
 ]
 
 [tool.ruff]
+# This table governs `impress` only. `agent/pyproject.toml` declares its own, at
+# line-length 100 and target-version py310, and `agent/tests/test_toolchain.py` asserts it
+# is there - ruff resolves configuration per file, so one `tox -e lint` covers both
+# projects without either having to adopt the other's width. Do not merge the two tables.
 line-length = 88
 target-version = "py39"
-fix = true
+# NOT true. With `fix = true` the documented `ruff check src tests` rewrote the working tree
+# instead of reporting on it, and `tox -e lint` was fixing before it checked - so that env
+# could never fail on anything autofixable, which is most of what `select` below picks.
+# `tox -e format` is the one that fixes. `agent/pyproject.toml` says the same of its own
+# table, and ci.yml asserts both with `git diff --exit-code` after lint.
+fix = false
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "N", "UP"]

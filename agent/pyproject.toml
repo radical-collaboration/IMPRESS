@@ -63,7 +63,12 @@ figures = ["matplotlib>=3.8"]
 # `tomli` only below 3.11, where `tomllib` is not in the standard library. It is used by
 # tests/test_toolchain.py to read this file's own [tool.ruff] table, rather than grepping it -
 # a text match would be satisfied by the word `false` appearing in a comment.
-dev = ["pytest", "pytest-asyncio", "ruff", "httpx", "tomli; python_version<'3.11'"]
+# `cloudpickle` is a TEST dependency, not a runtime one: tests/test_real_toolkits.py uses it
+# to prove `SubprocessError` survives being pickled across a process boundary. It was in no
+# extra, so the `pytest.importorskip("cloudpickle")` guarding that assertion skipped it in
+# CI while passing on any developer machine that happened to have it - a skip is not a pass.
+dev = ["pytest", "pytest-asyncio", "ruff", "httpx", "cloudpickle",
+       "tomli; python_version<'3.11'"]
 
 [project.scripts]
 impress-a = "impress_a.cli:main"
@@ -97,7 +102,7 @@ ignore = [
   "UP007", "UP045",
   # N818 wants an `Error` suffix on `CampaignAborted`, `CampaignStopped`,
   # `SubmissionRejected` and `BackendConstructionTimeout`. Those four names are the written
-  # vocabulary of this project: they appear in docs/decisions, plans/done, docs/limitations.md
+  # vocabulary of this project: they appear in docs/impress-a/decisions, plans/done, docs/impress-a/limitations.md
   # and CLAUDE.md, and in sentences like "raises `CampaignStopped` if the campaign ends first"
   # that are the record of why a seam exists. Renaming them buys nothing at runtime and makes
   # every one of those sentences wrong, so the rule is declined rather than worked around with

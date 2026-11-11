@@ -78,7 +78,7 @@ def test_no_model_claims_an_llm_call_it_cannot_make():
     for letter, m in reasoners.MODELS.items():
         assert m.llm_calls == 0, (
             f"{letter} claims {m.llm_calls} llm calls/cycle; if a live client was wired, "
-            "update this test and docs/reference/control-models.md together")
+            "update this test and docs/impress-a/reference/control-models.md together")
 
 
 def test_cli_policies_is_derived_from_the_registry():
@@ -366,8 +366,9 @@ def test_no_shipped_half_argues_its_own_stop_condition():
     say, and the protocol does permit an override - `specifier.py` says so, and says such a
     Specifier "owes an explanation in provenance, because the campaign's stop condition is
     being argued rather than computed". No shipped half takes that offer, and
-    `docs/reference/resolution.md` step 8 and `docs/reference/control-models.md` both rest on
-    it: the asymmetry behind G14 and H11 is that satisfaction counts READINGS while the front
+    `docs/impress-a/reference/resolution.md` step 8 and
+    `docs/impress-a/reference/control-models.md` both rest on it: the asymmetry behind G14 and H11
+    is that satisfaction counts READINGS while the front
     counts ELIGIBLE nodes, and a half that redefined `satisfied` would add a third population
     neither document describes.
 
@@ -387,5 +388,5 @@ def test_no_shipped_half_argues_its_own_stop_condition():
                                     "impress_a.policy.wrappers"), (
             f"{letter}: {type(half).__name__} defines its own `satisfied` in "
             f"{owner.__module__} - it is arguing the campaign's stop condition rather than "
-            f"computing it. Update docs/reference/resolution.md step 8 and "
-            f"docs/reference/control-models.md with it, or drop the override")
+            f"computing it. Update docs/impress-a/reference/resolution.md step 8 and "
+            f"docs/impress-a/reference/control-models.md with it, or drop the override")

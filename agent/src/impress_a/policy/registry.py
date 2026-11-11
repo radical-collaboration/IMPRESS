@@ -290,7 +290,7 @@ MODELS: dict[str, ReasonerModel] = {
              "NOT declare one satisfied, and the planner half defaults to `on_timeout='stop'` "
              "- a fallback is what makes a C arm that silently became a D arm possible. "
              "`impress-a run --model C` is refused outright rather than timing out (C6)",
-        spec_ref="docs/decisions/0002-model-c-is-control-mode-2.md"),
+        spec_ref="docs/impress-a/decisions/0002-model-c-is-control-mode-2.md"),
     "D": ReasonerModel(
         letter="D", name="explicit policy", mode="autonomous",
         llm_calls=0, llm_shape="none", status="implemented",

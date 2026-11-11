@@ -1433,7 +1433,7 @@ cross-layer import fails by default: the contract cannot rot by addition.
 One honest blind spot, which the test's own docstring names: a dynamic importlib call is
 invisible to it.
   `);
-  footer(s, `${S.n_layers} layers, ${K.tests_collected} tests, ${K.test_files} test files · the table mirrors docs/reference/architecture.md`);
+  footer(s, `${S.n_layers} layers, ${K.tests_collected} tests, ${K.test_files} test files · the table mirrors docs/impress-a/reference/architecture.md`);
 }
 
 // ============================================================ 22. status by dimension

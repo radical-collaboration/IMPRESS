@@ -2,7 +2,7 @@
 
 Deliberately lazy-imports Biopython/gemmi INSIDE each function, not at module scope, so
 `Registry.load()` and `Validator.dry_run()` work in a dev venv that has neither installed
-(see `docs/reference/authoring-tools.md`'s spirit: loading must not require the heavy
+(see `docs/impress-a/reference/authoring-tools.md`'s spirit: loading must not require the heavy
 science stack).
 """
 from __future__ import annotations

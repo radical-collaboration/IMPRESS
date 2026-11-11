@@ -47,7 +47,7 @@ upstream's metrics into a seeded RNG. They model no chemistry.
 So a reading that clears `complex_plddt >= 0.75` here cleared the bar the Delta arms
 measure against, and the difference between an **integrity** failure (the tool broke; the
 pattern's trust suffers) and an **acceptance** failure (the design fell short; trust is
-untouched) is visible on a laptop. That difference is `docs/decisions/0013`.
+untouched) is visible on a laptop. That difference is `docs/impress-a/decisions/0013-trust-counts-integrity-not-acceptance.md`.
 
 The six surrogates declare `toolkit: mock`, which is load-bearing rather than tidy. Gate 6
 classifies a tool by that field exactly, so a surrogate in a toolkit of its own would be
@@ -245,7 +245,7 @@ cycles 0   stop: rejected at interlock: provisional pattern capped at 10% of ava
 - **The numbers are drawn, not measured.** `complex_plddt: 0.93` here is a hash of some
   parameters. It is evidence about the engine and about nothing else. For what the real
   chain has actually produced, see `CLAUDE.md`'s "Known open risks" and
-  `docs/limitations.md`.
+  `docs/impress-a/limitations.md`.
 - **The timings are not timings.** Each surrogate returns in microseconds and declares a
   `cost_model` of 0.002 gpu-h or cpu-h. Those figures are sized so a laptop budget never
   binds; they are not a prediction of anything. The real specs carry measured figures with
@@ -275,6 +275,6 @@ pip install -e ".[figures]"     # once; the sweep and collect stages do not need
 impress-a mock-lab
 ```
 
-It writes to `campaigns/_runs/_analysis`. `docs/reference/mock-lab.md` has what each table
+It writes to `campaigns/_runs/_analysis`. `docs/impress-a/reference/mock-lab.md` has what each table
 and figure holds, which of its numbers mean anything, and the three defects the sweep found
 in the engine around the surrogate (backlog G14, G15, G16).

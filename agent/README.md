@@ -92,7 +92,7 @@ Writing a fifth is implementing the two protocols and adding a row to `policy/re
 A reasoner emits *abstract intent* — a `Stage` of `TaskMapping`s, never a concrete DAG — which is
 what keeps the models swappable, and halves compose: wrap a Planner in `StageGuard` for an
 unconditional external guard, or either half in `LoggingSpecifier`/`LoggingPlanner` for provenance.
-See [`docs/reference/control-models.md`](docs/reference/control-models.md).
+See [`docs/impress-a/reference/control-models.md`](../docs/impress-a/reference/control-models.md).
 
 **Interface frontend — control-plane adapters.** One transport-agnostic protocol (`observe`, `events`,
 `steer`, `artifacts`, `provenance`, `ingest_measurement`, lifecycle). `observe()` returns the **same
@@ -163,7 +163,7 @@ $ impress-a run campaigns/mock-stabilize.yaml --model A
 ### On Delta
 
 ```bash
-export WORK_DIR=/work/nvme/<project>/$USER     # NVMe, not /work/hdd - see docs/limitations.md
+export WORK_DIR=/work/nvme/<project>/$USER     # NVMe, not /work/hdd - see docs/impress-a/limitations.md
 impress-a preflight campaigns/delta-small-molecule-smoke.yaml
 sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml
 ```
@@ -201,7 +201,7 @@ A declarative `spec.yaml` plus a `TaskAgent` subclass, in a toolkit directory al
 that tells an agent how to use it. Loading is validating — a bad range, an unknown QC gate, or a missing
 skill section fails at load, and a toolkit that fails anywhere registers nothing. Adding a tool never
 requires touching the composer, validator or manager. See
-[`docs/reference/authoring-tools.md`](docs/reference/authoring-tools.md).
+[`docs/impress-a/reference/authoring-tools.md`](../docs/impress-a/reference/authoring-tools.md).
 
 ## Requirements
 
@@ -214,17 +214,17 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 
 | | |
 |---|---|
-| [`docs/reference/architecture.md`](docs/reference/architecture.md) | The loop, layers, import contract, invariants |
-| [`docs/reference/resolution.md`](docs/reference/resolution.md) | **How the toolkit, goal, budget and parameters become specified targets and a programmed Stage** — step by step, with what refuses each one |
-| [`docs/reference/observation.md`](docs/reference/observation.md) | **How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller** — with the eleven things the plane does not enforce |
-| [`docs/reference/control-models.md`](docs/reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
-| [`docs/reference/frontends.md`](docs/reference/frontends.md) | Control models and control-plane adapters in detail |
-| [`docs/reference/mock-lab.md`](docs/reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |
-| [`docs/reference/compute-patterns.md`](docs/reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
-| [`docs/reference/authoring-tools.md`](docs/reference/authoring-tools.md) | Writing tools, gates and skill documents |
-| [`docs/reference/middleware-integration.md`](docs/reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
-| [`docs/decisions/`](docs/decisions/) | Numbered, immutable architecture decision records |
-| [`docs/limitations.md`](docs/limitations.md) | Known gaps and residual risks, stated plainly |
+| [`docs/impress-a/reference/architecture.md`](../docs/impress-a/reference/architecture.md) | The loop, layers, import contract, invariants |
+| [`docs/impress-a/reference/resolution.md`](../docs/impress-a/reference/resolution.md) | **How the toolkit, goal, budget and parameters become specified targets and a programmed Stage** — step by step, with what refuses each one |
+| [`docs/impress-a/reference/observation.md`](../docs/impress-a/reference/observation.md) | **How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller** — with the eleven things the plane does not enforce |
+| [`docs/impress-a/reference/control-models.md`](../docs/impress-a/reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
+| [`docs/impress-a/reference/frontends.md`](../docs/impress-a/reference/frontends.md) | Control models and control-plane adapters in detail |
+| [`docs/impress-a/reference/mock-lab.md`](../docs/impress-a/reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |
+| [`docs/impress-a/reference/compute-patterns.md`](../docs/impress-a/reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
+| [`docs/impress-a/reference/authoring-tools.md`](../docs/impress-a/reference/authoring-tools.md) | Writing tools, gates and skill documents |
+| [`docs/impress-a/reference/middleware-integration.md`](../docs/impress-a/reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
+| [`docs/impress-a/decisions/`](../docs/impress-a/decisions/) | Numbered, immutable architecture decision records |
+| [`docs/impress-a/limitations.md`](../docs/impress-a/limitations.md) | Known gaps and residual risks, stated plainly |
 
 `planning/` holds the design record that produced this system. It is process history, not reference
 documentation, and is not part of the published package.
@@ -256,7 +256,7 @@ PyRosetta or Boltz code has executed through this system. Treat the real path as
 no `await` points, so a stall there blocks the event loop entirely — no heartbeat, no timeout, until
 whatever wall-clock limit kills the job. Measured, not theoretical: job 22318678 spent its full
 2-hour allocation this way. Bounded now by `backend_startup_timeout_s`/`backend_startup_heartbeat_s`
-on `CampaignSpec` (both Delta campaigns set 600s); see `docs/limitations.md`.
+on `CampaignSpec` (both Delta campaigns set 600s); see `docs/impress-a/limitations.md`.
 
 **`ligand_smiles` was empty** in both Delta campaign specs. Resolved for the ALR benchmark target
 (`campaigns/data/alr/`, borrowed from `examples/small_molecule_binding`) — both campaigns now set it to
@@ -274,7 +274,7 @@ a login node first regardless — it now also checks `ligand_smiles`.
 `metric_in_range` against each tool's *own* self-reported confidence — which is exactly what a
 confidently-wrong tool passes. There are no structural gates (is the ligand actually in the output
 complex, are there chain breaks, does sequence length match the contig). Every real tool now
-carries the known-bad fixtures `docs/reference/authoring-tools.md` asks for, so its declared gates
+carries the known-bad fixtures `docs/impress-a/reference/authoring-tools.md` asks for, so its declared gates
 have been seen to fail on output that should fail them; what those gates *measure* is still the
 tool's own opinion of itself.
 

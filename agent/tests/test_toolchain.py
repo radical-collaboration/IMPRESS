@@ -129,7 +129,7 @@ def test_the_declined_lint_rules_say_why():
     """Each ignored rule is a decision, so it carries its reason in the file.
 
     `N818` is declined rather than satisfied: an `Error` suffix on `CampaignStopped` and its
-    three siblings would make every sentence in `docs/decisions/`, `plans/done/` and
+    three siblings would make every sentence in `docs/impress-a/decisions/`, `plans/done/` and
     `CLAUDE.md` that names them wrong, for no runtime benefit.
     """
     ignored = _config()["tool"]["ruff"]["lint"]["ignore"]

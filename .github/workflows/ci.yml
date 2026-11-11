@@ -1,0 +1,184 @@
+name: ci
+
+# One workflow for the whole repository, replacing tests.yml, agent-tests.yml and a
+# docs.yml that was itself named `ci` - so `gh run list` showed three workflows per push,
+# one of them under a name that described none of what it did. What the split cost:
+#
+#   * agent/ carried its own `ruff check` step and ran it three times, once per matrix leg,
+#     while never checking formatting. `tox -e lint` resolved from the root to src/impress
+#     and ./tests, so the repository's own lint entry point never saw the second package.
+#   * docs.yml had no pull_request trigger and mkdocs had no strict mode, so a broken link
+#     or a missing nav target was only discovered after it had already deployed.
+#   * Two caching idioms and two install idioms for the same job in two files: root
+#     hand-rolled actions/cache over `pip cache dir`, agent used setup-python's native
+#     `cache: pip`, and the root lint job had no cache at all.
+#
+# No `paths:` filters, deliberately. Only the root suite was unfiltered before, so what
+# this adds is the agent suite running on changes that touch neither agent/ nor
+# src/impress - and in exchange no job can be absent for a regression that crosses the
+# boundary. If CI minutes ever need trimming, filter the two test jobs and never `lint` or
+# `docs`: those are the cheap ones, and the ones that caught nothing while they were absent.
+
+on:
+  push:
+    branches: [main, test-me-*]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default. The one job that needs to write says so for itself.
+permissions:
+  contents: read
+
+jobs:
+  # IMPRESS itself. One job for what used to be two near-identical 25-line copies that
+  # differed only in a cache-key prefix and a step name. `toxenv` is spelled out in the
+  # matrix rather than derived from `python`, because deriving it needs a ladder of nested
+  # ternaries in YAML and this is a table either way. The `-all` legs are the radical.pilot
+  # integration tier; tox.ini gives them RADICAL_VERBOSE=DEBUG and a `radical-stack` pre-step.
+  root-tests:
+    name: root ${{ matrix.toxenv }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {python: '3.9',  toxenv: py39}
+          - {python: '3.10', toxenv: py310}
+          - {python: '3.11', toxenv: py311}
+          - {python: '3.12', toxenv: py312}
+          - {python: '3.13', toxenv: py313}
+          - {python: '3.9',  toxenv: py39-all}
+          - {python: '3.10', toxenv: py310-all}
+          - {python: '3.11', toxenv: py311-all}
+          - {python: '3.12', toxenv: py312-all}
+          - {python: '3.13', toxenv: py313-all}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e ${{ matrix.toxenv }} -- -vv
+
+  # IMPRESS-A (agent/). A separate job and a separate environment, because impress-a
+  # declares >=3.10 and pulls langgraph, rhapsody and biopython: those must never end up in
+  # front of a root test, and no agent install belongs on the 3.9 leg above.
+  #
+  # Not driven by tox, on evidence. The earlier consolidation attempt added an `agent-py3xx`
+  # tox env whose `deps` were `./agent[dev]` alone; in its one CI run every campaign test
+  # failed and one wedged for twenty minutes, because `impress` is unreleased and resolving
+  # impress-a first sends pip to PyPI for that name. The explicit two-step install below is
+  # the one that is green, and it is the same order agent/scripts/dev_setup.sh uses locally.
+  agent-tests:
+    name: agent py${{ matrix.python }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 is here and was not in the workflow this replaces: agent/ was tested on
+        # 3.10-3.12 while root was tested on 3.9-3.13, so the newest interpreter IMPRESS
+        # supports was one nothing had ever run impress_a on. Verified before adding, not
+        # after: both installs resolve on 3.13.9 and the suite is 506 passed, 5 skipped.
+        python: ['3.10', '3.11', '3.12', '3.13']
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          # Both files: this job installs the root package too, so a change to root's
+          # dependencies has to invalidate this cache as well as root-tests'.
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      # Two steps, in this order, on purpose. IMPRESS-A depends on `impress`, the package at
+      # the repository root, which is unreleased - so it has to be present as a local
+      # editable install BEFORE pip resolves this project's dependencies, or pip goes looking
+      # for the name on PyPI and installs whatever it finds there.
+      - name: Install impress (repository root)
+        run: python -m pip install --upgrade pip && pip install -e ..
+      # `aucam` in the same install as `dev`, so pip resolves once: `tests/test_aucam.py`
+      # skips itself when the extra is absent, so without it the tests that prove an IMPRESS-A
+      # campaign really runs as one AuCaM workflow never ran anywhere automated - green either
+      # way, which is the failure this project already names as worse than a missing adapter.
+      # It is a git pin to a public commit with no compiled dependencies: ~6s to resolve.
+      - name: Install impress-a
+        run: pip install -e ".[dev,aucam]"
+      # A skip is not a pass, and the extra going missing again would be silent otherwise:
+      # pytest exits 0 with the whole file skipped. This step fails loudly instead. The import
+      # is `src.aucam`, not `aucam` - upstream's `include = ["src*"]` publishes the generic
+      # name, and this repository has two `src/` directories of its own to be confused with.
+      - name: Confirm the AuCaM adapter has something to test against
+        run: python -c "import src.aucam, impress_a.integrations.aucam"
+      # No lint step here any more: `tox -e lint` covers agent/src and agent/tests from the
+      # repository root, in one job, once - rather than three times across this matrix.
+      - name: Run tests
+        run: pytest tests -q
+
+  # Both projects, one entry point. ruff resolves its configuration per file, so this holds
+  # root's contract and agent/'s at the same time without either adopting the other's width.
+  lint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e lint
+      # `fix = false` in both [tool.ruff] tables is what makes the step above a check rather
+      # than a rewrite. If someone restores `fix = true`, lint starts passing by editing the
+      # checkout instead of reporting on it - so assert the tree is clean afterwards.
+      - name: Lint must not modify the tree
+        run: git diff --exit-code
+
+  docs:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      # Always, on pull requests too. `tox -e docs` builds the site and then fails on a
+      # broken internal link or a missing nav target - the half of `--strict` this repository
+      # can hold today. The workflow this replaces deployed those green.
+      - run: tox -e docs
+
+  # Separate from `docs` so that pull-request builds never request write access, and so a
+  # deploy cannot happen unless the checked build passed first.
+  docs-deploy:
+    needs: docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install .[doc]
+      - name: Configure Git credentials
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - run: mkdocs gh-deploy --force
