@@ -157,20 +157,36 @@ class RolesDriver:
             await self._publish(session, rev)
 
     async def _publish(self, session: CampaignSession, rev: SpecRevision | None) -> None:
-        """Hand the Spec, or one revision of it, to its only writer.
+        """Hand the Spec, or one revision of it, to its only writer - and apply it here too.
 
-        `rev is None` means "this is the initial Spec". The executor applies; nothing here
-        mutates campaign state, which is what keeps the single-writer discipline intact across
-        a boundary that becomes a process boundary in phase 7.
+        `rev is None` means "this is the initial Spec". The executor is the only writer of the
+        APPLIED Spec, which is what the Reviewer's coverage gate reads; this driver keeps its
+        own view of it, which is what `conduct` tests for completeness.
+
+        **Both have to be updated, and that is not obvious in one process.** In-process the
+        executor's `set_spec` stores the very object this driver holds, so a revision applied
+        there mutated this one too - by aliasing, not by design. Across a socket the executor
+        holds a deserialized copy, the local view never changed, `spec.complete()` was never
+        true, and a campaign whose objectives were all satisfied ran on to its cycle limit.
+        The in-process path passed for the wrong reason until the split exposed it.
+
+        The returned generation is compared rather than ignored: two views of the Spec that
+        disagree about how many revisions have been applied is the shape of that same bug
+        coming back.
         """
         payload = self.spec if rev is None else rev
-        # `publish_spec` is a core-protocol operation as of phase 3, so it crosses a socket
-        # with everything else and the injected fallback is only for a session that predates
-        # it. Phase 7 drops the fallback.
+        if rev is not None:
+            self.spec.apply(rev)
+        applied = None
         if hasattr(session, "publish_spec"):
-            await session.publish_spec(payload)
+            applied = await session.publish_spec(payload)
         elif self.publish is not None:
-            self.publish(payload)
+            applied = self.publish(payload)
+        if applied is not None and applied != self.spec.generation:
+            log.warning(
+                "spec generation diverged: the executor applied %s, this driver holds %s - "
+                "the two views of the Spec are no longer the same revision",
+                applied, self.spec.generation)
 
     # -- Planner overflow (scaffolding) --------------------------------------
     async def _handle_overflow(self, session: CampaignSession, branched: bool) -> str | None:

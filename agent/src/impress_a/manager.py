@@ -89,12 +89,20 @@ class CampaignManager:
             concurrency=self.spec.concurrency, publish=self.executor.publish_spec)
 
     def _reasoner(self) -> Any:
-        """A policy that implements `conduct` drives itself; anything else is driven."""
-        if self.spec.control == "roles":
-            return self._roles()
+        """A policy that implements `conduct` drives itself; anything else is driven.
+
+        `conduct` is checked FIRST, before `control`, and the ordering is load-bearing: a
+        `conduct` reasoner is already a complete reasoner, and the role pipeline is one
+        implementation of one rather than a wrapper every reasoner must wear. Checking
+        `control` first wrapped `impress-a serve`'s deliberately absent reasoner in the legacy
+        adapter and called `decide` on it - a served campaign has no local reasoner by design,
+        which is the whole point of serving it.
+        """
         target = getattr(self.policy, "inner", self.policy)
         if hasattr(self.policy, "conduct") or hasattr(target, "conduct"):
             return self.policy if hasattr(self.policy, "conduct") else target
+        if self.spec.control == "roles":
+            return self._roles()
         return SequentialPolicyDriver(
             self.policy, max_turns=self.spec.max_cycles,
             max_attempts=self.spec.max_attempts, concurrency=self.spec.concurrency)

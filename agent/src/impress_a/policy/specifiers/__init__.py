@@ -4,6 +4,16 @@ Imports `core` only, like everything else under `policy/` - asserted by
 `tests/test_layering.py`. What a Specifier may know about the Toolkit arrives as a
 `core.toolkit.ToolkitView`, never as a registry.
 """
+from .agentic import AgenticSpecifier
 from .explicit import ThresholdSpecifier
+from .external import ExternalSpecifier
+from .oracle import OracleSpecifier
+from .replay import ReplaySpecifier
 
-__all__ = ["ThresholdSpecifier"]
+__all__ = [
+    "AgenticSpecifier",
+    "ExternalSpecifier",
+    "OracleSpecifier",
+    "ReplaySpecifier",
+    "ThresholdSpecifier",
+]

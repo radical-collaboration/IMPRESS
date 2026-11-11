@@ -23,6 +23,7 @@ from ..core.qc import QCReport, QCVerdict
 from ..core.results import RunOutcome, RunState, TaskOutcome
 from ..tools.agent import TaskRequest, TaskResult, TaskUsage
 from ..tools.registry import Registry
+from .resources import gpu_env
 
 
 @dataclass
@@ -157,7 +158,9 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
               params: dict[str, Any], *, invocation: str = "",
               seed: int | None = None, dep_order: tuple[str, ...] = (),
               wiring: tuple[tuple[str, str, str], ...] = (),
-              workdir: str | None = None, gpu_index: int | None = None):
+              workdir: str | None = None, gpu_index: int | None = None,
+              backend_kind: str = "concurrent",
+              seed_inputs: dict[str, Any] | None = None):
     """ONE generic factory for every node in every graph.
 
     `wiring` is the node's typed `inputs` map, flattened to
@@ -171,16 +174,26 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
     the scan returns whichever dep is first. An Aim hierarchy with real dependencies hits
     that on its first branch - which is why this is fixed before the Runner, and before
     anything composes a branching Stage.
+
+    **The GPU pinning env is computed here, not in the adapter.** `TaskRequest.gpu_index` said
+    an adapter should turn it into an environment through `exec/resources.gpu_env`, which
+    would mean every adapter knowing which backend it is running under - and getting that
+    wrong is not a cosmetic error. Under a concurrent backend the env is what pins; under
+    Dragon the placement policy is, because local services merges a process template's env and
+    applies the layout afterwards - so an adapter that set `CUDA_VISIBLE_DEVICES=2` inside a
+    process Dragon had already restricted to one device would point it at a device it was
+    never given. Resolved once, where the backend is known; the adapter merges a dict it does
+    not have to interpret.
     """
     spec = reg.get(tool_id)
+    pinning = gpu_env(gpu_index, backend_kind)
     agent_cls = reg.agent_for(tool_id)
 
     async def _run(*deps: Any) -> dict[str, Any]:
         agent = agent_cls(spec)
         by_dep = dict(zip(dep_order, deps, strict=False))
-        # Keyed by PORT where the composer named one. The values are still the dep
-        # payloads, so `_subprocess.first_dep_output` keeps working for adapters that
-        # have not migrated - the keys changed, not the shape.
+        # Keyed by PORT where the composer named one, which is what `input_ref` resolves
+        # against. The values are the dep payloads, unchanged.
         inputs: dict[str, Any] = {port: by_dep[dep_id]
                                   for port, dep_id, _ in wiring if dep_id in by_dep}
         wired = {dep_id for _, dep_id, _ in wiring}
@@ -190,7 +203,8 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
                 inputs[f"dep{i}"] = payload
         req = TaskRequest(tool=tool_id, params=params,
                           node_id=invocation, seed=seed, workdir=workdir,
-                          inputs=inputs, gpu_index=gpu_index,
+                          inputs=inputs, gpu_index=gpu_index, gpu_env=dict(pinning),
+                          seed_inputs=dict(seed_inputs or {}),
                           input_ports={port: out for port, _, out in wiring})
         res = await agent(req)
         return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
@@ -230,6 +244,22 @@ def results_from(graph_id: str, payloads: dict[str, Any]) -> ExecutionResults:
     return out
 
 
+def gpu_for(lineage: int, gpus_per_node: int) -> int | None:
+    """One lineage, one GPU - round-robin across the devices the site declares.
+
+    Module level rather than a `Dispatcher` method because the Runner needs the same answer,
+    and A10 is the standing proof of what happens when nothing answers it: concurrent GPU
+    tasks were not pinned at all, so several could land on one device while others sat idle -
+    consistent with GPU-busy measuring at most 17% while three of four GPUs never held work.
+    Two implementations of one round-robin is two things to keep in step.
+
+    1 means "do not pin", which is also the honest answer for a laptop.
+    """
+    if gpus_per_node <= 1:
+        return None
+    return lineage % gpus_per_node
+
+
 class Dispatcher:
     def __init__(self, flow, reg: Registry, backend_kind: str = "concurrent",
                  workdir: str | None = None, gpus_per_node: int = 1):
@@ -241,25 +271,19 @@ class Dispatcher:
         self.workdir = workdir
 
     def _gpu_for(self, lineage: int) -> int | None:
-        """One lineage, one GPU - round-robin across the devices the site declares.
-
-        The reference pipeline assigns a device per pipeline the same way, and backlog A10
-        recorded that IMPRESS-A did not assign one at all: several concurrent GPU tasks could
-        land on the same device while others sat idle, which is consistent with GPU-busy
-        measuring at most 17% while three of four GPUs never held work.
-        """
-        if self.gpus_per_node <= 1:
-            return None
-        return lineage % self.gpus_per_node
+        """This dispatcher's site caps, through the shared round-robin."""
+        return gpu_for(lineage, self.gpus_per_node)
 
     def _make_task(self, node_id: str, tool_id: str, params: dict[str, Any],
                    invocation: str = "", seed: int | None = None,
                    dep_order: tuple[str, ...] = (),
                    wiring: tuple[tuple[str, str, str], ...] = (),
-                   gpu_index: int | None = None):
+                   gpu_index: int | None = None,
+                   seed_inputs: dict[str, Any] | None = None):
         return node_task(self.flow, self.reg, node_id, tool_id, params,
                          invocation=invocation, seed=seed, dep_order=dep_order,
-                         wiring=wiring, workdir=self.workdir, gpu_index=gpu_index)
+                         wiring=wiring, workdir=self.workdir, gpu_index=gpu_index,
+                         backend_kind=self.backend_kind, seed_inputs=seed_inputs)
 
 
     def submit(self, g: TaskGraph, run_id: str = "") -> DispatchHandle:
@@ -281,7 +305,8 @@ class Dispatcher:
                      wiring=tuple((port, *ref.split(".", 1)) if "." in ref
                                   else (port, ref, "")
                                   for port, ref in n.inputs.items()),
-                     gpu_index=self._gpu_for(n.lineage))
+                     gpu_index=self._gpu_for(n.lineage),
+                     seed_inputs=n.seed_inputs)
                  for tid, n in g.nodes.items()}
         futures: dict[str, Any] = {}
         for tid in g.topo_order():                       # edges via unawaited futures

@@ -31,6 +31,11 @@ class TaskRequest:
     #: Upstream payloads, keyed by this tool's own declared input PORT where the composer
     #: wired one, and by `dep{i}` for an ordering-only edge with no typed port behind it.
     inputs: dict[str, Any] = field(default_factory=dict)
+    #: port -> an artifact from outside this graph: the parent design a refinement starts
+    #: from, or a file the Goal supplied. Read by `input_ref` when no upstream task produced
+    #: that port, which is what makes a refinement chain start from a structure rather than
+    #: from nothing.
+    seed_inputs: dict[str, Any] = field(default_factory=dict)
     #: port -> the UPSTREAM output port it was wired to. The composer computed this and the
     #: validator type-checked it; without it an adapter has to guess which of a dep's outputs
     #: it was handed, which is what the scanning helper did.
@@ -40,9 +45,14 @@ class TaskRequest:
     #: Which GPU this task may use, when the site has more than one. Backlog A10: concurrent
     #: GPU tasks were not pinned, so several could land on the same device while others sat
     #: idle - measured as GPU-busy at most 17% with three of four GPUs never holding work.
-    #: An adapter applies it to its own child's environment via `exec/resources.gpu_env`,
-    #: because under Dragon the env is not what does the pinning.
+    #: Informational: which device this lineage was assigned. The env that actually pins is
+    #: `gpu_env` below, resolved by `exec/dispatch.node_task` where the backend is known -
+    #: under Dragon the placement policy pins and the env does not, so an adapter deciding
+    #: this for itself could point a child at a device Dragon never gave it.
     gpu_index: int | None = None
+    #: Environment an adapter merges into its child's, unexamined. Empty under Dragon and
+    #: whenever nothing is pinned, so merging it is always safe.
+    gpu_env: dict[str, str] = field(default_factory=dict)
     #: Where this task may write. Defaults to the process CWD - see
     #: `_subprocess.workdir_for`, which is what every real adapter uses.
     workdir: str | None = None
@@ -55,6 +65,11 @@ class TaskRequest:
         should never see: gate 1 refuses a graph whose required input has no producer.
         """
         payload = self.inputs.get(port)
+        if payload is None:
+            # No upstream produced this port, so fall back to what was handed in from outside
+            # the graph. An upstream payload always wins: a refinement's later stages consume
+            # what this run produced, not what its parent did.
+            return self.seed_inputs.get(port)
         if not isinstance(payload, dict):
             return payload
         outputs = payload.get("outputs") or {}

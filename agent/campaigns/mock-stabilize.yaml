@@ -5,6 +5,13 @@ backend_config: {workers: 4}
 max_cycles: 8
 stagnation_limit: 3
 site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+# The chain, stated rather than left to each model's built-in default. Every real campaign
+# already declares one; this file did not, so each reasoner fell back to its own idea of a
+# chain - which happened to agree because all four had the same mock list written into them.
+# Model B's rehearsal is the one that cannot have a built-in default: a chain of its own is
+# how `--model B` would have validated the real toolkits and then executed mocks (backlog
+# H2). Declaring it here removes the ambiguity for every model rather than for that one.
+stages: [mock_generate, mock_design, mock_fold, mock_score]
 budget:
   gpu_hours: 2.0
   cpu_hours: 12.0

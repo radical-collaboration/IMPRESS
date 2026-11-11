@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,6 +83,12 @@ class CampaignSpec:
     max_cycles: int = 10      # runs a decide-style policy is driven through (a Backtrack
                               # is not one); a `conduct` reasoner is bounded by max_runs
     max_runs: int = 0         # submissions; 0 = unbounded. See `max_cycles`.
+    # How many Pareto-front members the campaign is asking for. 0 keeps the reasoner's own
+    # default, which is 3 - a sensible number for the mock demo and an arbitrary cap on a
+    # campaign asked for ten designs. It belongs here rather than being inferred from
+    # `objectives`, because `Objective` declares a metric target and says nothing about how
+    # many designs satisfying it are wanted; the count is a property of the Goal.
+    target_front: int = 0
     concurrency: int = 1      # experiments allowed in flight at once
     stagnation_limit: int = 3
     # Backstop for runs exempted from the stagnation counter. A run that could not reach the
@@ -109,6 +116,15 @@ class CampaignSpec:
     # works for one that has never seen Dragon is exactly the move this project's records
     # argue against.
     runner: str = "dispatcher"
+    # How long the execution process will run without a word from the control process before
+    # it drains and stops. 0 disables, which is right in-process - the roles are coroutines
+    # beside the pump and cannot go silent without the whole process going with them.
+    #
+    # Across a socket they can, and then the failure is a campaign that silently stops
+    # replanning while holding an allocation. Draining rather than aborting is deliberate:
+    # in-flight work runs to completion and is absorbed, because cancellation is advisory and
+    # throwing away results that are already paid for buys nothing.
+    control_liveness_timeout_s: float = 0.0
     max_failed_cycles: int = 3
     max_attempts: int = 4              # bounded retry, for a `decide`-style policy
     max_admission_failures: int = 8    # executor-side cap; binds any reasoner
@@ -275,6 +291,9 @@ class CampaignExecutor:
         # a single draw sampled N times - evidence the interlock never actually gathered.
         self._untrusted_inflight: set[str] = set()
         self._last_front_ids: set[str] = set()
+        #: Monotonic time of the last call a control plane made. `None` until the campaign
+        #: starts, so a slow startup is never mistaken for a lost planner.
+        self._last_contact: float | None = None
         # Node ids in ABSORPTION order. `recent` used to mean "nodes stamped with the
         # previous cycle", which is only meaningful while a cycle absorbs exactly one
         # result. A cursor into this list says "what has landed since you last looked",
@@ -310,6 +329,25 @@ class CampaignExecutor:
             return AUTHORITY_ML_PREDICTOR
         return AUTHORITY_PHYSICS if toolkit == "rosetta" else AUTHORITY_ML_PREDICTOR
 
+    def _artifacts_of(self, node_id: str | None) -> dict[str, Any]:
+        """What one design node produced, for a Stage that refines it.
+
+        Empty for an unknown node rather than an error: a Planner naming a node that no longer
+        exists gets a graph with unsatisfied roots, which gate 1 is the right place to refuse -
+        the composer is not where identity is checked.
+        """
+        if not node_id:
+            return {}
+        try:
+            node = self.tree.get(node_id)
+        except KeyError:
+            # `CampaignTree.get` raises for an unknown id, and that contract is right for its
+            # other callers - a campaign asking for a node it created and cannot find has a
+            # real problem. Here the id came from a Planner, so a stale reference is ordinary
+            # and belongs in a rejection rather than a traceback.
+            return {}
+        return dict(node.artifacts)
+
     def _orphan_tasks(self) -> list[str]:
         """Non-terminal tasks whose every objective is now DELETED.
 
@@ -336,10 +374,14 @@ class CampaignExecutor:
         """Install the initial Spec. Returns the applied generation."""
         spec.campaign_id = self.spec.campaign_id
         self.spec_state = spec
+        # The objectives THEMSELVES, not their ids. An id says nothing about what the
+        # campaign was trying to achieve, so a record of ids could not be replayed, and the
+        # experiment's Specifier attribution - "the objectives emitted at campaign start" -
+        # would have nothing to read. Both are the whole reason `specs` provenance exists.
         self._log("specs", {"event": "initial", "generation": spec.generation,
-                            "aims": sorted(spec.aims),
-                            "objectives": {o.id: o.status.value
-                                           for o in spec.objectives.values()}})
+                            "aims": [a.model_dump(mode="json") for a in spec.aims.values()],
+                            "objectives": [o.model_dump(mode="json")
+                                           for o in spec.objectives.values()]})
         return spec.generation
 
     def apply_revision(self, rev: SpecRevision) -> int:
@@ -347,8 +389,9 @@ class CampaignExecutor:
         self.spec_state.apply(rev)
         self._log("specs", {"event": "revision",
                             "generation": self.spec_state.generation,
-                            "new_aims": [a.id for a in rev.new_aims],
-                            "new_objectives": [o.id for o in rev.new_objectives],
+                            "new_aims": [a.model_dump(mode="json") for a in rev.new_aims],
+                            "new_objectives": [o.model_dump(mode="json")
+                                               for o in rev.new_objectives],
                             "deleted": list(rev.deleted),
                             "status_changes": {k: v.value
                                                for k, v in rev.status_changes.items()},
@@ -361,16 +404,35 @@ class CampaignExecutor:
         Phase 3 makes this a `CampaignSession` and `CampaignControlPlane` operation so it can
         cross a socket; today the manager hands it to the driver directly.
         """
+        self.touch()
         if isinstance(payload, Spec):
             return self.set_spec(payload)
         return self.apply_revision(payload)
 
     # -- observe -------------------------------------------------------------
+    def touch(self) -> None:
+        """Record that the control plane is still there.
+
+        Called by every operation a `CampaignSession` exposes. No heartbeat operation is added
+        for this: the Listener polls `observe()` on every cycle, so liveness is already
+        observable, and inventing an operation to carry it would put ADR 0007 in play for
+        something the existing traffic answers.
+        """
+        self._last_contact = time.monotonic()
+
+    def _control_lost_for(self) -> float | None:
+        """Seconds since the last contact, if the timeout is enabled and has expired."""
+        if not self.spec.control_liveness_timeout_s or self._last_contact is None:
+            return None
+        silent = time.monotonic() - self._last_contact
+        return silent if silent > self.spec.control_liveness_timeout_s else None
+
     def observe(self, last_rejection: ValidationFailure | None = None,
                 since: int | None = None) -> CampaignObservation:
         """A read-only snapshot. `since` is a watermark into absorption order; the
         default reports what the last consumer saw, so an observer on the control plane
         gets parity of evidence with the policy without disturbing its cursor."""
+        self.touch()
         live = self.tree.live()
         front = pareto_front(live, self.spec.objectives)
         allnodes = list(self.tree)
@@ -395,7 +457,7 @@ class CampaignExecutor:
             # `toolkit` did not cover. Two lists describing the same thing disagree eventually;
             # this one is derived from the other.
             budget=self.budget, available_tools=self._toolkit.ids,
-            toolkit=self._toolkit, spec=self.spec_state,
+            toolkit=self._toolkit, stages=list(self.spec.stages), spec=self.spec_state,
             orphan_tasks=self._orphan_tasks(),
             last_rejection=last_rejection)
 
@@ -678,6 +740,40 @@ class CampaignExecutor:
             "replicas": max(1, replicas),
         })
 
+    def _apply_campaign_params(self, stage: Stage) -> None:
+        """Merge the campaign's declared parameters into a Stage, and apply the replica cap.
+
+        The Stage equivalent of `_apply_campaign_defaults`, and it was missing - which is a
+        silent loss rather than a cosmetic one. `params` is where a campaign puts target
+        identity: `boltz_predict.ligand_smiles`, `rfd3_design.input_spec_path`, the contig.
+        A roles-driven Delta campaign therefore ran `boltz_predict` with no ligand, which does
+        not fail - it models no ligand and the front optimises the wrong objective, which is
+        backlog A2 arriving by a new route. `mock-stabilize.yaml` declares no `params` at all,
+        which is why no test saw it.
+
+        Merged here rather than in the Planner for the recorded reason: the ligand and the
+        contig are campaign configuration, not search strategy, and a reasoner that had to
+        learn a tool's parameter names to run a campaign correctly would be one more place for
+        a real campaign to execute something it did not declare.
+
+        The Planner wins on any key it set - this supplies defaults. `replicas` is the other
+        way round, because it is a CAP: how wide a campaign may go is the campaign's call, and
+        a Stage asking wider is trimmed to it. Trimming drops whole lineages, never the tail of
+        a chain: a lineage is a complete chain, so removing one cannot change what the Stage
+        can measure, while truncating the tail is what took the only producer of two of four
+        objectives off job 22675512. It is recorded in `stages` provenance, because a Stage
+        that ran narrower than it was planned should say so.
+        """
+        for task in stage.tasks:
+            if defaults := self.spec.params.get(task.tool):
+                task.params = {**defaults, **task.params}
+        cap = self.spec.replicas
+        if cap and stage.lineages > cap:
+            dropped = sorted({t.lineage for t in stage.runs if t.lineage >= cap})
+            stage.tasks = [t for t in stage.tasks if t.lineage < cap]
+            self._log("stages", {"event": "capped", "stage": stage.id,
+                                 "replicas_cap": cap, "dropped_lineages": dropped})
+
     # -- the session surface -------------------------------------------------
     async def submit_stage(self, stage: Stage) -> str:
         """Admit and dispatch one Stage. Synchronous admission, as `submit` is.
@@ -691,10 +787,12 @@ class CampaignExecutor:
         is a legitimate Stage with nothing to run, and composing an empty graph to reject it
         would turn housekeeping into a rejection.
         """
+        self.touch()
         if self._halt.is_set():
             raise CampaignStopped(self._stop_reason or "campaign has ended")
         await self._await_resume()
         self._apply_cancels(stage)
+        self._apply_campaign_params(stage)
         if not stage.runs:
             stage.status = StageStatus.SETTLED
             self._log("stages", {"event": "cancels_only", "stage": stage.id,
@@ -729,7 +827,11 @@ class CampaignExecutor:
                            ) -> tuple[RunRecord | None, ValidationFailure | None]:
         """Compose the Stage, review it, then admit the graph."""
         try:
-            graph = self.composer.compose_stage(stage, run_label)
+            # A refinement Stage starts from the design it names. Resolved here because the
+            # composer has no tree, and the tree is the only thing that knows what a node
+            # produced.
+            graph = self.composer.compose_stage(
+                stage, run_label, parent_artifacts=self._artifacts_of(stage.parent_node))
         except KeyError as unknown:
             return None, ValidationFailure(
                 gate="type",
@@ -800,12 +902,21 @@ class CampaignExecutor:
                 directive=TaskDirective.RUN,
                 deployed_at=datetime.now(timezone.utc),
                 commitment=dict(stage.commitment)))
+        # `mappings` carries each task's PARAMETERS, lineage, wiring and seed beside the
+        # tool id. Without it the parameter vector a Planner chose is recorded nowhere -
+        # `graphs` holds `{node: tool}` and nothing else - so the experiment could not
+        # attribute anything to the Planner, and a replay would re-run the same chain with
+        # different numbers and call it the same experiment. `tasks` and `objectives` stay as
+        # they were, because they are the cheap read and something may already depend on them.
         self._log("stages", {"event": "deployed", "stage": stage.id, "run": run_label,
                              "graph": rec.graph.id, "spec_generation": stage.spec_generation,
                              "attempt": stage.attempt,
+                             "parent_node": stage.parent_node,
+                             "rationale": stage.rationale,
                              "tasks": {m.task_id: m.tool for m in stage.runs},
                              "objectives": {m.task_id: list(m.objectives)
                                             for m in stage.runs},
+                             "mappings": [m.model_dump(mode="json") for m in stage.runs],
                              "deferrals": [d.model_dump() for d in stage.deferrals],
                              "cancels": list(stage.cancels)})
 
@@ -829,6 +940,7 @@ class CampaignExecutor:
 
     async def submit(self, intent: ExperimentIntent) -> str:
         """Admit and dispatch one experiment, without waiting for it."""
+        self.touch()
         if self._halt.is_set():
             raise CampaignStopped(self._stop_reason or "campaign has ended")
         await self._await_resume()
@@ -869,6 +981,7 @@ class CampaignExecutor:
         hang whenever termination is decided while a reasoner is waiting - which is the
         deadlock this two-coroutine split makes possible, and it is silent.
         """
+        self.touch()
         if (done := self._outcomes.get(run_id)) is not None:
             return done
         fut = self._waiters.get(run_id)
@@ -921,6 +1034,7 @@ class CampaignExecutor:
 
     async def _await_resume(self) -> None:
         """Block while paused - but never past the end of the campaign."""
+        self.touch()
         if self._paused.is_set():
             return
         resumed = asyncio.ensure_future(self._paused.wait())
@@ -1170,7 +1284,9 @@ class CampaignExecutor:
             self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
         log.info("engine: %s backend ready", self.spec.backend)
         if self.spec.runner == "impress":
-            self.dispatcher = StageRunner(self.flow, self.reg, workdir=None)
+            self.dispatcher = StageRunner(
+                self.flow, self.reg, self.spec.backend, workdir=None,
+                gpus_per_node=self.spec.site.gpus_per_node)
             await self.dispatcher.start()
             log.info("execution loop: impress ImpressManager (one pipeline per stage)")
         else:
@@ -1194,13 +1310,36 @@ class CampaignExecutor:
         the science finishes, not the order it was asked for.
         """
         halt = asyncio.ensure_future(self._halt.wait())
+        poll = self.spec.control_liveness_timeout_s or 0.0
         try:
             while not self._halt.is_set():
+                if (silent := self._control_lost_for()) is not None:
+                    # Stop ADMITTING, then let the loop drain what is already running: the
+                    # results are paid for, cancellation is advisory, and throwing them away
+                    # buys nothing. The reason names the loss rather than saying "stopped",
+                    # because a campaign that quietly stopped replanning while holding an
+                    # allocation is the failure this exists to make loud.
+                    self._log("transitions", {"event": "control_lost",
+                                              "silent_s": round(silent, 1)})
+                    log.warning("control plane silent for %.1fs (limit %.1fs): draining "
+                                "%d in-flight run(s), then stopping",
+                                silent, self.spec.control_liveness_timeout_s,
+                                len(self._inflight))
+                    self.request_stop(
+                        f"control plane lost after {silent:.0f}s of silence")
+                    if not self._inflight:
+                        break
                 if not self._inflight:
                     wake = asyncio.ensure_future(self._activity.wait())
-                    await asyncio.wait({wake, halt},
-                                       return_when=asyncio.FIRST_COMPLETED)
+                    waits = {wake, halt}
+                    timer = (asyncio.ensure_future(asyncio.sleep(poll / 4))
+                             if poll else None)
+                    if timer is not None:
+                        waits.add(timer)
+                    await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
                     wake.cancel()
+                    if timer is not None:
+                        timer.cancel()
                     self._activity.clear()
                     continue
                 pending = {rec.handle.gather: rid

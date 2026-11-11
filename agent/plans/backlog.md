@@ -294,9 +294,19 @@ local services merges a template's env and applies the placement policy afterwar
 var there looks like pinning and does nothing, and Dragon needs
 `Policy(gpu_affinity=[gpu_index])` on the process template instead.
 
-**Still open:** the five real adapters do not yet apply `gpu_index` to their own child
-environments - that lands with their migration to `TaskRequest.input_ref` in phase 9 - and
-`replicas > 1` has still never executed on hardware. Nothing here has seen a GPU.
+*Pinning, completed in phase 9.* The adapters now apply it, and two things changed on the way.
+The assignment is no longer the adapter's to interpret: `exec/dispatch.node_task` resolves it to
+an environment where the backend is known and puts the result on `TaskRequest.gpu_env`, which an
+adapter merges through `_subprocess.child_env(req)` without asking which case it is in. An adapter
+deciding for itself would have to know its backend, and setting `CUDA_VISIBLE_DEVICES=2` inside a
+process Dragon had already restricted to one device points it at a device it was never given. And
+the **Runner path had no pinning at all** - `StagePipeline` registered every task without a
+`gpu_index`, so this item was fixed on the Dispatcher and reintroduced by omission on the path a
+Delta campaign selects with `runner: impress`. `gpu_for` is now shared by both loops, for the same
+reason `node_task` is.
+
+**Still open:** `replicas > 1` has still never executed on hardware. Nothing here has seen a GPU,
+so the pinning is asserted against the factory's own arguments and not against `nvidia-smi`.
 
 **A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
 `rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
@@ -418,11 +428,26 @@ no `impress-a serve` (executor side, inside the allocation, holding the plane op
 from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
 already describes as "implemented".
 
+**RESOLVED** (phase 7 of `control-plane-refactor.md`). `impress-a serve <spec>` runs the
+execution process - executor, Reviewer, Deployer, Runner, the one asyncflow engine - with no
+reasoner at all, behind `ControlPlaneServer`, and prints the URL it bound. `impress-a control
+--connect <url> --campaign <id> --model X` runs the Spec and Planning loops in their own
+process against `RemoteSession`. The split is now reachable from a shell, which is what this
+item was about; `test_serve_and_control_drive_a_campaign_in_two_processes` spawns both and
+drives a campaign, because every other test shares one interpreter and so cannot claim it.
+
 **C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
 `on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
 every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
 (`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
 as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
+
+**RESOLVED** (phase 7), by refusing rather than by detecting. `impress-a run --model C` now
+exits 1 and names the two commands to use instead. The entry points that make C real exist, so
+"no caller attached" is an operator error with an answer rather than a mode to degrade into -
+and `--specifier C` and `--planner C` are refused the same way, since they are the same hazard
+wearing a different flag. A disguised arm is indistinguishable from a real one in every figure
+derived from it, which is why this is a refusal and not a warning.
 
 **C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
 offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
@@ -431,6 +456,12 @@ single trusted client, no auth, no TLS. Planning question M6
 process runs relative to the job — was sidestepped rather than answered, and a real split on Delta
 needs it settled: the compute node's private interface, or a tunnel, and what the security boundary
 then is. Blocked on C5.
+
+**ANSWERED for this configuration** (phase 7): nowhere else. `impress-a serve` binds
+`127.0.0.1` by default and both processes belong on the same compute node, so the boundary is
+the node rather than a token nobody rotates. `--host` exists for a deliberate choice, and the
+plane still has no auth and no TLS - so anything other than loopback is a decision this item
+should be reopened for, not a flag to set casually.
 
 **C8. Concurrent Boltz runs can corrupt the shared CCD cache.** `download_boltz2()` checks
 `mols.exists()` - presence, not completeness - so a second concurrent lineage skips extraction and
@@ -582,6 +613,13 @@ measure, and A1 is still open.
   `helix_fraction`/`sheet_fraction` instead of our phi/psi estimate, and selecting the best model
   rather than the first. The file is now open in the adapter; nothing is read from it yet.
 
+**Still the blocker for rfd3's ensembling** (noted in phase 8 of
+`control-plane-refactor.md`). `ligandmpnn_design` and `boltz_predict` now select the best member
+of their own ensemble and their sampling is raised to 8; `rfd3_design` cannot, because choosing
+among its designs means reading the sidecar `*_model_*.json` and nothing here has confirmed
+which metric names it carries. So rfd3 stays at `num_designs: 1` with that reason recorded in
+its spec, and this item is now what gates raising it.
+
 **G3. `dump_trajectories=True` writes 99.4% waste.** Upstream measured trajectories at 11.85 MB of
 each 11.92 MB rfd3 output dir and flipped it to False (`0800ad8`), taking a campaign from ~30 GB to
 ~3.8 GB. Safe because trajectory files ship no `.json`. We never read them.
@@ -728,7 +766,23 @@ and what runs. Full evidence, the harmonization options and the hardware follow-
 [`plans/reasoner-models.md`](reasoner-models.md); the items below are what is outstanding from it.
 `policy/registry.py`, `impress-a models` and the `--model replay` fix are **DONE** (`fa0266f`).
 
-**H1. Model A has no LLM, and the slot for one is dead.** `planning/phase1-partB-architecture/02-control-models.md:59-61`
+**H1. Model A has no LLM, and the slot for one is dead.** **MOSTLY DONE** (phase 9). The four
+nodes exist and are compiled, two per half - `hypothesize`/`analyze` on `AgenticSpecifier`,
+`select_tasks`/`parameterize` on `AgenticPlanner` - and `self.reasoner` is read: each node calls
+`policy/reasoning.ask`, which is bounded (two attempts), schema-checked, and **corrective** - the
+rejection is appended to the prompt, and the node's own domain check (is this one of the three
+strategies?) runs *inside* the retry loop, because a check afterwards would reject a model that
+invented a strategy and degrade on the spot without ever telling it what the strategies are.
+Exhausting the attempts falls back to the rule cascade and writes a `reasoner_degraded`
+transition, named the same way model B's `oracle_degraded` is, so one query over `transitions`
+finds every degraded decision in a campaign whatever model made it - which is what the four-arm
+experiment's void rule needs. **Still open:** nothing constructs a client, so `--model A` runs
+the cascades and `llm_calls` is honestly 0; that lands with H2's live client, which is the whole
+reason H1 was sequenced after it. A is no longer behaviourally D, though: it retires an
+objective the Toolkit cannot measure (D names it and leaves it open) and it moves the diversity
+knobs (D never does), both asserted in `tests/test_planner.py`.
+
+The original finding, for the record:  `planning/phase1-partB-architecture/02-control-models.md:59-61`
 specifies "each node is a bounded LLM call with a declared input and output schema", ~3 per cycle,
 parse-retry with corrective feedback, escalation to a degraded policy. In code `_hypothesize`
 (`policy/agentic.py:57`) and `_parameterize` (`:75`) are deterministic threshold cascades, and
@@ -737,7 +791,37 @@ argument - B and C both have one. `_build()` registers two nodes while the modul
 four. So `--model A` is a LangGraph-shaped rule cascade, bit-exact and behaviourally a sibling of D,
 and its only test asserts termination (`tests/test_campaign.py:53`), never a node.
 
-**H2. Model B's live path is never constructed.** `OraclePolicy` defaults to `RehearsalOracle`
+**H2. Model B's live path is never constructed.** **DONE but for a live probe** (phase 9).
+`policy/llm.py` carries `OpenAICompatOracle`, ported from
+`examples/agentic_small_molecule_binding/llm.py` - which has four hardware runs behind it -
+with everything Part B doc 02 sections 3 and 7 ask for: a pinned dated model id, pinned
+sampling (temperature stated on every request, because a comparison cannot hold it constant if
+no request does), `Retry-After` honoured, retryable statuses separated from a 400 that will
+fail identically however often it is sent, and the model's own `reasoning_content` carried back
+for an endpoint that requires it. Async rather than synchronous: the halves run on the control
+process's own loop, which is what phase 7 bought, so no thread is needed. `models.yaml` holds
+one profile per model and `--model-profile` selects it; the extra is now `openai` rather than
+the `litellm` nothing imported, as `plans/reasoner-models.md` specified.
+
+Three defects closed with it, each silent. **The rehearsal returned the mock chain whatever the
+campaign declared** and `_build_b` did not forward `o.stages`: against the six-stage Delta
+chain that is a campaign which validates the real toolkits and then executes mocks, with
+plausible metrics and `6/6 tasks ok`, reported as a model-B result. There is no default chain
+now and a chainless rehearsal refuses by name. **Its stopping conditions were hardcoded** at
+`cycle >= 4` / `front >= 3`, which is X1 by another route. **A reply was brace-sliced** out of
+the text, so a prose answer containing two braces produced a decision from whatever was between
+them; it is parsed, and a reply that is not a JSON object is a schema failure `reasoning.ask`
+tells the model about. And `DECISION_SCHEMA` split in two: `SPEC_SCHEMA` answers in metrics and
+thresholds, `STAGE_SCHEMA` in tools, breadth and parameters, sharing only `rationale` - which a
+test asserts, and which caught `parent_node` being asked of both halves.
+
+**Still open:** no request has reached a real endpoint from this project. The sibling example
+measured `claude-opus-5-5` declining *its* workload through this endpoint
+(`finish_reason=content_filter`, 0 completion tokens, with and without the system prompt);
+whether a request for a JSON decision hits the same filter is unmeasured, so probe it on a
+login node before an allocation depends on it. That probe is the prerequisite gate's H2 row.
+
+The original finding, for the record:  `OraclePolicy` defaults to `RehearsalOracle`
 (`policy/oracle.py:85`) and nothing passes a model, so `--model B` runs the deterministic stand-in.
 `LangChainOracle` (`:65-77`) is built nowhere, brace-slices JSON out of the reply despite a docstring
 claiming structured output, and has none of what Part B doc 02 sections 3 and 7 require: pinned dated
@@ -746,7 +830,26 @@ model id, sampling parameters, `Retry-After` backoff, 429-vs-529. `pyproject.tom
 per-model profiles already exists in `examples/agentic_small_molecule_binding/llm.py` and has
 hardware results behind it; porting it is the plan's step 1.
 
-**H3. No policy can vary a real tool's parameters.** A and D emit `params` keyed to `mock_generate`
+**H3. No policy can vary a real tool's parameters.** **DONE for model D** (phase 9): its Planner
+half, `policy/planners/explicit.ThresholdPlanner`, chooses parameters from the `ToolkitView`'s own
+`ParamCard`s - so the tool ids and the ranges come from the specs rather than from this file - and
+`tests/test_real_toolkits.py::test_a_planner_can_vary_a_real_tools_parameter` asserts against the
+real six-stage chain that the tool is in the chain, the parameter is one that tool declares, the
+value is inside the declared range, and it differs from the default. Which parameter is read from
+the spec's `trades` sentence, the only prose a reasoner gets: `quality`/`accuracy`/`convergence` is
+the refinement axis, while `coverage`/`sampling`/`candidates` (breadth) and `seed` (lineage
+identity) are deliberately left alone - raising rfd3's `num_designs` pays N times for one design
+while its adapter keeps index 0, and moving `seed` would break the independence of the replicas the
+arm is credited for. **Still open for A, B and C**, whose planner halves are still derived from
+`decide` and still emit the mock keys below. Two gaps found while closing it, both of which would
+have made a real roles-driven campaign wrong rather than merely limited: `submit_stage` applied
+neither the campaign's `params` nor its `replicas` cap (`_apply_campaign_defaults` ran on the intent
+path only), so a Delta campaign on the roles path would have run `boltz_predict` with an empty
+`ligand_smiles` - which models no ligand rather than failing, A2 by a new route - and
+`CampaignObservation` did not carry the campaign's declared chain, so a Planner driving a campaign
+over a socket could not learn its ORDER and would have wired each port to the wrong producer.
+
+The original finding, for the record: A and D emit `params` keyed to `mock_generate`
 and `mock_design` (`policy/agentic.py:84`, `policy/explicit.py:69`), and B's rehearsal the same
 (`policy/oracle.py:60`), even when `stages` is the real six-stage chain. `compose/composer.py:63`
 reads `intent.params.get(tool_id, {})` per composed stage, so those keys are silently dropped. On a
@@ -828,8 +931,31 @@ paid for out of the first allocation.
 3. **A1-A3 the first real run** — needs a person, and everything else is speculation until it happens.
 4. **D1-D4 registry hardening** — small, self-contained, restores "loading is validating".
 5. **F1-F4 docs** — cheap, and the absent ADR is the one a future reader will most want.
-6. **C5-C7 the reasoner's entry points** — the transport is built and tested; without these
-   it can only be reached from `tests/`, and `--model C` keeps reporting a model-D campaign.
+6. ~~**C5-C6 the reasoner's entry points**~~ **DONE** (phases 7 and 9). `impress-a serve` /
+   `impress-a control` exist and are covered by a two-process test, `--model C` under
+   `impress-a run` is refused rather than timing out, and model C now has **two role inboxes**
+   routed by a `role` key inside the directive `steer` already carries - one headless mode
+   (decision 0002) and no new plane operation (ADR 0007). Its planner half defaults to
+   `on_timeout="stop"`, a fallback must be declared to exist, and taking one writes a
+   `caller_timeout` transition naming it, because a fallen-back C arm is byte-for-byte a D
+   campaign - and the default was wrong until a shell run showed it: `ExternalPlanner`
+   defaulted to `stop` while `ReasonerOptions.on_timeout` defaulted to `fallback`, so every
+   path through the registry, which is every path the CLI takes, built the dangerous one.
+   `impress-a serve --model C` logged `no directive in 5.0s; on_timeout=fallback` and finished
+   on model D's planner. Both defaults are `stop` now, pinned by a test.
+
+   **The arrangement for arm C is one process, and that is a finding rather than a choice.**
+   `plane.steer` reaches `manager.policy`, which lives in the *execution* process - so a
+   campaign served with no reasoner for `impress-a control` to attach to has nothing for a
+   third party to steer, and every directive comes back `campaign is not under external
+   control`. Decision 0002 says model C *is* the headless mode, and the headless mode is one
+   process serving a campaign whose halves are its inboxes: `impress-a serve <spec> --model C`.
+   The two-process split stays for A, B and D, whose halves have no inbox. Verified across two
+   OS processes from a shell, with the caller's `recycles: 6` reaching the deployed tasks.
+
+   **C7 remains**: the plane has no auth and no TLS, settled for the loopback configuration in
+   ADR 0014 and open for any other - and `--model C` raises the stakes, because a directive is
+   now the campaign's parameter vector rather than a suggestion.
 7. **B1 structural gates and G2/G4/G5** — all four wait on the first real run, which is what
    tells us what rfd3 actually writes and what the Rosetta numbers actually look like.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
@@ -837,10 +963,21 @@ paid for out of the first allocation.
    could explore with a truncated chain. The characterization test did change, exactly as it
    said it would, and a second test now holds the fix to being additive.
 10. ~~**H6 the lint gate**~~ **DONE** — it was the reason H1-H5 went unnoticed, and it was cheap.
-    Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
-    claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
-    after H2, which is what makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now
-    phases 9 and the experiment of [`control-plane-refactor.md`](control-plane-refactor.md).
+    ~~**H3**~~ **DONE for model D** in phase 9, which is what unblocks any claim about decision
+    quality for the control arm; A, B and C follow with their own planner halves. Then **H2**
+    (the client exists and has hardware behind it), then **H7**. **H1** after H2, which is what
+    makes it cheap. **H4** and **H5** on demand. H1-H3 and H7 are now phase 9 and the experiment
+    of [`control-plane-refactor.md`](control-plane-refactor.md).
+11. ~~**X1 `max_cycles` was not forwarded to the reasoner**~~ **DONE** (phase 9). Found while
+    planning the four-arm experiment. `build_policy` withheld it on the reasoning that
+    `CampaignManager._reasoner` already bounds the driver and bounding one thing twice hides an
+    off-by-one. The consequence was worse than what it avoided: every model carried
+    `ReasonerOptions.max_cycles`'s default of **6**, so a four-hour arm declaring `max_cycles: 200`
+    would have decided six times in about twenty minutes, stopped itself, and reported a clean
+    campaign having spent roughly 8% of its allocation. `target_front` had the same shape with no
+    second bound at all behind it, and is now a declared `CampaignSpec` field (0 keeps the model's
+    own 3) rather than an inferred one, because how many designs a campaign wants is a property of
+    the Goal and `core.pareto.Objective` says nothing about it.
 
 ## Verification that applies to any item
 

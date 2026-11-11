@@ -16,11 +16,17 @@ import yaml
 from ..compose.composer import Composer
 from ..compose.interlock import TrustLedger
 from ..compose.validate import SiteCaps
+from ..control.http import ControlPlaneClient, ControlPlaneServer
+from ..control.plane import InProcessControlPlane
+from ..control.session import RemoteSession
 from ..core.decision import ExperimentIntent
+from ..core.goal import Goal
 from ..core.pareto import Objective
+from ..core.session import CampaignStopped
 from ..manager import CampaignManager, CampaignSpec
 from ..policy import registry as reasoners
-from ..policy.wrappers import RuleCorrectionsPolicy
+from ..policy.wrappers import RuleCorrectionsPolicy, StageGuard
+from ..runtime.roles import RolesDriver
 from ..tools.registry import Registry
 
 # Module logger, never configured here: a library that calls basicConfig steals the
@@ -37,7 +43,8 @@ POLICIES = reasoners.CLASSES
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
-SUBCOMMANDS = ("run", "tools", "models", "preflight", "trust")
+SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
+               "trust")
 
 
 def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
@@ -81,6 +88,16 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # of the same spec, and differ between experiments. `scripts/delta_gpu_run.sh` records
         # it in the job manifest.
         seed_salt=d.get("seed_salt") or os.environ.get("IMPRESS_A_SEED_SALT", ""),
+        # Every field below is read from YAML, deliberately exhaustively. A key a spec file
+        # sets and the loader ignores does nothing and says nothing - which is exactly what
+        # `sites/*.yaml`'s `tool_delivery` switch has been doing since it was written (E1),
+        # and what `control_liveness_timeout_s: 120` did in all three Delta specs until this
+        # line existed.
+        control=d.get("control", "legacy"),
+        runner=d.get("runner", "dispatcher"),
+        control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
+        max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
+        target_front=int(d.get("target_front", 0)),
         stages=d.get("stages", []) or [],
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
@@ -103,7 +120,8 @@ def _check_ligand_smiles(spec: CampaignSpec) -> str | None:
 
 
 def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
-                 records: list[dict[str, Any]] | None = None):
+                 records: list[dict[str, Any]] | None = None,
+                 profile: str | None = None):
     """Adapt a `CampaignSpec` into the registry's options, and construct the reasoner.
 
     This function is the adapter and nothing more. `policy/registry.py` owns which models
@@ -116,13 +134,25 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
     which is the mock chain - so a real campaign would validate the real toolkits and
     then execute mocks.
     """
-    # `max_cycles` is deliberately NOT forwarded. `CampaignManager._reasoner` already
-    # bounds the driver with `spec.max_cycles`, and a policy carrying the same number
-    # would bound the same thing twice from two places - which is how an off-by-one
-    # becomes invisible (the driver counted a Backtrack as a cycle for three Delta jobs).
-    # The spec bounds the driver; the policy keeps its own stopping condition.
+    # `max_cycles` IS forwarded now, and the earlier reasoning for withholding it was half
+    # right. Withholding avoided bounding the same thing from two places, which is how an
+    # off-by-one became invisible (the driver counted a Backtrack as a cycle for three Delta
+    # jobs). But it left every model carrying `ReasonerOptions.max_cycles`'s default of 6,
+    # which does not merely duplicate the campaign's bound - it is TIGHTER than it. A 4-hour
+    # arm with `max_cycles: 200` would have made six decisions in about twenty minutes and then
+    # stopped itself, spending roughly 8% of the allocation. That is the worse of the two
+    # failures, and it is silent.
+    #
+    # Forwarding the spec's own value makes the policy's self-stop no tighter than the
+    # campaign's, so the driver remains the authority and a policy can still stop early for its
+    # own reasons. `target_front` comes from the spec for the same reason: 3 is a sensible
+    # default for a demo and an arbitrary cap on a campaign asked for ten designs, and a
+    # campaign that declares neither keeps the model's own number.
     pol = reasoners.build(model, reasoners.ReasonerOptions(
         stages=list(spec.stages) or None,
+        oracle=_oracle_for(profile, spec),
+        max_cycles=spec.max_cycles,
+        target_front=spec.target_front or reasoners.ReasonerOptions().target_front,
         records=records,
     ))
     if guard:
@@ -132,19 +162,96 @@ def build_policy(model: str, spec: CampaignSpec, guard: bool = True,
 
 def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
                 records: list[dict[str, Any]] | None = None,
-                specifier: str | None = None, planner: str | None = None):
+                specifier: str | None = None, planner: str | None = None,
+                spec_records: list[dict[str, Any]] | None = None,
+                stage_records: list[dict[str, Any]] | None = None,
+                profile: str | None = None, caller_timeout_s: float | None = None):
     """The same adapter, for the two halves.
 
-    The guard still wraps the *decision-making* half rather than the pair: while the strangler
-    is in place both halves come from one `ControlPolicy`, so wrapping it once is wrapping both.
-    Phase 9 replaces it with `StageGuard`, which can refuse a Stage directly - including a RUN
-    task that serves no objective, which no policy-level wrapper could see.
+    Two guard shapes, because there are two kinds of half. A pair derived from a
+    `ControlPolicy` is guarded by wrapping that policy once - it is the thing making the
+    decisions, so wrapping it is wrapping both halves. A model with real halves is guarded by
+    `StageGuard` on the planner, which is narrower than its predecessor on purpose: the
+    replica cap now binds in the executor and a task serving no objective is refused by the
+    Reviewer, so what is left to wrap is `forbid_tools` until phase 10's gate 6 takes it over.
+
+    `--no-guard` therefore stops being able to switch off either of the two checks that
+    matter, which it never should have been able to do.
     """
-    opts = reasoners.ReasonerOptions(stages=list(spec.stages) or None, records=records)
-    if specifier or planner:
-        return reasoners.build_roles(specifier or model, planner or model, opts)
+    opts = reasoners.ReasonerOptions(
+        stages=list(spec.stages) or None, records=records,
+        spec_records=spec_records, stage_records=stage_records,
+        oracle=_oracle_for(profile, spec),
+        timeout_s=caller_timeout_s or reasoners.ReasonerOptions().timeout_s,
+        max_cycles=spec.max_cycles,
+        target_front=spec.target_front or reasoners.ReasonerOptions().target_front)
+    if specifier or planner or _declares_halves(specifier or model, planner or model):
+        pair = reasoners.build_roles(specifier or model, planner or model, opts)
+        if guard:
+            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+        return pair
     pol = build_policy(model, spec, guard, records)
     return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
+def _oracle_for(profile: str | None, spec: CampaignSpec) -> Any:
+    """The model model B talks to, from `--model-profile`.
+
+    `None` leaves the registry to build `RehearsalOracle` with the campaign's chain, which is
+    what `--model B` runs with no profile named - and `impress-a models` reports `llm_calls: 0`
+    for exactly that reason. Loaded here rather than in `policy/` because `policy` may import
+    `core` only and reading a YAML file is not `core`'s business either; the same reason
+    `_replay_records` lives here.
+    """
+    if not profile:
+        return None
+    from ..policy.llm import build_oracle, load_profiles
+    # The PACKAGED file, unless an operator names another one explicitly. It used to try the
+    # current working directory first, and that is a credential path rather than a
+    # convenience: a profile's `base_url` is where the request goes and its `api_key_env`
+    # names the key that goes with it, so a `models.yaml` in whatever directory a job happened
+    # to start in could point the operator's own key at someone else's endpoint. On a shared
+    # filesystem, with a launcher that cd's into a per-job directory, that is not a remote
+    # hazard. `IMPRESS_A_MODELS` stays, because an operator choosing a file is a decision and
+    # a directory a process was started in is not.
+    path = Path(__file__).resolve().parents[3] / "models.yaml"
+    if override := os.environ.get("IMPRESS_A_MODELS"):
+        path = Path(override)
+        log.warning("control model: reading profiles from $IMPRESS_A_MODELS=%s rather than "
+                    "the packaged models.yaml", path)
+    profiles = load_profiles(path)
+    if profile not in profiles:
+        raise ValueError(f"unknown model profile {profile!r}; {path} declares "
+                         f"{sorted(profiles)}")
+    chosen = profiles[profile]
+    # The endpoint and the key variable together, because provenance should record which
+    # credential was sent where. A figure attributed to a model is only as good as the record
+    # of what answered.
+    log.info("control model: profile %s from %s (kind=%s, model=%s, endpoint=%s, key=%s)",
+             profile, path, chosen.kind, chosen.model, chosen.base_url or "-",
+             chosen.api_key_env or "none")
+    return build_oracle(chosen, stages=list(spec.stages) or None)
+
+
+def _declares_halves(spec_letter: str, plan_letter: str) -> bool:
+    """Whether both requested halves are the model's own rather than derived from `decide`.
+
+    While the strangler is in place most models have no halves of their own, and
+    `DecideAsRoles` presents their `ControlPolicy` as a pair - which is what made
+    `--control roles` a change of vocabulary rather than of behaviour. Model D now has real
+    halves, so the derivation has to stop being unconditional: taking the adapter when a
+    model declares a `ThresholdPlanner` would run the legacy decision cascade under a flag
+    that says otherwise, and the campaign log would name a planner that never planned.
+
+    Both halves, not either: a pair with one real and one derived half would mean a
+    `ThresholdPlanner` planning against a Spec the `LegacySpecifier` wrote, which is a
+    combination nothing has tested and nobody asked for. `--specifier X --planner Y` is the
+    supported way to mix, and it is checked first by the caller.
+    """
+    models = reasoners.MODELS
+    return (spec_letter in models and plan_letter in models
+            and models[spec_letter].specifier is not None
+            and models[plan_letter].planner is not None)
 
 
 def _halves_of(policy: Any):
@@ -249,6 +356,138 @@ def trust(spec_path: str | None, do_assert: bool, revoke: str | None, reason: st
     return 0
 
 
+class _Idle:
+    """A reasoner that is not there, for the execution process.
+
+    `impress-a serve` runs the executor, the Reviewer, the Deployer, the Runner and the one
+    asyncflow engine, and NO reasoner - the control process supplies that over the session. The
+    manager races a reasoner's `conduct` against the executor's pump, so the execution side
+    needs something that stays out of the way rather than something that decides.
+
+    Not `NullPolicy`: that stops the campaign on its first decision, which is the opposite of
+    what a served campaign wants.
+    """
+
+    name = "served"
+
+    async def conduct(self, session: Any) -> None:
+        await asyncio.Event().wait()
+
+
+async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
+                         heartbeat_s: float | None = None, model: str | None = None,
+                         guard: bool = True, profile: str | None = None,
+                         caller_timeout_s: float | None = None) -> int:
+    """Run the execution process and serve it over HTTP.
+
+    Backlog C5: the out-of-process split has been reachable from `tests/` and from no shell
+    since it was written, so `docs/reference/frontends.md` described as "implemented" something
+    nobody could run. These are those entry points.
+
+    Loopback by default, and that is the security boundary this configuration can defend: the
+    plane has no auth and no TLS, both ends sit on the same compute node, and backlog C7 - where
+    it may be reachable from - stays answered by "nowhere else" rather than by a token nobody
+    rotates.
+
+    **`--model` is what makes arm C runnable, and leaving it out is the two-process split.**
+    Without it the served campaign has no reasoner, which is right for `impress-a control` to
+    attach to. But `plane.steer` reaches `manager.policy`, which lives in THIS process - so a
+    third party steering a campaign served with no reasoner reaches nothing, and gets
+    `campaign is not under external control` for a campaign whose whole arrangement is
+    external control. That is not a transport problem to fix in the plane: decision 0002 says
+    model C *is* the headless mode, and the headless mode is one process serving a campaign
+    whose halves are its inboxes. So `impress-a serve <spec> --model C` registers the pair
+    here and a caller steers it over HTTP; `impress-a serve <spec>` alone keeps the split for
+    A, B and D, whose halves have no inbox and want a control process instead.
+    """
+    spec = load_spec(spec_path)
+    if err := _check_ligand_smiles(spec):
+        log.error("%s", err)
+        return 1
+    for var, val in _thread_caps(spec).items():
+        os.environ.setdefault(var, val)
+    spec.control = "roles"
+    reg = Registry().load()
+    reasoner: Any = _Idle()
+    if model:
+        reasoner = build_roles(model, spec, guard, profile=profile,
+                               caller_timeout_s=caller_timeout_s)
+        log.info("serving campaign with %s attached: an external caller steers it in place, "
+                 "rather than a control process attaching to it", reasoner.name)
+    mgr = CampaignManager(spec, reasoner, reg)
+    plane = InProcessControlPlane()
+    cid = plane.register(mgr)
+    if heartbeat_s is None:
+        heartbeat_s = float(os.environ.get("IMPRESS_A_HEARTBEAT_S", "60") or 0)
+
+    async with ControlPlaneServer(plane, host=host, port=port) as server:
+        # Printed, not only logged: a control process needs the URL, and on Delta the two are
+        # started by the same script from the same job.
+        print(f"campaign {cid} serving on {server.base_url}", flush=True)
+        log.info("serving campaign %s on %s (liveness timeout %.0fs)", cid,
+                 server.base_url, spec.control_liveness_timeout_s)
+        res = await mgr.run()
+    print(f"\n  campaign : {res.campaign_id}\n  cycles   : {res.cycles}"
+          f"\n  stop     : {res.stop_reason}\n  nodes    : {len(res.tree)}"
+          f"  front: {len(res.front)}")
+    return 0
+
+
+async def control_campaign(url: str, campaign_id: str, model: str = "D",
+                           specifier: str | None = None, planner: str | None = None,
+                           guard: bool = True, profile: str | None = None) -> int:
+    """Run the Spec Loop and Planning Loop in their own process, over the session.
+
+    The same `RolesDriver` the in-process path uses, against `RemoteSession` instead of
+    `InProcessSession` - which is the whole reason phase 1 wrote the roles against
+    `CampaignSession` rather than against the executor.
+
+    **This is also why `--model C` can no longer fail open.** A control process IS the
+    reasoner, so "no reasoner attached" is not a state that exists here; under `impress-a run`
+    it is refused outright rather than timing out every five seconds and silently running D
+    while reporting C (backlog C6).
+    """
+    client = ControlPlaneClient(url)
+    async with client:
+        session = RemoteSession(client, campaign_id)
+        obs = await session.observe()
+        goal = Goal(text=obs.goal, objectives=list(obs.objectives))
+        pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile)
+        log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
+        driver = RolesDriver(goal, pair.specifier, pair.planner,
+                             max_turns=10_000, concurrency=1)
+        try:
+            await driver.conduct(session)
+        except CampaignStopped as stopped:
+            log.info("control: campaign ended (%s)", stopped)
+    return 0
+
+
+def _role_pair(model: str, specifier: str | None, planner: str | None,
+               stages: list[str], guard: bool, profile: str | None = None):
+    """Build the two halves for a remote driver, from the served campaign's own chain.
+
+    `stages` comes from `CampaignObservation.stages` - the campaign's declaration in its own
+    order - and not from `toolkit.ids`, which holds the same tools sorted by id. A Planner
+    wires each port to the nearest preceding producer, so under alphabetical order
+    `mock_design` precedes `mock_generate` and the sequence step would be planned before the
+    backbone it consumes.
+    """
+    opts = reasoners.ReasonerOptions(
+        stages=stages or None,
+        oracle=_oracle_for(profile, CampaignSpec(campaign_id="", goal="", objectives=[],
+                                                 stages=list(stages))))
+    if specifier or planner or _declares_halves(specifier or model, planner or model):
+        pair = reasoners.build_roles(specifier or model, planner or model, opts)
+        if guard:
+            pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
+        return pair
+    pol = reasoners.build(model, opts)
+    if guard:
+        pol = RuleCorrectionsPolicy(pol, max_replicas=8, forbid_tools=("mock_noodle",))
+    return reasoners.RolePair(*_halves_of(pol), label=model)
+
+
 def print_models() -> int:
     """Print the control models, their shape and their real status.
 
@@ -289,6 +528,30 @@ def _replay_records(path: str) -> list[dict[str, Any]]:
     if not p.is_file():
         raise FileNotFoundError(f"no decisions.jsonl under {path}")
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+
+
+def _replay_role_records(path: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """`(specs, stages)` from a recorded campaign, for the two replay halves.
+
+    Two files rather than one, and executor-written rather than reasoner-written - which is
+    why the halves can replay a campaign run by a model that kept no notes of its own, where
+    `decisions.jsonl` only holds what a model chose to record about itself.
+
+    Read here rather than in the policy layer, for the reason `_replay_records` gives: a
+    policy that touches the filesystem is a policy that can reach past `core`.
+    """
+    root = Path(path)
+    prov = root / "provenance" if (root / "provenance").is_dir() else root
+    out = []
+    for name in ("specs.jsonl", "stages.jsonl"):
+        f = prov / name
+        if not f.is_file():
+            raise FileNotFoundError(
+                f"no {name} under {path}. The replay halves read the executor's own record; "
+                f"a campaign recorded before `specs`/`stages` provenance existed can only be "
+                f"replayed with `--control legacy`")
+        out.append([json.loads(line) for line in f.read_text().splitlines() if line.strip()])
+    return out[0], out[1]
 
 
 def _hms(seconds: float) -> str:
@@ -369,7 +632,8 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
                        replay_from: str | None = None, control: str | None = None,
-                       specifier: str | None = None, planner: str | None = None) -> int:
+                       specifier: str | None = None, planner: str | None = None,
+                       profile: str | None = None) -> int:
     t0 = time.monotonic()
     log.info("loading campaign spec %s", spec_path)
     spec = load_spec(spec_path)
@@ -387,6 +651,21 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     # Naming either half implies the role pipeline: a Specifier has nowhere to run in the
     # single-`decide` path. Stated as an implication rather than an error so that
     # `--specifier B --planner D` is one flag pair rather than three.
+    # Backlog C6, closed by refusing rather than by detecting. `impress-a run` attaches no
+    # control plane, so model C's `decide` blocked on an inbox nothing fed, timed out every
+    # five seconds and ran its declared fallback - a model-D campaign reported as model C. The
+    # entry points that make C real exist now, so "no caller attached" is an operator error
+    # with an answer rather than a mode to degrade into.
+    if "C" in {model, specifier, planner}:
+        log.error(
+            "--model C means an external caller steers the campaign, and `impress-a run` "
+            "attaches no control plane - it would time out every %.0fs and silently run its "
+            "fallback, reporting a model-D campaign as model C (backlog C6). Use two "
+            "processes instead:\n"
+            "    impress-a serve %s\n"
+            "    impress-a control --connect <url> --campaign <id> --model C",
+            reasoners.ReasonerOptions().timeout_s, spec_path)
+        return 1
     if specifier or planner:
         control = "roles"
     if control:
@@ -394,11 +673,20 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     label = model if not (specifier or planner) else f"{specifier or model}/{planner or model}"
     spec.campaign_id = f"{spec.campaign_id}-{label}"
     try:
-        records = _replay_records(replay_from) if replay_from else None
+        # Only the record the chosen path will actually use is loaded. The halves read the
+        # executor's own `specs.jsonl` and `stages.jsonl`; the legacy path reads the
+        # `decisions.jsonl` each model wrote for itself. Loading both would mean a campaign
+        # recorded before `specs`/`stages` provenance existed could not be replayed even
+        # under `--control legacy`, which is the one path that needs nothing from them.
         if spec.control == "roles":
-            policy = build_roles(model, spec, guard, records, specifier, planner)
+            spec_records, stage_records = (
+                _replay_role_records(replay_from) if replay_from else (None, None))
+            policy = build_roles(model, spec, guard, None, specifier, planner,
+                                 spec_records, stage_records, profile)
         else:
-            policy = build_policy(model, spec, guard, records)
+            policy = build_policy(model, spec, guard,
+                                  _replay_records(replay_from) if replay_from else None,
+                                  profile)
     except (ValueError, FileNotFoundError, json.JSONDecodeError) as exc:
         # A model that cannot be constructed is an operator error, not a crash: report it
         # the way preflight reports a missing binary. `--model replay` used to raise
@@ -605,6 +893,37 @@ def preflight(spec: CampaignSpec | None = None) -> int:
         except (OSError, subprocess.SubprocessError) as e:
             checks.append(("ligandmpnn imports", False, f"could not check: {e}"))
 
+    # `--batch_size` is new, and A3's lesson is that a tool's contract was not merely
+    # unverified but WRONG: RFD3 was invoked with `--config`/`--out`, flags its real Hydra CLI
+    # does not have, and that survived review because nobody had run it. So the flag is checked
+    # against the installed `run.py --help` rather than trusted.
+    mpnn_dir = os.environ.get("MPNN_DIR")
+    if stages and "ligandmpnn_design" in stages and mpnn_dir:
+        run_py = Path(mpnn_dir) / "run.py"
+        if run_py.is_file():
+            try:
+                helped = subprocess.run(
+                    [sys.executable, str(run_py), "--help"], capture_output=True, text=True,
+                    timeout=300, cwd=mpnn_dir)
+                helptext = helped.stdout + helped.stderr
+                missing = [f for f in ("--batch_size", "--number_of_batches")
+                           if f not in helptext]
+                if not helptext.strip():
+                    checks.append(("ligandmpnn batch flags", None,
+                                   "`run.py --help` produced no output - undetermined"))
+                elif missing:
+                    checks.append(("ligandmpnn batch flags", False,
+                                   f"installed run.py does not offer {', '.join(missing)} - "
+                                   f"the adapter passes them and would fail inside the job"))
+                else:
+                    checks.append(("ligandmpnn batch flags", True,
+                                   "--batch_size and --number_of_batches both offered"))
+            except subprocess.TimeoutExpired:
+                checks.append(("ligandmpnn batch flags", None,
+                               "`run.py --help` did not answer in 300s - undetermined"))
+            except (OSError, subprocess.SubprocessError) as e:
+                checks.append(("ligandmpnn batch flags", False, f"could not check: {e}"))
+
     # The `impress` dependency is published on no index, so if pip ever went looking for that
     # name it installed something else - and the failure is silent, because the import succeeds
     # and hands back a working module that is simply not ours. Both installers put the root
@@ -675,12 +994,42 @@ def main(argv: list[str] | None = None) -> int:
                         "scripts/delta_run_campaign.py")
     r.add_argument("--replay-from", default=None, metavar="DIR",
                    help="provenance directory to replay (--model replay only)")
+    r.add_argument("--model-profile", default=None, metavar="NAME",
+                   help="models.yaml profile naming a live endpoint (--model B). Omitted, B "
+                        "runs the deterministic rehearsal and `impress-a models` says so")
     t = sub.add_parser("tools", help="list registered tools")
     t.add_argument("--toolkits", default=None)
     sub.add_parser("models", help="list the control models and their status")
     pf = sub.add_parser("preflight",
                         help="check the real-toolkit environment before submitting")
     pf.add_argument("spec", nargs="?", default=None)
+    sv = sub.add_parser("serve", help="run the execution process and serve it over HTTP")
+    sv.add_argument("spec")
+    sv.add_argument("--model", default=None, choices=sorted(POLICIES),
+                    help="attach a reasoner IN this process, so an external caller steers it "
+                         "here (`--model C`). Omitted, the campaign is served with no "
+                         "reasoner for `impress-a control` to attach to")
+    sv.add_argument("--no-guard", action="store_true")
+    sv.add_argument("--model-profile", default=None, metavar="NAME",
+                    help="models.yaml profile naming a live endpoint (--model B)")
+    sv.add_argument("--caller-timeout", type=float, default=None, metavar="SECONDS",
+                    help="how long each half waits for an external directive (--model C). "
+                         "The default suits a scripted sidecar; raise it for a person")
+    sv.add_argument("--host", default="127.0.0.1",
+                    help="loopback by default: the plane has no auth and no TLS, and both "
+                         "ends belong on the same compute node (backlog C7)")
+    sv.add_argument("--port", type=int, default=0)
+    sv.add_argument("--heartbeat", type=float, default=None, metavar="SECONDS")
+    ct = sub.add_parser("control", help="run the Spec and Planning loops against a served "
+                                        "campaign")
+    ct.add_argument("--connect", required=True, metavar="URL")
+    ct.add_argument("--campaign", required=True, metavar="ID")
+    ct.add_argument("--model", default="D", choices=sorted(POLICIES))
+    ct.add_argument("--specifier", default=None, choices=sorted(POLICIES))
+    ct.add_argument("--planner", default=None, choices=sorted(POLICIES))
+    ct.add_argument("--no-guard", action="store_true")
+    ct.add_argument("--model-profile", default=None, metavar="NAME",
+                    help="models.yaml profile naming a live endpoint (--model B)")
     tr = sub.add_parser("trust", help="grant, list or withdraw trust for a campaign's patterns")
     tr.add_argument("spec", nargs="?", default=None)
     tr.add_argument("--assert", dest="do_assert", action="store_true",
@@ -697,9 +1046,17 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_campaign(a.spec, a.model, not a.no_guard,
                                         a.heartbeat, a.replay_from,
                                         control=a.control, specifier=a.specifier,
-                                        planner=a.planner))
+                                        planner=a.planner, profile=a.model_profile))
     if a.cmd == "models":
         return print_models()
+    if a.cmd == "serve":
+        return asyncio.run(serve_campaign(a.spec, a.host, a.port, a.heartbeat,
+                                          a.model, not a.no_guard, a.model_profile,
+                                          a.caller_timeout))
+    if a.cmd == "control":
+        return asyncio.run(control_campaign(a.connect, a.campaign, a.model,
+                                            a.specifier, a.planner, not a.no_guard,
+                                            a.model_profile))
     if a.cmd == "trust":
         widths = a.replicas
         if widths is None:

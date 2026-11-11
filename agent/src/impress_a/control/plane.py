@@ -50,30 +50,17 @@ class CampaignControlPlane(Protocol):
     # -- runs ----------------------------------------------------------------
     async def submit_stage(self, campaign_id: str,
                            stage: dict[str, Any]) -> dict[str, Any]:
-        mgr = self._need(campaign_id)
-        try:
-            run_id = await mgr.executor.submit_stage(Stage(**stage))
-        except SubmissionRejected as rejected:
-            self.emit(campaign_id, "transitions",
-                      {"event": "stage_rejected", "gate": rejected.failure.gate,
-                       "reason": rejected.failure.reason})
-            return {"accepted": False, "failure": rejected.failure.model_dump(mode="json")}
-        except CampaignStopped as stopped:
-            return {"accepted": False, "reason": str(stopped)}
-        return {"accepted": True, "run_id": run_id}
+        """Synchronous admission of a Stage: accepted with an id, or refused with the gate.
+
+        A core operation rather than an adapter's: ADR 0007 forbids an adapter carrying an
+        operation the core lacks, and a Planner in another process has no other way to submit.
+        """
+        ...
 
     async def publish_spec(self, campaign_id: str,
                            payload: dict[str, Any]) -> dict[str, Any]:
-        """One entry point for both shapes, discriminated by the payload itself.
-
-        A revision carries `generation` and the lists of what it changes; an initial Spec
-        carries `objectives`. Discriminating on content rather than on a flag means a caller
-        cannot disagree with itself about which it sent.
-        """
-        mgr = self._need(campaign_id)
-        obj = (Spec(**payload) if "objectives" in payload and "deleted" not in payload
-               else SpecRevision(**payload))
-        return {"generation": mgr.executor.publish_spec(obj)}
+        """Install the initial Spec, or apply one revision. The executor is the only writer."""
+        ...
 
     async def submit_run(self, campaign_id: str,
                          intent: dict[str, Any]) -> dict[str, Any]: ...
@@ -175,12 +162,21 @@ class InProcessControlPlane:
             await asyncio.sleep(0.05)
 
     async def steer(self, campaign_id: str, directive: dict[str, Any]) -> dict[str, Any]:
-        """A directive is validated exactly as any policy's decision would be."""
+        """A directive is validated exactly as any policy's decision would be.
+
+        `RolePair.steer` routes by the directive's `role` key and raises `ValueError` when the
+        addressed half takes no directives. Caught here and returned as a refusal with its
+        reason: an uncaught one would be a 500 over HTTP, which says "this server is broken"
+        where the truth is "this campaign's specifier is not the external one".
+        """
         pol = self.managers[campaign_id].policy
         target = getattr(pol, "inner", pol)
         if not hasattr(target, "steer"):
             return {"accepted": False, "reason": "campaign is not under external control"}
-        target.steer(directive)
+        try:
+            target.steer(directive)
+        except ValueError as refused:
+            return {"accepted": False, "reason": str(refused)}
         self.emit(campaign_id, "steered", {"directive": directive})
         return {"accepted": True}
 
@@ -217,6 +213,40 @@ class InProcessControlPlane:
         return list(self.managers[campaign_id].prov.read(kind))
 
     # -- runs ----------------------------------------------------------------
+    async def submit_stage(self, campaign_id: str,
+                           stage: dict[str, Any]) -> dict[str, Any]:
+        """Synchronous admission of a Stage, over whichever transport asked.
+
+        Accepted with an id, or refused with the gate and the reason. A rejection severed from
+        the request that caused it leaves nothing to bound retries against, which is why this
+        answers in the call rather than on the event stream.
+        """
+        mgr = self.managers[campaign_id]
+        try:
+            run_id = await mgr.executor.submit_stage(Stage(**stage))
+        except SubmissionRejected as rejected:
+            self.emit(campaign_id, "transitions",
+                      {"event": "stage_rejected", "gate": rejected.failure.gate,
+                       "reason": rejected.failure.reason})
+            return {"accepted": False, "failure": rejected.failure.model_dump(mode="json")}
+        except CampaignStopped as stopped:
+            return {"accepted": False, "reason": str(stopped)}
+        return {"accepted": True, "run_id": run_id}
+
+    async def publish_spec(self, campaign_id: str,
+                           payload: dict[str, Any]) -> dict[str, Any]:
+        """Install the initial Spec, or apply one revision. The executor is the only writer.
+
+        One entry point for both shapes, discriminated by the payload itself: a revision
+        carries the lists of what it changes, an initial Spec carries `objectives`.
+        Discriminating on content rather than on a flag means a caller cannot disagree with
+        itself about which it sent.
+        """
+        mgr = self.managers[campaign_id]
+        obj = (Spec(**payload) if "objectives" in payload and "deleted" not in payload
+               else SpecRevision(**payload))
+        return {"generation": mgr.executor.publish_spec(obj)}
+
     async def submit_run(self, campaign_id: str,
                          intent: dict[str, Any]) -> dict[str, Any]:
         """Admit one experiment. Answers accepted-with-an-id, or refused-with-a-reason.

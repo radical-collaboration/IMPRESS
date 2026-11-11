@@ -11,6 +11,7 @@ and each toolkit's SKILL.md Pitfalls).
 from __future__ import annotations
 
 import pathlib
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -25,10 +26,15 @@ from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
 from impress_a.core.results import RunOutcome, RunState, TaskOutcome
+from impress_a.core.spec import ObjectiveStatus, SpecRevision
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
+from impress_a.policy.planner import PlanningContext
+from impress_a.policy.planners import AgenticPlanner, ThresholdPlanner
 from impress_a.policy.specifier import SpecEvidence
 from impress_a.policy.specifiers import ThresholdSpecifier
+from impress_a.tools._ensemble import member_index, pair_by_index, select_best
+from impress_a.tools.ligandmpnn_agents import _parse_all_confidences, _parse_confidence
 from impress_a.tools.registry import Registry
 from impress_a.tools.view import view_of
 
@@ -458,16 +464,20 @@ async def test_ligandmpnn_passes_absolute_checkpoints_and_runs_in_the_checkout(
 
     captured: dict[str, object] = {}
 
-    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
-        captured["cmd"], captured["cwd"] = cmd, cwd
+    async def fake_run_cmd(cmd, cwd=None, env=None, timeout_s=None):
+        captured["cmd"], captured["cwd"], captured["env"] = cmd, cwd, env
         return "", ""
 
     monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    # Keyed by this tool's own DECLARED input port, with the upstream output port recorded -
+    # which is what `exec/dispatch.node_task` builds from the composer's typed wiring. The
+    # `dep0` form this replaces was the positional keying that made a two-input node mis-wire.
     req = TaskRequest(
         tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
-        inputs={"dep0": {"outputs": {
+        input_ports={"backbone": "backbone"},
+        inputs={"backbone": {"outputs": {
             "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
     await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
 
@@ -528,15 +538,15 @@ async def test_boltz_agent_passes_no_kernels(reg, tmp_path, monkeypatch):
 
     captured: dict[str, list[str]] = {}
 
-    async def fake_run_cmd(cmd, timeout_s=None):
-        captured["cmd"] = cmd
+    async def fake_run_cmd(cmd, env=None, timeout_s=None):
+        captured["cmd"], captured["env"] = cmd, env
         return "", ""
 
     monkeypatch.setattr(boltz_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("boltz_predict")(reg.get("boltz_predict"))
-    req = TaskRequest(tool="boltz_predict",
-                      inputs={"dep0": {"outputs": {"structure": str(pdb)}}})
+    req = TaskRequest(tool="boltz_predict", input_ports={"structure": "structure"},
+                      inputs={"structure": {"outputs": {"structure": str(pdb)}}})
     params = agent.parameterize(TaskRequest(
         tool="boltz_predict", params={"ligand_smiles": "CC(=O)Oc1ccccc1C(=O)O"}))
     await agent.run(req, params)
@@ -775,16 +785,20 @@ async def test_ligandmpnn_runs_run_py_through_the_numpy_alias_shim(reg, monkeypa
 
     captured: dict[str, Any] = {}
 
-    async def fake_run_cmd(cmd, cwd=None, timeout_s=None):
-        captured["cmd"], captured["cwd"] = cmd, cwd
+    async def fake_run_cmd(cmd, cwd=None, env=None, timeout_s=None):
+        captured["cmd"], captured["cwd"], captured["env"] = cmd, cwd, env
         return "", ""
 
     monkeypatch.setattr(ligandmpnn_agents, "run_cmd", fake_run_cmd)
 
     agent = reg.agent_for("ligandmpnn_design")(reg.get("ligandmpnn_design"))
+    # Keyed by this tool's own DECLARED input port, with the upstream output port recorded -
+    # which is what `exec/dispatch.node_task` builds from the composer's typed wiring. The
+    # `dep0` form this replaces was the positional keying that made a two-input node mis-wire.
     req = TaskRequest(
         tool="ligandmpnn_design", node_id="r0001:r0_s1_ligandmpnn_design",
-        inputs={"dep0": {"outputs": {
+        input_ports={"backbone": "backbone"},
+        inputs={"backbone": {"outputs": {
             "backbone": ArtifactRef(type="Backbone", path="/fake/bb.pdb")}}})
     await agent.run(req, agent.parameterize(TaskRequest(tool="ligandmpnn_design")))
 
@@ -1232,3 +1246,370 @@ async def test_a_refinement_objective_is_not_satisfied_by_its_parents_own_measur
         "the parent's measurement alone must not satisfy a refinement of it"
     assert [o.id for o in spec.open_objectives() if o.parent_node] == [added.id], \
         "and it stays OPEN, so the one-at-a-time cap actually binds"
+
+
+# ---------------------------------------------------------------------------
+# Ensemble selection (phase 8 of plans/control-plane-refactor.md).
+# ---------------------------------------------------------------------------
+
+def test_the_mpnn_parser_reads_every_candidate_not_the_first():
+    """Real LigandMPNN writes every candidate for a design into ONE file.
+
+    So a parser that stops at the first header reads one candidate out of `num_seqs` and the
+    rest are computed, charged for and discarded. The reference pipeline recorded exactly this:
+    `analysis_sequence` "silently never compared MPNN candidates against each other", and
+    fixing it there is what made `mpnn_ensemble_size` mean anything.
+    """
+    text = (">design, id=1, overall_confidence=0.5100, ligand_confidence=0.4000\nMKT\n"
+            ">design, id=2, overall_confidence=0.8200, ligand_confidence=0.7100\nMKV\n"
+            ">design, id=3, overall_confidence=0.6300, ligand_confidence=0.5500\nMKW\n")
+    every = _parse_all_confidences(text)
+    assert [c["overall_confidence"] for c in every] == [0.51, 0.82, 0.63]
+    assert _parse_confidence(text)["overall_confidence"] == 0.82, \
+        "the BEST candidate, not the first - 0.82 is what the acceptance gate reads"
+
+
+def test_an_unreadable_header_is_skipped_rather_than_scored_zero():
+    """A parser failure must not be indistinguishable from a genuinely bad design.
+
+    Omitted, the integrity gate `metrics_reported` catches it; reported as 0.0 it reads as a
+    weak design and an acceptance gate takes the blame for a broken tool (decision 0013).
+    """
+    text = (">design, id=1, confidence=unparseable\nMKT\n"
+            ">design, id=2, overall_confidence=0.7000, ligand_confidence=0.6000\nMKV\n")
+    assert len(_parse_all_confidences(text)) == 1
+    assert _parse_confidence(text)["overall_confidence"] == 0.7
+    assert _parse_confidence(">no confidences here\nMKT\n") == {}
+
+
+def test_a_member_index_is_absent_rather_than_zero_when_the_name_carries_none():
+    """"This is member zero" and "this filename does not say" must not be the same answer.
+
+    Only one of them is safe to pair on, and pairing on the wrong one attributes a confidence
+    to another member's structure.
+    """
+    assert member_index("confidence_abc_model_3.json") == 3
+    assert member_index("abc_model_0.pdb") == 0
+    assert member_index("backbone_0_packed_1_2.pdb") == 2, "the LAST integer in the stem"
+    assert member_index("structure.pdb") is None
+
+
+def test_pairing_refuses_rather_than_falls_back_to_position():
+    """Two independently sorted globs agree only by luck.
+
+    `rfd3_agents` already states the principle for its trajectory bug: a confident guess is
+    worse than a loud failure. A caller that gets `None` here must say it could not pair, which
+    is what `ensemble_paired: 0` records.
+    """
+    conf = [Path("confidence_x_model_0.json"), Path("confidence_x_model_1.json")]
+    pdbs = [Path("x_model_0.pdb"), Path("x_model_1.pdb")]
+    paired = pair_by_index(conf, pdbs)
+    assert paired is not None
+    assert [(c.name, p.name) for c, p in paired] == [
+        ("confidence_x_model_0.json", "x_model_0.pdb"),
+        ("confidence_x_model_1.json", "x_model_1.pdb")]
+
+    # Counts differ, indices differ, or a name carries no index: all unpairable.
+    assert pair_by_index(conf, pdbs[:1]) is None
+    assert pair_by_index(conf, [Path("x_model_0.pdb"), Path("x_model_7.pdb")]) is None
+    assert pair_by_index(conf, [Path("a.pdb"), Path("b.pdb")]) is None
+
+
+def test_select_best_skips_a_member_whose_metric_cannot_be_read():
+    """The same rule the gates use: an unreadable value is an omission, not a zero."""
+    members = [{"plddt": None}, {"plddt": 0.4}, {}, {"plddt": 0.9}, {"plddt": 0.6}]
+    chosen = select_best(members, lambda m: m.get("plddt"))
+    assert chosen == (3, {"plddt": 0.9})
+    assert select_best(members, lambda m: m.get("plddt"), higher_is_better=False) \
+        == (1, {"plddt": 0.4})
+    assert select_best([{}, {"plddt": None}], lambda m: m.get("plddt")) is None
+
+
+def test_mpnn_prefers_one_wide_batch_over_several_narrow_ones(reg):
+    """The one place the preference is mechanical rather than a comment.
+
+    `--batch_size` is candidates per forward pass and `--number_of_batches` is passes, so the
+    old form - batches set to `num_seqs` with `--batch_size` left at its default of 1 - asked
+    for N sequential batches of one. For a model tuned for batched output that is the worse of
+    the two options: linear in N where a single wide batch is close to sublinear.
+    """
+    spec = reg.get("ligandmpnn_design")
+    assert spec.parameters["batch_size"].default == 8
+    assert spec.parameters["number_of_batches"].default == 1
+    # And the declared sampling must be reachable: a width the spec forbids is a width the
+    # Planner cannot ask for.
+    assert spec.parameters["batch_size"].max >= 8
+
+
+def test_the_sampled_tools_declare_what_the_adapter_reports(reg):
+    """`ensemble_size`/`ensemble_paired` come from the adapter, not the tool - and must still
+    be declared, or a reasoner cannot see that the campaign is measuring them."""
+    for tool in ("ligandmpnn_design", "boltz_predict"):
+        declared = set(reg.get(tool).metrics)
+        assert {"ensemble_size", "ensemble_paired"} <= declared, tool
+
+
+def test_rfd3_sampling_stays_at_one_with_its_reason_recorded(reg):
+    """The honest exception: rfd3's adapter still keeps `cif_models[0]`.
+
+    Selecting among its designs needs the sidecar `*_model_*.json`'s metric names confirmed
+    against a real out_dir, which is backlog G2's remaining half. Raising it before that pays N
+    times for one design - which is precisely what the comment there used to describe as a
+    design principle.
+    """
+    assert reg.get("rfd3_design").parameters["num_designs"].default == 1
+    assert reg.get("boltz_predict").parameters["diffusion_samples"].default == 8, \
+        "the tools whose adapters DO select are the ones raised"
+
+
+# ---------------------------------------------------------------------------
+# Model D's Planner half, against the REAL specs. The point of testing it here rather than
+# only on mocks is backlog H3: the defect was that no reasoner could vary a real tool's
+# parameter, and a planner exercised only against `mock_generate` is exactly how that went
+# unnoticed - the shipped policy's hardcoded params named two mock tools and were silently
+# dropped on every real campaign.
+# ---------------------------------------------------------------------------
+
+def _planning_context(view, goal, spec, stages, front=()):
+    obs = CampaignObservation(campaign_id="c", cycle=1, goal=goal.text,
+                              objectives=goal.objectives, toolkit=view, spec=spec,
+                              stages=list(stages), pareto_front=list(front))
+    return PlanningContext(goal, obs)
+
+
+async def _refined_spec(reg, goal, sp):
+    """A Spec mid-campaign: the declared objectives met, one refinement objective open.
+
+    The four declared objectives are closed with an explicit revision rather than through
+    `Specifier.satisfied`, which would need a populated `DataRegistry` - this fixture is for
+    testing the *Planner*, and the Specifier's satisfaction rules have their own tests above.
+    What matters here is the shape of the Spec a Planner is handed on an exploit cycle.
+    """
+    spec = await sp.initial_spec(goal)
+    node = DesignNode()
+    for name, value in (("shape_complementarity", 0.56), ("complex_plddt", 0.95),
+                        ("ligand_iptm", 0.9), ("total_score", -300.0)):
+        node.properties[name] = Property(name=name, value=value,
+                                         source=PropertySource(name="t"))
+    ev = _evidence(view_of(reg, CHAIN), goal, spec, front=[node])
+    spec.apply(SpecRevision(status_changes={
+        oid: ObjectiveStatus.SATISFIED for oid in spec.objectives}))
+    spec.apply(await sp.revise(spec, ev))
+    return spec, node
+
+
+async def test_a_planner_can_vary_a_real_tools_parameter(reg):
+    """Backlog H3, which blocks any claim about decision quality.
+
+    `ThresholdPolicy` emitted `params={"mock_generate": {...}, "mock_design": {...}}` on every
+    arm. Against this chain those keys name tools that are not in the graph, so the composer
+    dropped them without a word and no real tool's parameter was ever varied by any reasoner -
+    which means the four models differed in no parameter at all, and a comparison between them
+    could not have been measuring what it claimed.
+
+    The value has to be real on three counts, so all three are asserted: the tool is one of
+    this chain's own, the parameter is one that tool declares, and the number is inside the
+    declared range rather than merely different.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+
+    varied = {t.tool: t.params for t in stage.runs if t.params}
+    assert varied, "the planner varied nothing on a refinement, which is H3 unfixed"
+    for tool, params in varied.items():
+        assert tool in CHAIN, f"{tool} is not in this campaign's chain"
+        declared = reg.get(tool).parameters
+        for name, value in params.items():
+            assert name in declared, f"{tool}.{name} is not a declared parameter"
+            card = declared[name]
+            assert card.min is None or value >= card.min, f"{tool}.{name}={value} below min"
+            assert card.max is None or value <= card.max, f"{tool}.{name}={value} above max"
+            assert value != card.default, f"{tool}.{name} was not actually varied"
+
+    assert "diffusion_steps" in varied.get("rfd3_design", {}), (
+        "rfd3's `diffusion_steps` trades 'quality vs wall-clock', which is the refinement "
+        "axis this chain offers")
+
+
+async def test_the_planner_leaves_breadth_and_identity_parameters_alone(reg):
+    """Escalating `num_designs` or `seed` would cost GPU-hours or break the lineages.
+
+    `rfd3_design`'s spec says `num_designs` stays at 1 because its adapter still keeps index
+    0, so a planner reading "coverage vs GPU-hours" as an improvement axis pays N times for
+    one design. `seed` is lineage identity: moving it would break the independence of the
+    replicas the arm is being credited for. Both are declared, tunable and in range - so
+    nothing but the `trades` sentence distinguishes them from the knob above.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+
+    asked = {name for t in stage.runs for name in t.params}
+    for forbidden in ("num_designs", "seed", "batch_size", "number_of_batches",
+                      "diffusion_samples", "nstruct"):
+        assert forbidden not in asked, (
+            f"{forbidden} is breadth or identity, not quality - raising it is either an "
+            f"N-times bill for one design or a broken replica")
+
+
+async def test_the_planner_escalates_toward_the_declared_maximum(reg):
+    """One step per refinement, not a jump to the limit.
+
+    The declared max is a limit, not a target: arriving there on the first refinement leaves
+    nothing to escalate and no record of which step helped. It must also never exceed the
+    max, because gate 3 refuses a parameter outside its declared range and a planner whose
+    only move is refused has no moves.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    planner = ThresholdPlanner(stages=CHAIN)
+    ctx = _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN, front=[node])
+    card = reg.get("rfd3_design").parameters["diffusion_steps"]
+
+    seen = []
+    for _ in range(8):
+        stage = await planner.plan(spec, ctx)
+        steps = next(t.params["diffusion_steps"] for t in stage.runs
+                     if t.tool == "rfd3_design")
+        seen.append(steps)
+    assert seen == sorted(seen), f"escalation must be monotonic, got {seen}"
+    assert seen[0] > card.default and seen[0] < card.max, (
+        f"the first step must move off {card.default} without reaching {card.max}: {seen[0]}")
+    assert max(seen) == card.max, f"escalation must reach the declared max: {seen}"
+
+
+async def test_the_planner_wires_the_real_chain_by_declared_port(reg):
+    """Typed wiring over the real specs, and the chain in the campaign's own order.
+
+    Nearest-preceding by type is the rule `Composer.compose` applies to a linear chain, so a
+    Stage this planner wires explicitly and a chain the composer wires by position describe
+    the same graph. Asserted against the real ports because the mock chain is uniform and
+    would hide a type error that this one would not.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+    planner = ThresholdPlanner(stages=CHAIN, base_replicas=1)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN))
+
+    assert [t.tool for t in stage.runs] == CHAIN, "the campaign's order, not id order"
+    for task in stage.runs:
+        spec_ = reg.get(task.tool)
+        required = {name for name, p in spec_.inputs.items() if p.required}
+        assert required <= set(task.inputs), (
+            f"{task.tool} left required port(s) {sorted(required - set(task.inputs))} unwired")
+        for port, ref in task.inputs.items():
+            src_id, out_port = ref.split(".", 1)
+            src = next(t for t in stage.runs if t.task_id == src_id)
+            want = spec_.inputs[port].type
+            assert reg.get(src.tool).outputs[out_port].type.unifies_with(want), (
+                f"{task.tool}.{port} wired to {src.tool}.{out_port}, which cannot satisfy "
+                f"{want}")
+
+
+async def test_a_refinement_stage_still_measures_every_campaign_objective(reg):
+    """The minimal chain for one objective makes a child nobody can compare.
+
+    Planning only `filter_shape`'s producers for a `shape_complementarity` refinement
+    produced a node measured on that alone - incomparable with every design on the front, and
+    refused outright by the executor's A8 check, so the refinement was unwinnable from the
+    moment it was planned. That is job 22675512's defect reached by the opposite route: there
+    a chain was truncated to fit a budget, here it was never built.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec, node = await _refined_spec(reg, goal, sp)
+    ready = spec.ready()
+    assert [o.parent_node for o in ready] == [node.id], "precondition: one refinement objective"
+
+    planner = ThresholdPlanner(stages=CHAIN, base_replicas=1)
+    stage = await planner.plan(spec, _planning_context(view_of(reg, CHAIN), goal, spec,
+                                                       CHAIN, front=[node]))
+    assert stage.parent_node == node.id
+    reported = {m for t in stage.runs for m in reg.get(t.tool).metrics}
+    missing = sorted({o.name for o in goal.objectives} - reported)
+    assert missing == [], f"the refinement cannot be ranked on {missing}"
+
+
+def test_every_real_adapter_recovers_its_inputs_by_port(reg):
+    """No adapter may scan the dependency payloads for an artifact.
+
+    `first_dep_output` searched them for one whose `outputs` happened to contain the name it
+    wanted, which is right only while a node has exactly one upstream dependency: with two
+    typed inputs it returned whichever came first, and that type-checks at composition and
+    mis-wires at runtime. Worse, an adapter asked for an upstream *output* port while
+    declaring an *input* port, and the two coincided here by luck - `ligandmpnn_design`
+    consumes `backbone` and rfd3 emits `backbone`, so nothing ever disagreed.
+
+    Checked two ways, because the mechanical one alone would pass a scan written by hand:
+    every port name an adapter asks `input_path` for must be a port that tool DECLARES, and
+    the scanning helper must be gone from the package entirely.
+    """
+    import ast
+
+    src = pathlib.Path(impress_a_tools_dir())
+    offenders, checked = [], 0
+    for path in sorted(src.glob("*_agents.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        declared: set[str] = set()
+        for tool_id in reg.ids():
+            spec = reg.get(tool_id)
+            if spec.entry.rsplit(".", 2)[-2] == path.stem:
+                declared |= set(spec.inputs)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id == "first_dep_output":
+                offenders.append(f"{path.name}:{node.lineno}: still scans")
+            if node.func.id == "input_path" and len(node.args) == 2:
+                port = node.args[1]
+                if isinstance(port, ast.Constant):
+                    checked += 1
+                    if port.value not in declared:
+                        offenders.append(
+                            f"{path.name}:{node.lineno}: asks for {port.value!r}, which no "
+                            f"tool in this module declares as an input port "
+                            f"({sorted(declared)})")
+    assert offenders == [], "\n".join(offenders)
+    assert checked == 5, f"{checked} port lookups found; the real adapters have five"
+
+
+def impress_a_tools_dir() -> str:
+    import impress_a.tools
+    return str(pathlib.Path(impress_a.tools.__file__).parent)
+
+
+async def test_model_a_also_varies_a_real_tools_parameter(reg):
+    """H3 for model A, which had the same defect and a different shape of it.
+
+    `FourNodePolicy` asked for `diffusion_steps: 170` and `temperature: 0.35` keyed to
+    `mock_generate` and `mock_design`. Against this chain those keys name nothing in the
+    graph, so the composer dropped them silently; and even keyed correctly, 170 is a literal
+    that happens to be inside rfd3's declared range and would be a gate-3 rejection on a tool
+    whose range is narrower. The planner half asks for the same *fractions* of each tool's own
+    declared range, which is the only form in which those numbers survive a chain nobody wrote
+    them for.
+    """
+    goal, sp = _real_goal(), ThresholdSpecifier()
+    spec = await sp.initial_spec(goal)
+    stage = await AgenticPlanner(stages=CHAIN).plan(
+        spec, _planning_context(view_of(reg, CHAIN), goal, spec, CHAIN))
+
+    varied = {t.tool: t.params for t in stage.runs if t.params}
+    assert varied, "model A varied nothing on the real chain, which is H3 unfixed for A"
+    for tool, params in varied.items():
+        assert tool in CHAIN
+        for name, value in params.items():
+            card = reg.get(tool).parameters[name]
+            assert card.min <= value <= card.max, f"{tool}.{name}={value} outside its range"
+            assert name not in reg.get(tool).frozen_parameters, \
+                f"{tool}.{name} is frozen; gate 3 refuses a graph that proposes it"
+
+    steps = varied["rfd3_design"]["diffusion_steps"]
+    assert steps == 169, (
+        "FourNodePolicy's exploring 170 as a fraction of the 20-200 range it was written "
+        f"against (0.83), rounded to the declared int type; got {steps}")
+    assert varied["ligandmpnn_design"]["temperature"] == 0.35

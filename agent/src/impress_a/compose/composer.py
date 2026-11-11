@@ -6,6 +6,7 @@ intent; the composer emits graphs. That separation is what keeps policies swappa
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 from ..core.decision import ExperimentIntent
 from ..core.spec import Stage
@@ -79,7 +80,8 @@ class Composer:
                 prev = tid
         return g
 
-    def compose_stage(self, stage: Stage, run_label: str = "") -> TaskGraph:
+    def compose_stage(self, stage: Stage, run_label: str = "",
+                      parent_artifacts: dict[str, Any] | None = None) -> TaskGraph:
         """Build the DAG for a Stage's Objective:Task mappings.
 
         Where `compose` derives the shape from an ordered tool list and a replica count, this
@@ -131,8 +133,15 @@ class Composer:
                             inputs[port] = f"{prev.task_id}.{match}"
                     if inputs:
                         deps = [prev.task_id]
+            # A task with no upstream dependency in this graph is a root, and a root in a
+            # REFINEMENT stage starts from the parent design rather than from nothing. Matched
+            # by declared type, the same unification rule gate 1 uses, so a Complex can
+            # satisfy a Backbone port and never the reverse.
+            seeds = ({} if deps or not parent_artifacts
+                     else self._seed_inputs(spec, parent_artifacts))
             g.add(TaskNode(id=mapping.task_id, tool=mapping.tool,
                            params=dict(mapping.params), deps=deps, inputs=inputs,
+                           seed_inputs=seeds,
                            node_id=self._parent_of(mapping, stage),
                            lineage=mapping.lineage,
                            seed=mapping.seed
@@ -140,6 +149,23 @@ class Composer:
                            else _replica_seed(run_label or g.id, mapping.lineage,
                                               self.seed_salt)))
         return g
+
+    @staticmethod
+    def _seed_inputs(spec, available: dict[str, Any]) -> dict[str, Any]:
+        """Match a tool's declared input ports against artifacts from outside the graph.
+
+        By TYPE, not by name: a parent design's artifacts are named for the port that produced
+        them, and the consumer names them for its own purpose. Matching by name would work
+        only where the two happen to agree.
+        """
+        out: dict[str, Any] = {}
+        for port, ps in spec.inputs.items():
+            for ref in available.values():
+                ref_type = getattr(ref, "type", None)
+                if ref_type is not None and ref_type.unifies_with(ps.type):
+                    out[port] = ref
+                    break
+        return out
 
     @staticmethod
     def _parent_of(mapping, stage: Stage) -> str | None:

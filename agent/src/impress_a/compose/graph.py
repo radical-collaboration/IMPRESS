@@ -17,6 +17,11 @@ class TaskNode(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     deps: list[str] = Field(default_factory=list)
     inputs: dict[str, str] = Field(default_factory=dict)  # port -> "dep_id.out_port"
+    #: port -> an artifact from OUTSIDE this graph: a parent design being refined, or a file
+    #: the Goal supplied. Without this `parent_node` only labelled lineage - "exploit a node"
+    #: re-ran its recipe rather than refining its structure, which is why no campaign could
+    #: reproduce the reference pipeline's partial-diffusion loop.
+    seed_inputs: dict[str, Any] = Field(default_factory=dict)
     node_id: str | None = None  # design-tree parent this task belongs to
     lineage: int = 0            # replica index: one independent chain per lineage
     seed: int | None = None     # per-lineage draw; see composer._replica_seed

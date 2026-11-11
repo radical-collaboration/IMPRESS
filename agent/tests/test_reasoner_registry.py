@@ -187,3 +187,110 @@ def test_halves_mix_independently():
 def test_an_unknown_letter_names_the_known_ones():
     with pytest.raises(KeyError, match="unknown control model"):
         reasoners.build_roles("Z")
+
+
+def test_policy_max_cycles_equals_the_spec():
+    """A reasoner must not carry a stopping bound tighter than the campaign's (X1).
+
+    `build_policy` withheld `max_cycles` on the reasoning that `CampaignManager._reasoner`
+    already bounds the driver with it and bounding one thing from two places hides an
+    off-by-one. The consequence was worse than the thing avoided: every model kept
+    `ReasonerOptions.max_cycles`'s default of **6**, so a four-hour arm declaring
+    `max_cycles: 200` would have decided six times in about twenty minutes, stopped itself,
+    and reported a clean campaign having spent roughly 8% of its allocation.
+
+    Checked on both arms that stop themselves this way - A reads `max_cycles` in
+    `agentic.py` and D in `explicit.py` - and in both directions, because a spec asking for
+    fewer cycles than the default must also be honoured.
+    """
+    for letter in ("A", "D"):
+        for cycles in (3, 200):
+            pol = build_policy(letter, _spec(max_cycles=cycles), guard=False)
+            assert pol.max_cycles == cycles, (
+                f"{letter} carries max_cycles={pol.max_cycles} against a spec asking for "
+                f"{cycles}")
+
+
+def test_the_front_target_comes_from_the_spec_when_it_declares_one():
+    """`target_front` is a property of the Goal, not of the demo it was defaulted for.
+
+    A policy stops at `len(pareto_front) >= target_front`, so the shipped 3 is a second
+    silent cap on a campaign asked for ten designs - and unlike `max_cycles` nothing else
+    bounds it. 0 (the default) keeps the model's own number, so no existing campaign moves.
+    """
+    assert build_policy("D", _spec(), guard=False).target_front == 3
+    assert build_policy("D", _spec(target_front=10), guard=False).target_front == 10
+
+
+#: Every shipped model now supplies its own two halves. Kept as a list rather than an
+#: "all of them" assertion so that adding a model is a decision about which it is: a new row
+#: without halves would run the legacy `decide` cascade under `--control roles`, which is what
+#: `DecideAsRoles` exists for and what phase 11 deletes.
+DECLARES_HALVES = {"A", "B", "C", "D", "null", "replay"}
+
+
+def test_every_model_supplies_its_own_halves_rather_than_deriving_them():
+    """`--control roles` must not quietly run a model's `decide` cascade.
+
+    `cli.build_roles` derives a pair from `decide` only for a model that declares none, so
+    which models declare them decides what `--model X --control roles` actually executes. A
+    model that gained halves and was not added here would run them while its note still said
+    otherwise; one that lost them would silently fall back to the legacy cascade under a flag
+    that says it is not using it.
+    """
+    declared = {k for k, m in reasoners.MODELS.items()
+                if m.specifier is not None and m.planner is not None}
+    assert declared == DECLARES_HALVES, (
+        f"models declaring halves changed to {sorted(declared)}; update DECLARES_HALVES and "
+        f"the model's own `note`, which `impress-a models` prints")
+    partial = {k for k, m in reasoners.MODELS.items()
+               if (m.specifier is None) != (m.planner is None)}
+    assert partial == set(), (
+        f"{sorted(partial)} declare one half and not the other, which would pair a real half "
+        f"with a legacy adapter - a combination nothing tests and nobody asked for")
+
+
+def test_no_model_claims_a_live_client_it_has_not_been_given():
+    """The status column is load-bearing documentation, so B must say what it is running.
+
+    `docs/` described four working control models while two had no LLM behind them, and
+    nothing contradicted it. Model B now has a live client, but nothing *attaches* one unless
+    a profile names it, so `llm_calls` stays 0 and the note has to say which stand-in runs by
+    default - otherwise a reader assumes the phase-9 split made B a live arm.
+    """
+    for letter, model in reasoners.MODELS.items():
+        assert model.llm_calls == 0, (
+            f"{letter} claims {model.llm_calls} LLM calls per cycle. Nothing in this "
+            f"repository constructs a client without a `--model-profile`, so raise this only "
+            f"when a default profile makes one")
+    b = reasoners.MODELS["B"]
+    assert "RehearsalOracle" in b.note, b.note
+    assert "models.yaml" in b.note, "the note must say where a live profile comes from"
+
+
+def test_model_c_is_built_to_stop_rather_than_to_fall_back():
+    """The safe default has to be the one the CLI builds, not the one a class declares.
+
+    `ExternalPlanner.__init__` defaulted to `stop` and `ReasonerOptions.on_timeout` defaulted
+    to `fallback`, so every path that went through the registry - which is every path the CLI
+    takes - built the dangerous one. Found by running it: `impress-a serve --model C` logged
+    `external planner: no directive in 5.0s; on_timeout=fallback` and finished the campaign on
+    model D's planner. An arm whose entire claim is that a third party steered it, silently
+    steering itself, is byte-for-byte a model-D campaign and invisible in the result; the
+    four-arm design names it as one of its two dangerous failure modes.
+    """
+    assert reasoners.ReasonerOptions().on_timeout == "stop"
+
+    pair = reasoners.build_roles("C", options=reasoners.ReasonerOptions(stages=["mock_fold"]))
+    assert pair.planner.on_timeout == "stop"
+    assert pair.planner.fallback is None, \
+        "a model-D planner must not even be in arm C's object graph unless asked for"
+
+    asked = reasoners.build_roles("C", options=reasoners.ReasonerOptions(
+        stages=["mock_fold"], on_timeout="fallback"))
+    assert asked.planner.fallback is not None, "an operator who asks for one gets one"
+    assert asked.planner.on_timeout == "fallback"
+
+    legacy = reasoners.build("C", reasoners.ReasonerOptions(stages=["mock_fold"]))
+    assert legacy.on_timeout == "stop", \
+        "the legacy policy too: backlog C6 is exactly a model-C arm that ran D"

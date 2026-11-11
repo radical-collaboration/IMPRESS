@@ -45,7 +45,8 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 
 ```
 control/    CampaignControlPlane + transport adapters
-policy/     ControlPolicy implementations (the decision frontend)
+policy/     the decision frontend: specifiers/ + planners/ (one module per control
+            model), the reasoning seam, the role wrappers, and the legacy ControlPolicy
 manager.py  the outer loop
 core/       tree · pareto · budget · qc · decision · provenance · artifacts
 compose/    TaskGraph · composer · five gates · self-promoting interlock
@@ -61,7 +62,7 @@ science imports into `run()` bodies, and a deferred `from ..exec import ...` ins
 be exactly as fatal as one at the top of the file.
 
 ```
-cli      → manager, policy, compose, tools, core
+cli      → control, manager, runtime, policy, compose, tools, core
 control  → manager, runtime, core
 policy   → core                           (NOT tools, NOT exec, NOT runtime)
 manager  → runtime, policy, tools, core   (a facade; the executor owns the work)
