@@ -62,6 +62,21 @@ ALLOWED = {
     # still imports nothing internal.
     "cli": frozenset({"control", "manager", "runtime", "policy", "compose", "tools",
                       "core", "analysis"}),
+    # `integrations` is a second composition root, in the sense `cli` already is: it builds a
+    # whole campaign on behalf of an owner that is not a person at a terminal. Narrow on
+    # purpose - `reporting` needs only the digest - and the direction is what matters: nothing
+    # else in the package imports `integrations`, so an adapter may name another project's
+    # types without any layer of IMPRESS-A needing to know that project exists. The row grows
+    # only when a concrete adapter lands, and each widening should say which adapter forced it.
+    #
+    # `cli`, `manager`, `runtime` and `tools` were added by `integrations/aucam`, which has to
+    # build a whole campaign the way `cli.run_campaign` does: `load_spec` and `build_roles`
+    # are the adapters from a `CampaignSpec` to a registry and a role pair, `offer_for_spec`
+    # prices it, and `CampaignManager` runs it. Reimplementing any of those here would be a
+    # second way to start a campaign, and the second one is always the one that drifts.
+    # `exec` is absent and should stay absent: an integration drives the executor, it does not
+    # dispatch.
+    "integrations": frozenset({"cli", "manager", "runtime", "tools", "core"}),
     # `analysis` is downstream of everything and must reach no reasoner. The rule that
     # matters is the ABSENCE of `policy` and `control`: a scorer that could reach a reasoner
     # could score a campaign by asking it, and the comparison's whole method is that figures
@@ -190,6 +205,72 @@ def test_only_the_runner_imports_impress():
     assert bad == [], (
         "only " + ", ".join(sorted(IMPRESS_IMPORTERS)) + " may import the root `impress` "
         "package:\n" + "\n".join(bad))
+
+
+def test_the_offer_cannot_reach_the_execution_layer():
+    """`impress-a offer` prices a campaign without running it, and nothing may erode that.
+
+    The layer row permits `runtime -> exec`, correctly - the executor lives there. The offer
+    does not get that licence: a caller asks it what an invocation would cost precisely
+    because it has not decided to make one, so a module that could dispatch a task is the
+    wrong shape for the answer. The synchronous signature is the other half of the guarantee
+    (`tests/test_validation.py`), and this is the half review would otherwise have to hold.
+    """
+    offered = SRC / "runtime" / "offer.py"
+    assert offered.exists(), "runtime/offer.py has moved; update this test with it"
+    reached = {imported for path, _ln, _a, imported in _edges() if path == offered}
+    assert "exec" not in reached, (
+        f"runtime/offer.py imports the exec layer (reaches {sorted(reached)}) - it can now "
+        f"dispatch work, and an offer must not be able to run what it is pricing")
+
+
+def test_every_keyword_passed_to_a_core_model_is_a_field_of_it():
+    """A projection that passes a field the model does not declare loses it silently.
+
+    `tools/view.card_for` passed `burn_rate=` and `max_commitment=` to `TaskCard`, which
+    declared neither, from the line's first day - and pydantic's default `extra` is `ignore`,
+    so both were dropped without a word. Nothing observably broke because no shipped spec
+    sets either key, and `core/budget.Commitment` meanwhile documented a rule against a field
+    that could not exist (backlog D1).
+
+    `extra="forbid"` is NOT the fix: these models cross the HTTP control-plane boundary, and
+    forbidding extras would turn a newer peer's observation into a 500 rather than a field
+    this version ignores. So the check is mechanical instead, and it is cheap: every keyword
+    any module passes to a model declared in `core/toolkit` or `core/decision` must be one of
+    that model's fields. Walked with `ast`, for the reason the rest of this file is.
+    """
+    import pydantic
+
+    from impress_a.core import decision as decision_mod
+    from impress_a.core import toolkit as toolkit_mod
+
+    models = {
+        name: obj
+        for mod in (toolkit_mod, decision_mod)
+        for name, obj in vars(mod).items()
+        if isinstance(obj, type) and issubclass(obj, pydantic.BaseModel)
+        and obj.__module__ == mod.__name__
+    }
+    assert "TaskCard" in models and "CampaignObservation" in models, (
+        f"the model sweep found {sorted(models)}; it has stopped seeing the models it is "
+        f"meant to guard")
+
+    bad = []
+    for path in sorted(SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if (model := models.get(node.func.id)) is None:
+                continue
+            for kw in node.keywords:
+                if kw.arg is None:          # **kwargs - nothing named to check
+                    continue
+                if kw.arg not in model.model_fields:
+                    bad.append(f"{path.relative_to(SRC)}:{node.lineno} passes "
+                               f"`{kw.arg}=` to {node.func.id}, which has no such field - "
+                               f"pydantic drops it silently")
+    assert bad == [], "\n".join(bad)
 
 
 def test_every_layer_is_in_the_table():

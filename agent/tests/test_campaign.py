@@ -1777,3 +1777,224 @@ async def test_a_failed_gate_reaches_tasks_provenance_through_the_executor(reg):
         "gate names, not objects or dicts - the harness reads these without a schema"
     assert "has_secondary_structure" in names, \
         f"the gate that catches a noodle must be named; got {names}"
+
+
+# ---------------------------------------------------------------------------
+# Telling a caller what the campaign is doing, while it does it
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSink:
+    """A `CycleSink` that remembers every digest, and can hand back one signal."""
+
+    def __init__(self, signals: list[str] | None = None) -> None:
+        self.digests: list = []
+        self.signals = list(signals or [])
+
+    async def report(self, digest) -> None:
+        self.digests.append(digest)
+
+    async def poll(self) -> str | None:
+        return self.signals.pop(0) if self.signals else None
+
+
+class _BrokenSink:
+    """Somebody else's code, reaching into a process that is holding an allocation."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def report(self, digest) -> None:
+        self.calls += 1
+        raise RuntimeError("the caller's socket went away")
+
+    async def poll(self) -> str | None:
+        raise RuntimeError("and so did its signal channel")
+
+
+async def test_a_digest_reaches_the_sink_for_each_absorbed_cycle(reg):
+    """One report per absorbed cycle, plus the two that bracket the campaign.
+
+    Triggered on the absorption watermark rather than on `cycle`, which is incremented at
+    DISPATCH and so counts submissions: a report fired there would carry no results. The
+    first and last reports are not optional - the first is the caller's liveness anchor
+    before any work exists to describe, and the last is the only one guaranteed to be read,
+    because the stores a caller receives these through keep one value per workflow.
+    """
+    from impress_a.integrations import run_with_sink
+
+    sink = _RecordingSink()
+    mgr = CampaignManager(spec("t-digest", max_cycles=3), _pair(), reg)
+    result = await run_with_sink(mgr, sink, period_s=0.05)
+
+    assert [d.status for d in sink.digests][0] == "starting"
+    assert sink.digests[-1].status == "stopped"
+    assert sink.digests[-1].stop_reason == result.stop_reason
+    assert sink.digests[-1].stop_reason, "a caller must be told WHY the campaign ended"
+
+    # The watermark only ever advances, and the last report has seen everything absorbed.
+    seqs = [d.seq for d in sink.digests]
+    assert seqs == sorted(seqs), f"the absorption watermark went backwards: {seqs}"
+    assert sink.digests[-1].seq == len(mgr.executor._absorbed)
+    assert sink.digests[-1].cycle == mgr.executor.cycle
+
+
+async def test_the_digest_carries_both_cost_scales_under_distinct_names(reg):
+    """Declared and measured are two numbers, and a caller charging a budget wants the second.
+
+    `BudgetLedger.spent` is DECLARED - it is what `reserve` and `settle` work in and what
+    gate 5 refuses against, so it is correctly pessimistic, and the declared figures sit
+    multiples above measurement on purpose. Reporting it outward as "what we spent" tells an
+    enclosing manager the headroom as well as the cost, and its learned-cost estimate then
+    converges on a number no run ever consumed (backlog G20).
+    """
+    from impress_a.integrations import run_with_sink
+
+    sink = _RecordingSink()
+    mgr = CampaignManager(spec("t-two-scales", max_cycles=2), _pair(), reg)
+    await run_with_sink(mgr, sink, period_s=0.05)
+
+    final = sink.digests[-1]
+    assert final.spend, "declared spending must be reported"
+    assert final.spend_measured, "measured spending must be reported beside it"
+    assert set(final.spend_measured) & set(final.spend), "the two must share dimensions"
+    assert final.limits and final.remaining
+    # The ledger keeps them apart, and only the declared one bounds the campaign.
+    assert mgr.budget.spent_measured and mgr.budget.spent_measured != mgr.budget.spent
+
+
+async def test_the_digest_omits_the_toolkit_and_the_skill_documents(reg):
+    """What it drops is the point.
+
+    The full observation carries every `TaskCard` plus each toolkit's entire `SKILL.md` text,
+    the applied `Spec`, and every front node with its properties and QC report - all of it
+    static for the campaign, and all of it already given to a caller once at calltime by
+    `impress-a offer`. Sending it again every thirty seconds would be sending a campaign's
+    description as if it were news.
+    """
+    import json
+
+    mgr = CampaignManager(spec("t-thin", max_cycles=1), _pair(), reg)
+    await mgr.run()
+
+    obs = mgr.observe()
+    assert obs.toolkit is not None and obs.toolkit.skills, "the fixture must be meaningful"
+    wire = json.dumps(obs.digest().model_dump(mode="json"))
+    for skill in obs.toolkit.skills.values():
+        assert skill[:200] not in wire, "a SKILL.md reached the wire"
+    for absent in ("toolkit", "skills", "qc_gates", "parameters", "properties"):
+        assert absent not in wire, f"{absent!r} reached the wire"
+    # And it still says the things a caller acts on.
+    assert "front_satisfying" in wire and "spend_measured" in wire
+
+
+async def test_a_sink_that_raises_does_not_stop_the_campaign(reg):
+    """The campaign is the thing holding the allocation; a listener is not.
+
+    Same rule as `policy/reasoning._record`, and the opposite of `executor._log`, where an
+    unguarded `prov_sink` can still take a campaign down with it (backlog G18).
+    """
+    from impress_a.integrations import run_with_sink
+
+    broken = _BrokenSink()
+    mgr = CampaignManager(spec("t-broken", max_cycles=2), _pair(), reg)
+    result = await run_with_sink(mgr, broken, period_s=0.05)
+
+    assert result.stop_reason, "the campaign must have run to its own conclusion"
+    assert broken.calls >= 2, "and the sink must really have been called and really failed"
+
+
+async def test_a_pause_from_the_caller_stops_admission_and_resume_restarts_it(reg):
+    """Pause gates ADMISSION, and the digest says which state it is in.
+
+    In-flight work runs to completion, because cancellation is advisory - the concurrent
+    backend's `Future.cancel()` returns False once a callable has started, and asyncflow
+    discards that answer. So a paused campaign keeps spending for up to one cycle, which is
+    what `offer.pause_semantics` declares rather than hides.
+    """
+    from impress_a.integrations import PAUSE, RESUME, Bridge
+
+    mgr = CampaignManager(spec("t-pause", max_cycles=2), _pair(), reg)
+    sink = _RecordingSink(signals=[PAUSE, RESUME])
+    bridge = Bridge(mgr, sink, period_s=0.05, tick_s=0.01)
+
+    await bridge._signals()
+    assert bridge.paused is True and mgr.executor.paused is True
+    assert sink.digests[-1].status == "paused"
+
+    await bridge._signals()
+    assert bridge.paused is False and mgr.executor.paused is False
+    assert sink.digests[-1].status == "running"
+
+
+async def test_the_jsonl_sink_keeps_what_the_caller_was_told(reg):
+    """A report nobody received used to be lost outright.
+
+    Written beside `provenance/` and not into it: the executor is the only writer there, and a
+    tenth provenance kind would make a report look like a campaign record when it is a record
+    of what somebody else was told.
+    """
+    import json
+
+    from impress_a.integrations import JsonlSink, run_with_sink
+
+    mgr = CampaignManager(spec("t-jsonl", max_cycles=2), _pair(), reg)
+    sink = JsonlSink(mgr.root)
+    await run_with_sink(mgr, sink, period_s=0.05)
+
+    assert sink.path.exists() and sink.path.parent.name == "reports"
+    assert "provenance" not in sink.path.parts
+
+    # Append-only, like provenance: a campaign re-run under the same id adds to the record
+    # rather than replacing it, so this reads back only the rows THIS run wrote.
+    rows = [json.loads(line) for line in sink.path.read_text().splitlines()]
+    assert len(rows) >= sink.count >= 2
+    mine = rows[-sink.count:]
+    assert mine[0]["status"] == "starting" and mine[-1]["status"] == "stopped"
+    assert all("ts" in r and "seq" in r for r in mine)
+
+
+async def test_the_control_plane_and_the_log_both_receive_provenance(reg):
+    """Two listeners, neither evicting the other. It used to be one slot.
+
+    `ControlPlane.register` assigned `prov_sink` for its event stream and
+    `cli.run_campaign` assigned it for the log heartbeat; neither checked for the other, so
+    serving a campaign over HTTP silently turned off its own progress log and the loser left
+    no trace of having been displaced (backlog G18).
+    """
+    seen_a, seen_b = [], []
+    mgr = CampaignManager(spec("t-fanout", max_cycles=2), _pair(), reg)
+    mgr.prov_sink = lambda cid, kind, rec: seen_a.append((cid, kind))   # the old spelling
+    mgr.add_prov_listener(lambda cid, kind, rec: seen_b.append((cid, kind)))
+    await mgr.run()
+
+    assert seen_a and seen_b, "both listeners must have been called"
+    assert seen_a == seen_b, "both must see the same records, in the same order"
+    assert {k for _c, k in seen_a} >= {"campaign", "results"}, \
+        "a listener must see what the campaign DID, not only what the plane asked"
+    # The old single-slot spelling still names the first listener, so no caller has to move.
+    assert mgr.prov_sink is not None
+
+
+async def test_a_provenance_listener_that_raises_does_not_take_the_campaign_down(reg):
+    """A bystander must not be able to kill a run from inside a provenance write.
+
+    This was the most expensive possible place to raise: `_log` is on every settlement and
+    every absorption, so a listener that threw aborted a campaign holding an allocation,
+    after the work was done and while it was being recorded. `policy/reasoning._record` has
+    always guarded its sink; this is the same rule arriving late.
+    """
+    calls = []
+
+    def broken(cid, kind, rec):
+        calls.append(kind)
+        raise RuntimeError("the subscriber's socket went away")
+
+    mgr = CampaignManager(spec("t-badlistener", max_cycles=2), _pair(), reg)
+    mgr.add_prov_listener(broken)
+    result = await mgr.run()
+
+    assert result.stop_reason, "the campaign must have reached its own conclusion"
+    assert calls, "and the listener must really have been called"
+    assert mgr.executor.prov_dropped == len(calls), \
+        "every failure must be counted, so a silently deaf subscriber is discoverable"

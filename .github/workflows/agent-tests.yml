@@ -41,8 +41,19 @@ jobs:
       # for the name on PyPI and installs whatever it finds there.
       - name: Install impress (repository root)
         run: python -m pip install --upgrade pip && pip install -e ..
+      # `aucam` in the same install as `dev`, so pip resolves once: `tests/test_aucam.py`
+      # skips itself when the extra is absent, so without it the tests that prove an IMPRESS-A
+      # campaign really runs as one AuCaM workflow never ran anywhere automated - green either
+      # way, which is the failure this project already names as worse than a missing adapter.
+      # It is a git pin to a public commit with no compiled dependencies: ~6s to resolve.
       - name: Install impress-a
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,aucam]"
+      # A skip is not a pass, and the extra going missing again would be silent otherwise:
+      # pytest exits 0 with the whole file skipped. This step fails loudly instead. The import
+      # is `src.aucam`, not `aucam` - upstream's `include = ["src*"]` publishes the generic
+      # name, and this repository has two `src/` directories of its own to be confused with.
+      - name: Confirm the AuCaM adapter has something to test against
+        run: python -c "import src.aucam, impress_a.integrations.aucam"
       # Nothing linted agent/ before this: there was no [tool.ruff] table here, so ruff walked
       # up to the root project's config, which sets `fix = true` - the documented command
       # rewrote the tree instead of reporting on it. The local table sets `fix = false`, and

@@ -523,3 +523,43 @@ def test_the_failed_gate_list_is_logged_in_the_shape_failed_actually_returns():
     for row in failed:
         assert {"gate", "role", "observed", "threshold", "detail"} <= set(row), \
             "provenance shape - the harness reads these without a schema"
+
+
+def test_an_offer_round_trips_through_json_unchanged():
+    """An offer crosses a process boundary, which is why its types live in `core`.
+
+    A caller builds its own campaign spec from this payload, in its own process and possibly
+    in another language, so a field that does not survive `model_dump(mode="json")` is a field
+    the caller silently sizes its budget without.
+    """
+    import json
+
+    from impress_a.core.offer import CampaignOffer, ChainOffer, CostRange, GoalOffer
+
+    offer = CampaignOffer(
+        campaign_id="c", goal_text="design something",
+        chain=ChainOffer(declared=["a", "b"], minimal=["a"], replicas=2, graph_nodes=4,
+                         pattern_signature="deadbeef", cost_cap_fraction=0.1),
+        cost={"gpu_hours": CostRange(floor=0.1, expected=0.4, ceiling=8.0,
+                                     unit="gpu_hours", bounded_by_budget=True)},
+        goals=GoalOffer(addressable_metrics=["iptm"], producible_objectives=["iptm"]),
+        warnings=["the estimate is parameter-blind"])
+
+    back = CampaignOffer.model_validate(json.loads(json.dumps(offer.model_dump(mode="json"))))
+    assert back == offer
+
+
+def test_an_offers_bounds_are_the_floor_and_ceiling_of_every_dimension():
+    """The shape a caller that sizes from ranges consumes directly.
+
+    A range is reported rather than a point because a caller's own scheduler will have
+    measured costs this side never sees, and giving it a single declared number would throw
+    that away and claim a precision the declared figures do not have.
+    """
+    from impress_a.core.offer import CampaignOffer, CostRange
+
+    offer = CampaignOffer(
+        campaign_id="c", goal_text="g",
+        cost={"gpu_hours": CostRange(floor=0.1, expected=0.4, ceiling=8.0, unit="gpu_hours"),
+              "cpu_hours": CostRange(floor=1.0, expected=2.0, ceiling=9.0, unit="cpu_hours")})
+    assert offer.bounds() == {"gpu_hours": (0.1, 8.0), "cpu_hours": (1.0, 9.0)}

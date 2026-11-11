@@ -46,6 +46,15 @@ echo "== installing impress-a with dev extras (editable)"
 echo "== installing the oracle extra (control model B's live client)"
 .venv/bin/pip install --quiet -e ".[oracle]"
 
+# AuCaM, the enclosing campaign manager IMPRESS-A offers itself to as a subordinate workflow.
+# An extra for the same reason as the oracle above: nothing in the package imports it unless a
+# caller asks for the adapter, but the adapter's tests are only a guard if the development venv
+# has it - they build a real WorkflowConfig and emit through AuCaM's own reporter rather than a
+# fake, and skip when it is absent. Installed from the pinned commit in pyproject.toml; to work
+# against a live checkout instead, `pip install -e ../../campaign_manager` over the top.
+echo "== installing the aucam extra (the enclosing campaign manager)"
+.venv/bin/pip install --quiet -e ".[aucam]"
+
 # Verify rather than trust the order: `impress` is on no index, so if pip went looking for the
 # name and found something, the import below succeeds and returns the wrong module. Failing hard
 # here is the difference between a confusing campaign and a one-line error.

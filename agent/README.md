@@ -141,6 +141,8 @@ different transport.
 ruff check src tests                                      # reports; never rewrites. Ceiling: zero
 pytest tests -q                                           # the whole local tier, ~19s, no allocation
 impress-a tools                                           # list registered tools
+impress-a offer campaigns/mock-stabilize.yaml             # what one invocation costs, and
+                                                          # which goals it can address
 impress-a run campaigns/mock-stabilize.yaml --model D     # run a campaign
 ```
 
@@ -214,6 +216,7 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 |---|---|
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | The loop, layers, import contract, invariants |
 | [`docs/reference/resolution.md`](docs/reference/resolution.md) | **How the toolkit, goal, budget and parameters become specified targets and a programmed Stage** — step by step, with what refuses each one |
+| [`docs/reference/observation.md`](docs/reference/observation.md) | **How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller** — with the eleven things the plane does not enforce |
 | [`docs/reference/control-models.md`](docs/reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
 | [`docs/reference/frontends.md`](docs/reference/frontends.md) | Control models and control-plane adapters in detail |
 | [`docs/reference/mock-lab.md`](docs/reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |

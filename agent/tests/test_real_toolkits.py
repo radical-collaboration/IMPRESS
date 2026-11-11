@@ -37,7 +37,8 @@ from impress_a.policy.specifiers import ThresholdSpecifier
 from impress_a.tools._ensemble import member_index, pair_by_index, select_best
 from impress_a.tools.ligandmpnn_agents import _parse_all_confidences, _parse_confidence
 from impress_a.tools.registry import Registry
-from impress_a.tools.view import view_of
+from impress_a.tools.spec import CostModel
+from impress_a.tools.view import card_for, view_of
 
 CHAIN = ["rfd3_design", "ligandmpnn_design", "packmin", "fastrelax", "filter_shape",
          "boltz_predict"]
@@ -1011,6 +1012,59 @@ def test_the_six_stage_chain_fits_the_untrusted_pattern_cap(reg):
         f"cpu estimate {est['cpu_hours']:.3f} exceeds the 1.000 provisional cap"
 
 
+def test_the_offer_for_the_six_stage_campaign_fits_the_untrusted_pattern_cap(reg, tmp_path):
+    """The same arithmetic as the test above, asked of the offer a caller actually reads.
+
+    The test above does the sum by hand and proves the figures are sound. This one proves the
+    offer REPORTS that soundness - including the cap itself, which is the number that decided
+    job 22675512: the chain's estimate exceeded 10% of available budget, the graph was refused
+    three times, and the policy truncated `boltz_predict` - the only producer of two of four
+    objectives - off the end. A caller handed this offer can see that before it launches.
+    """
+    from impress_a.runtime.executor import CampaignSpec
+    from impress_a.runtime.offer import offer_for_spec
+
+    spec = CampaignSpec(campaign_id="smoke", goal="bind", objectives=[],
+                        stages=list(CHAIN), budget={"gpu_hours": 6.0, "cpu_hours": 10.0},
+                        root=str(tmp_path / "runs"))
+    offer = offer_for_spec(spec, reg)
+
+    assert offer.chain.trusted is False and offer.chain.cost_cap_fraction == 0.10
+    cap = offer.chain.cost_cap_fraction
+    for dim in ("gpu_hours", "cpu_hours"):
+        allowed = offer.cost[dim].ceiling * cap
+        assert offer.cost[dim].expected <= allowed, (
+            f"the offer prices one cycle at {offer.cost[dim].expected:.3f} {dim} against a "
+            f"provisional cap of {allowed:.3f} - a caller sizing to this offer would be "
+            f"refused before a task ran")
+
+
+def test_the_offered_wall_ceiling_covers_every_measured_task_time(reg, tmp_path):
+    """A wall figure below reality makes a caller's proration exceed 100% and cancel us.
+
+    An enclosing campaign manager prorates an unreported spend against the declared wall
+    time, so `wall_hours` too SMALL is the dangerous direction - it reads as a workflow over
+    its budget rather than one running normally. Checked against the measured per-task
+    seconds this file already records, summed along the chain, because that is the closest
+    thing to a real campaign's wall time that exists without an allocation.
+    """
+    from impress_a.runtime.executor import CampaignSpec
+    from impress_a.runtime.offer import offer_for_spec
+
+    measured_s = {"rfd3_design": 145.7, "ligandmpnn_design": 18.1, "packmin": 15.9,
+                  "fastrelax": 25.9, "filter_shape": 10.2, "boltz_predict": 57.8}
+    spec = CampaignSpec(campaign_id="walled", goal="bind", objectives=[],
+                        stages=list(CHAIN), max_cycles=1, root=str(tmp_path / "runs"))
+    offer = offer_for_spec(spec, reg)
+
+    assert offer.resources.walltime_s_per_cycle >= sum(measured_s.values()), (
+        f"one cycle is offered {offer.resources.walltime_s_per_cycle}s against "
+        f"{sum(measured_s.values()):.0f}s measured along the chain")
+    assert offer.cost["wall_hours"].expected == offer.cost["wall_hours"].ceiling, (
+        "wall_hours must not be offered as a range: a caller prorates against the expected "
+        "figure, and anything below the ceiling invites a false over-budget cancel")
+
+
 def test_packmin_does_not_gate_on_a_relaxed_score(reg):
     """Whether a pose blew up is fastrelax's call, made by whether it converges.
 
@@ -1075,6 +1129,34 @@ async def test_run_cmd_keeps_what_a_timed_out_process_already_said():
 # ---------------------------------------------------------------------------
 # The ToolkitView and the model-D Specifier (phase 2 of plans/control-plane-refactor.md).
 # ---------------------------------------------------------------------------
+
+def test_a_card_carries_the_cost_terms_its_spec_declares(reg):
+    """`burn_rate` and `max_commitment` reach the card, which they did not for a year.
+
+    `card_for` passed both to a `TaskCard` that declared neither field, and pydantic's
+    default `extra` is `ignore`, so both were discarded in silence. No shipped spec sets
+    either key - which is why nothing broke, and why the behaviour had to be checked against
+    a spec written for the purpose rather than against the toolkit on disk.
+
+    `max_commitment` is the one with a consumer waiting: `core/budget.Commitment` states the
+    rule `min(goal.budget[d], card.max_commitment[d])`, and until now the right-hand side
+    could not be read. `tests/test_layering.py` guards the general case mechanically.
+    """
+    spec = reg.get("rfd3_design").model_copy(update={
+        "cost_model": CostModel(unit="invocation",
+                                cost={"gpu_hours": 0.1},
+                                burn={"gpu_hours": 0.00003},
+                                max_commitment={"gpu_hours": 0.4})})
+    card = card_for(spec)
+    assert card.declared_cost == {"gpu_hours": 0.1}
+    assert card.burn_rate == {"gpu_hours": 0.00003}
+    assert card.max_commitment == {"gpu_hours": 0.4}
+
+    # None rather than {} when a spec declares neither, so "not declared" and "declared
+    # empty" stay distinguishable to a reader deciding whether a cap exists at all.
+    bare = card_for(reg.get("rfd3_design"))
+    assert bare.burn_rate is None and bare.max_commitment is None
+
 
 def test_the_view_exposes_every_declared_parameter_with_its_range(reg):
     """A reasoner given bare tool ids cannot choose, so it guesses - which is backlog H3.

@@ -46,7 +46,7 @@ POLICIES = reasoners.LETTERS
 #: it to generate the deck, and had the list hardcoded - so adding `models` here would
 #: otherwise have left the deck claiming three subcommands against the code's four.
 #: `tests/test_reasoner_registry.py` asserts the parser accepts every name in it.
-SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight",
+SUBCOMMANDS = ("run", "serve", "control", "tools", "models", "preflight", "offer",
                "trust", "validate-tasks", "compare", "mock-lab")
 
 
@@ -744,9 +744,12 @@ def _hms(seconds: float) -> str:
 def _prov_heartbeat(campaign: str, kind: str, record: dict[str, Any]) -> None:
     """Mirror every provenance record to the log as it is written.
 
-    `prov_sink` exists for the control plane; pointing it at a logger turns the campaign's
-    own append-only record into a live progress feed, so a batch run reports what it is
-    doing without the package printing anything of its own.
+    Provenance listeners exist for the control plane; pointing one at a logger turns the
+    campaign's own append-only record into a live progress feed, so a batch run reports what
+    it is doing without the package printing anything of its own. Attached with
+    `add_prov_listener` rather than by assigning `prov_sink`, because it used to be one slot
+    and `ControlPlane.register` wanted it too - serving a campaign over HTTP silently turned
+    this log off (backlog G18).
     """
     body = json.dumps({k: v for k, v in record.items() if k != "ts"}, default=str)
     log.info("prov %-12s %s", kind, body if len(body) <= 600 else body[:600] + "...")
@@ -779,7 +782,7 @@ async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
                          f"{'' if r.trusted else ' untrusted'}]" for r in running))
 
 
-def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
+def _thread_caps(spec: CampaignSpec, ncpu: int | None = None) -> dict[str, str]:
     """How many threads each CPU-bound child may take, sized from what this process was
     actually given rather than from the machine.
 
@@ -796,10 +799,16 @@ def _thread_caps(spec: CampaignSpec) -> dict[str, str]:
     both numbers: a `TaskRequest` carries no concurrency information, and an agent
     cannot see how many siblings it has. Applied with `setdefault`, so an operator who
     exported their own value keeps it.
+
+    `ncpu` overrides what the cgroup reports, for the one case where the cgroup is not the
+    right answer: under an enclosing campaign manager this process shares its cgroup with
+    every sibling workflow, so `sched_getaffinity` describes the allocation rather than our
+    share of it, and the caller's own resource grant is the honest number
+    (`integrations/aucam`).
     """
-    if hasattr(os, "sched_getaffinity"):
+    if ncpu is None and hasattr(os, "sched_getaffinity"):
         ncpu = len(os.sched_getaffinity(0))
-    else:  # not Linux; the campaign path is, but the test tier need not be
+    elif ncpu is None:  # not Linux; the campaign path is, but the test tier need not be
         ncpu = os.cpu_count() or 1
     pipelines = max(1, spec.concurrency) * max(1, spec.replicas)
     per = max(1, ncpu // (pipelines * 2))
@@ -884,7 +893,7 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
     mgr = CampaignManager(spec, policy, reg)
-    mgr.prov_sink = _prov_heartbeat
+    mgr.add_prov_listener(_prov_heartbeat)
     # The halves were built before the manager existed, so their sink has had nowhere to
     # write until now. Everything a reasoner records - its prompts, its replies, the model
     # id that answered, how long each call took and whether it degraded - reaches
@@ -924,6 +933,75 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
               + " ".join(f"{o.name}={n.metric(o.name)}" for o in spec.objectives))
     if res.corrections:
         print(f"  guard corrections: {res.corrections}")
+    return 0
+
+
+def offer_command(spec_path: str, as_json: bool = False,
+                  validation: str | None = None) -> int:
+    """What this campaign would cost and what it could answer, computed without running it.
+
+    Distinct from `preflight`, deliberately and by name: `preflight` asks whether THIS MACHINE
+    can run the binaries, and is a gate before `sbatch`. `offer` asks what an invocation costs
+    and which goals it can address, and is what an enclosing campaign manager needs *before*
+    it builds its own spec - because it fixes its budget and resource request there, and has
+    no preflight protocol of its own to negotiate over (decision 0014).
+
+    Runs anywhere, touches no allocation and executes no task: `offer_for_spec` is synchronous,
+    and nothing can run without an awaited engine.
+    """
+    from ..runtime.offer import offer_for_spec
+
+    offer = offer_for_spec(load_spec(spec_path), validation=validation)
+    if as_json:
+        print(json.dumps(offer.model_dump(mode="json"), indent=2))
+        return 0
+
+    c = offer.chain
+    scheduled = [t for t in c.declared if t not in c.inlined]
+    print(f"\nOFFER  {offer.campaign_id}")
+    print(f"  goal        {offer.goal_text[:90]}")
+    print(f"  toolkits    {', '.join(offer.toolkits) or '-'}")
+    print(f"  chain       {len(c.declared)} declared, {len(scheduled)} scheduled, "
+          f"{c.graph_nodes} graph nodes at {c.replicas} lineage(s)")
+    print(f"              {' -> '.join(scheduled)}")
+    if c.inlined:
+        print(f"  inlined     {', '.join(c.inlined)} (P6: never scheduled)")
+    trust = "TRUSTED" if c.trusted else "UNTRUSTED"
+    extra = "" if c.trusted else (
+        f" - first cycle forced through a dry run and capped at "
+        f"{c.cost_cap_fraction:.0%} of available budget")
+    print(f"  pattern     {c.pattern_signature}  {trust}{extra}")
+
+    print(f"\nCOST   basis: {offer.basis.kind} - an upper bound to size against, "
+          f"not a prediction")
+    print(f"  {'dimension':<12} {'floor':>12} {'1 cycle':>12} {'ceiling':>12}")
+    for dim, r in offer.cost.items():
+        note = "  campaign budget" if r.bounded_by_budget else ""
+        print(f"  {dim:<12} {r.floor:>12.4f} {r.expected:>12.4f} {r.ceiling:>12.4f}{note}")
+    res = offer.resources
+    print(f"  at once     {res.gpus} gpu, {res.cores} cores, {res.nodes} node(s); "
+          f"wall <= {res.walltime_s_ceiling}s")
+    print(f"  reports      every {offer.report_interval_s:.0f}s; pause is "
+          f"{offer.pause_semantics}")
+
+    g = offer.goals
+    print("\nGOALS")
+    print(f"  addressable {len(g.addressable_metrics)} metric(s) across the declared chain")
+    print(f"  producible  {', '.join(g.producible_objectives) or '-'}")
+    print(f"  UNPRODUCIBLE {', '.join(g.unproducible_objectives) or '-'}")
+    print(f"  bounded     {', '.join(g.bounded_objectives) or '-'}  (can satisfy, so can stop)")
+    print(f"  unbounded   {', '.join(g.unbounded_objectives) or '-'}  (ranked, never satisfied)")
+    print(f"  thresholds  {len(g.acceptance_thresholds)} acceptance bar(s) the toolkit "
+          f"declares for itself")
+    if g.unsatisfied_root_ports:
+        ports = ", ".join(f"{p.tool}.{p.port}:{p.type}" for p in g.unsatisfied_root_ports)
+        print(f"  you supply  {ports}")
+
+    print(f"\nWARNINGS ({len(offer.warnings)}) - each one is a recorded defect, not a "
+          f"disclaimer")
+    for w in offer.warnings:
+        print(f"  - {w}")
+    print()
     return 0
 
 
@@ -1248,6 +1326,15 @@ def _parser() -> argparse.ArgumentParser:
                     help="tier-1 checks only - skip the pyrosetta and LigandMPNN import "
                          "probes, which bound at 1320s together. What the Delta launcher runs "
                          "inside the allocation before Dragon comes up")
+    of = sub.add_parser("offer",
+                        help="what this campaign would cost and what it could answer, "
+                             "without running it")
+    of.add_argument("spec")
+    of.add_argument("--json", action="store_true", dest="as_json",
+                    help="the machine-readable offer, for a caller building its own spec")
+    of.add_argument("--validation", default=None,
+                    help="a validate_tasks.json, whose measured/declared ratios are the only "
+                         "route by which a measured figure enters an offer")
     sv = sub.add_parser("serve", help="run the execution process and serve it over HTTP")
     sv.add_argument("spec")
     sv.add_argument("--model", default=None, choices=sorted(POLICIES),
@@ -1399,6 +1486,8 @@ def main(argv: list[str] | None = None) -> int:
         return trust(a.spec, a.do_assert, a.revoke, a.reason, widths)
     if a.cmd == "preflight":
         return preflight(load_spec(a.spec) if a.spec else None, a.quick)
+    if a.cmd == "offer":
+        return offer_command(a.spec, a.as_json, a.validation)
     reg = Registry().load(a.toolkits)
     for tid in reg.ids():
         s = reg.get(tid)

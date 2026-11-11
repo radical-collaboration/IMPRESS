@@ -905,3 +905,160 @@ async def test_no_planner_answers_a_rejection_by_truncating_its_chain(reg):
             f"budget. Breadth may shrink - a lineage is a whole chain - but the chain may not")
         assert answer.lineages <= stage.lineages, \
             f"{planner.name} answered a budget rejection by asking for MORE"
+
+
+# ---------------------------------------------------------------------------
+# `impress-a offer` - what a caller is told before anything runs
+# ---------------------------------------------------------------------------
+
+
+def _offer_spec(tmp_path, **kw):
+    """A campaign spec for the mock chain, rooted in a tmpdir so trust starts empty."""
+    from impress_a.runtime.executor import CampaignSpec
+
+    objectives = kw.pop("objectives", [Objective(name="sc_rmsd", direction=Direction.MIN,
+                                                 max=3.0)])
+    return CampaignSpec(campaign_id="offered", goal="stabilize", objectives=objectives,
+                        stages=list(kw.pop("stages", CHAIN)),
+                        root=str(tmp_path / "runs"), **kw)
+
+
+def test_the_offer_executes_nothing_and_its_signature_says_so(reg, tmp_path):
+    """The guarantee is the `def`, not a comment.
+
+    Nothing in `exec/` can be driven without an awaited engine - rhapsody's backends fail
+    unregistered if they are not awaited, and `make_engine_bounded` is a coroutine - so a
+    synchronous function cannot run a task however wrong its body becomes. That is a stronger
+    guarantee than a review promise, and this is what keeps it true.
+    """
+    import inspect
+
+    from impress_a.runtime.offer import offer_for_spec
+
+    assert not inspect.iscoroutinefunction(offer_for_spec), (
+        "offer_for_spec became a coroutine; it can now await an engine, and 'the offer "
+        "executes nothing' stopped being true by construction")
+    offer_for_spec(_offer_spec(tmp_path), reg)  # and it runs with no event loop at all
+
+
+def test_the_offer_prices_the_graph_the_validator_would_price(reg, tmp_path):
+    """One estimator, so a caller sizing to the offer cannot be refused by gate 5.
+
+    `Validator.estimate` is what gate 5, the Reviewer and the untrusted-pattern cap all price
+    a graph with. An offer computing its own figure would be a second implementation, and the
+    first time they disagreed a caller would have sized a budget against a number the gate
+    does not use.
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    spec = _offer_spec(tmp_path, replicas=3)
+    offer = offer_for_spec(spec, reg)
+
+    intent = ExperimentIntent(goal=spec.goal, stages=list(spec.stages), replicas=3)
+    graph = Composer(reg).compose(intent, run_label="x")
+    want = Validator(reg, spec.site, BudgetLedger(limits={})).estimate(graph)
+
+    assert offer.chain.graph_nodes == len(graph.nodes)
+    assert offer.chain.pattern_signature == graph.pattern_signature()
+    for dim, value in want.items():
+        assert offer.cost[dim].expected == value, dim
+
+
+def test_the_offer_ceiling_is_the_campaigns_own_budget_where_it_declared_one(reg, tmp_path):
+    """For a budgeted dimension the ceiling is EXACT, not an estimate.
+
+    Admission reserves against `limits - spent - reserved` and refuses what does not fit, and
+    settlement charges no more than was reserved - so spending cannot pass the limit. Where
+    the campaign declares no budget there is nothing to be exact about, and the ceiling falls
+    back to `max_cycles x` one cycle, which is an estimate like any other.
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    budgeted = offer_for_spec(_offer_spec(tmp_path, budget={"gpu_hours": 7.5}), reg)
+    assert budgeted.cost["gpu_hours"].ceiling == 7.5
+    assert budgeted.cost["gpu_hours"].bounded_by_budget is True
+
+    free = offer_for_spec(_offer_spec(tmp_path, max_cycles=4), reg)
+    assert free.cost["gpu_hours"].bounded_by_budget is False
+    assert free.cost["gpu_hours"].ceiling == free.cost["gpu_hours"].expected * 4
+
+
+def test_the_offers_minimal_chain_is_what_the_objectives_need(reg, tmp_path):
+    """Floor and ceiling price different chains, and the floor is the honest one.
+
+    A campaign declaring four tools to answer one objective is paying for the three the
+    objective does not need, and a caller deciding whether to invoke at all should be able to
+    see both figures. The minimal chain is resolved by the rule the planner uses, so it is
+    the chain a reasoner could actually choose to run.
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    offer = offer_for_spec(_offer_spec(tmp_path), reg)
+    assert offer.chain.minimal == ["mock_generate", "mock_design", "mock_fold"], (
+        "mock_score produces no declared objective's metric, so the floor must not pay for it")
+    assert set(offer.chain.minimal) <= set(offer.chain.declared)
+    assert offer.cost["gpu_hours"].floor <= offer.cost["gpu_hours"].expected
+    assert any("mock_score" in w for w in offer.warnings), (
+        "a chain wider than the objectives require is priced, and must say so")
+
+
+def test_the_offer_declares_a_declared_basis_and_carries_no_measurement(reg, tmp_path):
+    """An offer must not be mistakable for a prediction.
+
+    Declared `cost_model` figures sit above measurement ON PURPOSE, because they feed gates
+    that refuse graphs - so the number is correct for its job and wrong as a forecast. The
+    only route by which a measured figure enters an offer is a `validate-tasks` artifact a
+    caller passes in, which exists only because something ran the tools on hardware.
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    offer = offer_for_spec(_offer_spec(tmp_path), reg)
+    assert offer.basis.kind == "declared_cost_model"
+    assert offer.basis.measured_ratio == {} and offer.basis.measured_source == ""
+    assert offer.basis.notes, "the basis must state itself in words, not only in a field name"
+    # No dimension is renamed or converted on the way out.
+    for dim, r in offer.cost.items():
+        assert r.unit == dim
+
+
+def test_an_objective_no_enabled_tool_reports_is_offered_as_unproducible(reg, tmp_path):
+    """The question the Specifier and the executor each answer mid-campaign, asked first.
+
+    `specifiers/explicit.unproducible` answers it per cycle and
+    `executor._objectives_without_a_producer` answers it per admitted graph, as a refusal.
+    A caller can have the same answer before it launches, which is the difference between
+    choosing not to invoke and watching a campaign refuse its own work.
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    objectives = [Objective(name="sc_rmsd", direction=Direction.MIN, max=3.0),
+                  Objective(name="solubility", direction=Direction.MAX, min=0.5)]
+    offer = offer_for_spec(_offer_spec(tmp_path, objectives=objectives), reg)
+
+    assert offer.goals.unproducible_objectives == ["solubility"]
+    assert offer.goals.producible_objectives == ["sc_rmsd"]
+    assert any("solubility" in w for w in offer.warnings)
+    # And the distinction a caller needs for a stopping condition.
+    assert offer.goals.bounded_objectives == ["sc_rmsd", "solubility"]
+
+
+def test_the_offer_warns_about_what_its_figures_cannot_see(reg, tmp_path):
+    """Each warning is a recorded defect, so dropping one silently is a regression.
+
+    Parameter-blindness is the one that matters most: `Validator.estimate` reads no
+    parameter, so a reasoner raising a breadth knob buys N draws and moves no number in the
+    offer or in any gate. A caller that sized its budget from `expected` without reading this
+    would be wrong in a direction this file could have named (backlog H10).
+    """
+    from impress_a.runtime.offer import offer_for_spec
+
+    warnings = offer_for_spec(_offer_spec(tmp_path), reg).warnings
+    assert any("PARAMETER-BLIND" in w for w in warnings)
+    assert any("upper bound" in w for w in warnings)
+    assert any("UNTRUSTED" in w for w in warnings), (
+        "a fresh trust root means the pattern is untrusted, and its first cycle is capped")
+
+    tight = offer_for_spec(_offer_spec(tmp_path, budget={"gpu_hours": 0.0001}), reg)
+    assert any("exceeds the campaign's own budget" in w for w in tight.warnings), (
+        "a campaign that cannot admit one cycle must be told so before it is launched, not "
+        "after it has stopped having spent nothing")

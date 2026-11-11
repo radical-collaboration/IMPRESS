@@ -260,7 +260,16 @@ class CampaignExecutor:
         self.dispatched = 0
         self.max_attempts = spec.max_attempts
         self.pending_human: RequestHuman | None = None
-        self.prov_sink: Any = None
+        #: Everything that wants to see provenance as it is written. A LIST, because it was a
+        #: single slot and two things wanted it: `ControlPlane.register` assigns the event
+        #: stream and `cli.run_campaign` assigns the log heartbeat, neither checks for the
+        #: other, and the loser was evicted in silence - so serving a campaign over HTTP
+        #: turned off its own progress log (backlog G18). `prov_sink` remains as a property
+        #: over slot 0 so no existing caller moves.
+        self._prov_listeners: list[Any] = []
+        #: How many listener calls were dropped because a listener raised. Counted rather
+        #: than propagated: see `_log`.
+        self.prov_dropped: int = 0
         #: Whether a control plane registered this campaign - i.e. whether there IS an
         #: external caller that could go away. Set by `ControlPlane.register`; an
         #: `impress-a run` campaign never has one, and the liveness timeout is meaningless
@@ -310,15 +319,49 @@ class CampaignExecutor:
         self._cursor = 0
 
     # -- provenance ----------------------------------------------------------
+    # -- provenance listeners ------------------------------------------------
+
+    @property
+    def prov_sink(self) -> Any:
+        """The first listener, for every caller written when there could be only one."""
+        return self._prov_listeners[0] if self._prov_listeners else None
+
+    @prov_sink.setter
+    def prov_sink(self, sink: Any) -> None:
+        if sink is None:
+            self._prov_listeners.clear()
+        elif self._prov_listeners:
+            self._prov_listeners[0] = sink
+        else:
+            self._prov_listeners.append(sink)
+
+    def add_prov_listener(self, sink: Any) -> None:
+        """Also mirror provenance to `sink`, without displacing anything already listening."""
+        if sink is not None and sink not in self._prov_listeners:
+            self._prov_listeners.append(sink)
+
     def _log(self, kind: str, record: dict[str, Any]) -> None:
-        """Write provenance and mirror it to the control plane's event stream.
+        """Write provenance, then mirror it to every listener.
 
         The plane has always assigned `manager.prov_sink`; nothing ever read it, so
         `events()` could only ever replay the plane's own calls and never saw anything
-        the campaign actually did."""
+        the campaign actually did.
+
+        Each listener is guarded. A listener is a bystander and this process is holding an
+        allocation, so a broken one must cost a log line and a counter - it used to be able
+        to take the campaign down from inside a provenance write, which is the most
+        expensive possible place to raise. `policy/reasoning._record` has always guarded its
+        sink for exactly this reason; this is the same rule, arriving late.
+        """
         self.prov.append(kind, record)
-        if self.prov_sink is not None:
-            self.prov_sink(self.spec.campaign_id, kind, dict(record))
+        for sink in list(self._prov_listeners):
+            try:
+                sink(self.spec.campaign_id, kind, dict(record))
+            except Exception as broken:          # noqa: BLE001 - see the docstring
+                self.prov_dropped += 1
+                log.warning("provenance listener %r failed on %s (%d dropped): %r",
+                            getattr(sink, "__name__", type(sink).__name__), kind,
+                            self.prov_dropped, broken)
 
     #: The only provenance streams a REASONER may append to. Both describe the reasoner's
     #: own behaviour and nothing else: what it was asked, what it answered, and whether it
@@ -1125,6 +1168,11 @@ class CampaignExecutor:
     def _settle(self, run_id: str, rec: RunRecord,
                 results: ExecutionResults) -> list[DesignNode]:
         self.budget.settle(run_id, results.cost)
+        # Beside the settlement, never instead of it. `settle` works in DECLARED cost because
+        # that is what was reserved and what gate 5 refuses against; this is the same work as
+        # the tools measured it, accumulated so something outside the campaign can be told
+        # what it actually cost rather than what it was charged (backlog G20).
+        self.budget.charge_measured(results.cost_measured)
         self._untrusted_inflight.discard(rec.signature)
         self.jobs.record(job_id=run_id,
                          status=(RunState.FAILED if results.failures
@@ -1132,6 +1180,7 @@ class CampaignExecutor:
                          cost=results.cost, failures=results.failures)
         self._log("executions", {"cycle": rec.turn, "graph": rec.graph.id,
                                  "run": run_id, "cost": results.cost,
+                                 "cost_measured": results.cost_measured,
                                  "failures": results.failures})
         log.info("reaped %s: %d/%d tasks ok, cost=%s%s", run_id,
                  len(results.per_task), len(rec.graph.nodes), results.cost,

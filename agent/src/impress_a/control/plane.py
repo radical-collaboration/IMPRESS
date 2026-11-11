@@ -101,7 +101,7 @@ class InProcessControlPlane:
         cid = manager.spec.campaign_id
         self.managers[cid] = manager
         self._events.setdefault(cid, [])
-        manager.prov_sink = self.emit
+        manager.add_prov_listener(self.emit)
         # Registering IS what makes a campaign externally controlled, and it is the only
         # moment at which that becomes true. The liveness timeout reads this: a campaign
         # nobody registered has no caller that could go silent, and arming the bound against
