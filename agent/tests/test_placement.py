@@ -23,7 +23,6 @@ import pytest
 from impress_a.compose.composer import Composer
 from impress_a.core.decision import ExperimentIntent
 from impress_a.exec.backend import COMPUTE, make_engine
-from impress_a.exec.dispatch import Dispatcher
 from impress_a.exec.launch import Launcher
 from impress_a.exec.resources import (
     KILL_GRACE_S,
@@ -32,6 +31,7 @@ from impress_a.exec.resources import (
     thread_caps,
     thread_share,
 )
+from impress_a.exec.stage import StageExecutor
 from impress_a.tools._subprocess import SubprocessError, run_cmd
 from impress_a.tools.agent import TaskAgent
 from impress_a.tools.registry import Registry
@@ -167,7 +167,7 @@ async def test_a_command_is_an_engine_task_placed_on_its_lineages_gpu(reg, tmp_p
                                                replicas=2), "r0001")
     flow, _ = await make_engine("concurrent", {"workers": 2}, work_dir=str(tmp_path))
     try:
-        d = Dispatcher(flow, _ProbeRegistry(reg), "concurrent", gpus_per_node=2, threads=3)
+        d = StageExecutor(flow, _ProbeRegistry(reg), "concurrent", gpus_per_node=2, threads=3)
         res = await d.collect(d.submit(g, run_id="r0001"))
     finally:
         await flow.shutdown()

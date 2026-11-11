@@ -14,12 +14,20 @@ and the comment saying "there the placement policy pins" described a policy nobo
 
 Commands cross a thread boundary here: the adapter's loop is not the engine's, and a
 `WorkflowEngine` belongs to the loop it was built on (jobs 22328172/22328262). Submission is
-therefore handed to the engine loop with `run_coroutine_threadsafe`, and only the result comes
-back.
+therefore handed to the engine loop, and only the result comes back.
+
+**Commands are members of their Stage's block.** asyncflow records a task as a block member
+when it registers inside the block's context (its own context variable, read at registration;
+an explicit `workflow_id` is only a label). A command submitted from the adapter's thread would
+register in no block at all, so a Stage's cancel would never reach it. The `Launcher` is built
+inside the block body and keeps a copy of that context, and every command's submission runs in
+a copy of it - so the block's cancel cascade reaches the command on its backend.
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
 import re
 import shlex
 import time
@@ -68,10 +76,34 @@ class Launcher:
     """
 
     def __init__(self, flow: Any, loop: asyncio.AbstractEventLoop, node: str,
-                 placement: Placement, workflow_id: str | None = None) -> None:
+                 placement: Placement, workflow_id: str | None = None,
+                 context: contextvars.Context | None = None,
+                 slots: asyncio.Semaphore | None = None) -> None:
         self.flow, self.loop, self.node = flow, loop, node
+        #: Commands this ENGINE may run at once, where the backend does not bound them itself.
+        #: A STOPGAP for rhapsody's concurrent backend, which runs every executable as its own
+        #: asyncio subprocess and bounds only function tasks by its `workers` - so with tools as
+        #: executables, `workers: 1` would start every command at once. Shared by every
+        #: Launcher on the engine; `None` (Dragon, whose Batch has its own capacity) is no
+        #: bound. Remove when rhapsody bounds executables.
+        self.slots = slots
         self.placement = placement
         self.workflow_id = workflow_id
+        #: The context commands are submitted in: the Stage block's, when built inside one.
+        self.context = context
+        #: Engine futures of this node's commands that have not finished.
+        self.inflight: set[Any] = set()
+        #: Submissions handed to the engine loop that have not finished - including one still
+        #: waiting for a command slot, which has no engine future yet.
+        self.pending: set[asyncio.Task] = set()
+        self.cancelled = False
+        #: Set while the node's adapter is NOT running in its thread. A cancelled Stage is not
+        #: settled until every adapter has left, because the engine's `local` backend joins its
+        #: threads synchronously on the engine loop at shutdown - an adapter still waiting on a
+        #: command there would deadlock it - and because a reservation must not be released
+        #: while work it paid for is still running.
+        self.idle = asyncio.Event()
+        self.idle.set()
         #: Seconds this node's commands spent submitted but not yet running.
         self.queued_s = 0.0
         #: Seconds they spent running, as the backend reported them started and finished.
@@ -88,13 +120,66 @@ class Launcher:
         dies is the backend's business (see `docs/impress-a/limitations.md`), which is one
         reason every command also carries its own `timeout`.
         """
-        cfut = asyncio.run_coroutine_threadsafe(
-            self._submit_and_wait(list(map(str, cmd)), cwd, env, timeout_s), self.loop)
+        if self.cancelled:
+            raise asyncio.CancelledError(f"{self.node}: its Stage was cancelled")
+        cfut: concurrent.futures.Future = concurrent.futures.Future()
+        coro = self._submit_and_wait(list(map(str, cmd)), cwd, env, timeout_s)
+        self.loop.call_soon_threadsafe(self._start, coro, cfut)
         try:
             return await asyncio.wrap_future(cfut)
         except asyncio.CancelledError:
             cfut.cancel()
             raise
+
+    def _start(self, coro: Any, cfut: concurrent.futures.Future) -> None:
+        """On the engine loop: run `coro` in a copy of the Stage's context, relay its outcome.
+
+        `create_task(..., context=)` rather than `run_coroutine_threadsafe`, which offers no
+        way to choose the context - and the context is what makes the command a block member.
+        A copy per command, because one `Context` may not be entered by two tasks at once.
+        """
+        if cfut.cancelled() or self.cancelled:
+            coro.close()
+            cfut.cancel()
+            return
+        ctx = self.context.copy() if self.context is not None else None
+        task = self.loop.create_task(coro, context=ctx)
+        self.pending.add(task)
+        task.add_done_callback(self.pending.discard)
+
+        def relay(t: asyncio.Task) -> None:
+            if cfut.done():
+                return
+            if t.cancelled():
+                cfut.cancel()
+            elif t.exception() is not None:
+                cfut.set_exception(t.exception())
+            else:
+                cfut.set_result(t.result())
+
+        task.add_done_callback(relay)
+        cfut.add_done_callback(
+            lambda f: self.loop.call_soon_threadsafe(task.cancel) if f.cancelled() else None)
+
+    def cancel(self) -> None:
+        """Refuse further commands and cancel the running ones. On the engine loop.
+
+        The block's cascade already cancels member commands; this also stops an adapter that
+        is between commands from starting another one after its Stage was abandoned.
+        """
+        self.cancelled = True
+        for fut in list(self.inflight):
+            fut.cancel()
+        for task in list(self.pending):
+            task.cancel()
+
+    def entered(self) -> None:
+        """The adapter started in its thread. Thread-safe."""
+        self.loop.call_soon_threadsafe(self.idle.clear)
+
+    def left(self) -> None:
+        """The adapter returned or raised in its thread. Thread-safe."""
+        self.loop.call_soon_threadsafe(self.idle.set)
 
     async def _submit_and_wait(self, cmd: list[str], cwd: Any, env: dict[str, str] | None,
                                timeout_s: float | None) -> tuple[str, str]:
@@ -122,16 +207,26 @@ class Launcher:
             kwargs["workflow_id"] = self.workflow_id
 
         submitted = time.monotonic()
-        fut = task(**kwargs)
-        started: float | None = None
+        if self.slots is not None:
+            await self.slots.acquire()          # waiting for a slot is queueing too
         try:
-            while not fut.done():
-                if started is None and getattr(fut, "state", "") == "RUNNING":
-                    started = time.monotonic()
-                await asyncio.wait({fut}, timeout=_POLL_S)
-        except asyncio.CancelledError:
-            fut.cancel()
-            raise
+            if self.cancelled:
+                raise asyncio.CancelledError(f"{self.node}: its Stage was cancelled")
+            fut = task(**kwargs)
+            self.inflight.add(fut)
+            fut.add_done_callback(self.inflight.discard)
+            started: float | None = None
+            try:
+                while not fut.done():
+                    if started is None and getattr(fut, "state", "") == "RUNNING":
+                        started = time.monotonic()
+                    await asyncio.wait({fut}, timeout=_POLL_S)
+            except asyncio.CancelledError:
+                fut.cancel()
+                raise
+        finally:
+            if self.slots is not None:
+                self.slots.release()
         finished = time.monotonic()
         started = started if started is not None else submitted
         self.commands += 1

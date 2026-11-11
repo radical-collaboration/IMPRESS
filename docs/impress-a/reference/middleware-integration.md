@@ -11,7 +11,10 @@ How IMPRESS-A sits on `radical.asyncflow` and `rhapsody`, and the behaviours tha
 ```
 
 The agent owns the `WorkflowEngine` directly, and keeps several graphs in flight on it at once.
-`Dispatcher.submit` registers a graph and returns a handle without awaiting it; `collect` awaits one.
+`StageExecutor.submit` (`exec/stage.py`) runs a graph as one asyncflow **block** and returns the
+block's future without awaiting it; `collect` waits for one. Inside a node, the adapter runs on the
+engine's `local` route and each tool command is an executable task on `compute`, placed per backend
+(`exec/launch.py`, `exec/resources.py`).
 Backends are constructed by `exec/backend.py` and named only in site configuration.
 
 Two things make concurrent graphs safe on one engine, both verified against 0.5.1. Task **names** come

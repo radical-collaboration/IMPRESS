@@ -215,7 +215,8 @@ document described it as implemented anyway (backlog C5).
 
 ```bash
 impress-a serve campaigns/<spec>.yaml            # execution: executor, Reviewer, Deployer,
-                                                 # Runner, the one asyncflow engine. No reasoner.
+                                                 # stage executor, the one asyncflow engine.
+                                                 # No reasoner.
 # it prints: campaign <id> serving on http://127.0.0.1:<port>
 impress-a control --connect <url> --campaign <id> --model D
 ```

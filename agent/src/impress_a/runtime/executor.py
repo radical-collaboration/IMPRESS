@@ -57,14 +57,14 @@ from ..core.spec import (
     TaskState,
 )
 from ..core.tree import CampaignTree, DesignNode, NodeStatus
-from ..exec.dispatch import Dispatcher, ExecutionResults
+from ..exec.dispatch import ExecutionResults
 from ..exec.ledger import JobLedger
 from ..exec.resources import thread_share
+from ..exec.stage import StageExecutor, command_slots
 from ..exec.task_ledger import TaskLedger
 from ..tools.registry import Registry
 from ..tools.view import view_of
 from .reviewer import StageReviewer
-from .runner import StageRunner
 
 
 class CampaignAborted(RuntimeError):
@@ -112,17 +112,6 @@ class CampaignSpec:
     # recorded in `campaign` provenance because a draw nobody can name is one nobody can
     # repeat.
     seed_salt: str = ""
-    # Which execution loop runs a graph. `dispatcher` registers tasks on the engine directly;
-    # `impress` deploys each Stage as an `ImpressBasePipeline` through `ImpressManager`,
-    # reusing the framework's task labelling, failure reporting and the examples' own
-    # task_description and GPU-pinning conventions.
-    #
-    # The default stays `dispatcher` until a Delta smoke has run. The Runner is tested against
-    # ConcurrentExecutionBackend, but the component it replaces is the one whose failure modes
-    # cost jobs 22328172 and 22328262 their full allocations, and swapping a dispatcher that
-    # works for one that has never seen Dragon is exactly the move this project's records
-    # argue against.
-    runner: str = "dispatcher"
     # How long the execution process will run without a word from the control process before
     # it drains and stops. 0 disables, which is right in-process - the roles are coroutines
     # beside the pump and cannot go silent without the whole process going with them.
@@ -295,7 +284,8 @@ class CampaignExecutor:
         #: an enclosing campaign manager the cgroup is shared with every sibling workflow
         #: (`integrations/aucam`). `None` reads the cgroup. Sizes each command's thread caps.
         self.cpu_share: int | None = None
-        self.dispatcher: Dispatcher | None = None
+        #: The execution loop: each admitted graph runs as one block on `flow`.
+        self.dispatcher: StageExecutor | None = None
         self.last_rejection: ValidationFailure | None = None
         self._runs: dict[str, RunRecord] = {}
         self._inflight: dict[str, RunRecord] = {}
@@ -1415,16 +1405,11 @@ class CampaignExecutor:
         log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
                  f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
         hosts = tuple(str(n["id"]) for n in self.topology if n.get("id"))
-        if self.spec.runner == "impress":
-            self.dispatcher = StageRunner(
-                self.flow, self.reg, self.spec.backend, workdir=None,
-                gpus_per_node=self.spec.site.gpus_per_node, threads=threads)
-            await self.dispatcher.start()
-            log.info("execution loop: impress ImpressManager (one pipeline per stage)")
-        else:
-            self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend,
-                                         gpus_per_node=self.spec.site.gpus_per_node,
-                                         threads=threads, hosts=hosts)
+        self.dispatcher = StageExecutor(self.flow, self.reg, self.spec.backend,
+                                        gpus_per_node=self.spec.site.gpus_per_node,
+                                        threads=threads, hosts=hosts,
+                                        command_slots=command_slots(self.spec.backend,
+                                                                    self.spec.backend_config))
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))
@@ -1556,17 +1541,6 @@ class CampaignExecutor:
         is about to exit anyway. The timeout is therefore logged, not raised - an
         abandoned teardown must not turn a finished campaign into a failed one.
         """
-        # The Runner's manager drains BEFORE the engine goes, and does not own it: the caller
-        # owns the engine in `ImpressManager`'s design, so the bounded teardown below stays
-        # exactly where it was. Teardown is the expensive end - on job 22491438
-        # `flow.shutdown()` never returned and the job sat 60 minutes, about 64 GPU-hours,
-        # after the science was already done.
-        if isinstance(self.dispatcher, StageRunner):
-            try:
-                await self.dispatcher.shutdown()
-            except Exception as exc:          # noqa: BLE001 - never sink a finished campaign
-                log.warning("execution loop: runner shutdown ended with %r", exc)
-
         timeout_s = self.spec.backend_shutdown_timeout_s
         if timeout_s <= 0:
             await self.flow.shutdown()

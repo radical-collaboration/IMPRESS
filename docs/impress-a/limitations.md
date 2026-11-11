@@ -81,7 +81,7 @@ answer is: cancellation exists and is **advisory only**.
 
 `ConcurrentExecutionBackend.cancel_task` calls `Future.cancel()`, which returns `False` once a callable
 has started — so **queued work is reclaimed and running work is not** — and asyncflow's own cancel hook
-discards that boolean, so a caller never learns which happened. `Dispatcher.cancel` and the control
+discards that boolean, so a caller never learns which happened. `StageExecutor.cancel` and the control
 plane's `cancel_run` therefore say so in their return value, and a run's terminal state always comes
 from collecting it, never from the fact that cancel was called.
 

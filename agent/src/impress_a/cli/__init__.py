@@ -68,6 +68,11 @@ def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
 
 def load_spec(path: str | Path) -> CampaignSpec:
     d: dict[str, Any] = yaml.safe_load(Path(path).read_text())
+    if "runner" in d:
+        # Refused rather than ignored: a key the loader drops does nothing and says nothing.
+        raise ValueError(
+            f"{path}: `runner:` was removed - there is one execution loop now, each Stage an "
+            "asyncflow block on the campaign's engine (exec/stage.py). Delete the key.")
     return CampaignSpec(
         campaign_id=d["campaign_id"], goal=d["goal"],
         objectives=[Objective(**o) for o in d["objectives"]],
@@ -96,7 +101,6 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # `sites/*.yaml`'s `tool_delivery` switch has been doing since it was written (E1),
         # and what `control_liveness_timeout_s: 120` did in all three Delta specs until this
         # line existed.
-        runner=d.get("runner", "dispatcher"),
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
         target_front=int(d.get("target_front", 0)),

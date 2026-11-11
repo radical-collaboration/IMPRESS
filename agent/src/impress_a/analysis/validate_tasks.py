@@ -41,8 +41,8 @@ from ..compose.composer import Composer
 from ..core.decision import ExperimentIntent
 from ..core.qc import GateOutcome
 from ..exec.backend import make_engine_bounded
-from ..exec.dispatch import Dispatcher
 from ..exec.resources import thread_share
+from ..exec.stage import StageExecutor, command_slots
 from ..tools.registry import Registry
 
 log = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ async def validate_tasks(spec: Any, reg: Registry | None = None,
                          out_dir: Path | None = None) -> Report:
     """Execute each Task in the spec's chain once, in dependency order, and check it.
 
-    One width-1 graph through the ordinary `Dispatcher` on the campaign's own backend, so each
+    One width-1 graph through the ordinary `StageExecutor` on the campaign's own backend, so each
     Task runs exactly as a campaign would run it - same composer, same wiring, same adapters,
     same resource translation. A bespoke harness here would validate the harness.
     """
@@ -143,10 +143,11 @@ async def validate_tasks(spec: Any, reg: Registry | None = None,
     try:
         # One chain, one lineage: the thread share is the whole cgroup halved, as for a
         # campaign of one pipeline.
-        dispatcher = Dispatcher(flow, reg, spec.backend,
-                                gpus_per_node=spec.site.gpus_per_node,
-                                threads=thread_share(None, 1, 1))
-        results = await dispatcher.collect(dispatcher.submit(graph, run_id="validate"))
+        stages = StageExecutor(flow, reg, spec.backend,
+                               gpus_per_node=spec.site.gpus_per_node,
+                               threads=thread_share(None, 1, 1),
+                               command_slots=command_slots(spec.backend, spec.backend_config))
+        results = await stages.run(graph, invocation="validate")
     finally:
         await flow.shutdown()
 

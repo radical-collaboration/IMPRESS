@@ -194,6 +194,10 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 
 `tests/test_core.py` (pure logic) · `test_validation.py` (the five gates + interlock) ·
 `test_campaign.py` (full campaigns on `ConcurrentExecutionBackend` with mock tools) ·
+`test_stage_block.py` (each Stage as one asyncflow block: attribution, cancel cascade, parity with
+the `Dispatcher` it replaced, against `tests/data/dispatcher_parity_campaign.json`) ·
+`test_placement.py` (each tool command as an engine task, and its placement per backend) ·
+`test_engine_routes.py` (the engine's `compute` and `local` routes) ·
 `test_real_toolkits.py` (the real specs, without executing any real binary) ·
 `test_backend_bound.py` (backend-construction timeout/heartbeat, against a fake backend
 that blocks its own thread's event loop the way Dragon's `Batch()` does) ·

@@ -1,9 +1,9 @@
-"""Generic DAG dispatch to asyncflow.
+"""The node factory and result assembly every Stage shares.
 
-VALIDATED BY SPIKE (asyncflow 0.5.1, rhapsody 0.5.0): a DAG described as *data* is
-dispatched with ONE generic factory - no code generation, no AST work. Dependencies are
-expressed by passing UNAWAITED futures as call arguments; asyncflow's scheduler resolves
-order from its own dependency-count structure.
+`node_task` turns one graph node into engine work; `results_from` turns a Stage's payloads back
+into typed `ExecutionResults`. The Stage itself - one asyncflow block per graph - is
+`exec/stage.py`. This module used to hold the `Dispatcher` too, which registered a graph's tasks
+on the engine directly; Stages as blocks replaced both it and the IMPRESS-pipeline Runner.
 
 Two asyncflow idioms, both needed and not interchangeable:
   * dependency-as-argument -> expresses EDGES
@@ -15,10 +15,10 @@ GOTCHA: asyncflow takes the task name from `fn.__name__`; the decorator accepts 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from ..compose.graph import TaskGraph
 from ..core.qc import QCReport, QCVerdict
 from ..core.results import RunOutcome, RunState, TaskOutcome
 from ..tools._subprocess import LAUNCHER
@@ -141,29 +141,15 @@ class ExecutionResults:
         return q
 
 
-@dataclass
-class DispatchHandle:
-    """Retained submission state for one in-flight graph.
-
-    The execution-layer seam always called for these ("cancellation is why submission
-    handles are retained per graph"); nothing kept one, because nothing needed one while
-    every graph was awaited where it was submitted.
-    """
-
-    run_id: str
-    graph_id: str
-    futures: dict[str, Any] = field(default_factory=dict)
-    gather: Any = None
-    cancelled: bool = False
-
-
 def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
               params: dict[str, Any], *, invocation: str = "",
               seed: int | None = None, dep_order: tuple[str, ...] = (),
               wiring: tuple[tuple[str, str, str], ...] = (),
               workdir: str | None = None, placement: Placement | None = None,
               workflow_id: str | None = None,
-              seed_inputs: dict[str, Any] | None = None):
+              seed_inputs: dict[str, Any] | None = None,
+              launchers: list[Launcher] | None = None,
+              slots: asyncio.Semaphore | None = None):
     """ONE generic factory for every node in every graph.
 
     **A node is two kinds of engine work.** The adapter - pre-process, parameterize, run,
@@ -181,10 +167,16 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
     spec = reg.get(tool_id)
     agent_cls = reg.agent_for(tool_id)
     placement = placement or placement_for(spec.resources, "concurrent", threads=1)
-    # The engine's own loop, captured here rather than inside `_run`: `_run` executes on a
-    # `local` thread under its own `asyncio.run`, and commands must be submitted on the loop
-    # the engine was built on.
-    engine_loop = flow.loop
+    # Built here, on the engine loop, rather than inside `_run`: `_run` executes on a `local`
+    # thread under its own `asyncio.run`, and commands must be submitted on the loop the engine
+    # was built on - in THIS context, which inside a Stage block is the block's, so its
+    # commands become block members (`exec/launch.py`). `launchers` is how the Stage reaches
+    # them to cancel.
+    launcher = Launcher(flow, flow.loop, invocation or node_id, placement,
+                        workflow_id=workflow_id, context=contextvars.copy_context(),
+                        slots=slots)
+    if launchers is not None:
+        launchers.append(launcher)
 
     async def _run(*deps: Any) -> dict[str, Any]:
         agent = agent_cls(spec)
@@ -203,13 +195,13 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
                           inputs=inputs, gpu_index=placement.gpu_index,
                           seed_inputs=dict(seed_inputs or {}),
                           input_ports={port: out for port, _, out in wiring})
-        launcher = Launcher(flow, engine_loop, invocation or node_id, placement,
-                            workflow_id=workflow_id)
         token = LAUNCHER.set(launcher)
+        launcher.entered()
         try:
             res = await agent(req)
         finally:
             LAUNCHER.reset(token)
+            launcher.left()
         usage = res.usage
         if launcher.commands:
             # Time a command spent waiting for the backend is the backend's, not the tool's:
@@ -232,9 +224,10 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
 def results_from(graph_id: str, payloads: dict[str, Any]) -> ExecutionResults:
     """Assemble typed results from `{node_id: payload-or-exception}`.
 
-    One assembly implementation, shared by the Dispatcher and the Runner. Two would be two
-    places for the declared/measured cost split to drift, and the `strict=True` zip that feeds
-    this is where a misattribution would otherwise hide.
+    One assembly implementation, so the declared/measured cost split has one place to live.
+    The payloads must be keyed by the node that produced them - `exec/stage.py` builds them
+    with a `strict=True` zip in topo order, which is where a misattribution would otherwise
+    hide.
     """
     out = ExecutionResults(graph_id=graph_id)
     for tid, r in payloads.items():
@@ -271,113 +264,12 @@ def host_for(lineage: int, gpus_per_node: int, hosts: tuple[str, ...]) -> str | 
 def gpu_for(lineage: int, gpus_per_node: int) -> int | None:
     """One lineage, one GPU - round-robin across the devices the site declares.
 
-    Module level rather than a `Dispatcher` method because the Runner needs the same answer,
-    and A10 is the standing proof of what happens when nothing answers it: concurrent GPU
+    Backlog A10 is the standing proof of what happens when nothing answers it: concurrent GPU
     tasks were not pinned at all, so several could land on one device while others sat idle -
     consistent with GPU-busy measuring at most 17% while three of four GPUs never held work.
-    Two implementations of one round-robin is two things to keep in step.
 
     1 means "do not pin", which is also the honest answer for a laptop.
     """
     if gpus_per_node <= 1:
         return None
     return lineage % gpus_per_node
-
-
-class Dispatcher:
-    def __init__(self, flow, reg: Registry, backend_kind: str = "concurrent",
-                 workdir: str | None = None, gpus_per_node: int = 1, *,
-                 threads: int = 1, hosts: tuple[str, ...] = ()):
-        self.flow, self.reg, self.backend_kind = flow, reg, backend_kind
-        #: Devices available per node, from the campaign's `SiteCaps`. 1 means "do not pin",
-        #: which is also the honest answer for a laptop.
-        self.gpus_per_node = gpus_per_node
-        #: Threads one CPU-bound command may take (`exec/resources.thread_share`).
-        self.threads = threads
-        #: The compute backend's hosts, from its topology. Placement names one only when
-        #: there is more than one to choose from.
-        self.hosts = tuple(hosts)
-        # None means "whatever the process CWD is", which is what the launcher sets.
-        self.workdir = workdir
-
-    def _gpu_for(self, lineage: int) -> int | None:
-        """This dispatcher's site caps, through the shared round-robin."""
-        return gpu_for(lineage, self.gpus_per_node)
-
-    def placement(self, tool_id: str, lineage: int) -> Placement:
-        """Where one lineage's node of `tool_id` runs: its share of threads, and - for a tool
-        that declares a GPU - that lineage's device, on that device's host."""
-        return placement_for(self.reg.get(tool_id).resources, self.backend_kind,
-                             threads=self.threads,
-                             gpu_index=self._gpu_for(lineage),
-                             host=host_for(lineage, self.gpus_per_node, self.hosts))
-
-    def _make_task(self, node_id: str, tool_id: str, params: dict[str, Any],
-                   invocation: str = "", seed: int | None = None,
-                   dep_order: tuple[str, ...] = (),
-                   wiring: tuple[tuple[str, str, str], ...] = (),
-                   lineage: int = 0, workflow_id: str | None = None,
-                   seed_inputs: dict[str, Any] | None = None):
-        return node_task(self.flow, self.reg, node_id, tool_id, params,
-                         invocation=invocation, seed=seed, dep_order=dep_order,
-                         wiring=wiring, workdir=self.workdir,
-                         placement=self.placement(tool_id, lineage),
-                         workflow_id=workflow_id, seed_inputs=seed_inputs)
-
-
-    def submit(self, g: TaskGraph, run_id: str = "") -> DispatchHandle:
-        """Register the whole graph and return WITHOUT awaiting it.
-
-        Submission is where the outer loop used to lose control: it awaited the entire
-        graph, so the reasoner could not be consulted again until the slowest lineage
-        finished. Registration is synchronous, so by the time this returns every task is
-        known to the scheduler and the caller holds a handle to the work.
-
-        The handle is also the run's index. asyncflow tags tasks with `workflow_id` but
-        exposes no way to look tasks up by it, so the caller's own table remains the only
-        way to answer "what belongs to run R" - which cancellation and draining need.
-        """
-        invocation = run_id or g.id
-        tasks = {tid: self._make_task(
-                     tid, n.tool, n.params, f"{invocation}:{tid}", n.seed,
-                     dep_order=tuple(n.deps),
-                     wiring=tuple((port, *ref.split(".", 1)) if "." in ref
-                                  else (port, ref, "")
-                                  for port, ref in n.inputs.items()),
-                     lineage=n.lineage, workflow_id=run_id or None,
-                     seed_inputs=n.seed_inputs)
-                 for tid, n in g.nodes.items()}
-        futures: dict[str, Any] = {}
-        for tid in g.topo_order():                       # edges via unawaited futures
-            deps = [futures[d] for d in g.nodes[tid].deps]
-            futures[tid] = (tasks[tid](*deps, workflow_id=run_id) if run_id
-                            else tasks[tid](*deps))
-        # return_exceptions=True: one bad task must not cancel its siblings, and the
-        # gather is not awaited yet, so a raising task would otherwise go unretrieved.
-        gather = asyncio.gather(*futures.values(), return_exceptions=True)
-        return DispatchHandle(run_id=run_id, graph_id=g.id, futures=futures,
-                              gather=gather)
-
-    async def collect(self, h: DispatchHandle) -> ExecutionResults:
-        """Await a submitted graph and assemble its typed results."""
-        raw = await h.gather
-        # Zip against `futures`, which is built in topo order - the same order `gather` was
-        # given. Zipping against `graph.nodes` (insertion order) misattributes every payload
-        # for anything wider than one lineage, because Kahn's algorithm emits roots first.
-        return results_from(h.graph_id, dict(zip(h.futures.keys(), raw, strict=True)))
-
-    def cancel(self, h: DispatchHandle) -> None:
-        """Ask for a run to stop. ADVISORY - see `DispatchHandle.cancelled`.
-
-        A task that has already started cannot be recalled: the concurrent backend calls
-        `Future.cancel()`, which returns False once the callable is running, and
-        asyncflow discards that answer anyway. So this reclaims queued work only, and the
-        run's real outcome still has to come from `collect`.
-        """
-        h.cancelled = True
-        for f in h.futures.values():
-            f.cancel()
-
-    async def run(self, g: TaskGraph, invocation: str = "") -> ExecutionResults:
-        """Submit and await in one step - the serial path."""
-        return await self.collect(self.submit(g, run_id=invocation))

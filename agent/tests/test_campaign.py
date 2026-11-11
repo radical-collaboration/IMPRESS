@@ -39,7 +39,7 @@ from impress_a.core.spec import (
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
 from impress_a.exec.backend import make_engine
-from impress_a.exec.dispatch import Dispatcher
+from impress_a.exec.stage import StageExecutor
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy import registry as reasoners
 from impress_a.policy.planners import ExternalPlanner, ThresholdPlanner
@@ -212,12 +212,12 @@ async def test_lying_tool_is_caught_by_qc(reg):
     Part A failure mode, manufactured on purpose."""
     from impress_a.compose.composer import Composer
     from impress_a.exec.backend import make_engine
-    from impress_a.exec.dispatch import Dispatcher
+    from impress_a.exec.stage import StageExecutor
 
     g = Composer(reg).compose(ExperimentIntent(goal="g", stages=["mock_noodle"]))
     flow, _ = await make_engine("concurrent", {"workers": 1}, work_dir=ROOT)
     try:
-        res = await Dispatcher(flow, reg).run(g)
+        res = await StageExecutor(flow, reg).run(g)
     finally:
         await flow.shutdown()
     assert not res.failures, "the tool must SUCCEED - that is what makes it silent"
@@ -322,7 +322,7 @@ async def test_concurrent_runs_of_one_intent_are_independent(reg):
     """
     from impress_a.compose.composer import Composer
     from impress_a.exec.backend import make_engine
-    from impress_a.exec.dispatch import Dispatcher
+    from impress_a.exec.stage import StageExecutor
 
     intent = ExperimentIntent(goal="g", stages=CHAIN, replicas=2)
     comp = Composer(reg)
@@ -331,7 +331,7 @@ async def test_concurrent_runs_of_one_intent_are_independent(reg):
 
     flow, _ = await make_engine("concurrent", {"workers": 4}, work_dir=ROOT)
     try:
-        d = Dispatcher(flow, reg)
+        d = StageExecutor(flow, reg)
         r1, r2 = await asyncio.gather(d.run(g1, invocation="r0001"),
                                       d.run(g2, invocation="r0002"))
     finally:
@@ -518,13 +518,13 @@ async def test_cancel_is_advisory_and_the_outcome_still_comes_from_collect(reg):
     """
     from impress_a.compose.composer import Composer
     from impress_a.exec.backend import make_engine
-    from impress_a.exec.dispatch import Dispatcher
+    from impress_a.exec.stage import StageExecutor
 
     g = Composer(reg).compose(
         ExperimentIntent(goal="g", stages=CHAIN, replicas=4), "r0009")
     flow, _ = await make_engine("concurrent", {"workers": 2}, work_dir=ROOT)
     try:
-        d = Dispatcher(flow, reg)
+        d = StageExecutor(flow, reg)
         h = d.submit(g, run_id="r0009")
         d.cancel(h)
         assert h.cancelled
@@ -542,11 +542,11 @@ async def test_run_labels_tag_tasks_so_concurrent_graphs_stay_distinguishable(re
     them in a log or a trace."""
     from impress_a.compose.composer import Composer
     from impress_a.exec.backend import make_engine
-    from impress_a.exec.dispatch import Dispatcher
+    from impress_a.exec.stage import StageExecutor
 
     flow, _ = await make_engine("concurrent", {"workers": 2}, work_dir=ROOT)
     try:
-        d = Dispatcher(flow, reg)
+        d = StageExecutor(flow, reg)
         hs = [d.submit(Composer(reg).compose(
             ExperimentIntent(goal="g", stages=["mock_generate", "mock_design"]), lbl),
             run_id=lbl) for lbl in ("r0042", "r0043")]
@@ -1441,7 +1441,7 @@ async def test_a_two_input_node_receives_each_input_on_its_declared_port(reg, tm
 
     flow, _ = await make_engine("concurrent", {"workers": 3}, work_dir=str(tmp_path))
     try:
-        d = Dispatcher(flow, reg)
+        d = StageExecutor(flow, reg)
         results = await d.collect(d.submit(g, run_id="r-join"))
     finally:
         await flow.shutdown()
@@ -1469,7 +1469,7 @@ async def test_an_ordering_only_dependency_still_reaches_the_adapter(reg, tmp_pa
 
     flow, _ = await make_engine("concurrent", {"workers": 3}, work_dir=str(tmp_path))
     try:
-        d = Dispatcher(flow, reg)
+        d = StageExecutor(flow, reg)
         results = await d.collect(d.submit(g, run_id="r-order"))
     finally:
         await flow.shutdown()
@@ -1739,7 +1739,7 @@ async def test_a_failed_gate_reaches_tasks_provenance_through_the_executor(reg):
 
     The gap this closes is more useful than the bug that revealed it.
     `test_lying_tool_is_caught_by_qc` is the only test that produces a QC FAIL, and it drives
-    `Dispatcher` directly - so `_log_task_telemetry` never runs for it. Every test that does
+    the stage executor directly - so `_log_task_telemetry` never runs for it. Every test that does
     go through the executor uses tools that pass. The result was a `failed_gates` expression
     exercised on every task in the suite and never once on a non-empty list, which is how
     `[g.gate for g in task.qc.failed()]` survived to the four-arm smoke and took all four arms
