@@ -2173,23 +2173,29 @@ The gate: `impress-a preflight campaigns/delta-small-molecule-smoke.yaml`, then
 `sbatch scripts/delta_gpu_run.sh campaigns/delta-small-molecule-smoke.yaml --model D` with
 `replicas: 2`. Read one GPU per lineage off the telemetry (`telemetry_checkpoint_s: 60` is set)
 and each command's stderr, then compare `6/6 tasks ok` against job 22692304. Closes on that job id.
+**Submitted 2026-11-11 as job 23814643** (commit `d22f5cd`, `replicas: 2`, model D,
+`gpuA40x4-interactive`, 1 h, venv upgraded in place to asyncflow/rhapsody 0.7.0 + dragonhpc 0.15.0;
+deep preflight 16/16 on the login node beforehand).
 
 **I2. Upstream gaps, each worked around in code and marked for removal.** File them; none needs
 anything from us beyond the report.
 
 - *rhapsody, concurrent backend:* `cancel_task` cancels its own coroutine and leaves the child
   process running (reproduced with a `sleep`). Workaround: every command carries
-  `timeout --kill-after` (`exec/launch.py`).
+  `timeout --kill-after` (`exec/launch.py`). [Upstream doc](../../plans/upstream/rhapsody-concurrent-cancel-leaves-process-running.md).
 - *rhapsody, concurrent backend:* executables run as unbounded asyncio subprocesses; `workers`
   bounds only function tasks. Workaround: a per-engine command semaphore sized from `workers`
   (`exec/stage.command_slots`, `Launcher.slots`). Concurrent backend only.
+  [Upstream doc](../../plans/upstream/rhapsody-concurrent-executables-unbounded.md).
 - *asyncflow, `LocalExecutionBackend.shutdown`:* joins its pool synchronously on the engine loop,
   so an adapter thread waiting on a command deadlocks it. Workaround: a cancelled or failed Stage
   is not reaped until every adapter thread has left (`StageExecutor._settle`, `Launcher.idle`).
+  [Upstream doc](../../plans/upstream/asyncflow-local-backend-shutdown-blocks-loop.md).
 - *asyncflow, `start_telemetry`:* does not forward rhapsody's `drain_on_stop`, so a stalled drain
   can only be cut short by a timeout (`executor._stop_telemetry`). Also: stopping telemetry from
   a task other than the one that started it trips OpenTelemetry's context detach. That is not
   upstream's bug, but it is easy to hit, and it is why `asyncio.timeout` is used there.
+  [Upstream doc](../../plans/upstream/asyncflow-start-telemetry-no-drain-on-stop.md).
 
 **I3. Under AuCaM there are still two engines, and the fix is not ours to make.** The plan was to
 borrow AuCaM's engine when it is on our loop and carries the `compute` and `local` routes. It never
@@ -2202,7 +2208,8 @@ stay invisible to AuCaM's per-task telemetry. Prerequisite: AuCaM accepts a list
 Decided 2026-11-11: each reasoner call becomes a prompt task on an `ai` route, reached through a new
 core operation `CampaignSession.infer`, so the reasoner's GPU and its calls sit on the same engine
 as the tools. Upstream limits apply on either route: `max_tokens` and `temperature` are ignored,
-there is no chat template, no `response_format`, and token counts are word counts. Open.
+there is no chat template, no `response_format`, and token counts are word counts
+([upstream doc](../../plans/upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)). Open.
 
 **I5. `TaskUsage.host`/`pid` changed meaning.** They name where the adapter ran - the campaign host,
 on the `local` route - not where the binary ran. The binary's host is in the engine's telemetry.

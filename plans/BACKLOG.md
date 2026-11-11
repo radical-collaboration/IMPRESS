@@ -44,6 +44,19 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F24 | No generation or depth concept anywhere in the framework, and no cap: an adaptive rule that always spawns never lets `start()` reach its empty-queues exit, so the failure is a hang rather than an error. All three examples carry their own cap, each invented separately | 3 | open, needs decision: optional `max_generations` on `PipelineSetup`, manager refuses past it and logs why | [colab-examples](2026-11-11-colab-live-examples.md#f24) |
 | F25 | `manager.start()` indexes `config["name"]` directly when draining a child request (`impress_manager.py:201`), so a child config without one raises `KeyError` out of the poll loop mid-run rather than a validation error naming the parent. Same shape as F21, probably the same fix | 3 | open | [colab-examples](2026-11-11-colab-live-examples.md#f25) |
 
+## Upstream
+
+Defects in the middleware, written to be filed with asyncflow and rhapsody. F13 is the older
+asyncflow list; these five were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
+works around each in code and tracks them as `agent/plans/backlog.md` I2/I4. None is reported
+upstream yet.
+
+- [rhapsody: concurrent `cancel_task` leaves a running executable's process alive](upstream/rhapsody-concurrent-cancel-leaves-process-running.md)
+- [rhapsody: concurrent backend runs executables without any concurrency bound](upstream/rhapsody-concurrent-executables-unbounded.md)
+- [asyncflow: `LocalExecutionBackend.shutdown` joins its pool synchronously on the event loop](upstream/asyncflow-local-backend-shutdown-blocks-loop.md)
+- [asyncflow: `start_telemetry` does not expose rhapsody's `drain_on_stop`](upstream/asyncflow-start-telemetry-no-drain-on-stop.md)
+- [rhapsody: vLLM chat endpoint ignores sampling parameters and fakes token counts](upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)
+
 ## Order
 
 1. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move
