@@ -19,10 +19,21 @@ name: ci
 # boundary. If CI minutes ever need trimming, filter the two test jobs and never `lint` or
 # `docs`: those are the cheap ones, and the ones that caught nothing while they were absent.
 
+# A weekly run alongside the usual triggers, for upstream drift. Nothing in either project
+# pins radical.asyncflow, rhapsody-py or langgraph to an exact version, so a release of any
+# of them can break a green tree that nobody has touched - and the committed notebook
+# outputs would go on showing the old behaviour working. A scheduled run is the only thing
+# that catches that before a reader does.
+#
+# It runs every job rather than only `notebooks`, because the same drift reaches the test
+# suites. Narrow it with `if: github.event_name != 'schedule'` on the two matrix jobs if the
+# minutes ever matter; `notebooks`, `lint` and `docs` are the cheap ones and should stay.
 on:
   push:
     branches: [main, test-me-*]
   pull_request:
+  schedule:
+    - cron: '17 6 * * 1'
   workflow_dispatch:
 
 # Read-only by default. The one job that needs to write says so for itself.
@@ -130,6 +141,36 @@ jobs:
       # hiding it behind -q.
       - name: Run tests
         run: pytest tests -q -rs
+
+  # The two Colab notebooks under docs/notebooks/, re-executed headlessly.
+  #
+  # They are committed with their outputs, because the documentation site renders them for
+  # readers who never open Colab. That is also what makes them the one part of the
+  # documentation that can rot into a lie with nobody touching it: an upstream release
+  # breaks the code while the committed output still shows it working. This job is the only
+  # thing that would notice.
+  #
+  # One job, both packages, because the notebooks cover one each - `tox -e notebooks` does
+  # the same two-step editable install, in the same order and for the same reason, as
+  # agent-tests above.
+  #
+  # 3.12 is what Google Colab ships, and the notebooks' promise is that they run there.
+  # It is deliberately a single version rather than a matrix: this checks a documented
+  # environment, not the support range, which root-tests and agent-tests already cover.
+  notebooks:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            agent/pyproject.toml
+      - run: python -m pip install --upgrade pip tox
+      - run: tox -e notebooks
 
   # Both projects, one entry point. ruff resolves its configuration per file, so this holds
   # root's contract and agent/'s at the same time without either adopting the other's width.
