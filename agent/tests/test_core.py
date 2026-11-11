@@ -1,6 +1,6 @@
 """T1 - unit tests. Pure logic, no I/O."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -422,7 +422,7 @@ def test_an_undeclared_walltime_limit_never_refuses_anything():
 
 
 def test_remaining_walltime_is_the_limit_less_elapsed():
-    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    started = datetime.now(UTC) - timedelta(seconds=100)
     led = BudgetLedger(walltime=Walltime(started_at=started, limit_s=150.0))
     assert 99 <= led.walltime.elapsed_s <= 102
     assert 48 <= led.walltime.remaining_s <= 51
@@ -436,7 +436,7 @@ def test_burn_rate_is_measured_not_declared():
     The one thing it must not be is the declared estimate in new units: those figures sit
     2.25x-69x above measurement on purpose, because they feed gates that REFUSE graphs.
     """
-    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    started = datetime.now(UTC) - timedelta(seconds=100)
     led = BudgetLedger(limits={"gpu_hours": 10.0},
                        walltime=Walltime(started_at=started, limit_s=1000.0))
     assert led.burn_rate().per_s == {}, "nothing settled yet, so no rate exists"

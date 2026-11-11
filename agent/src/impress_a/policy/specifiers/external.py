@@ -86,7 +86,7 @@ class ExternalSpecifier(BaseSpecifier):
         self.evidence.put_nowait(ev)
         try:
             directive = await asyncio.wait_for(self.inbox.get(), timeout=self.timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if self.sink:
                 self.sink("transitions", {"event": "caller_timeout", "role": "specifier",
                                           "cycle": ev.cycle})

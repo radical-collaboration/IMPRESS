@@ -16,7 +16,7 @@ by nothing.
 
 **What that rule was really protecting, and what still holds:**
 
-- **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.10` with
+- **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.11` with
   langgraph, rhapsody and biopython. The dependency runs one way: `impress` is installed editable
   into this project's environment, root first, because it is on no index. The reverse must never
   happen — do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
@@ -90,8 +90,10 @@ Do not run the tier against the system Python. The reason recorded here was that
 specific claim is stale — but a user-site install that drifts under you is the hazard, not any
 particular version, and `rhapsody` there has pointed at a different checkout.
 
-**Verified middleware: `radical.asyncflow` 0.6.0 / `rhapsody-py` 0.6.0**, 186 tests green in ~19s
-(2026-11-06, Python 3.10.12). `docs/impress-a/reference/middleware-integration.md` was written against
+**Verified middleware: `radical.asyncflow` 0.7.0 / `rhapsody-py` 0.7.0**, 510 passed / 1 skipped
+(2026-11-11, Python 3.12.12, both installed editable from sibling checkouts). The line this
+replaces claimed 0.6.0 while `$WORK_DIR/ve/impress_a` still carried 0.5.1/0.5.0 - so name the
+venv a claim was measured in. `docs/impress-a/reference/middleware-integration.md` was written against
 0.5.1/0.5.0 and its API notes still hold; check the installed version before trusting any of them.
 
 On Delta, `.venv` is a **symlink** to `$WORK_DIR/ve/impress_a`, and `$WORK_DIR` must be on NVMe
@@ -206,8 +208,8 @@ toolkit directories rather than asserting 11, and there is no asserted test coun
 41 and did not reproduce, because no `[tool.ruff]` table existed here and ruff resolved to the
 root project's config: 449 findings against that, 9 against ruff's own defaults. With a local
 table at `line-length = 100` the residual was 57; all 57 were fixed and `N818` was declined with
-its reason in `pyproject.toml`. So a finding now is a regression, not a budget — which is the
-only form in which a ceiling is worth anything.
+its reason in `pyproject.toml` (as was `UP042`, when the target moved to py311). So a finding now
+is a regression, not a budget — which is the only form in which a ceiling is worth anything.
 
 **A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
 tests before anyone noticed the defect was in the executor, not the test setup. If a test needs an

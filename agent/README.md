@@ -205,7 +205,8 @@ requires touching the composer, validator or manager. See
 
 ## Requirements
 
-Python **≥3.11** where Dragon is used; **3.10** suffices for the mock/laptop path. Scientific tools run
+Python **≥3.11** everywhere (radical.asyncflow and rhapsody 0.7.0 require it); Dragon is the
+`[dragon]` extra. Scientific tools run
 as subprocesses or in containers and do not constrain the agent environment. Built on
 [`radical.asyncflow`](https://github.com/radical-cybertools/radical.asyncflow) and
 [`rhapsody`](https://github.com/radical-cybertools/rhapsody); LangGraph drives the control-model-A loop.

@@ -8,7 +8,7 @@ because one campaign may not run a pattern N times.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +113,7 @@ class TrustLedger(BaseModel):
             return
         p = Path(self.path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        rec = {"ts": datetime.now(timezone.utc).isoformat(),
+        rec = {"ts": datetime.now(UTC).isoformat(),
                "event": event, "signature": sig, **extra}
         with p.open("a") as fh:
             fh.write(json.dumps(rec, default=str) + "\n")

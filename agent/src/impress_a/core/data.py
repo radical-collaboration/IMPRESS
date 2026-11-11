@@ -16,7 +16,7 @@ Everything is serializable for the same reason.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ from .types import ArtifactType
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class DatumKind(str, Enum):

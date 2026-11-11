@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -1000,7 +1000,7 @@ class CampaignExecutor:
                 graph_node_id=mapping.task_id, tool=mapping.tool,
                 objectives=list(mapping.objectives), state=TaskState.DEPLOYED,
                 directive=TaskDirective.RUN,
-                deployed_at=datetime.now(timezone.utc),
+                deployed_at=datetime.now(UTC),
                 commitment=dict(stage.commitment)))
         # `mappings` carries each task's PARAMETERS, lineage, wiring and seed beside the
         # tool id. Without it the parameter vector a Planner chose is recorded nowhere -
@@ -1536,7 +1536,7 @@ class CampaignExecutor:
             return
         try:
             await asyncio.wait_for(asyncio.shield(self.flow.shutdown()), timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning(
                 "engine: %s backend did not shut down within %.0fs - abandoning it. "
                 "The campaign's results are already durable; this leaks backend state in "

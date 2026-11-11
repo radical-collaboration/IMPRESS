@@ -7,7 +7,7 @@ terminated campaign keep receiving assay results (doc 09).
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -37,7 +37,7 @@ class DesignNode(BaseModel):
     produced_by: str | None = None      # GraphId
     decision: str | None = None          # DecisionId
     status: NodeStatus = NodeStatus.LIVE
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def metric(self, name: str) -> float | None:
         p = self.properties.get(name)

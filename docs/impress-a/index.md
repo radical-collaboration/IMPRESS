@@ -42,7 +42,7 @@ only writer.
 
 ## Relationship to IMPRESS
 
-IMPRESS-A is a **separate package**: `impress_a`, Python >= 3.10, living in this repository under
+IMPRESS-A is a **separate package**: `impress_a`, Python >= 3.11, living in this repository under
 [`agent/`](https://github.com/radical-collaboration/IMPRESS/tree/main/agent). It is not on PyPI and
 is not installed by `pip install .` at the repository root — see
 [Installation](../getting-started/installation.md).
@@ -56,7 +56,7 @@ rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, wh
 per cycle.
 
 The dependency runs one way only. The two packages are never installed into one environment as a
-merged dependency set: IMPRESS targets Python >= 3.9 with radical.pilot, and IMPRESS-A >= 3.10 with
+merged dependency set: IMPRESS targets Python >= 3.9 with radical.pilot, and IMPRESS-A >= 3.11 with
 langgraph, rhapsody and biopython.
 
 ## This section

@@ -14,7 +14,7 @@ import os
 import socket
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -223,7 +223,7 @@ class TaskAgent:
         and the two have to be distinguishable or "the task was slow" and "the task waited"
         read the same.
         """
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         t0 = time.monotonic()
         phases: dict[str, float] = {}
 
@@ -242,7 +242,7 @@ class TaskAgent:
 
         usage = TaskUsage(
             started_at=started.isoformat(),
-            finished_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=datetime.now(UTC).isoformat(),
             wall_s=round(time.monotonic() - t0, 6),
             phases=phases,
             host=socket.gethostname(),

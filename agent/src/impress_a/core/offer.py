@@ -29,7 +29,7 @@ misunderstanding this file exists to prevent.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -175,7 +175,7 @@ class CampaignOffer(BaseModel):
 
     campaign_id: str
     goal_text: str
-    offered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    offered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     toolkits: list[str] = Field(default_factory=list)
     chain: ChainOffer = Field(default_factory=ChainOffer)
     #: Every dimension the chain's cost models or the campaign's budget names, plus

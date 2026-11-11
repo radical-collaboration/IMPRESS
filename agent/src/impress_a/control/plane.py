@@ -309,7 +309,7 @@ class InProcessControlPlane:
             return {"state": "ready", "outcome": known.model_dump(mode="json")}
         try:
             outcome = await asyncio.wait_for(mgr.runs.result(run_id), wait_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # `wait_for` cancels the wrapper, never the run's own future - the waiter
             # table is untouched and the next call picks up where this one left off.
             return {"state": "pending"}

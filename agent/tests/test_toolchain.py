@@ -18,17 +18,12 @@ Neither is checkable by reading; both are cheap to assert.
 from __future__ import annotations
 
 import pathlib
-import sys
+import tomllib
 import types
 
 import impress
 
 import impress_a
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # tomllib landed in 3.11; `tomli` is the dev-extra backport for the 3.10 floor
-    import tomli as tomllib
 
 #: `<repo>/agent/src/impress_a/__init__.py` -> impress_a, src, agent, repo
 REPO = pathlib.Path(impress_a.__file__).resolve().parents[3]
@@ -130,10 +125,11 @@ def test_the_declined_lint_rules_say_why():
 
     `N818` is declined rather than satisfied: an `Error` suffix on `CampaignStopped` and its
     three siblings would make every sentence in `docs/impress-a/decisions/`, `plans/done/` and
-    `CLAUDE.md` that names them wrong, for no runtime benefit.
+    `CLAUDE.md` that names them wrong, for no runtime benefit. `UP042` (`StrEnum`) is declined
+    because it changes what `str()` of a member returns, and those strings reach provenance.
     """
     ignored = _config()["tool"]["ruff"]["lint"]["ignore"]
-    assert set(ignored) == {"UP007", "UP045", "N818"}, (
+    assert set(ignored) == {"UP007", "UP045", "N818", "UP042"}, (
         f"the ignore list changed to {ignored}; add the reason beside it in pyproject.toml "
         f"and update this test, so a growing list stays a set of decisions")
 

@@ -17,11 +17,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(cd .. && pwd)"
 
-# 3.10 is this project's floor and is enough for the mock/laptop tier. Dragon requires >=3.11,
-# so a venv built here cannot run the HPC backends - which is fine, because nothing local does.
+# 3.11 is this project's floor: radical.asyncflow and rhapsody 0.7.0 both require it. Dragon is
+# an extra (`.[dragon]`) and is not installed here - nothing local runs it.
 PY="${PY:-python3}"
-"$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' || {
-  echo "need Python >= 3.10 (got $("$PY" -V)); set PY=python3.11 or later" >&2; exit 1; }
+"$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)' || {
+  echo "need Python >= 3.11 (got $("$PY" -V)); set PY=python3.11 or later" >&2; exit 1; }
 
 if [ ! -d .venv ]; then
   echo "== creating .venv with $("$PY" -V)"

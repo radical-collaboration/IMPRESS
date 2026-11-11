@@ -75,7 +75,7 @@ jobs:
       - run: tox -e ${{ matrix.toxenv }} -- -vv
 
   # IMPRESS-A (agent/). A separate job and a separate environment, because impress-a
-  # declares >=3.10 and pulls langgraph, rhapsody and biopython: those must never end up in
+  # declares >=3.11 and pulls langgraph, rhapsody and biopython: those must never end up in
   # front of a root test, and no agent install belongs on the 3.9 leg above.
   #
   # Not driven by tox, on evidence. The earlier consolidation attempt added an `agent-py3xx`
@@ -93,7 +93,8 @@ jobs:
         # 3.10-3.12 while root was tested on 3.9-3.13, so the newest interpreter IMPRESS
         # supports was one nothing had ever run impress_a on. Verified before adding, not
         # after: both installs resolve on 3.13.9 and the suite is 506 passed, 5 skipped.
-        python: ['3.10', '3.11', '3.12', '3.13']
+        # No 3.10: radical.asyncflow and rhapsody 0.7.0 require >=3.11.
+        python: ['3.11', '3.12', '3.13']
     runs-on: ubuntu-latest
     defaults:
       run:

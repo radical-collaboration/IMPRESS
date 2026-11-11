@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -50,10 +51,10 @@ JOB_22692304 = {"ss_fraction": 0.84, "total_score": -272.0, "fa_rep": 109.4,
 def _task(run, lineage, tool, metrics=None, qc="pass", started=0.0, finished=1.0,
           cost=None, measured=None, failed_gates=()):
     """One `tasks` provenance line, in the shape `_log_task_telemetry` writes."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     def stamp(offset):
-        return datetime.fromtimestamp(1_800_000_000 + offset, timezone.utc).isoformat()
+        return datetime.fromtimestamp(1_800_000_000 + offset, UTC).isoformat()
 
     return {"run": run, "cycle": int(run[1:]), "task": f"{run}_{lineage}_{tool}",
             "tool": tool, "lineage": lineage, "metrics": metrics or {}, "qc": qc,

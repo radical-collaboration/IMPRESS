@@ -180,12 +180,13 @@ if got != want:
 print(f"  ok  impress -> {got}")
 EOF
 
-# pyproject.toml's base rhapsody-py dependency has no [dragon] extra - install it
-# explicitly, or Dragon backend resolution (exec/backend.py's get_backend("dragon", ...))
-# fails at runtime even though the plain package imports fine.
+# pyproject.toml's base rhapsody-py dependency has no [dragon] extra (impress-a's own
+# `[dragon]` extra is this same requirement) - install it explicitly, or Dragon backend
+# resolution (exec/backend.py's get_backend("dragon", ...)) fails at runtime even though the
+# plain package imports fine. The floor matches pyproject.toml's.
 echo ""
 echo "── Step 3b: rhapsody-py[dragon,telemetry] ──"
-"${PIP}" install -q "rhapsody-py[dragon,telemetry]"
+"${PIP}" install -q "rhapsody-py[dragon,telemetry]>=0.7.0"
 
 # ── 4. PyTorch (CUDA 12.1) - required by LigandMPNN + Boltz-2 ────────────────
 echo ""

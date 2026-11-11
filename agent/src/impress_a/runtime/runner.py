@@ -146,7 +146,7 @@ class StageRunner:
         if self._loop_task is not None:
             try:
                 await asyncio.wait_for(self._loop_task, timeout=30.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning("runner: manager loop did not drain in 30s; abandoning it")
                 self._loop_task.cancel()
             except asyncio.CancelledError:

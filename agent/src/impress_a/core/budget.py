@@ -11,7 +11,7 @@ overspends. The reservation is what makes the gate mean anything under concurren
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -25,12 +25,12 @@ class Walltime(BaseModel):
     `--time` is the real backstop and this field would only duplicate it less reliably.
     """
 
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     limit_s: float | None = None
 
     @property
     def elapsed_s(self) -> float:
-        return (datetime.now(timezone.utc) - self.started_at).total_seconds()
+        return (datetime.now(UTC) - self.started_at).total_seconds()
 
     @property
     def remaining_s(self) -> float:
@@ -71,7 +71,7 @@ class Commitment(BaseModel):
     stage_id: str
     projected: dict[str, float] = Field(default_factory=dict)
     cap: dict[str, float] = Field(default_factory=dict)
-    opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def exceeds_cap(self) -> list[str]:
         return [d for d, v in self.projected.items()

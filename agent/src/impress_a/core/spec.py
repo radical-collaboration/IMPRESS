@@ -28,7 +28,7 @@ proof of what happens when something non-structural leaks into that hash.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -44,7 +44,7 @@ new_stage_id = counter("s")
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ObjectiveStatus(str, Enum):

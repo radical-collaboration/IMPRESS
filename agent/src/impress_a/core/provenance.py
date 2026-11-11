@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +22,7 @@ class ProvenanceLog:
         return self.root / f"{kind}.jsonl"
 
     def append(self, kind: str, record: dict[str, Any]) -> None:
-        record = {"ts": datetime.now(timezone.utc).isoformat(), **record}
+        record = {"ts": datetime.now(UTC).isoformat(), **record}
         with self._f(kind).open("a") as fh:
             fh.write(json.dumps(record, default=str) + "\n")
 

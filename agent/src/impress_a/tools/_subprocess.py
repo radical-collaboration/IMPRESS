@@ -68,7 +68,7 @@ async def run_cmd(cmd: list[str], cwd=None, env=None,
     try:
         await asyncio.wait_for(proc.wait(), timeout=timeout_s)
         await asyncio.gather(*readers)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         for r in readers:

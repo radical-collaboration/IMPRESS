@@ -158,7 +158,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
     try:
         try:
             be = await asyncio.wait_for(asyncio.shield(async_fut), timeout=timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise BackendConstructionTimeout(
                 f"constructing {kind!r} backend did not complete within {timeout_s:.0f}s - "
                 "most likely a stall inside the backend's own synchronous construction "
@@ -176,9 +176,9 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
 
         try:
             if remaining <= 0:
-                raise asyncio.TimeoutError
+                raise TimeoutError
             return await asyncio.wait_for(_finish(), timeout=remaining)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise BackendConstructionTimeout(
                 f"{kind!r} backend was constructed but its async init / engine build did "
                 f"not complete within the remaining {max(remaining, 0.0):.0f}s of the "
