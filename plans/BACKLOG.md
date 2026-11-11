@@ -28,7 +28,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
 | F5 | Telemetry defaults (`checkpoint_interval`, `resource_poll_interval`, absolute path) and a bounded shutdown helper (smb 2) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f5) |
 | F6 | Engine `work_dir` should be the job dir, so captured stdio (now on by default) stays with the run (smb 21) | 2 | open; stdio capture is the default on `main` since PR #72, so every task's `.stdout`/`.stderr` lands in the engine's `work_dir` | [pr2](2026-10-08-framework-pr2.md#f6) |
-| F7 | Document and adopt the two-backend engine layout (`compute` + `local` thread pool) in all runners | 2 | adopted everywhere, **awaiting a Delta run**. `protein_binding`, `discontinuous_scaffolds` and smb's `run_nonadaptive` now build `compute` + a `local` thread pool and declare their adaptive callback on it (F19); `docs/concepts/architecture.md` carries the layout and the declaration. Row stays until a run confirms it | [pr2](2026-10-08-framework-pr2.md#f7) |
+| F7 | Document and adopt the two-backend engine layout (`compute` + `local` thread pool) in all runners | 2 | adopted everywhere, **awaiting a Delta run**. `protein_binding` and `discontinuous_scaffolds` now build `compute` + a `local` thread pool and declare their adaptive callback on it (F19). smb's `run_nonadaptive.py` is gone (merge `d571de2`): its pass-through policy is now `run_small_molecule_binding.py --nonadaptive`, which declares that body on the runner's own `local` pool, and that part is **confirmed on `23074256`** (1736/1736 callbacks on `local`; [nonadaptive-under-f19](../examples/small_molecule_binding/plans/2026-10-20-nonadaptive-under-f19.md#result)); `docs/concepts/architecture.md` carries the layout and the declaration. Row stays until a run confirms it | [pr2](2026-10-08-framework-pr2.md#f7) |
 | F8 | Task-directory helper: `taskcount` + `{n}_{stage}/in,out` is repeated 7× in smb and 8× in discontinuous | 3 | open | [pr3](2026-10-08-framework-pr3.md#f8) |
 | F9 | Adaptive function exceptions are logged and swallowed; the pipeline continues on stale state | 3 | open | [pr3](2026-10-08-framework-pr3.md#f9) |
 | F10 | Staggered pipeline start as a manager option (smb `start_delay`; OOM on `22714785` without it) | 3 | open | [pr3](2026-10-08-framework-pr3.md#f10) |
@@ -82,7 +82,7 @@ Closed by PR #72 (`9a413cd`, merged 2026-10-21), each with the run that confirme
 - **F19**: adaptive functions passed as declared asyncflow tasks (`22a1f82`). Passed on `23062773`
   and `23065238`: every adaptive task on `local`, rfd3 / boltz within 10 % of F18, and adaptive
   share 0.28 % / 0.35 % against the restated ≤ 0.5 % bar. Its pass-through counterpart was
-  confirmed on `23074256` (smb 23, on `smb-benchmark-f19`, not yet on `main`). Doc: [f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)
+  confirmed on `23074256` (smb 23). Doc: [f19-delta-acceptance](2026-10-20-f19-delta-acceptance.md#rerun)
 - **F20**: the declared-task contract moved into a `PipelineSetup` validator (`0446e96`). No Delta
   run, by design. Its one unrun criterion, the smb mock comparison, was run 2026-10-21 on merge
   `0cefeb2` of `main` into `smb-benchmark-f19`. In all three modes (adaptive, `--nonadaptive`,

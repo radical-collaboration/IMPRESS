@@ -179,8 +179,13 @@ def register_mock_tasks(pipeline):
 
         # Mirrors the real analysis_sequence()'s parsing: evaluate every id=
         # record across every .fa file, skip the template record.
+        # Honours pipeline.selection the way the real stage does, so a mock run
+        # exercises open-loop selection too. (analysis_backbone above has no
+        # equivalent: it synthesises a single model, so there is nothing to
+        # choose between.)
         best_conf, best_lig_conf, best_id, best_seq = -1.0, 0.0, None, None
-        for fa_file in os.listdir(seqs_dir):
+        pool_best_conf = -1.0
+        for fa_file in sorted(os.listdir(seqs_dir)):
             if not fa_file.endswith('.fa'):
                 continue
             with open(f"{seqs_dir}/{fa_file}") as fh:
@@ -198,7 +203,12 @@ def register_mock_tasks(pipeline):
                     continue
                 conf     = float(parts.get('overall_confidence', 0))
                 lig_conf = float(parts.get('ligand_confidence', 0))
-                if conf > best_conf:
+                pool_best_conf = max(pool_best_conf, conf)
+                if pipeline.selection == "first":
+                    if best_id is None:
+                        best_conf, best_lig_conf = conf, lig_conf
+                        best_id,   best_seq      = parts['id'], seq
+                elif conf > best_conf:
                     best_conf, best_lig_conf, best_id, best_seq = conf, lig_conf, parts['id'], seq
 
         if best_id is not None:
@@ -214,7 +224,12 @@ def register_mock_tasks(pipeline):
             'pass':                    True,
             'best_overall_confidence': best_conf,
             'best_ligand_confidence':  best_lig_conf,
+            'pool_best_confidence':    pool_best_conf,
         }
+        pipeline.logger.pipeline_log(
+            f"[selection/sequence] mode={pipeline.selection} chosen_id={best_id} "
+            f"conf={best_conf:.4f} pool_best_conf={pool_best_conf:.4f}"
+        )
         pipeline.state['ensemble'].append((
             ETYPE_SEQUENCE, best_conf, pipeline.state.get('best_backbone_path'),
             pipeline.state.get('last_seq_fasta'),

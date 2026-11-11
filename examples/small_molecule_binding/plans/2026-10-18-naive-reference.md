@@ -1,0 +1,228 @@
+# Naive (open-loop) reference: 1 node, 1 h, 32 pipelines (smb 24)
+
+## Why
+
+[nonadaptive-benchmark](2026-10-17-nonadaptive-benchmark.md) removed *routing* feedback and found
+pass-through at 51.0 passing / 22.2 high-quality folds per GPU-h against adaptive's 22.5 / 11.4
+(`22967619` vs `22927576`). But pass-through is still a **greedy** workflow: each analysis stage
+picks the best candidate its tool produced, so metrics keep steering the work.
+
+The live selection points, confirmed against `logs/22967619`:
+
+| Stage | Pool | Picked by |
+|---|---|---|
+| `analysis_backbone` (`small_molecule_binding.py:810`) | 4 rfd3 models | fewest ligand clashes, then lowest `max_ca_deviation` |
+| `analysis_sequence` (`:936`) | 40 LigandMPNN candidates in cycle 0 (10 batches × `num_seqs=4`), 4 later | highest `overall_confidence`; also sets `best_packed_pdb`, so it picks the structure every later stage uses |
+| `analysis_fold` (`:1167`) | 1 model | **already a no-op** — `scripts/boltz.sh:85` defaults `--diffusion_samples 1` |
+
+This run is the third point: open-loop, where no metric influences anything.
+
+## Change
+
+`selection` kwarg on `SmallMoleculeBindingPipeline` — `"best"` (default) or `"first"`:
+
+- `analysis_backbone` takes `sorted(json_files)[0]` (`*_model_0`).
+- `analysis_sequence` takes the first `id=` record in sorted-filename order (`id=1`).
+- `analysis_fold` is unchanged, with a comment saying why: one model per task, nothing to choose.
+  If `--diffusion_samples` ever rises it becomes a third selection point and must honour the kwarg.
+- `mock.py`'s `analysis_sequence` mirrors it, so mock runs still exercise the real behaviour.
+  Its `analysis_backbone` synthesises one model, so there is nothing to select there.
+- Both modes also record the pool's best value (`pool_best_clashes`/`pool_best_dev`,
+  `pool_best_confidence`) in `last_analysis_metrics`. Metrics only; nothing reads them. This is
+  what lets the write-up say how much quality the picking was buying.
+
+`--selection {best,first}` on the runner (named in the `[POLICY]` line);
+`IMPRESS_SELECTION=first` on `delta_gpu_run.sh`.
+
+**Candidate pools are deliberately unchanged.** The naive run still generates 4 backbones and 40
+sequences and throws the rest away. Keeping compute per backbone identical is what makes
+throughput comparable; shrinking the pools would confound the measurement.
+
+Offline checks (2026-10-18):
+- mock with `--selection first` chose `binder_id_1` 60/60; with `best`, `binder_id_3` (the
+  highest confidence, 0.5670). Stage sequence identical in both: 180 stages, same order.
+- a mock run of unmodified HEAD gives the same 180 stages and the same `binder_id_3` as
+  `--selection best`, so the default path is untouched.
+- framework tests 127 passed; no new ruff findings in `small_molecule_binding.py` (52 → 51
+  pre-existing) or `mock.py` (19 → 19).
+
+## Run
+
+From `examples/small_molecule_binding/` on `smb-nonadaptive-benchmark`:
+```
+IMPRESS_N_PIPELINES=32 IMPRESS_NONADAPTIVE=1 IMPRESS_SELECTION=first \
+  sbatch --partition=gpuA40x4-interactive --time=01:00:00 \
+  --account=<allocation A> --job-name=impress_naive delta_gpu_run.sh
+```
+Pre-flight (2026-10-18): clean tree; `p1_in`…`p32_in` populated; project inodes 1.96M of the
+2.55M soft limit, ~588k free (`22967619` cost ~36.5k files / 1.6 GB); no other job queued or
+running.
+
+Job: `22970061` (submitted 2026-10-18).
+
+## In-flight fault on `22970061` (2026-10-18 00:27)
+
+**Not the selection risk below — a Dragon runtime fault.** At 00:27:13–00:27:33, ~9 minutes in,
+18 tasks failed at once, all with
+`RuntimeError('ProcessGroup manager is not in state State.DEAD')`, across every stage type
+(`rfd3`, `fastrelax`, `boltz`) and 18 different pipelines. Nothing in the selection change can
+produce a simultaneous failure of tasks that were already running, and the error comes from
+Dragon's process-group layer, not from the pipeline.
+
+Five pipelines then died through smb 15 (`'NoneType' object is not subscriptable` after a
+`TaskFailed`): p9, p10, p15, p19, p20. The run continued, with 28 of 32 pipelines active a minute
+later, and no further `State.DEAD` errors in the following minutes.
+
+Decision (user, 2026-10-18): let it finish and score it with the caveat. **The throughput figures
+from this job are therefore a floor, not a clean measurement** — some concurrency was lost from
+roughly minute 9. The Result section must report surviving pipelines over time beside the rates,
+and a clean rerun is needed before the three-way comparison is quoted as final.
+
+This is new evidence for smb 15 (a failed stage kills its pipeline) and possibly for smb 22
+(Dragon delivery faults). It is not evidence about open-loop selection.
+
+## Risk: this run may lose pipelines
+
+Taking `model_0` regardless of clashes feeds structurally bad backbones downstream, and
+[smb 15](BACKLOG.md) says a failed stage kills its whole pipeline (`'NoneType' object is not
+subscriptable`). If pipelines die, effective concurrency falls and per-node-h rates stop being
+comparable. The watch flags `TaskFailed` immediately, and scoring reports surviving pipelines
+alongside the rates — a run that loses half its pipelines is evidence about open-loop fragility,
+not a throughput measurement.
+
+## Comparison
+
+Scored the F18 way: per node-h from minute 10 to the last telemetry event. Same script as
+smb 23, which reproduces `22927576` as 337.0 / 107.9 / 1043.5 against F18's 337.1 / 108.0 /
+1043.8.
+
+| Metric | `22927576` adaptive | `22967619` pass-through | this run (naive) |
+|---|---|---|---|
+| rfd3 / mpnn / boltz per node-h | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | |
+| folds / passed (pass rate) | 90 / 75 (83.3 %) | 222 / 170 (76.6 %) | |
+| high quality (pLDDT ≥ 90, ipTM ≥ 0.8) | 38 (42 %) | 74 (33 %) | |
+| **passing folds per GPU-h** | 22.5 | 51.0 | |
+| **high-quality folds per GPU-h** | 11.4 | 22.2 | |
+| surviving pipelines, `TaskFailed` | 32, 0 | 32, 0 | |
+| `pool_best` − chosen, per stage | — | — | |
+| GPU busy (mean) | 70–81 % | 58–62 % | |
+
+Caveat, as for smb 23: 1 h with a ~4 min stagger is early-campaign behaviour, and this is one run
+per configuration.
+
+<a id="result"></a>
+## Result — job `22970061` (scored 2026-10-18): **inconclusive, rerun needed**
+
+`TIMEOUT` at 01:00:26 on gpub002, as planned. `[POLICY] nonadaptive_decision, selection=first`.
+
+**The Dragon fault above cost 18 of the 32 pipelines.** Active pipelines by 5-minute bucket: 32
+for the first 10 minutes, then **14 for the rest of the run**. The whole scoring window therefore
+ran at 44 % of the intended concurrency, so this job's per-node-h rates measure the fault, not
+the selection policy. They are reported below only to be explicit about what was lost.
+
+| Per node-h (min 10–end) | `22927576` adaptive | `22967619` pass-through | `22970061` naive |
+|---|---|---|---|
+| surviving pipelines | 32 | 32 | **14** |
+| rfd3 / mpnn / boltz | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | 127.9 / 259.4 / 127.9 |
+| passing folds / GPU-h | 22.5 | 51.0 | 24.4 |
+| high-quality / GPU-h | 11.4 | 22.2 | 8.8 |
+| GPU busy (mean) | 70–81 % | 58–62 % | 17–42 % |
+| `TaskFailed`, stalls > 15 s | 0, 2 | 0, 8 | **18**, 27 |
+
+Normalising by surviving pipeline instead, which at least divides by the work actually attempted:
+
+| Per surviving pipeline-h | adaptive | pass-through | naive |
+|---|---|---|---|
+| passing folds | 2.81 | 6.37 | 6.96 |
+| high-quality folds | 1.42 | 2.77 | 2.52 |
+| high-quality share of folds | 42.2 % | 33.3 % | 27.6 % |
+| median `complex_plddt` | 89.6 | 86.7 | 86.4 |
+
+**This does not settle the question, and the per-pipeline figures must not be quoted as if it
+did.** With 14 pipelines on 4 GPUs the naive run had far less GPU contention than the 32-pipeline
+runs (GPUs 17–42 % busy against 58–62 %), which flatters any per-pipeline rate. The honest
+reading is only the direction of the quality effect, which is consistent with the other two runs:
+dropping within-stage picking lowers the high-quality share again, 42.2 % → 33.3 % → 27.6 %, and
+the median `complex_plddt` barely moves after the first step.
+
+**Implementation gap found while scoring.** The `pool_best_*` metrics do reach
+`last_analysis_metrics`, but nothing writes them to disk — there is no log line and telemetry does
+not carry the metrics dict — so `grep pool_best impress_22970061.out` returns 0 and the
+"what was the picking buying" measurement did not land. Before the rerun, each analysis stage
+should log its chosen and pool-best values, so the cost of selection is recoverable from the job
+log.
+
+### Next
+
+1. Add the `pool_best` log line (above). **Done** (`6905313`): `analysis_backbone` and
+   `analysis_sequence` each log `[selection/<stage>] mode=... chosen=... pool_best_...`. In the
+   mock, `first` logs `chosen_id=1 conf=0.3366 pool_best_conf=0.5670` against `best`'s
+   `chosen_id=3 conf=0.5670`.
+2. Rerun the same job for a clean hour at 32 pipelines, and only then fill in the three-way
+   comparison. **Done: `22999614` passed** — see the Result below.
+3. The fault itself is evidence for smb 15 (one failed stage kills its pipeline — 5 immediate
+   `NoneType` deaths here, and 18 pipelines gone in total) and possibly smb 22. A single
+   runtime hiccup costing 56 % of a run's concurrency is a resilience problem worth its own
+   item, independent of this benchmark.
+
+
+<a id="result2"></a>
+## Result — job `22999614` (scored 2026-10-18): the clean rerun
+
+`TIMEOUT` at 01:00:14 on gpub091, as planned. **0 `TaskFailed`, 0 `State.DEAD`, 0 `NoneType`
+deaths, and 32 of 32 pipelines active in every 10-minute bucket**, so unlike `22970061` this one
+is comparable. 4 completion stalls > 15 s (max 22 s).
+
+| Min 10–60 | `22927576` adaptive | `22967619` pass-through | `22999614` naive |
+|---|---|---|---|
+| rfd3 / mpnn / boltz per node-h | 337.0 / 1043.5 / 107.9 | 262.7 / 526.5 / 265.1 | 252.6 / 505.3 / 252.6 |
+| boltz per rfd3 | 0.32 | 1.01 | 1.00 |
+| folds / passed (pass rate) | 90 / 75 (83.3 %) | 222 / 170 (76.6 %) | 212 / 171 (**80.7 %**) |
+| high quality | 38 (42.2 %) | 74 (33.3 %) | 67 (31.6 %) |
+| median `complex_plddt` / `ligand_iptm` | 89.6 / 0.836 | 86.7 / 0.810 | 87.7 / 0.815 |
+| **passing folds per GPU-h** | 22.5 | 51.0 | **51.4** |
+| **high-quality folds per GPU-h** | 11.4 | 22.2 | 20.2 |
+| GPU busy (mean) | 70–81 % | 58–62 % | 61–69 % |
+| `TaskFailed`, stalls > 15 s | 0, 2 | 0, 8 | 0, 4 |
+
+**Removing within-stage selection changed almost nothing.** Naive matches pass-through on
+passing folds per GPU-h (51.4 vs 51.0, +0.8 %) and is 9 % below it on high-quality folds
+(20.2 vs 22.2) — while its pass rate is *higher* (80.7 % vs 76.6 %) and its median pLDDT is
+*higher* (87.7 vs 86.7). Those differences point in opposite directions and come from one run
+each, so the honest conclusion is that **greedy per-stage picking is worth roughly nothing here**,
+not that it is harmful or helpful.
+
+### Why: the candidate pools are nearly homogeneous
+
+The new `[selection/*]` log lines say it directly, over the whole run:
+
+| Selection point | Calls | What picking the best was buying |
+|---|---|---|
+| backbone (pool of 4 rfd3 models) | 256 | the first model already tied the pool's best on ligand clashes **253/256 times (99 %)**; it had more clashes only 3 times (1 %). Median `max_ca_deviation` penalty **0.008 Å**, mean 0.059, worst 0.951 — against a 1.0 Å threshold |
+| sequence (pool of 40, then 4) | 496 | median confidence left on the table **0.0132** (chosen 0.4623 vs pool best 0.4777, ~3 %); worst case 0.0565 |
+
+RFD3 with the same spec produces four backbones of near-identical quality, and LigandMPNN's
+candidates sit in a narrow confidence band, so "best of N" and "first of N" are almost the same
+structure. That is a property of these pools, not a general result: a tool whose candidates vary
+widely would make selection matter.
+
+### What the three runs say together
+
+1. **Adaptive routing is the expensive part, and it did not pay for itself over 1 h.** It spends
+   ~3.7 mpnn per rfd3 on retries and folds a third of its backbones, for 22.5 passing folds per
+   GPU-h against ~51 for both open-loop variants. Its folds *are* better (42.2 % high quality vs
+   ~32 %), but not by enough to cover a 2.3× yield gap.
+2. **Within-stage picking is nearly free to drop**, for the reason above.
+3. So the yield difference in this workflow comes almost entirely from **how many backbones reach
+   boltz**, not from which candidate each stage picks.
+
+### Limits
+
+- One run per configuration; no spread. The naive-vs-pass-through differences here are within
+  what run-to-run variation would plausibly produce, which is the basis for calling them a tie.
+- 1 h, ~4 min of it stagger. The adaptive policy's guided feedback depends on ensemble history
+  that barely exists by minute 60, so this measures early-campaign behaviour. A multi-hour pair
+  is the next thing to run before any of this is treated as settled.
+- Quality here means Boltz self-confidence (pLDDT, ligand ipTM), not an experimental result.
+
+Figure: `figures/nonadaptive_benchmark.py` → `figures/nonadaptive_benchmark.png`, all three runs.
