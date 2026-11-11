@@ -634,6 +634,81 @@ had never run anywhere but Delta's 3.12.
 
 ---
 
+## H. Reasoner models
+
+The abstraction the whole decision frontend rests on, and the gap between what `docs/` claims for it
+and what runs. Full evidence, the harmonization options and the hardware follow-on are in
+[`plans/reasoner-models.md`](reasoner-models.md); the items below are what is outstanding from it.
+`policy/registry.py`, `impress-a models` and the `--model replay` fix are **DONE** (`fa0266f`).
+
+**H1. Model A has no LLM, and the slot for one is dead.** `planning/phase1-partB-architecture/02-control-models.md:59-61`
+specifies "each node is a bounded LLM call with a declared input and output schema", ~3 per cycle,
+parse-retry with corrective feedback, escalation to a degraded policy. In code `_hypothesize`
+(`policy/agentic.py:57`) and `_parameterize` (`:75`) are deterministic threshold cascades, and
+`self.reasoner` (`:51`) is stored and never read. There is no schema, no retry, and no `fallback`
+argument - B and C both have one. `_build()` registers two nodes while the module docstring describes
+four. So `--model A` is a LangGraph-shaped rule cascade, bit-exact and behaviourally a sibling of D,
+and its only test asserts termination (`tests/test_campaign.py:53`), never a node.
+
+**H2. Model B's live path is never constructed.** `OraclePolicy` defaults to `RehearsalOracle`
+(`policy/oracle.py:85`) and nothing passes a model, so `--model B` runs the deterministic stand-in.
+`LangChainOracle` (`:65-77`) is built nowhere, brace-slices JSON out of the reply despite a docstring
+claiming structured output, and has none of what Part B doc 02 sections 3 and 7 require: pinned dated
+model id, sampling parameters, `Retry-After` backoff, 429-vs-529. `pyproject.toml`'s
+`oracle = ["litellm"]` extra is imported by nothing. A working OpenAI-compatible client with
+per-model profiles already exists in `examples/agentic_small_molecule_binding/llm.py` and has
+hardware results behind it; porting it is the plan's step 1.
+
+**H3. No policy can vary a real tool's parameters.** A and D emit `params` keyed to `mock_generate`
+and `mock_design` (`policy/agentic.py:84`, `policy/explicit.py:69`), and B's rehearsal the same
+(`policy/oracle.py:60`), even when `stages` is the real six-stage chain. `compose/composer.py:63`
+reads `intent.params.get(tool_id, {})` per composed stage, so those keys are silently dropped. On a
+real campaign a policy's only levers are stage selection, `parent_node`, `Backtrack` and `Stop` - and
+A9 records that even `replicas` is capped downstream where the policy cannot see it. **This is the
+item that blocks any claim about decision quality**, and it is why model D cannot yet be the
+benchmark against the reference's `adaptive_decision()`, which varies the route and the retry.
+
+**H4. Declared-but-inert seams.** `ToolSpec.agent: Literal["deterministic", "llm"]`
+(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/reference/architecture.md:145` and
+`docs/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
+(`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
+"supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
+`obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
+pitfalls. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
+`docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
+needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
+
+**H5. No `conduct` reasoner ships.** The entry point, `core/session.py`'s ten-operation surface and
+`policy/driver.py`'s adapter all exist and are covered, but every `conduct` implementation in the
+repository is a test double (`tests/test_campaign.py:401,467,548,615,789`,
+`tests/test_remote_session.py:68`, `tests/test_http_adapter.py:62`). Free tool-calling over
+`CampaignSession` - a reasoner whose tools are `observe`/`submit`/`result`/`as_completed`/`backtrack`/
+`stop` - is the shape `examples/agentic_small_molecule_binding` actually built, and it is **not**
+model B: Part B doc 02 sections 3 and 6 specify B as one structured call per cycle, and that ruling
+stands. Worth building as its own reasoner, named as such.
+
+**H6. The lint ceiling stated below does not reproduce, and nothing lints `agent/` at all.**
+`.github/workflows/agent-tests.yml` runs only `pytest tests -q`, and `tox -e lint` resolves to
+`ruff check src tests` from the repository root, which is IMPRESS's `src/impress` and its own
+`tests/`. Meanwhile `agent/pyproject.toml` declares no `[tool.ruff]`, so ruff walks up and applies
+IMPRESS's root config - `line-length = 88`, `target-version = "py39"` for a package whose floor is
+3.10, and `fix = true`, which makes the documented `ruff check` command **rewrite the working tree**
+(36 files on first run). Measured under that config: **449 findings**, 404 of them E501, against the
+41 stated below; under ruff's own defaults, 9. The ceiling was evidently recorded against defaults.
+This belongs to the project-level CI and documentation consolidation, not to a reasoner item, but it
+is recorded here because the verification paragraph below currently states a number no configuration
+produces.
+
+**H7. Hardware: paired 1-hour, 1-node runs of B and D.** After H2. One spec, two arms, differing only
+in `--model`, submitted together - `campaigns/delta-small-molecule-arms.yaml` derived from
+`delta-small-molecule-trust.yaml`, 1 node on `gpuA40x4`, 8 GPU-h total. They test the `ControlPolicy`
+contract under a live LLM: a real `Decision`, an LLM-authored `ExperimentIntent` passing or being
+refused by the five gates, `on_rejected` under a real rejection, the degraded transition and its
+labelling. **They cannot test decision quality** while H3 is open, and must not be reported as if they
+could. Prerequisites with their evidence, and the scoring method, are in the plan.
+
+---
+
 ## Recommended order
 
 This order was written at the stagnation fix, before C8-C10 and G2-G5 existed. Two things it got
@@ -656,6 +731,10 @@ paid for out of the first allocation.
 8. **C1-C3** on demand; **C4** only if a real campaign shows abandoned runs holding GPUs.
 9. **G1** before any `conduct()` reasoner that explores with a truncated chain ships. Latent until
    then, and now pinned by two characterization tests that must change when it is decided.
+10. **H6 the lint gate**, before anything else in H — it is the reason H1-H5 went unnoticed, and it
+    is cheap. Then **H2** (the client exists and has hardware behind it), then **H3** (nothing can be
+    claimed about decision quality until a policy can vary a real parameter), then **H7**. **H1**
+    after H2, which is what makes it cheap. **H4** and **H5** on demand.
 
 ## Verification that applies to any item
 
