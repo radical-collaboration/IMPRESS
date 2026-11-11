@@ -87,3 +87,6 @@ class InProcessSession:
 
     async def stop(self, reason: str) -> None:
         self._ex.request_stop(reason)
+
+    async def infer(self, node: str, prompt: str) -> str:
+        return await self._ex.infer(node, prompt)

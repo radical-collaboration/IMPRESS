@@ -157,6 +157,11 @@ class CampaignSpec:
     # the default because it needs the `[telemetry]` extra; a campaign that asks for it without
     # the extra is refused at start rather than run blind.
     telemetry_checkpoint_s: float = 0.0
+    # A locally hosted reasoner, served by an `ai` route on this campaign's own engine
+    # (`exec/backend.make_ai_backend`). Plain data from a `rhapsody_vllm` model profile - set by
+    # the CLI from `--model-profile`, never from the campaign YAML, because which model reasons
+    # is the arm, not the campaign. Empty: no `ai` route, and `infer` refuses.
+    inference: dict[str, Any] = field(default_factory=dict)
     # WHICH tools this campaign is about. Without it every policy falls back to its own
     # default chain - which is the mock one - so a campaign naming real toolkits would
     # load them, validate them, and then run mocks.
@@ -1124,6 +1129,32 @@ class CampaignExecutor:
                                 "rationale": rationale})
         return branch.id
 
+    async def infer(self, node: str, prompt: str) -> str:
+        """One reasoner call, as a `prompt_task` on this engine's `ai` route.
+
+        So a locally hosted reasoner's calls are engine tasks like any other - traced under the
+        campaign's telemetry, labelled `<campaign>:reason:<node>`, on GPUs the engine placed -
+        rather than requests to a server nobody scheduled. Refused when the campaign has no
+        `ai` route: a hosted model is reached over its own API, not through here.
+        """
+        from ..exec.backend import AI
+        if self.flow is None:
+            raise RuntimeError("infer: the campaign's engine has not started")
+        if not prompt:
+            raise ValueError("infer: an empty prompt")
+        async def reason() -> str:
+            return prompt
+
+        # asyncflow names a task from `__name__` when it is decorated, so set it first.
+        reason.__name__ = "reason_" + "".join(c if c.isalnum() else "_" for c in node)
+        try:
+            task = self.flow.prompt_task(backend=AI)(reason)
+        except ValueError as exc:
+            raise RuntimeError(
+                "infer: this campaign has no local model - its reasoner profile is not a "
+                "`rhapsody_vllm` one") from exc
+        return await task(workflow_id=f"{self.spec.campaign_id}:reason:{node}")
+
     def request_human(self, question: str, context: dict[str, Any] | None = None) -> None:
         self.pending_human = RequestHuman(question=question, context=context or {})
         self._log("transitions", {"event": "request_human", "question": question})
@@ -1402,11 +1433,17 @@ class CampaignExecutor:
         # a stall there leaves no campaign.jsonl and no other trace at all. Bounded by
         # `backend_startup_timeout_s` (0 = unbounded, the default) precisely because of
         # that: see `exec.backend.make_engine_bounded`.
+        ai = None
+        if self.spec.inference:
+            from ..exec import backend as _backend_mod
+            log.info("engine: starting the local reasoner's model (%s)",
+                     (self.spec.inference.get("model") or {}).get("model_name", "?"))
+            ai = await _backend_mod.make_ai_backend(self.spec.inference)
         log.info("engine: constructing %s backend (config=%s)",
                  self.spec.backend, self.spec.backend_config or {})
         self.flow, self._backend = await make_engine_bounded(
             self.spec.backend, self.spec.backend_config, self.spec.backend_startup_timeout_s,
-            self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
+            self.spec.backend_startup_heartbeat_s, work_dir=str(self.root), ai=ai)
         log.info("engine: %s backend ready", self.spec.backend)
         self.topology = await probe_topology(self._backend)
         self._check_site_against_topology()

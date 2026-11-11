@@ -26,7 +26,7 @@ from impress_a.exec.backend import BackendConstructionTimeout, make_engine_bound
 async def test_disabled_by_default_calls_make_engine_directly(monkeypatch):
     calls = []
 
-    async def fake_make_engine(kind, config, work_dir=""):
+    async def fake_make_engine(kind, config, work_dir="", ai=None):
         calls.append((kind, config, work_dir))
         return ("flow", "backend")
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -42,6 +43,11 @@ log = logging.getLogger(__name__)
 #: decoration-time `ValueError` in the middle of a campaign.
 COMPUTE = "compute"
 LOCAL = "local"
+#: * `ai` - an inference backend serving a locally hosted model, present only when the
+#:   campaign's reasoner is one. Reasoner calls reach it as `prompt_task`s
+#:   (`runtime/executor.CampaignExecutor.infer`), so the model's GPUs and its calls are on the
+#:   same engine as the tools.
+AI = "ai"
 
 #: Threads behind the `local` backend. Its work is parsing and gating, which is short and
 #: mostly I/O; the bound only keeps a burst of finishing lineages from spawning a thread each.
@@ -113,8 +119,87 @@ async def make_backend(kind: str, config: dict[str, Any] | None = None):
     return await _init_backend(_construct_backend_sync(kind, config))
 
 
-async def _engine_over(compute, work_dir: str):
-    """The one engine: `compute` first, so it is the default route, then `local`.
+class PromptResults:
+    """An inference backend whose finished prompt tasks asyncflow can actually resolve.
+
+    STOPGAP for an upstream mismatch (`plans/upstream/rhapsody-vllm-prompt-result-not-stdout.md`):
+    rhapsody's `DragonVllmInferenceBackend` reports a prompt task DONE with its answer in
+    `task["response"]` (a list, one entry per prompt), while asyncflow resolves a prompt task
+    from `task["stdout"]` - so the documented `@flow.prompt_task(backend="ai")` route never
+    resolves. Reproduced against a stand-in that completes exactly as `vllm.py` does.
+
+    This wraps the backend's state callback and nothing else: it copies the answer to `stdout`,
+    unwrapping Dragon Inference's `{"assistant": ...}` dict, and turns the backend's in-band
+    error strings (`"ERROR: Batch timeout..."`, reported as DONE) into a FAILED task, because a
+    reasoner handed an error message as its model's answer would try to parse it as a decision.
+    Every other attribute is the wrapped backend's.
+    """
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._backend, name)
+
+    def __await__(self):
+        return self._init().__await__()
+
+    async def _init(self) -> PromptResults:
+        await _init_backend(self._backend)
+        return self
+
+    def register_callback(self, func: Any) -> None:
+        def relay(task: dict, state: str) -> None:
+            if state == "DONE" and "stdout" not in task:
+                answer = task.get("response")
+                if isinstance(answer, list):
+                    answer = answer[0] if len(answer) == 1 else answer
+                if isinstance(answer, dict):
+                    answer = answer.get("assistant", answer)
+                text = answer if isinstance(answer, str) else str(answer)
+                if text.startswith("ERROR:"):
+                    task["exception"] = RuntimeError(text)
+                    task["stderr"] = text
+                    state = "FAILED"
+                else:
+                    task["stdout"] = text
+            func(task, state)
+
+        self._backend.register_callback(relay)
+
+
+async def make_ai_backend(inference: dict[str, Any]) -> Any:
+    """The `ai` route: rhapsody's `DragonVllmInferenceBackend` for one locally hosted model.
+
+    `inference` is plain data (from a `rhapsody_vllm` model profile, `policy/llm.py`):
+    `model` (Dragon `ModelConfig` fields, `model_name` required, `hf_token` filled from
+    `hf_token_env`), `hardware` (`HardwareConfig`: `num_nodes`, `num_gpus`, `node_offset`), and
+    optionally `batching`. Imports Dragon's AI stack only here, and lazily, through rhapsody's
+    own re-export - so nothing else in the package names it.
+    """
+    try:
+        from rhapsody.backends.ai.config import HardwareConfig, ModelConfig
+        from rhapsody.backends.ai.vllm import DragonVllmInferenceBackend
+    except ImportError as exc:
+        raise RuntimeError(
+            "a local reasoner needs rhapsody's AI backend and Dragon's inference stack: "
+            "install the `[dragon]` extra with dragonhpc[ai] on the allocation") from exc
+    if ModelConfig is None:
+        raise RuntimeError("dragon.ai.inference is not importable - install dragonhpc[ai]")
+    model = dict(inference.get("model") or {})
+    if env := inference.get("hf_token_env"):
+        model.setdefault("hf_token", os.environ.get(env, ""))
+    model.setdefault("hf_token", "")
+    model.setdefault("tp_size", 1)
+    backend = DragonVllmInferenceBackend(
+        model=ModelConfig(**model), hardware=HardwareConfig(**(inference.get("hardware") or {})),
+        use_service=False, name=AI)
+    return await PromptResults(backend)
+
+
+async def _engine_over(compute, work_dir: str, ai: Any = None):
+    """The one engine: `compute` first, so it is the default route, then `local`, then `ai`
+    when the campaign's reasoner is a locally hosted model.
 
     Called on the caller's loop - the `local` backend's async init and the engine both bind
     to it (module docstring). `local` is asyncflow's own thread backend rather than rhapsody's
@@ -123,13 +208,16 @@ async def _engine_over(compute, work_dir: str):
     from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
     local = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=LOCAL_WORKERS),
                                         name=LOCAL)
-    return await WorkflowEngine.create(backend=[compute, local], work_dir=work_dir)
+    backends = [compute, local] + ([ai] if ai is not None else [])
+    return await WorkflowEngine.create(backend=backends, work_dir=work_dir)
 
 
-async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir: str = ""):
-    """`(engine, compute_backend)`. The engine carries the `compute` and `local` routes."""
+async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir: str = "",
+                      ai: Any = None):
+    """`(engine, compute_backend)`. The engine carries the `compute` and `local` routes, and
+    `ai` when an inference backend is passed."""
     backend = await make_backend(kind, config)
-    return await _engine_over(backend, work_dir), backend
+    return await _engine_over(backend, work_dir, ai), backend
 
 
 async def probe_topology(backend: Any) -> list[dict[str, Any]]:
@@ -178,7 +266,8 @@ def _construct_backend_in_thread(kind: str, config: dict[str, Any] | None,
 
 
 async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
-                              timeout_s: float, heartbeat_s: float, work_dir: str = ""):
+                              timeout_s: float, heartbeat_s: float, work_dir: str = "",
+                              ai: Any = None):
     """`make_engine`, bounded by a wall-clock timeout with progress logging.
 
     `timeout_s <= 0` disables the bound entirely and calls `make_engine` directly - this
@@ -190,7 +279,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
     that is the loop that will submit to them.
     """
     if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS:
-        return await make_engine(kind, config, work_dir)
+        return await make_engine(kind, config, work_dir, ai=ai)
 
     fut: Future = Future()
     threading.Thread(target=_construct_backend_in_thread, args=(kind, config, fut),
@@ -223,7 +312,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
 
         async def _finish():
             backend = await _init_backend(be)
-            return await _engine_over(backend, work_dir), backend
+            return await _engine_over(backend, work_dir, ai), backend
 
         try:
             if remaining <= 0:

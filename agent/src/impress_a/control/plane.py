@@ -79,6 +79,7 @@ class CampaignControlPlane(Protocol):
                         rationale: str = "") -> str: ...
     async def request_human(self, campaign_id: str, question: str,
                             context: dict[str, Any] | None = None) -> None: ...
+    async def infer(self, campaign_id: str, node: str, prompt: str) -> str: ...
 
 
 class InProcessControlPlane:
@@ -349,6 +350,11 @@ class InProcessControlPlane:
                             context: dict[str, Any] | None = None) -> None:
         self.managers[campaign_id].executor.request_human(question, context)
         self.emit(campaign_id, "human_requested", {"question": question})
+
+    async def infer(self, campaign_id: str, node: str, prompt: str) -> str:
+        """`CampaignSession.infer`, for a reasoner in another process (ADR 0007: the operation
+        is in the core protocol, so every adapter carries it)."""
+        return await self.managers[campaign_id].executor.infer(node, prompt)
 
     async def ingest_measurement(self, campaign_id: str, node_id: str,
                                  prop: Property) -> dict[str, Any]:

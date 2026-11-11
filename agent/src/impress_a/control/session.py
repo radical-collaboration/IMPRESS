@@ -229,3 +229,7 @@ class RemoteSession:
     async def stop(self, reason: str) -> None:
         """Ask the campaign to end. The executor still decides when it actually has."""
         await self._client.stop(self._cid, reason)
+
+    async def infer(self, node: str, prompt: str) -> str:
+        """The model runs on the execution side's engine; only the text crosses the socket."""
+        return await self._client.infer(self._cid, node, prompt)

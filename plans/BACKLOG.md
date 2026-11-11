@@ -47,7 +47,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 ## Upstream
 
 Defects in the middleware, written to be filed with asyncflow and rhapsody. F13 is the older
-asyncflow list; these five were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
+asyncflow list; these six were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
 works around each in code and tracks them as `agent/plans/backlog.md` I2/I4. None is reported
 upstream yet.
 
@@ -56,6 +56,7 @@ upstream yet.
 - [asyncflow: `LocalExecutionBackend.shutdown` joins its pool synchronously on the event loop](upstream/asyncflow-local-backend-shutdown-blocks-loop.md)
 - [asyncflow: `start_telemetry` does not expose rhapsody's `drain_on_stop`](upstream/asyncflow-start-telemetry-no-drain-on-stop.md)
 - [rhapsody: vLLM chat endpoint ignores sampling parameters and fakes token counts](upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)
+- [rhapsody + asyncflow: a `prompt_task` routed to the vLLM backend never resolves](upstream/rhapsody-vllm-prompt-result-not-stdout.md)
 
 ## Order
 
