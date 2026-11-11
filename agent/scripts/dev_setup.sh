@@ -58,6 +58,13 @@ echo "== installing the aucam extra (the enclosing campaign manager)"
 # Verify rather than trust the order: `impress` is on no index, so if pip went looking for the
 # name and found something, the import below succeeds and returns the wrong module. Failing hard
 # here is the difference between a confusing campaign and a one-line error.
+# Figures for the mock knob lab. An extra rather than a dependency - only
+# analysis/mock_figures.py imports matplotlib - but installed here for the same reason as the
+# two above: four tests in test_mock_lab.py sit behind `importorskip("matplotlib")` and are
+# only a guard if the development venv has it. CI installs this extra for the same reason.
+echo "== installing the figures extra (the mock lab's plots)"
+.venv/bin/pip install --quiet -e ".[figures]"
+
 echo "== verifying"
 .venv/bin/python - "$ROOT" <<'EOF'
 import pathlib, sys

@@ -104,13 +104,19 @@ jobs:
       # for the name on PyPI and installs whatever it finds there.
       - name: Install impress (repository root)
         run: python -m pip install --upgrade pip && pip install -e ..
-      # `aucam` in the same install as `dev`, so pip resolves once: `tests/test_aucam.py`
-      # skips itself when the extra is absent, so without it the tests that prove an IMPRESS-A
-      # campaign really runs as one AuCaM workflow never ran anywhere automated - green either
-      # way, which is the failure this project already names as worse than a missing adapter.
-      # It is a git pin to a public commit with no compiled dependencies: ~6s to resolve.
+      # Every extra whose absence a test answers with a skip, in one install so pip resolves
+      # once. A skip is not a pass, and each of these was skipping in the only automated
+      # environment there is:
+      #   aucam    the tests that prove an IMPRESS-A campaign really runs as one AuCaM
+      #            workflow. A git pin to a public commit, no compiled dependencies, ~6s.
+      #   oracle   test_oracle.py builds a REAL openai client when it is present, which is
+      #            the only thing that catches LangChainOracle claiming structured output
+      #            over a brace-slice. No endpoint or key is contacted.
+      #   figures  four mock-lab tests behind `importorskip("matplotlib")`.
+      # Measured: 511 passed and 0 skipped with all four, against 506 passed and 5 skipped
+      # with dev+aucam alone.
       - name: Install impress-a
-        run: pip install -e ".[dev,aucam]"
+        run: pip install -e ".[dev,aucam,oracle,figures]"
       # A skip is not a pass, and the extra going missing again would be silent otherwise:
       # pytest exits 0 with the whole file skipped. This step fails loudly instead. The import
       # is `src.aucam`, not `aucam` - upstream's `include = ["src*"]` publishes the generic
@@ -119,8 +125,11 @@ jobs:
         run: python -c "import src.aucam, impress_a.integrations.aucam"
       # No lint step here any more: `tox -e lint` covers agent/src and agent/tests from the
       # repository root, in one job, once - rather than three times across this matrix.
+      # `-rs` lists any skipped test with its reason. The suite skips nothing in this
+      # environment today, and if that changes the log says which test and why rather than
+      # hiding it behind -q.
       - name: Run tests
-        run: pytest tests -q
+        run: pytest tests -q -rs
 
   # Both projects, one entry point. ruff resolves its configuration per file, so this holds
   # root's contract and agent/'s at the same time without either adopting the other's width.
