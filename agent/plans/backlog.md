@@ -2184,8 +2184,17 @@ process group, and `timeout` leads its own - so neither task ever completed and 
 downstream started ([upstream](../../plans/upstream/dragon-unreaped-process-group-leader.md)).
 Fixed by not wrapping under Dragon and letting Dragon's own task `timeout` bound the command
 (`exec/launch.py`, regression test `test_under_dragon_the_walltime_is_dragons_...`).
-23814643 cancelled at 22 min (stuck). **Re-run submitted as job 23815248** on commit `ed0fde2`,
-same settings.
+23814643 cancelled at 22 min (stuck). **CLOSED by job 23815248** (commit `ed0fde2`, same settings,
+gpub066): `12/12 tasks ok` at width 2, campaign 3m45s, job 4m19s exit 0:0, Dragon up in 4.5 s and
+torn down in 2 s. Placement held: each lineage's GPU tools (rfd3, LigandMPNN, Boltz) on its own
+device - lineage 0 on GPU 0, lineage 1 on GPU 1, by `Policy(gpu_affinity=...)`; `gpusample.csv`
+shows only GPUs 0-1 working - and CPU stages unpinned. Telemetry: one block span for r0001 with
+every node (`local`) and every command (`compute`) under it, labelled `r0001`. Command queue
+time ~0.05 s each (the watcher's poll). Both nodes failed acceptance gates only (`fa_rep`; lineage
+1 also shape complementarity 0.533 and complex pLDDT 0.504) - weak designs, not defects, as in
+every run so far - so the front is empty. Per-stage wall times are in line with job 22692304
+(rfd3 46 s, LigandMPNN 15 s, packmin 15 s, fastrelax 40 s, filter_shape 5 s, Boltz 92-94 s). Not
+exercised: a block cancel reaching a running Dragon command, and a Dragon task timeout.
 
 **I2. Upstream gaps, each worked around in code and marked for removal.** File them; none needs
 anything from us beyond the report.
