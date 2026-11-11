@@ -1763,8 +1763,18 @@ async def test_a_failed_gate_reaches_tasks_provenance_through_the_executor(reg):
     mgr = CampaignManager(spec("t-failed-gates", max_cycles=1), _pair(chain), reg)
     await mgr.run()
 
-    found = list(_pathlib.Path(ROOT).glob("t-failed-gates/**/tasks.jsonl"))
-    assert found, f"no tasks provenance under {ROOT}/t-failed-gates"
+    # Two files match `**/tasks.jsonl`, and only one of them is provenance: `jobs/tasks.jsonl`
+    # is engine telemetry - 16 rows of {event, task, task_id, ts} with no `qc` key at all. So
+    # `found[0]` on a bare glob asserted against whichever of the two the filesystem listed
+    # first. `pathlib.glob` yields directory order, not sorted order, so this passed wherever
+    # `provenance` happened to come first and failed elsewhere: it took down CI's 3.11 leg
+    # while 3.10, 3.12 and 3.13 passed on the same commit. Sorting is NOT the fix - `jobs`
+    # sorts before `provenance`, so sorting would have failed everywhere instead. Name the
+    # file you mean.
+    found = [p for p in _pathlib.Path(ROOT).glob("t-failed-gates/**/tasks.jsonl")
+             if p.parent.name == "provenance"]
+    assert len(found) == 1, \
+        f"expected exactly one provenance tasks.jsonl under {ROOT}/t-failed-gates, got {found}"
     rows = [json.loads(ln) for ln in found[0].read_text().splitlines() if ln.strip()]
     assert rows, "tasks.jsonl is empty"
 
