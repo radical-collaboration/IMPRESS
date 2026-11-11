@@ -102,7 +102,7 @@ ignore = [
   "UP007", "UP045",
   # N818 wants an `Error` suffix on `CampaignAborted`, `CampaignStopped`,
   # `SubmissionRejected` and `BackendConstructionTimeout`. Those four names are the written
-  # vocabulary of this project: they appear in docs/decisions, plans/done, docs/limitations.md
+  # vocabulary of this project: they appear in docs/impress-a/decisions, plans/done, docs/impress-a/limitations.md
   # and CLAUDE.md, and in sentences like "raises `CampaignStopped` if the campaign ends first"
   # that are the record of why a seam exists. Renaming them buys nothing at runtime and makes
   # every one of those sentences wrong, so the rule is declined rather than worked around with

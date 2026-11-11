@@ -29,7 +29,7 @@ impress-a offer campaigns/mock-small-molecule-binding.yaml   # what one invocati
 #   reads to size its own budget (decision 0014); `--validation <validate_tasks.json>` is the
 #   only route by which a MEASURED figure enters an offer. Everything else is declared, and
 #   the payload says so - declared cost models sit above measurement on purpose, because they
-#   feed gates that refuse graphs. See docs/reference/observation.md
+#   feed gates that refuse graphs. See docs/impress-a/reference/observation.md
 impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and check it, ON
 #   hardware. Exits non-zero if any Task fails an INTEGRITY row; an acceptance row that falls
 #   short does not fail it (a weak design is not a broken Task). This is what justifies
@@ -38,7 +38,7 @@ impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and ch
 #                    scripts/delta_validate_tasks.sh campaigns/<spec>.yaml
 impress-a mock-lab                                   # the mock chain across a knob grid, with
 #   figures. ~30s, no allocation. --stage sweep|collect|figures to run one; --only arms.
-#   Figures need `pip install -e ".[figures]"`. See docs/reference/mock-lab.md
+#   Figures need `pip install -e ".[figures]"`. See docs/impress-a/reference/mock-lab.md
 impress-a run campaigns/mock-stabilize.yaml --model D
 #   --model  A | B | C | D | null | replay     --no-guard  disables the correction wrapper
 #   --control roles          the Specifier/Planner halves rather than the legacy `decide`
@@ -65,7 +65,7 @@ specific claim is stale — but a user-site install that drifts under you is the
 particular version, and `rhapsody` there has pointed at a different checkout.
 
 **Verified middleware: `radical.asyncflow` 0.6.0 / `rhapsody-py` 0.6.0**, 186 tests green in ~19s
-(2026-11-06, Python 3.10.12). `docs/reference/middleware-integration.md` was written against
+(2026-11-06, Python 3.10.12). `docs/impress-a/reference/middleware-integration.md` was written against
 0.5.1/0.5.0 and its API notes still hold; check the installed version before trusting any of them.
 
 On Delta, `.venv` is a **symlink** to `$WORK_DIR/ve/impress_a`, and `$WORK_DIR` must be on NVMe
@@ -90,7 +90,7 @@ included `$USER`. `impress-a preflight` flags a venv still on HDD.
 
 ## Invariants — do not break these
 
-Each exists because of a specific failure mode. Details in `docs/reference/architecture.md`.
+Each exists because of a specific failure mode. Details in `docs/impress-a/reference/architecture.md`.
 
 | Invariant | Enforced in | Why |
 |---|---|---|
@@ -114,7 +114,7 @@ Each exists because of a specific failure mode. Details in `docs/reference/archi
 
 ## Middleware gotchas
 
-Full notes in `docs/reference/middleware-integration.md`. The ones that cost the most time:
+Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones that cost the most time:
 
 - **Rhapsody backends are awaitable and must be awaited.** `__await__` triggers state registration.
   Constructing synchronously appears to work, then fails later with
@@ -146,7 +146,7 @@ Full notes in `docs/reference/middleware-integration.md`. The ones that cost the
 ## Adding a tool
 
 `toolkits/<toolkit>/tools/<id>/spec.yaml` + a `TaskAgent` subclass (`entry:` points at it) + a mention in
-that toolkit's `SKILL.md`. Full guide: `docs/reference/authoring-tools.md`.
+that toolkit's `SKILL.md`. Full guide: `docs/impress-a/reference/authoring-tools.md`.
 
 **Never edit the composer, validator or manager to add a tool.** If you need to, the layering is wrong.
 
@@ -230,7 +230,7 @@ Four defects reached real hardware before anything caught them, and each was inv
 - **Where the bytes live.** `import pyrosetta` cost **471s** off HDD-backed Lustre, so `packmin`
   could not finish starting inside its 300s budget. On NVMe it is seconds. This one nearly caused a
   second bug: the fix queued up was to raise three walltimes to 1800/3600/1200, which would have
-  hidden the real cost behind timeouts six times too large. See `docs/limitations.md`.
+  hidden the real cost behind timeouts six times too large. See `docs/impress-a/limitations.md`.
 - **An estimate that refuses work.** The `cost_model` figures were literature guesses 6-69x over
   measurement. Gate 5 and the untrusted-pattern cap refuse graphs against them, so the inflated
   gpu side summed past the cap and the policy truncated `boltz_predict` off the chain - silently,
@@ -249,7 +249,7 @@ way). Bounded now by `CampaignSpec.backend_startup_timeout_s`/`backend_startup_h
 (`exec/backend.make_engine_bounded` runs the *synchronous* construction on a daemon thread so the
 bound stays effective, and builds the backend's async init and the engine on the caller's own loop —
 see the loop-ownership gotcha above); 0 disables it, the default for every non-Delta campaign. See
-`docs/limitations.md`.
+`docs/impress-a/limitations.md`.
 
 **Dragon teardown can hang too, and it is the more expensive end.** Measured on the reference
 IMPRESS pipeline (job 22491438): `flow.shutdown()` never returned after every pipeline had finished,
@@ -273,4 +273,4 @@ confidently-wrong tool passes. Since decision 0013 those are *acceptance* gates,
 There are still no structural gates (backlog B1). Known-bad fixtures exist for every real tool, and each
 must fail an integrity gate or declare itself `acceptance_only`.
 
-Full list: `plans/backlog.md`. Shipping-facing summary: `docs/limitations.md`.
+Full list: `plans/backlog.md`. Shipping-facing summary: `docs/impress-a/limitations.md`.

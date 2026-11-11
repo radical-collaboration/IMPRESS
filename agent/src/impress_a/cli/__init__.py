@@ -463,8 +463,8 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
     """Run the execution process and serve it over HTTP.
 
     Backlog C5: the out-of-process split has been reachable from `tests/` and from no shell
-    since it was written, so `docs/reference/frontends.md` described as "implemented" something
-    nobody could run. These are those entry points.
+    since it was written, so `docs/impress-a/reference/frontends.md` described as "implemented"
+    something nobody could run. These are those entry points.
 
     Loopback by default, and that is the security boundary this configuration can defend: the
     plane has no auth and no TLS, both ends sit on the same compute node, and backlog C7 - where
@@ -705,7 +705,7 @@ def print_models() -> int:
             if m.spec_ref:
                 print(f"     specified in {m.spec_ref}")
     print("\n  `llm` is what the specification asks for; `calls` is what runs today.")
-    print("  Reference: docs/reference/control-models.md\n")
+    print("  Reference: docs/impress-a/reference/control-models.md\n")
     return 0
 
 

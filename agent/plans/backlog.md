@@ -89,7 +89,7 @@ log lines - no campaign log, no ledger entry, nothing else, for the whole run. T
 worker pool, telemetry) synchronously with no `await` points, blocking the event loop entirely -
 the codebase's own heartbeat never fired once in 2 hours because of it. Now bounded by
 `backend_startup_timeout_s`/`backend_startup_heartbeat_s` on `CampaignSpec` (see
-`exec/backend.make_engine_bounded`, `docs/limitations.md`): a future stall fails loudly within
+`exec/backend.make_engine_bounded`, `docs/impress-a/limitations.md`): a future stall fails loudly within
 minutes instead of consuming the whole allocation silently. What remains open: *why* `Batch()`/
 `Pool()` didn't complete inside 2 hours in the first place (most likely GPU-affinity worker
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
@@ -680,7 +680,7 @@ prove this failure mode is the dominant one; the real tools have no equivalent.
   (`_pdbtools.py:19-42`, explicitly not DSSP). A `ligand_clashes == 0` gate is a real structural
   check, and unlike `metric_in_range` on a self-reported confidence it is a measurement of the
   output geometry rather than the tool's opinion of itself - so it is not the caveat in
-  `docs/limitations.md`. See G2.
+  `docs/impress-a/limitations.md`. See G2.
 
 **B2. No known-bad fixtures — RESOLVED.** Every non-mock tool now carries `tests/*.bad.json` and
 `tests/*.good.json`, run against its own declared gates by `tests/test_gate_fixtures.py`, which also
@@ -761,7 +761,7 @@ cancellation inside task agents, or a backend that can kill a process.
 exist and are covered end to end, but only `tests/` ever constructs a `ControlPlaneServer` — there is
 no `impress-a serve` (executor side, inside the allocation, holding the plane open) and no
 `impress-a reason` (reasoner side, outside it, driving a `RemoteSession`). The split is reachable
-from the test suite and not from a shell, which is the state `docs/reference/frontends.md:107-111`
+from the test suite and not from a shell, which is the state `docs/impress-a/reference/frontends.md:107-111`
 already describes as "implemented".
 
 **RESOLVED** (phase 7 of `control-plane-refactor.md`). `impress-a serve <spec>` runs the
@@ -775,7 +775,7 @@ drives a campaign, because every other test shares one interpreter and so cannot
 **C6. `--model C` fails open.** `cli/__init__.py:78-80` builds an `ExternalPolicy` with
 `on_timeout="fallback"` and no control plane attached, so its inbox can never be filled: it times out
 every 5s and silently runs `ThresholdPolicy` instead. The documented headless mode
-(`docs/decisions/0002`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
+(`docs/impress-a/decisions/0002-model-c-is-control-mode-2.md`) is therefore unreachable from `impress-a run`, and reports a model-D campaign
 as a model-C one. It should refuse and point at C5's entry points instead. Blocked on C5.
 
 **RESOLVED** (phase 7), by refusing rather than by detecting. `impress-a run --model C` now
@@ -785,7 +785,7 @@ and `--specifier C` and `--planner C` are refused the same way, since they are t
 wearing a different flag. A disguised arm is indistinguishable from a real one in every figure
 derived from it, which is why this is a refusal and not a warning.
 
-**C7. Where the control plane is reachable from is undecided.** `docs/reference/frontends.md:110`
+**C7. Where the control plane is reachable from is undecided.** `docs/impress-a/reference/frontends.md:110`
 offers HTTP+SSE for "a reasoner outside the allocation", but `control/http.py:17-21` is loopback,
 single trusted client, no auth, no TLS. Planning question M6
 (`planning/phase1-partB-architecture/06-headless-control-protocol.md:115-117`) — where the adapter
@@ -1069,13 +1069,13 @@ reporting to an AuCaM running elsewhere. `CycleSink` is the seam, `aucam_client.
 the implementation, and it needs a Redis or Dragon `DataBackend` reachable from the compute
 node. Worth doing only after the in-process path has run once on hardware.
 
-Scoped and decided in `docs/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
+Scoped and decided in `docs/impress-a/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md`:
 the enclosing manager is a caller, not control model C. Three deliverables — `impress-a offer`
 (a synchronous handshake computing a cost model and the goal vocabulary from the toolkit, with
 its declared basis stated rather than passing for a prediction), a `CampaignDigest` projection
 of the observation delivered per absorbed cycle by a pump that reads the executor's await-free
 snapshot API, and one adapter module for AuCaM. Blocked on nothing. The plane is described as
-built in `docs/reference/observation.md`, whose eleven findings are what the work has to be
+built in `docs/impress-a/reference/observation.md`, whose eleven findings are what the work has to be
 honest about — G20 especially, since without it the caller is told an inflated spend.
 
 ## D. Registry and spec-contract gaps
@@ -1095,7 +1095,7 @@ hazard D1 describes is not hypothetical, and the fix is **not** `extra="forbid"`
 these types cross the HTTP boundary, and forbidding extras turns a newer peer's observation into
 a 500. Add the two fields, and pin the rest by introspection — a test that every kwarg a
 projection passes is a field of the model it passes them to. Found while writing
-`docs/reference/observation.md` (finding 9).
+`docs/impress-a/reference/observation.md` (finding 9).
 
 **That half is RESOLVED.** `TaskCard` declares `burn_rate` and `max_commitment` now, so
 `max_commitment` can finally be read by the rule that documents it, and
@@ -1153,7 +1153,7 @@ Stage-level commitment layer. Consequence that matters now: limits, spent and ho
 caller on every observation, and **a rate does not**, so nothing outside can project a
 burn-down. Either drive them or delete them; carrying a third of a ledger that answers `{}` is
 how `sites/*.yaml` stayed inert for a release. Found while writing
-`docs/reference/observation.md` (finding 10).
+`docs/impress-a/reference/observation.md` (finding 10).
 
 ## F. Documentation debt
 
@@ -1171,7 +1171,7 @@ nothing enforces; ADR 0007's per-client cursor. ADR 0007 also now owes the five 
 `CampaignControlPlane` for the remote session (`status`, `inflight`, `backtrack`, `request_human`,
 `await_run_result`) and the two widened signatures (`observe(since=)`, `events(stream=)`).
 
-**F4. `docs/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
+**F4. `docs/impress-a/reference/` has no record of the remote session** — neither `RemoteSession` nor the routes
 it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` does not mention that a
 `conduct` policy collecting for itself must now call `interpret` for itself.
 
@@ -1179,7 +1179,7 @@ it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` doe
 enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
 but no lookup API does.
 
-**F5. `docs/reference/` documented the pre-phase-11 policy layer, and one page a test names did
+**F5. `docs/impress-a/reference/` documented the pre-phase-11 policy layer, and one page a test names did
 not exist — RESOLVED.** Opened and closed in the same commit, because the evidence is the useful
 part. Found while answering four questions about the control plane that all had to be answered
 from the source: by what process the toolkit, the goal, the budget and the parameters become
@@ -1192,12 +1192,12 @@ Two separate defects. **`frontends.md`'s "Writing your own" example did not run*
 wrappers" section listed three deleted classes, and `architecture.md`'s DECIDE row named the
 deleted return union. A reader following either would have written against an interface removed in
 phase 11. **And `tests/test_reasoner_registry.py:81` instructed a maintainer to keep
-`docs/reference/control-models.md` in step with the `llm_calls` assertion** — a file that had
+`docs/impress-a/reference/control-models.md` in step with the `llm_calls` assertion** — a file that had
 never been written, so the pointer was dead from the day the test landed.
 
-Resolved by two new pages and four repairs: `docs/reference/resolution.md` (the pipeline, step 0
+Resolved by two new pages and four repairs: `docs/impress-a/reference/resolution.md` (the pipeline, step 0
 to step 8, each with its owner, its anchor and its refusal, plus a closing table of what the
-pipeline does **not** enforce), `docs/reference/control-models.md` (the per-reasoner half: what
+pipeline does **not** enforce), `docs/impress-a/reference/control-models.md` (the per-reasoner half: what
 each model is shown, what it may choose, the six layers that constrain a reply), the two stale
 sections in `frontends.md` rewritten against `policy/wrappers.py` as it stands, `architecture.md`'s
 loop corrected to specify/plan/review, the arm **naming rule** added to `mock-lab.md`, and both
@@ -1643,7 +1643,7 @@ person measuring agent overhead on short tasks does not spend the afternoon look
 `exec/dispatch.py`.
 
 **G17. A campaign cannot raise a quality knob that survives its own first refinement.** Found
-while checking `docs/reference/resolution.md` step 6 against provenance rather than against the
+while checking `docs/impress-a/reference/resolution.md` step 6 against provenance rather than against the
 source, which is the only reason it was found at all: three correct rules compose into a surprise,
 and no single function is wrong.
 
@@ -1672,7 +1672,7 @@ trusted with on evidence (H10), and quality is the one it is not.
 back by three knobs"; two of the three are undone from cycle 2 onward, so what the figures compare
 is `hard` against *one cycle* of `rescued` plus an escalation path that starts below the arm's own
 setting. The arm is still a valid campaign and the measured behaviour is real - this does not
-invalidate any figure - but the label overstates what is held. `docs/reference/mock-lab.md` now
+invalidate any figure - but the label overstates what is held. `docs/impress-a/reference/mock-lab.md` now
 says so beside the arm table.
 
 Three ways to close it, none obviously right. **Escalate from the effective value** rather than the
@@ -1811,8 +1811,8 @@ item that blocks any claim about decision quality**, and it is why model D canno
 benchmark against the reference's `adaptive_decision()`, which varies the route and the retry.
 
 **H4. Declared-but-inert seams.** `ToolSpec.agent: Literal["deterministic", "llm"]`
-(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/reference/architecture.md:145` and
-`docs/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
+(`tools/spec.py:96`) is read by no code, while decision 0006, `docs/impress-a/reference/architecture.md:145` and
+`docs/impress-a/roadmap/academy-for-task-agents.md:90` all present it as working. `Registry.toolkit_skills()`
 (`tools/registry.py:85`) has zero callers, although Part B doc 04:112-124 specifies skill documents are
 "supplied to the policy at campaign start" and doc 06:65 gives the observation field for them - so
 `obs.available_tools` is bare ids and model B's prompt lists tool names with no parameters, costs or
@@ -1821,10 +1821,10 @@ enabled tool's outputs, metrics and every tunable parameter with its type, defau
 sentence and inferred kind, and its schema check refuses a reply naming an unknown, out-of-range or
 frozen one. What is still true is `toolkit_skills()`: no caller, so the SKILL documents - the costs
 and the pitfalls - still reach no reasoner. The fifth specified skill section, **Composition guidance** (doc 04:122), was dropped from
-`docs/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
+`docs/impress-a/reference/authoring-tools.md:180`'s four required sections, and it is the one a reasoner most
 needs. `ExperimentIntent.toolkit_hint` (`core/decision.py:26`) is read nowhere.
 
-**Three more, found while writing `docs/reference/resolution.md` and verified by grep.**
+**Three more, found while writing `docs/impress-a/reference/resolution.md` and verified by grep.**
 `ToolkitView.skills` *is* populated — `view_of` (`tools/view.py:67`) fills it from
 `Registry.skills` for every enabled toolkit — so the skill text now reaches the object a reasoner
 holds and is still included in no prompt; the gap moved one step closer without closing.
@@ -1876,7 +1876,7 @@ indistinguishable afterwards. The residual against that config was **57**, and a
 rather than budgeted: 37 by one deliberate `ruff check --fix`, 20 by hand (10 line reflows, 3 unused
 locals, 3 `zip(strict=)`, 2 semicolons, 2 `N806`, 1 `E741`, 1 `B904`). `N818` is **declined**, not
 worked around — an `Error` suffix on `CampaignAborted`, `CampaignStopped`, `SubmissionRejected` and
-`BackendConstructionTimeout` would falsify every sentence in `docs/decisions/`, `plans/done/` and
+`BackendConstructionTimeout` would falsify every sentence in `docs/impress-a/decisions/`, `plans/done/` and
 `CLAUDE.md` that names them, for no runtime benefit; the reason sits beside the `ignore` entry.
 `.github/workflows/agent-tests.yml` runs `ruff check src tests` before the suite, and its path
 filter now includes `src/impress/**` and the root `pyproject.toml`, because this package now
@@ -2029,7 +2029,7 @@ An arm whose GPU bill cannot be predicted within 6x is a scheduling problem as m
 quality one, and `f11-predicted-cost.png` is where it shows.
 
 **The layer the per-invocation assumption actually lives in is `Validator.estimate`**
-(`compose/validate.py:142`), found while writing `docs/reference/resolution.md`. It is four lines,
+(`compose/validate.py:142`), found while writing `docs/impress-a/reference/resolution.md`. It is four lines,
 and it sums `cost_model.cost` **per node in the graph** with no reference to any parameter. So
 "the cost models are per invocation" is not a property of the specs that a better spec could fix
 on its own: gate 5, the Reviewer's `affordable` and the interlock's 10% provisional cap all price
@@ -2093,7 +2093,7 @@ wins, and nothing says so. The call is also unguarded, where the reasoner's equi
 catches (`policy/reasoning.py:175`), so a sink raising takes down the thing holding the
 allocation. Minimal fix is a guarded listener list with `prov_sink` kept as the slot-0 property
 so no caller moves. Sibling of "the reasoner sink had writers and no subscriber"; found while
-writing `docs/reference/observation.md` (finding 3).
+writing `docs/impress-a/reference/observation.md` (finding 3).
 
 **RESOLVED.** `_prov_listeners` is a list, `add_prov_listener` appends without displacing, and
 `prov_sink` survives as a property over the first listener so no existing caller had to move.
@@ -2127,7 +2127,7 @@ observation. Inside one campaign that is harmless — the budget should reserve 
 Across a boundary it is not: an enclosing manager told our spend is told the inflated figure,
 and its own learned-cost estimate converges on it forever (C13). Fix is a `spent_measured`
 dimension on the ledger and one line in `_settle`; the input is already there. Found while
-writing `docs/reference/observation.md` (finding 8).
+writing `docs/impress-a/reference/observation.md` (finding 8).
 
 **RESOLVED.** `BudgetLedger.spent_measured` accumulates beside `spent`, `_settle` calls
 `charge_measured(results.cost_measured)` - the figure was already summed per run and folded
@@ -2148,7 +2148,7 @@ the policies, not a gate, and an external caller under model C is shown the narr
 submits through a path that does not re-check it. Anything *pricing* a campaign from `stages`
 is relying on it, which is why `impress-a offer` has to declare the assumption rather than
 assert the number (C13). Neighbour of `resolution.md`'s "available means three different
-things"; found while writing `docs/reference/observation.md` (finding 11).
+things"; found while writing `docs/impress-a/reference/observation.md` (finding 11).
 
 ---
 

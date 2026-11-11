@@ -42,7 +42,7 @@ class BackendConstructionTimeout(RuntimeError):
     rhapsody's Dragon backend builds `Batch()` synchronously in its own constructor - the
     results DDict, GPU-affinity worker pool, telemetry - with no `await` points, so a
     stall there blocks the event loop entirely: no heartbeat, no timeout, nothing, until
-    the whole allocation's walltime is spent. See docs/limitations.md.
+    the whole allocation's walltime is spent. See docs/impress-a/limitations.md.
     """
 
 
@@ -163,7 +163,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
                 f"constructing {kind!r} backend did not complete within {timeout_s:.0f}s - "
                 "most likely a stall inside the backend's own synchronous construction "
                 "(e.g. Dragon's Batch()/Pool()), which blocks the event loop and produces "
-                "no further log output. See docs/limitations.md.") from None
+                "no further log output. See docs/impress-a/limitations.md.") from None
 
         # On OUR loop, within whatever is left of the same budget: see the module
         # docstring for why neither of these may happen on the helper thread.
@@ -182,7 +182,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
             raise BackendConstructionTimeout(
                 f"{kind!r} backend was constructed but its async init / engine build did "
                 f"not complete within the remaining {max(remaining, 0.0):.0f}s of the "
-                f"{timeout_s:.0f}s budget. See docs/limitations.md.") from None
+                f"{timeout_s:.0f}s budget. See docs/impress-a/limitations.md.") from None
     finally:
         hb.cancel()
         try:

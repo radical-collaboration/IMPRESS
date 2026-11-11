@@ -85,6 +85,13 @@ docstrings, `agent/docs/reference/` is prose. Likewise root `docs/concepts/archi
 framework's architecture and `agent/docs/reference/architecture.md` is the app's — different subjects,
 same filename. **Everything this plan writes goes in `agent/docs/`**, except where it says otherwise.
 
+> **Superseded, 2026-11-10.** The deferred question below was answered: `agent/docs/` moved to
+> `docs/impress-a/` and joined the published nav, so there is one site and one CI workflow for both
+> projects. The paths in this document are left as they were written, because the two-tree analysis
+> above is the record of why the move was made; read `docs/impress-a/…` wherever it says
+> `agent/docs/…`. The boundary rule it defers to is repealed in `agent/CLAUDE.md`, which now states
+> what is shared (CI, lint, tests, docs) and what the rule was really protecting.
+
 **G14 — the published site documents the agentic example and not the app whose taxonomy it borrows.**
 The root site contains no occurrence of "IMPRESS-A", `impress_a`, `agent/`, "control model",
 "reasoner", "oracle" or "headless" — verified by grep over all of root `docs/`. Yet

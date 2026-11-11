@@ -866,7 +866,7 @@
     "minutes": 60,
     "gpu_h": 64,
     "share_of_billed": 0.37,
-    "source": "docs/limitations.md"
+    "source": "docs/impress-a/limitations.md"
    }
   },
   "our_rosetta_gates": {
