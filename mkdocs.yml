@@ -65,11 +65,12 @@ nav:
     - Architecture: impress-a/reference/architecture.md
     - Resolution: impress-a/reference/resolution.md
     - Observation: impress-a/reference/observation.md
-    - Control Models: impress-a/reference/control-models.md
     - Pluggable Frontends: impress-a/reference/frontends.md
+    - Control Models: impress-a/reference/control-models.md
     - Compute Patterns: impress-a/reference/compute-patterns.md
     - Authoring Tools: impress-a/reference/authoring-tools.md
     - Middleware Integration: impress-a/reference/middleware-integration.md
+    - AuCaM Integration: impress-a/reference/aucam.md
     - The Mock Knob Lab: impress-a/reference/mock-lab.md
     - Known Limitations: impress-a/limitations.md
     - Decisions:

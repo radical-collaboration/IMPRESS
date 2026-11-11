@@ -194,8 +194,10 @@ arm produced is not that model's result.
 
 ## Writing another one
 
-Implement the two protocols — or subclass `BaseSpecifier` / `BasePlanner`, whose defaults are a
-fixed Spec and a planner that gives up loudly — then add a row to `policy/registry.MODELS` with
-both builders. `ReasonerOptions` is the only configuration a builder sees; if a builder needs
-something only `CampaignSpec` has, the answer is another field there, not an import. See
-`frontends.md` for the worked example.
+Two protocols and a registry row. [`frontends.md`](frontends.md#writing-your-own) has the
+procedure and a worked example, including why a new Planner should compose `ThresholdPlanner`
+rather than reimplement chain resolution.
+
+What belongs here rather than there is the constraint that shapes such a half: a reasoner reads
+only `ReasonerOptions`, never a `CampaignSpec` — see "What reaches a half" above — so a builder
+that needs a campaign field wants another option, not an import.

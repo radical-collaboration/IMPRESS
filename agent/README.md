@@ -217,12 +217,13 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 | [`docs/impress-a/reference/architecture.md`](../docs/impress-a/reference/architecture.md) | The loop, layers, import contract, invariants |
 | [`docs/impress-a/reference/resolution.md`](../docs/impress-a/reference/resolution.md) | **How the toolkit, goal, budget and parameters become specified targets and a programmed Stage** — step by step, with what refuses each one |
 | [`docs/impress-a/reference/observation.md`](../docs/impress-a/reference/observation.md) | **How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller** — with the eleven things the plane does not enforce |
+| [`docs/impress-a/reference/frontends.md`](../docs/impress-a/reference/frontends.md) | The two frontend axes: which seams are swappable, the protocols they implement, and how to write one |
 | [`docs/impress-a/reference/control-models.md`](../docs/impress-a/reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
-| [`docs/impress-a/reference/frontends.md`](../docs/impress-a/reference/frontends.md) | Control models and control-plane adapters in detail |
 | [`docs/impress-a/reference/mock-lab.md`](../docs/impress-a/reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |
 | [`docs/impress-a/reference/compute-patterns.md`](../docs/impress-a/reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
 | [`docs/impress-a/reference/authoring-tools.md`](../docs/impress-a/reference/authoring-tools.md) | Writing tools, gates and skill documents |
 | [`docs/impress-a/reference/middleware-integration.md`](../docs/impress-a/reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
+| [`docs/impress-a/reference/aucam.md`](../docs/impress-a/reference/aucam.md) | Running as one subordinate workflow under an enclosing campaign manager: the seam, the offer handshake, and the pin |
 | [`docs/impress-a/decisions/`](../docs/impress-a/decisions/) | Numbered, immutable architecture decision records |
 | [`docs/impress-a/limitations.md`](../docs/impress-a/limitations.md) | Known gaps and residual risks, stated plainly |
 
