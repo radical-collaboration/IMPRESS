@@ -78,7 +78,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        # 3.13 is here and was not in the workflow this replaces: agent/ was tested on
+        # 3.10-3.12 while root was tested on 3.9-3.13, so the newest interpreter IMPRESS
+        # supports was one nothing had ever run impress_a on. Verified before adding, not
+        # after: both installs resolve on 3.13.9 and the suite is 506 passed, 5 skipped.
+        python: ['3.10', '3.11', '3.12', '3.13']
     runs-on: ubuntu-latest
     defaults:
       run:
