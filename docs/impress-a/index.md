@@ -7,6 +7,14 @@ IMPRESS-A conducts scientific exploration of protein design space given a design
 workflow to run it, executing that workflow on HPC, interpreting the result, and updating a
 population of design candidates.
 
+!!! tip "Run it before you read it"
+
+    [Ten minutes with a mock campaign](../notebooks/impress_a_knob_lab.ipynb)
+    runs that loop in a browser tab against a laptop surrogate of the
+    small-molecule binding chain — same executor, same gates, same thresholds,
+    no allocation. It walks the four knob arms, then asks you to predict what a
+    campaign will do before you break it.
+
 ## What *autonomous* means here
 
 Workflow parameters **and topology** are modified at runtime in response to production data. The

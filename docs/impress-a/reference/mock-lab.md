@@ -9,6 +9,11 @@ Read `campaigns/README.md` first for what the surrogate campaign is and what eac
 This page is about the harness around it: what it runs, what it measures, and which of its
 numbers mean anything.
 
+To drive it rather than read about it, [Ten minutes with a mock
+campaign](../../notebooks/impress_a_knob_lab.ipynb) runs the four arms in Colab and walks the
+two traps below — the G14 stop-reason gap and the decision-0013 trust split — as a
+predict-then-run exercise.
+
 ## What a figure from here is allowed to claim
 
 Every metric the six surrogates report is a **seeded random draw**

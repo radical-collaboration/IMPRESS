@@ -63,6 +63,7 @@ nav:
   # under impress-a/ is what separates them.
   - IMPRESS-A:
     - Overview: impress-a/index.md
+    - Quickstart (Colab): notebooks/impress_a_knob_lab.ipynb
     - Architecture: impress-a/reference/architecture.md
     - Resolution: impress-a/reference/resolution.md
     - Observation: impress-a/reference/observation.md
