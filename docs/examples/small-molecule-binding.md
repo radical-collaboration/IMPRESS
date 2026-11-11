@@ -181,11 +181,14 @@ environment variables set by the launcher do not reach the runner. Pipeline
 thresholds live in the `PROD` `RunConfig` at the top of
 `run_small_molecule_binding.py`.
 
-Two alternate entry points are also provided:
+An alternate routing mode and a mock entry point are also provided:
 
-- **`run_nonadaptive.py`** — a fixed routing table (every stage always
-  "passes" and proceeds linearly, with no ensemble comparison or guided
-  backbone feedback), used as a baseline comparison.
+- **`run_small_molecule_binding.py --nonadaptive`** (or
+  `IMPRESS_NONADAPTIVE=1 sbatch delta_gpu_run.sh`) — a fixed routing table
+  (every stage always "passes" and proceeds linearly, with no ensemble
+  comparison or guided backbone feedback), used as a baseline comparison.
+  Everything else (backends, GPU pinning, staggered start, telemetry) is the
+  same as the adaptive run.
 - **`run_test_small_molecule_binding.py`** — a mock dry run (`mock=True`,
   routing to `mock.py`'s placeholder tasks) that exercises the full state
   machine and adaptive routing logic with no external HPC tools required;

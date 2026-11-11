@@ -271,14 +271,14 @@
  ],
  [
   "examples/small_molecule_binding/small_molecule_binding.py",
-  36,
+  14,
   "STEP_DONE",
   "S3 - the fixed step set a pipeline's shape is drawn from"
  ],
  [
   "examples/small_molecule_binding/run_small_molecule_binding.py",
-  210,
-  "def _adaptive_decision_sync",
+  189,
+  "async def adaptive_decision(",
   "S3 - the hand-written state machine the shape lives in"
  ],
  [
@@ -289,15 +289,15 @@
  ],
  [
   "examples/small_molecule_binding/small_molecule_binding.py",
-  1154,
+  1118,
   "interact      is not None and interact",
   "S10 - the three-term fastrelax gate, inside the function that parses the output"
  ],
  [
-  "examples/small_molecule_binding/run_nonadaptive.py",
-  32,
+  "examples/small_molecule_binding/run_small_molecule_binding.py",
+  434,
   "routes = {",
-  "S3 - the declarative variant of the same science, 102 lines"
+  "S3 - the declarative variant of the same science, a 30-line function in the runner (--nonadaptive)"
  ],
  [
   "agent/toolkits/rosetta/tools/fastrelax/spec.yaml",

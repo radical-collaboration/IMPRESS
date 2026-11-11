@@ -252,7 +252,8 @@ profiles:
   # Used by the offline test, and as the degraded mode when an endpoint fails
   # mid-run.
   #
-  # NOT a faithful replay of run_nonadaptive: its route sends packmin -> relax,
+  # NOT a faithful replay of the reference pass-through route
+  # (`run_small_molecule_binding.py --nonadaptive`): its route sends packmin -> relax,
   # where the reference's refine cycle runs a second design_sequence first. It
   # is the degraded path and a plumbing fixture, not a control arm; `rules-d`
   # is the control.

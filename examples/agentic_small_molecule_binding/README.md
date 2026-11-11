@@ -131,7 +131,8 @@ emits the same stage sequence as the reference's own state machine, which
 `test_agentic_smb.py` asserts.
 
 Do not confuse it with `scripted`. That profile is the degraded path and a
-plumbing fixture, and its route table is not a faithful `run_nonadaptive` replay
+plumbing fixture, and its route table is not a faithful replay of the reference's pass-through
+route (`run_small_molecule_binding.py --nonadaptive`)
 (it sends `packmin` straight to `relax`, where the reference's refine cycle runs
 a second `design_sequence` first).
 

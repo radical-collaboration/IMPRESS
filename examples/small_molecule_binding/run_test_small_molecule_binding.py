@@ -8,9 +8,15 @@ to be tested end-to-end on any machine.
 
 Usage:
     cd examples/small_molecule_binding
-    python run_test_small_molecule_binding.py
+    python run_test_small_molecule_binding.py                    # adaptive
+    python run_test_small_molecule_binding.py --nonadaptive      # pass-through
+    python run_test_small_molecule_binding.py --nonadaptive --selection first  # naive
+
+The flags mirror run_small_molecule_binding.py's, so each benchmark mode can
+be rehearsed offline before it is run on Delta.
 """
 
+import argparse
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -20,7 +26,7 @@ from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 from impress import ImpressManager, PipelineSetup
 from small_molecule_binding import SmallMoleculeBindingPipeline
-from run_small_molecule_binding import adaptive_decision
+from run_small_molecule_binding import adaptive_decision, nonadaptive_decision
 
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -144,7 +150,7 @@ def check_fastrelax_interface_shortcircuit() -> None:
     assert _stage_metrics_improving(cur, prev, interface_specs) is False
 
 
-async def run_mock_test() -> None:
+async def run_mock_test(nonadaptive: bool = False, selection: str = "best") -> None:
     pipeline_name = "p1"
     setup_mock_inputs(pipeline_name)
 
@@ -156,7 +162,9 @@ async def run_mock_test() -> None:
     # declared on the default one.  The production runner names "local"
     # because its default backend is `compute`; both arrive here as a task,
     # so this mock run now rehearses production's routing, not a second path.
-    adaptive_task = flow.function_task(adaptive_decision)
+    policy = nonadaptive_decision if nonadaptive else adaptive_decision
+    print(f"[POLICY] {policy.__name__}, selection={selection}", flush=True)
+    adaptive_task = flow.function_task(policy)
 
     pipeline_setups: List[PipelineSetup] = [
         PipelineSetup(
@@ -169,6 +177,7 @@ async def run_mock_test() -> None:
                 "num_refine_cycles":  3,
                 "mpnn_ensemble_size": 10,
                 "max_tasks":          100,
+                "selection":          selection,
             },
         )
     ]
@@ -183,4 +192,8 @@ if __name__ == "__main__":
     check_boltz_filename_derivation()
     check_mpnn_candidate_selection()
     check_fastrelax_interface_shortcircuit()
-    asyncio.run(run_mock_test())
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--nonadaptive", action="store_true")
+    ap.add_argument("--selection", choices=("best", "first"), default="best")
+    args = ap.parse_args()
+    asyncio.run(run_mock_test(args.nonadaptive, args.selection))
