@@ -51,6 +51,21 @@ dev = [
 doc = [
     "mkdocs==1.5.3",
     "mkdocs-material==9.5.9",
+    # Renders the executed notebooks under docs/notebooks/ into the site. Pinned like the
+    # two above and resolved against them: it wants mkdocs>=1.4,<2 and mkdocs-material
+    # >9.0.0, so neither pin moves.
+    #
+    # NOT the newest. 0.27.0 declares requires-python >=3.12, and ci.yml runs both the
+    # `docs` and `docs-deploy` jobs on 3.11, so pinning it turns those jobs red on a
+    # resolution error rather than on anything about the documentation. 0.26.3 is the last
+    # release that still declares >=3.9, which also keeps `tox -e docs` working for a
+    # contributor on any interpreter this package supports. Move the pin when those two
+    # jobs move.
+    #
+    # It brings an nbconvert/jupyter stack of about forty packages into both jobs, which
+    # is the price of the static render. The plugin runs with `execute: false`, so the
+    # build never executes a notebook.
+    "mkdocs-jupyter==0.26.3",
     "mkdocstrings[python]>=0.26.1",
     "mkdocs-gen-files==0.5.0",
     "mkdocs-literate-nav==0.6.1",
@@ -116,11 +131,18 @@ exclude_lines = [
 #   unparseable  a deliberate FASTA fixture value in tests/test_real_toolkits.py, and a valid
 #                variant spelling; the toolkit's own fixtures are named unparsed_* to match.
 ignore-words-list = "ser,fro,unparseable"
+# `codespell ... docs` walks docs/ recursively and does not filter by file type, so the
+# committed notebooks under docs/notebooks/ put their JSON in front of it -- including the
+# base64 of every PNG output, which yields findings that are not words at all and cannot
+# be fixed. Nothing checks notebook prose automatically as a result; it is reviewed in the
+# diff like any other documentation. Narrow this to `docs/notebooks/*.ipynb` if a notebook
+# ever lands somewhere codespell should still read.
 skip = """
 .git,
 .github,
 __pycache__,
 build,
 dist,
-.*egg-info
+.*egg-info,
+*.ipynb
 """

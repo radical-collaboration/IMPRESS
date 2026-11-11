@@ -41,6 +41,7 @@ nav:
   - Getting Started:
     - Installation: getting-started/installation.md
     - Build A Protein Pipeline: getting-started/quick-start.md
+    - Run It In Colab: notebooks/impress_adaptive_quickstart.ipynb
   - Concepts:
     - Architecture: concepts/architecture.md
     - Adaptive Execution: concepts/adaptive-execution.md
@@ -94,6 +95,15 @@ nav:
 
 plugins:
   - search
+  # The two notebooks under docs/notebooks/ are committed WITH their outputs, so the site
+  # shows a real run to a reader who never opens Colab. `execute: false` is what makes that
+  # safe: a build that re-ran them would need impress, impress-a, a clone and about two
+  # minutes, in a job whose point is to check links. Re-execute them by hand and commit the
+  # result when the output they show goes stale.
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      include: ["*.ipynb"]
   - mkdocstrings:
       handlers:
         python:
