@@ -11,6 +11,7 @@ IMPRESS is an asynchronous framework for managing complex protein design pipelin
 - **Adaptive Execution**: Dynamic pipeline spawning
 - **HPC Optimized**: High-performance async execution
 - **Flexible Architecture**: Standard and user-defined pipelines
+- **Autonomous Campaigns**: [IMPRESS-A](impress-a/index.md) composes a new workflow each cycle
 
 
 ## Quick Example
@@ -58,3 +59,4 @@ hand it to `ImpressManager`, and shut it down when `start()` returns.
 - [Adaptive Execution](concepts/adaptive-execution.md) — a worked walkthrough of adaptive child-pipeline spawning
 - [Examples](examples/protein-binding.md) — real HPC workflows: protein binding, discontinuous scaffolds, small molecule binding
 - [API Reference](reference/index.md) — full class and method documentation
+- [IMPRESS-A](impress-a/index.md) — a separate package (`impress_a`) for autonomous campaigns: instead of running a fixed pipeline, it decides what experiment to run next and composes the workflow for it

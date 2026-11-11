@@ -65,6 +65,13 @@ decision rules are held fixed while the execution path varies — which is what
 separates the harness's contribution from the decision-maker's. Every other arm
 changes both at once.
 
+The `-d` names control model **D**, the deterministic arm of the four-model
+taxonomy documented under
+[Control Models](../impress-a/reference/control-models.md). The letter is the
+shared vocabulary, not a shared implementation: this profile runs the reference
+example's decision rules, where IMPRESS-A's own model D resolves a goal to a
+specification and picks tasks by output type.
+
 Each pipeline writes `llm_transcript.jsonl` — every turn, tool call, result and
 token count — which is both the comparison data and what makes a run
 replayable.

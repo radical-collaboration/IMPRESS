@@ -36,7 +36,7 @@ the work. The composer inlines P6 tools and validation gate 4 rejects any graph 
 **P8 is forward-declared.** No tool in the current registry is P8. It exists so the data model, the
 storage layout and the control plane are shaped correctly now, when that is nearly free, rather than
 retrofitted later. A measurement arrives out-of-band as an update to an existing design node, not as a
-task result — see `docs/decisions/0012`.
+task result — see [decision 0012](../decisions/0012-one-property-two-sources.md).
 
 ## Orthogonal attributes
 

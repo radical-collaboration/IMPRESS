@@ -28,7 +28,11 @@ Issues = "https://github.com/radical-collaboration/IMPRESS/issues"
 
 [project.optional-dependencies]
 
-lint = ["ruff"]
+# Pinned to one minor. Unpinned, a ruff release adds rules overnight and turns `tox -e lint`
+# red on code nobody touched - and the ceiling for both projects is zero, so there is no
+# budget to absorb that. The same pin is in agent/pyproject.toml's `dev` extra and in
+# tox.ini's lint env, which is what CI runs; move all three together.
+lint = ["ruff>=0.17,<0.18"]
 
 # examples/agentic_small_molecule_binding: an LLM reasoner reached through an
 # OpenAI-compatible endpoint. Not needed by any other example.
@@ -89,7 +93,9 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["radical.asyncflow"]
+# `impress`, not `radical.asyncflow` - this measured the coverage of a DEPENDENCY, while
+# `tox -e coverage` passes `--cov=impress` on the command line and silently disagreed with it.
+source = ["impress"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
@@ -101,6 +107,15 @@ exclude_lines = [
 ]
 
 [tool.codespell]
+# Run by tox -e lint. Each of these three is a word this repository means, not a typo, and
+# each was a finding before it was listed:
+#   ser          serine, in the amino-acid three-letter -> one-letter map
+#                (agent/src/impress_a/tools/boltz_agents.py). Will recur in a protein codebase.
+#   fro          inside a quoted description of overlapping figure labels - "no fronto fro" is
+#                literally what the panel rendered (agent/src/impress_a/analysis/mock_figures.py).
+#   unparseable  a deliberate FASTA fixture value in tests/test_real_toolkits.py, and a valid
+#                variant spelling; the toolkit's own fixtures are named unparsed_* to match.
+ignore-words-list = "ser,fro,unparseable"
 skip = """
 .git,
 .github,

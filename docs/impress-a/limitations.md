@@ -10,7 +10,7 @@ designs, and results should be reported that way.
 
 The architecture anticipates this changing: `Property` carries a source and authority so a measurement
 supersedes a prediction for the same objective without any change to a campaign specification, and
-`ingest_measurement` accepts assay results even after a campaign terminates (`docs/decisions/0012`). What
+`ingest_measurement` accepts assay results even after a campaign terminates ([decision 0012](decisions/0012-one-property-two-sources.md)). What
 is *not* built is the other half — nothing selects which designs to send for assay or manages samples.
 
 **Some problem classes need a human-supplied hypothesis.** Where a design protocol depends on expert

@@ -69,6 +69,31 @@ The protein binding and small molecule binding examples also ship
 rhapsody, PyTorch, PyRosetta, Boltz-2, and so on) on NCSA Delta. See
 [Examples](../examples/protein-binding.md).
 
+### IMPRESS-A (optional)
+
+[IMPRESS-A](../impress-a/index.md) is a second package in this repository,
+under `agent/`. The clone above brings it with it, but `pip install .` does not
+install it: it is its own distribution (`impress_a`, Python >= 3.10) with its
+own dependency set, and it is not on PyPI.
+
+Install it from `agent/`, and install `impress` first — IMPRESS-A depends on it,
+and because `impress` is unreleased, resolving IMPRESS-A first would send pip to
+PyPI looking for that name:
+
+```bash
+cd agent
+pip install -e ..          # impress, from the repository root, FIRST
+pip install -e ".[dev]"
+```
+
+`agent/scripts/dev_setup.sh` does this in a dedicated `.venv` and then verifies
+that `impress` resolved to this repository rather than to an index. Check the
+install with `impress-a tools`, which lists the registered toolkit.
+
+The two packages are not installed into one merged environment: Impress targets
+Python >= 3.9 with radical.pilot, IMPRESS-A >= 3.10 with langgraph, rhapsody and
+biopython.
+
 ---
 
 ## Step 3: Verify Installation
@@ -111,5 +136,6 @@ Next time you want to work with Impress, just activate the environment again.
 - Explore the [API Reference](../reference/index.md)
 - Read [Architecture](../concepts/architecture.md) to understand the core framework
 - Build your own workflows with [Build A Protein Pipeline](quick-start.md)
+- See [IMPRESS-A](../impress-a/index.md) for autonomous campaigns that compose a workflow per cycle
 
 ---
