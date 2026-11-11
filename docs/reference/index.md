@@ -14,3 +14,8 @@ generated directly from the source docstrings.
 
 See [Architecture](../concepts/architecture.md) for a narrative overview of
 how these pieces fit together.
+
+This section covers `impress` only. [IMPRESS-A](../impress-a/index.md)
+(`impress_a`) is a separate package, and its reference documentation is
+hand-written rather than generated from docstrings — it lives in its own
+section, not here.

@@ -194,9 +194,18 @@ all.
 Because child pipelines can themselves have an `adaptive_fn` that spawns
 further children, this protocol supports arbitrarily deep or wide trees of
 self-spawning pipelines, all drained by the same manager loop before
-`start()` returns. The three example workflows under
+`start()` returns. The example workflows under
 [Examples](../examples/protein-binding.md) each use this protocol
-differently — see each page's Adaptive Flow section for specifics.
+differently — see each page's Adaptive Flow section for specifics. Three of them
+write `adaptive_fn` as a hand-written decision function; the fourth,
+[Agentic Small Molecule Binding](../examples/agentic-small-molecule-binding.md),
+replaces it with a model.
+
+Taking that one step further is a different architecture rather than a different
+`adaptive_fn`: if the shape of the workflow is itself chosen each cycle rather
+than parameterised, the graph cannot be written down ahead of time. That is what
+[IMPRESS-A](../impress-a/index.md) does, as a separate package built on the
+classes described here.
 
 ## PipelineSetup
 
