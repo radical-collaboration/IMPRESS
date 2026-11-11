@@ -204,6 +204,9 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     # property of how the CLI assembled it, not of the two-half contract that `policy`
     # defines and that `impress-a control` honours across a socket.
     pair.reasoner_sink = opts.sink
+    # Same late binding, for a model served by the campaign's own engine: the oracle needs a
+    # `CampaignSession`, and there is none until the manager (or a remote session) exists.
+    pair.session_oracle = opts.oracle if hasattr(opts.oracle, "bind") else None
     return pair
 
 
@@ -290,9 +293,29 @@ def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
     Loaded here rather than in `policy/` because `policy` may import `core` only and reading a
     YAML file is not `core`'s business either; the same reason `_replay_records` lives here.
     """
+    chosen = _load_profile(profile)
+    if chosen is None:
+        return None
+    from ..policy.llm import build_oracle
+    return build_oracle(chosen, stages=list(spec.stages) or None)
+
+
+def _inference_for(profile: str | None) -> dict[str, Any]:
+    """`CampaignSpec.inference` for a profile whose model runs on the campaign's own engine.
+
+    Empty for every other kind. Read by the process that hosts the ENGINE - `run`, or `serve`
+    in the split - which is not always the process that hosts the reasoner: under
+    `serve` + `control` the model is served by the first and called by the second.
+    """
+    chosen = _load_profile(profile)
+    return chosen.inference() if chosen is not None else {}
+
+
+def _load_profile(profile: str | None) -> Any:
+    """The named `ModelProfile`, or `None` when no profile is named."""
     if not profile:
         return None
-    from ..policy.llm import build_oracle, load_profiles
+    from ..policy.llm import load_profiles
     # The PACKAGED file, unless an operator names another one explicitly. It used to try the
     # current working directory first, and that is a credential path rather than a
     # convenience: a profile's `base_url` is where the request goes and its `api_key_env`
@@ -317,7 +340,7 @@ def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
     log.info("control model: profile %s from %s (kind=%s, model=%s, endpoint=%s, key=%s)",
              profile, path, chosen.kind, chosen.model, chosen.base_url or "-",
              chosen.api_key_env or "none")
-    return build_oracle(chosen, stages=list(spec.stages) or None)
+    return chosen
 
 
 def _declares_halves(spec_letter: str, plan_letter: str) -> bool:
@@ -498,7 +521,12 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
                                caller_timeout_s=caller_timeout_s)
         log.info("serving campaign with %s attached: an external caller steers it in place, "
                  "rather than a control process attaching to it", reasoner.name)
+    # Even with no reasoner attached: in the split, the control process names a
+    # `rhapsody_vllm` profile and calls `infer`, and the model has to be on THIS engine.
+    spec.inference = _inference_for(profile)
     mgr = CampaignManager(spec, reasoner, reg)
+    if (oracle := getattr(reasoner, "session_oracle", None)) is not None:
+        oracle.bind(mgr.session)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
     if heartbeat_s is None:
@@ -555,6 +583,8 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
                     target_front=obs.target_front)
         pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile,
                           replicas=obs.replicas)
+        if (oracle := getattr(pair, "session_oracle", None)) is not None:
+            oracle.bind(session)      # the model is on the serving process's engine
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         # The campaign's OWN bounds, from the observation. `max_turns=10_000` was here, and
         # it is not a neutral default: every in-process arm is driven through
@@ -608,6 +638,7 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
     pair.reasoner_sink = opts.sink
+    pair.session_oracle = client if hasattr(client, "bind") else None
     return pair
 
 
@@ -848,8 +879,11 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
+    spec.inference = _inference_for(profile)
     mgr = CampaignManager(spec, policy, reg)
     mgr.add_prov_listener(_prov_heartbeat)
+    if (oracle := getattr(policy, "session_oracle", None)) is not None:
+        oracle.bind(mgr.session)
     # The halves were built before the manager existed, so their sink has had nowhere to
     # write until now. Everything a reasoner records - its prompts, its replies, the model
     # id that answered, how long each call took and whether it degraded - reaches

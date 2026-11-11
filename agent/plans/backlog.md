@@ -2209,7 +2209,17 @@ Decided 2026-11-11: each reasoner call becomes a prompt task on an `ai` route, r
 core operation `CampaignSession.infer`, so the reasoner's GPU and its calls sit on the same engine
 as the tools. Upstream limits apply on either route: `max_tokens` and `temperature` are ignored,
 there is no chat template, no `response_format`, and token counts are word counts
-([upstream doc](../../plans/upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)). Open.
+([upstream doc](../../plans/upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)).
+**Built, not yet run on hardware** (commits on `agent/one-engine` after `c3a36fc`):
+`CampaignSession.infer` on every surface, the executor's `ai` route and `PromptResults` (the
+backend's answer never reached asyncflow; see
+[upstream](../../plans/upstream/rhapsody-vllm-prompt-result-not-stdout.md)), the
+`rhapsody_vllm` profile kind (`local-dragon` in `models.yaml`, model still `REPLACE-ME`), and
+`SessionOracle`, bound by `run`, `serve` and `control`. Tested against a stand-in that completes
+exactly as the real backend does. Open on hardware: that Dragon Inference takes the FIRST
+`num_gpus` devices of its node, which the tools' placement now assumes
+(`StageExecutor._gpu_for`), and the model's start-up time inside `backend_startup_timeout_s`.
+Needs a model choice first.
 
 **I5. `TaskUsage.host`/`pid` changed meaning.** They name where the adapter ran - the campaign host,
 on the `local` route - not where the binary ran. The binary's host is in the engine's telemetry.

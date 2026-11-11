@@ -75,7 +75,7 @@ class StageExecutor:
     def __init__(self, flow: Any, reg: Registry, backend_kind: str = "concurrent",
                  workdir: str | None = None, gpus_per_node: int = 1, *,
                  threads: int = 1, hosts: tuple[str, ...] = (),
-                 command_slots: int | None = None) -> None:
+                 command_slots: int | None = None, gpu_offset: int = 0) -> None:
         self.flow, self.reg, self.backend_kind = flow, reg, backend_kind
         #: How many commands may run at once on a backend that does not bound them itself -
         #: see `Launcher.slots`. Shared by every Stage on this engine.
@@ -89,9 +89,25 @@ class StageExecutor:
         self.threads = threads
         #: The compute backend's hosts, from its topology. Named only when there are several.
         self.hosts = tuple(hosts)
+        #: GPUs at the start of each node that tools must not be given, because the campaign's
+        #: own model holds them (`CampaignSpec.inference`). See `_gpu_for`.
+        self.gpu_offset = gpu_offset
 
     def _gpu_for(self, lineage: int) -> int | None:
-        return gpu_for(lineage, self.gpus_per_node)
+        """Round-robin over the devices tools may use.
+
+        With a local model holding the first `gpu_offset` devices, tools round-robin over the
+        rest - and are pinned even when only one is left, because "do not pin" would let a
+        tool land on the model's GPU. ASSUMES Dragon Inference takes the first devices of its
+        node: its `HardwareConfig` names a count, not ids. Unverified on hardware (backlog I4).
+        """
+        if not self.gpu_offset:
+            return gpu_for(lineage, self.gpus_per_node)
+        usable = self.gpus_per_node - self.gpu_offset
+        if usable < 1:
+            raise ValueError(f"the local model holds {self.gpu_offset} of "
+                             f"{self.gpus_per_node} GPUs per node; no GPU is left for tools")
+        return self.gpu_offset + lineage % usable
 
     def placement(self, tool_id: str, lineage: int) -> Placement:
         """Where one lineage's node of `tool_id` runs: its share of threads and - for a tool

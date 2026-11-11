@@ -1456,7 +1456,8 @@ class CampaignExecutor:
                                         gpus_per_node=self.spec.site.gpus_per_node,
                                         threads=threads, hosts=hosts,
                                         command_slots=command_slots(self.spec.backend,
-                                                                    self.spec.backend_config))
+                                                                    self.spec.backend_config),
+                                        gpu_offset=self._model_gpus())
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))
@@ -1604,6 +1605,23 @@ class CampaignExecutor:
             log.warning("engine: telemetry stop failed: %r", exc)
         finally:
             self.telemetry = None
+
+    def _model_gpus(self) -> int:
+        """GPUs per node the campaign's own model holds, when it shares the tools' node.
+
+        Only for a model on the first node (`node_offset` 0) of a one-node layout - which is
+        every allocation run so far. A model given whole nodes of its own takes nothing from
+        the tools' nodes.
+        """
+        hw = (self.spec.inference or {}).get("hardware") or {}
+        if not self.spec.inference or int(hw.get("node_offset", 0) or 0) != 0:
+            return 0
+        if self.spec.site.nodes > 1 and int(hw.get("num_nodes", 1) or 1) < self.spec.site.nodes:
+            return 0
+        wanted = int(hw.get("num_gpus", 1))
+        # -1 is Dragon's "every GPU on the node": then nothing is left for tools, and
+        # `StageExecutor._gpu_for` says so rather than pinning a tool onto the model.
+        return self.spec.site.gpus_per_node if wanted < 0 else wanted
 
     def _check_site_against_topology(self) -> None:
         """Say so when the declared site promises more GPUs than the backend can see.

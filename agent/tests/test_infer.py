@@ -168,3 +168,113 @@ async def test_a_remote_reasoner_reaches_the_model_on_the_execution_side(tmp_pat
             assert await session.infer("plan", "which tool?") == "echo:which tool?"
     finally:
         await mgr.executor.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# The reasoner side: a `rhapsody_vllm` profile and the oracle that calls `infer`.
+# ---------------------------------------------------------------------------
+
+def test_a_rhapsody_vllm_profile_becomes_the_engines_inference_config():
+    from impress_a.policy.llm import ModelProfile, SessionOracle, build_oracle
+    p = ModelProfile(name="local", kind="rhapsody_vllm", model="meta-llama/Llama-3.1-8B",
+                     max_tokens=2048, temperature=0.0, hardware={"num_gpus": 1},
+                     model_options={"tp_size": 1}, hf_token_env="HF_TOKEN")
+    assert p.is_live, "it makes model calls, so it is a live arm"
+    assert p.inference() == {
+        "model": {"model_name": "meta-llama/Llama-3.1-8B", "max_tokens": 2048,
+                  "temperature": 0.0, "tp_size": 1},
+        "hardware": {"num_gpus": 1}, "hf_token_env": "HF_TOKEN"}, \
+        "sampling stays pinned from the profile, as for every other kind"
+    assert isinstance(build_oracle(p), SessionOracle)
+    assert ModelProfile(name="hosted", kind="openai_compat").inference() == {}
+
+
+def test_a_barred_vendor_is_refused_for_a_local_model_too(tmp_path):
+    """The provenance rule bars a model by any route, and serving one inside the allocation is
+    a route."""
+    from impress_a.policy.llm import LLMError, load_profiles
+    f = tmp_path / "models.yaml"
+    f.write_text("profiles:\n  local:\n    kind: rhapsody_vllm\n    model: Qwen/Qwen2.5-7B\n")
+    with pytest.raises(LLMError, match="qwen"):
+        load_profiles(f)
+
+
+async def test_the_oracle_refuses_until_bound_and_carries_its_exchange():
+    from impress_a.policy.llm import LLMError, ModelProfile, SessionOracle
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        async def infer(self, node, prompt):
+            self.calls.append((node, prompt))
+            return '{"next": "ligandmpnn_design"}' if len(self.calls) > 1 else "not json"
+
+    oracle = SessionOracle(ModelProfile(name="l", kind="rhapsody_vllm", model="m"))
+    with pytest.raises(LLMError, match="no campaign session"):
+        await oracle.think("plan", "which tool?", {"next": "str"})
+    session = Session()
+    oracle.bind(session)
+    with pytest.raises(ValueError, match="did not return JSON"):
+        await oracle.think("plan", "which tool?", {"next": "str"})   # ask() retries this
+    assert await oracle.think("plan", "try again", {"next": "str"}) == \
+        {"next": "ligandmpnn_design"}
+    retry = session.calls[1][1]
+    assert "which tool?" in retry and "not json" in retry and retry.endswith("Assistant:"), \
+        "the corrective retry carries the exchange so far"
+    assert oracle.token_counts_estimated and oracle.prompt_tokens > 0
+
+
+async def test_the_oracle_reaches_the_model_on_the_campaigns_engine(tmp_path, monkeypatch):
+    from impress_a.policy.llm import ModelProfile, SessionOracle
+    model = FakeVllm(reply=lambda prompt: '{"done": true}')
+
+    async def make_ai_backend(inference):
+        return await PromptResults(model)
+
+    monkeypatch.setattr(backend_mod, "make_ai_backend", make_ai_backend)
+    mgr = CampaignManager(_spec("t-oracle", tmp_path, {"model": {"model_name": "m"}}),
+                          Idle(), Registry().load())
+    await mgr.executor.start()
+    try:
+        oracle = SessionOracle(ModelProfile(name="l", kind="rhapsody_vllm", model="m"))
+        oracle.bind(mgr.session)
+        assert await oracle.think("specify", "anything left?", {"done": "bool"}) == \
+            {"done": True}
+        assert model.prompts and model.prompts[0].startswith("User: anything left?")
+    finally:
+        await mgr.executor.shutdown()
+
+
+def test_tools_are_not_placed_on_the_local_models_gpus():
+    from impress_a.exec.stage import StageExecutor
+    reg = Registry().load()
+    s = StageExecutor(None, reg, "dragon", gpus_per_node=4, gpu_offset=1)
+    assert [s._gpu_for(i) for i in range(4)] == [1, 2, 3, 1], "GPU 0 is the model's"
+    assert StageExecutor(None, reg, gpus_per_node=2, gpu_offset=1)._gpu_for(5) == 1, \
+        "one GPU left is still pinned, or a tool could land on the model's"
+    with pytest.raises(ValueError, match="no GPU is left"):
+        StageExecutor(None, reg, gpus_per_node=1, gpu_offset=1)._gpu_for(0)
+
+
+def test_the_executor_reserves_what_the_profile_asks_for(tmp_path):
+    def model_gpus(hardware):
+        spec = _spec("t-res", tmp_path, {"model": {"model_name": "m"}, "hardware": hardware})
+        spec.site = SiteCaps(gpu_api="cuda", gpus_per_node=4)
+        return CampaignManager(spec, Idle(), Registry().load()).executor._model_gpus()
+
+    assert model_gpus({"num_gpus": 1}) == 1
+    assert model_gpus({"num_gpus": -1}) == 4, "Dragon's -1 is every GPU on the node"
+    assert model_gpus({"num_gpus": 2, "node_offset": 1}) == 0, "a node of its own"
+
+
+def test_the_cli_hands_the_engine_its_model_and_the_halves_an_oracle_to_bind(tmp_path):
+    """`run`/`serve` fill `spec.inference` from the profile (the engine side); `build_roles`
+    hands back the oracle so whichever process holds a session can bind it."""
+    from impress_a.cli import _inference_for, build_roles
+    from impress_a.policy.llm import SessionOracle
+    assert _inference_for("local-dragon")["hardware"]["num_gpus"] == 1
+    assert _inference_for(None) == {} and _inference_for("rehearsal") == {}
+    pair = build_roles("B", _spec("t-cli", tmp_path, {}), profile="local-dragon")
+    assert isinstance(pair.session_oracle, SessionOracle)
+    assert build_roles("D", _spec("t-cli-d", tmp_path, {})).session_oracle is None
