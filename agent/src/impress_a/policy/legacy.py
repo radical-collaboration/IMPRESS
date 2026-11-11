@@ -96,7 +96,8 @@ class LegacyPlanner(BasePlanner):
         self.pending_backtrack: tuple[str, str] | None = None
         self.pending_human: tuple[str, dict] | None = None
 
-    def _render(self, intent: ExperimentIntent, spec: Spec) -> Stage:
+    def _render(self, intent: ExperimentIntent, spec: Spec,
+                orphans: list[str] | None = None) -> Stage:
         open_ids = [o.id for o in spec.ready()]
         tasks: list[TaskMapping] = []
         for lineage in range(max(1, intent.replicas)):
@@ -111,12 +112,16 @@ class LegacyPlanner(BasePlanner):
                     params=dict(intent.params.get(tool, {})),
                     lineage=lineage))
         return Stage(spec_generation=spec.generation, tasks=tasks,
+                     # A wrapped legacy policy has no opinion about cancellation - it never
+                     # knew tasks existed - so the orphans the executor reported are carried
+                     # through unchanged. A real Planner decides; this one cannot withhold.
+                     cancels=list(orphans or []),
                      rationale=f"legacy: {intent.goal[:60]}")
 
     async def plan(self, spec: Spec, ctx: PlanningContext) -> Stage | None:
         decision = await self.inner.decide(ctx.observation)
         if isinstance(decision, ComposeAndRun):
-            return self._render(decision.intent, spec)
+            return self._render(decision.intent, spec, ctx.orphans)
         if isinstance(decision, Stop):
             self.pending_stop = decision.reason
         elif isinstance(decision, Backtrack):

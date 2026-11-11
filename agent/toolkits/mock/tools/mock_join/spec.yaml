@@ -1,0 +1,32 @@
+# The only tool in any toolkit with TWO typed inputs, which is why it exists.
+#
+# `TaskNode.inputs` - the typed port map the composer computes and gate 1 type-checks - was
+# read by the validator and thrown away by the dispatcher, which keyed inputs `dep0..depN`
+# positionally. Every real adapter then recovered its artifact by SCANNING the payloads for
+# one whose `outputs` happened to contain the port it wanted. That works only while a node has
+# exactly one upstream dependency: a node with two typed inputs type-checks at composition and
+# mis-wires at runtime, silently, because the scan returns whichever dep comes first.
+#
+# Nothing in the toolkits could express that shape, so nothing caught it. This tool does, and
+# its agent ASSERTS what it was handed rather than reporting it - an Aim hierarchy with real
+# dependencies hits this on its first branch.
+id: mock_join
+toolkit: mock
+version: "0.1"
+pattern: P1
+entry: impress_a.tools.mock_agents.JoinAgent
+resources: {gpus: 1, cores: 2, walltime_s: 15}
+gpu_portability: {cuda: proven}
+inputs:
+  backbone: {type: Backbone}
+  sequences: {type: ProteinSequence}
+outputs:
+  complex: {type: Complex}
+metrics: [wired_correctly, inputs_seen]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  # An integrity gate, not an acceptance one: a mis-wired input is the tool being handed the
+  # wrong thing, not a design falling short (decision 0013).
+  - {id: metrics_reported, params: {metrics: [wired_correctly, inputs_seen]}}
+  - {id: metric_in_range, params: {metric: wired_correctly, min: 1.0}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.01}}

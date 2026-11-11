@@ -7,18 +7,36 @@ import asyncio
 
 import pytest
 
+from impress_a.compose.composer import Composer
+from impress_a.compose.graph import TaskGraph, TaskNode
 from impress_a.compose.interlock import Scrutiny
 from impress_a.compose.validate import SiteCaps
 from impress_a.control.plane import InProcessControlPlane
-from impress_a.core.artifacts import AUTHORITY_ASSAY, Property, PropertySource, SourceKind
+from impress_a.core.artifacts import (
+    AUTHORITY_ASSAY,
+    AUTHORITY_ML_PREDICTOR,
+    Property,
+    PropertySource,
+    SourceKind,
+)
 from impress_a.core.decision import ExperimentIntent
 from impress_a.core.goal import Goal
 from impress_a.core.pareto import Direction, Objective
 from impress_a.core.qc import QCVerdict
 from impress_a.core.session import CampaignStopped, SubmissionRejected
-from impress_a.core.spec import Spec, Stage, TaskState
+from impress_a.core.spec import (
+    Aim,
+    Spec,
+    SpecObjective,
+    SpecRevision,
+    Stage,
+    TaskRecord,
+    TaskState,
+)
 from impress_a.core.tree import DesignNode
 from impress_a.core.types import ArtifactType
+from impress_a.exec.backend import make_engine
+from impress_a.exec.dispatch import Dispatcher
 from impress_a.manager import CampaignManager, CampaignSpec
 from impress_a.policy.agentic import FourNodePolicy
 from impress_a.policy.explicit import ThresholdPolicy
@@ -27,6 +45,7 @@ from impress_a.policy.legacy import LegacyPlanner
 from impress_a.policy.oracle import OraclePolicy
 from impress_a.policy.wrappers import NullPolicy, RuleCorrectionsPolicy
 from impress_a.runtime.roles import _intent_for
+from impress_a.tools.mock_agents import _upstream
 from impress_a.tools.registry import Registry
 
 ROOT = "/tmp/impress_a_tests"   # campaign root, and where direct engines put their sessions
@@ -1184,3 +1203,251 @@ async def test_a_cancel_only_stage_is_not_an_error_but_runs_nothing(reg, tmp_pat
         assert ex.dispatched == 0
     finally:
         await ex.shutdown()
+
+
+async def test_a_two_input_node_receives_each_input_on_its_declared_port(reg, tmp_path):
+    """The defect this phase exists for, and it could not be expressed before `mock_join`.
+
+    `TaskNode.inputs` - the typed port map the composer computes and gate 1 type-checks - was
+    read by the validator and discarded by the dispatcher, which keyed inputs `dep0..depN`
+    positionally. Every real adapter then recovered its artifact by SCANNING the payloads for
+    one whose `outputs` contained the port it wanted. That works only while a node has exactly
+    one upstream dependency: with two typed inputs the scan returns whichever dep came first,
+    so the graph type-checks at composition and mis-wires at runtime, silently.
+
+    An Aim hierarchy with real dependencies hits that on its first branch, which is why it is
+    fixed before the Runner and before anything composes a branching Stage. `mock_join`
+    asserts what it was handed rather than reporting it, so a mis-wire fails an integrity gate
+    instead of producing a plausible number.
+    """
+    g = TaskGraph()
+    g.add(TaskNode(id="gen", tool="mock_generate", seed=1))
+    g.add(TaskNode(id="des", tool="mock_design", deps=["gen"],
+                   inputs={"backbone": "gen.designs"}, seed=2))
+    # Both ports wired explicitly, and deliberately in an order that does NOT match the
+    # dependency order: `backbone` comes from the FIRST dep and `sequences` from the second,
+    # so a positional reading gets them the wrong way round.
+    g.add(TaskNode(id="join", tool="mock_join", deps=["gen", "des"],
+                   inputs={"backbone": "gen.designs", "sequences": "des.sequences"},
+                   seed=3))
+
+    flow, _ = await make_engine("concurrent", {"workers": 3}, work_dir=str(tmp_path))
+    try:
+        d = Dispatcher(flow, reg)
+        results = await d.collect(d.submit(g, run_id="r-join"))
+    finally:
+        await flow.shutdown()
+
+    assert results.failures == {}, results.failures
+    joined = results.per_task["join"]
+    assert joined.metrics["wired_correctly"] == 1.0, (
+        "each input must arrive on its declared port; a positional reading swaps them")
+    assert joined.metrics["inputs_seen"] == 2.0
+    assert joined.qc.verdict is not QCVerdict.FAIL
+
+
+async def test_an_ordering_only_dependency_still_reaches_the_adapter(reg, tmp_path):
+    """A real edge with no typed port behind it keeps its `dep{i}` key.
+
+    Otherwise wiring by port would silently drop the dependency's payload, and an adapter that
+    reads `inputs` for anything other than a declared port would stop seeing it.
+    """
+    g = TaskGraph()
+    g.add(TaskNode(id="gen", tool="mock_generate", seed=1))
+    g.add(TaskNode(id="also", tool="mock_generate", seed=2))
+    # `des` declares one typed input but depends on two nodes: the second is ordering only.
+    g.add(TaskNode(id="des", tool="mock_design", deps=["gen", "also"],
+                   inputs={"backbone": "gen.designs"}, seed=3))
+
+    flow, _ = await make_engine("concurrent", {"workers": 3}, work_dir=str(tmp_path))
+    try:
+        d = Dispatcher(flow, reg)
+        results = await d.collect(d.submit(g, run_id="r-order"))
+    finally:
+        await flow.shutdown()
+
+    assert results.failures == {}, results.failures
+    assert "des" in results.per_task
+
+
+async def test_deleting_an_objective_makes_its_pending_tasks_cancellable(reg, tmp_path):
+    """DELETED -> orphan -> CANCEL, end to end, through the roles the architecture names.
+
+    The executor REPORTS orphans on the observation; the Planner DECIDES to cancel by putting
+    them in `Stage.cancels`; the executor acts on that at admission. The split is the point:
+    computing the fact needs both the task registry and the applied Spec, which only the
+    executor sees, while cancelling is a planning decision.
+
+    *Every* objective must be deleted, not any - which is why `TaskMapping.objectives` is a
+    list. A task serving one live objective among three dead ones is still wanted, and with one
+    objective per task the question could not be asked.
+    """
+    s = spec("t-orphan", control="roles", trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    await ex.start()
+    try:
+        aim = Aim(statement="a")
+        keep, drop = SpecObjective(aim=aim.id), SpecObjective(aim=aim.id)
+        ex.publish_spec(Spec().apply(SpecRevision(new_aims=[aim],
+                                                  new_objectives=[keep, drop])))
+        # Two pending tasks: one serving both objectives, one serving only the doomed one.
+        ex.tasks.record_task(TaskRecord(task_id="t-both", campaign_id=s.campaign_id,
+                                        objectives=[keep.id, drop.id],
+                                        state=TaskState.PENDING))
+        ex.tasks.record_task(TaskRecord(task_id="t-doomed", campaign_id=s.campaign_id,
+                                        objectives=[drop.id], state=TaskState.PENDING))
+        assert ex.observe().orphan_tasks == [], "nothing is deleted yet"
+
+        ex.apply_revision(SpecRevision(deleted=[drop.id]))
+        assert ex.observe().orphan_tasks == ["t-doomed"], (
+            "a task serving one live objective among dead ones is still wanted")
+
+        # The Planner's decision, as it reaches the executor.
+        ex._apply_cancels(Stage(cancels=["t-doomed"]))
+        snap = ex.tasks.snapshot()
+        assert snap["t-doomed"].state is TaskState.CANCELLED
+        assert snap["t-both"].state is TaskState.PENDING
+        assert ex.observe().orphan_tasks == [], "a cancelled task is no longer open work"
+    finally:
+        await ex.shutdown()
+
+
+async def test_a_running_task_asked_to_stop_is_recorded_orphaned_not_cancelled(reg, tmp_path):
+    """Cancellation is advisory once a callable has started, so the record must not lie.
+
+    Measured rather than assumed: the concurrent backend's `Future.cancel()` returns False once
+    the callable is running and asyncflow discards that answer, and `impress`'s own
+    `kill_parent` cancels a pipeline's asyncio Task without reaching the backend. Reclaiming
+    the GPU is backlog C4 and unsolved - so a RUNNING task asked to stop is ORPHANED, which
+    says "we wanted this stopped and could not", rather than CANCELLED, which would claim we
+    did.
+    """
+    s = spec("t-advisory", control="roles", trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    ex = CampaignManager(s, ThresholdPolicy(), reg).executor
+    await ex.start()
+    try:
+        ex.tasks.record_task(TaskRecord(task_id="t-running", campaign_id=s.campaign_id,
+                                        objectives=["o1"], state=TaskState.RUNNING))
+        ex._apply_cancels(Stage(cancels=["t-running"]))
+        assert ex.tasks.snapshot()["t-running"].state is TaskState.ORPHANED
+    finally:
+        await ex.shutdown()
+
+
+async def test_a_mock_draw_does_not_depend_on_what_its_inputs_are_called(reg, tmp_path):
+    """The same lesson twice, now pinned.
+
+    `_upstream` once seeded on `str(inputs)`, so adding a field to `GateResult` reshuffled
+    every downstream draw. The keys were still in the seed, so when the dispatcher started
+    keying inputs by declared port instead of `dep0..depN`, every draw reshuffled again and
+    the demo campaign's cycle count changed - a rename of the wiring altering the science.
+
+    A mock's draw must be a function of what upstream PRODUCED, never of how it was addressed.
+    """
+    payload = {"tool": "mock_generate", "outputs": {"designs": "backbone[1]"},
+               "metrics": {"designability": 0.9}, "qc": {"verdict": "pass"}}
+    positional = _upstream({"dep0": payload})
+    by_port = _upstream({"backbone": payload})
+    assert positional == by_port, "the key must not reach the seed"
+
+    # And an added QC field must not either - the original form of this bug.
+    noisier = dict(payload, qc={"verdict": "pass", "new_field": 1})
+    assert _upstream({"backbone": noisier}) == by_port
+
+
+async def test_a_task_reports_its_own_wall_clock(reg, tmp_path):
+    """Backlog G8: nothing timed a task, and every cost figure was the estimate repeated.
+
+    `TaskResult.cost` was `dict(self.spec.cost_model.cost)` - a copy of the spec - and the job
+    ledger recorded that same figure. The consequences were measurable from outside anyway:
+    GPU-busy at most 17% of billed GPU time, CPU efficiency around 42%, three of four GPUs
+    never holding work. None of it was attributable to a task.
+    """
+    s = spec("t-timed", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    telemetry = list(mgr.prov.read("tasks"))
+    assert telemetry, "per-task telemetry must be written, not merely available"
+    timed = [r for r in telemetry if r.get("wall_s") is not None]
+    assert timed, "every settled task carries its own wall clock"
+    assert all(r["wall_s"] > 0 for r in timed)
+    assert all(set(r["phases"]) == {"pre_process", "parameterize", "run", "post_process"}
+               for r in timed), (
+        "per-phase, so import time is separable from work - `import pyrosetta` alone took "
+        "471s off HDD against a 300s budget, and a timeout names a budget, not a cause")
+    assert all(r["host"] and r["pid"] for r in timed), \
+        "recorded where the task ran, which is the only place that can know"
+
+
+async def test_declared_and_measured_cost_are_both_recorded_and_distinct(reg, tmp_path):
+    """Two numbers, not one quietly redefined.
+
+    The declared figure feeds gate 5 and the untrusted-pattern cap, and those REFUSE graphs -
+    so it must stay conservative rather than drift toward measurement (backlog A11). Settling
+    the measured figure instead would change what admission refuses for every campaign at
+    once.
+    """
+    s = spec("t-twocosts", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    rows = [r for r in mgr.prov.read("tasks") if r.get("wall_s") is not None]
+    assert all(r["cost_estimated"] for r in rows), "the declared figure is still recorded"
+    assert all("wall_s" in r["cost_measured"] for r in rows)
+    # And the budget settled on the DECLARED figure, which is what keeps refusals comparable.
+    assert mgr.budget.spent, "something was charged"
+    declared_total = sum(v for r in rows for d, v in r["cost_estimated"].items()
+                         if d == "gpu_hours")
+    assert abs(mgr.budget.spent.get("gpu_hours", 0.0) - declared_total) < 1e-9, \
+        "the ledger must still settle the declared estimate, not the measurement"
+
+
+async def test_a_property_names_the_tool_that_reported_it(reg, tmp_path):
+    """Defect (k): every metric from every tool carried `mock_toolkit`/authority 10.
+
+    That made the whole predicted-versus-measured machinery unreachable from the normal path.
+    Decision 0012 turns on a property knowing where it came from: `outranks` compares
+    authority, so an assay can supersede an ML prediction only if the prediction says it is
+    one.
+    """
+    s = spec("t-sources", control="roles", max_cycles=1, trust_root=str(tmp_path / "trust"))
+    s.root = str(tmp_path)
+    mgr = CampaignManager(s, ThresholdPolicy(), reg)
+    await mgr.run()
+
+    sources = {p.source.name for n in mgr.tree.nodes.values() for p in n.properties.values()}
+    assert sources, "the campaign produced properties"
+    assert "mock_toolkit" not in sources, "the hardcoded source is gone"
+    assert sources <= set(reg.ids()), f"every source must be a real tool id: {sources}"
+    assert all(p.source.authority == AUTHORITY_ML_PREDICTOR
+               for n in mgr.tree.nodes.values() for p in n.properties.values()), (
+        "a mock ML predictor must not claim an authority that would outrank an assay")
+
+
+async def test_two_campaign_instances_with_different_salts_draw_differently(reg, tmp_path):
+    """Backlog G7: run labels restart at `r0001`, so without a salt every job drew the same.
+
+    17 designs on record turned out to be 5 independent folds sampled about three times each.
+    Seeding fixes length and biases fold - same-seed pairs measured median TM 0.82 against
+    0.28 across seeds - and does not reproduce coordinates, so this is variance reduction
+    rather than exact pairing. An empty salt reproduces the old behaviour exactly, which is
+    what keeps every recorded figure comparable.
+    """
+    def seeds(salt):
+        g = Composer(reg, seed_salt=salt).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001")
+        return sorted(n.seed for n in g.nodes.values())
+
+    assert seeds("exp-a") != seeds("exp-b"), "different experiments must draw differently"
+    assert seeds("exp-a") == seeds("exp-a"), "and the same salt must reproduce"
+    assert seeds("") == sorted(
+        Composer(reg).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001").nodes[k].seed
+        for k in Composer(reg).compose(
+            ExperimentIntent(goal="g", stages=CHAIN, replicas=2), "r0001").nodes), (
+        "an empty salt must reproduce the pre-G7 draw exactly")

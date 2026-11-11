@@ -34,6 +34,8 @@ def card_for(spec: ToolSpec) -> TaskCard:
         gates=[GateCard(id=g.id, role=g.role, metric=(g.params or {}).get("metric"))
                for g in spec.qc_gates],
         declared_cost=dict(spec.cost_model.cost),
+        burn_rate=dict(spec.cost_model.burn) or None,
+        max_commitment=dict(spec.cost_model.max_commitment) or None,
         declared_walltime_s=spec.resources.walltime_s,
         gpus=spec.resources.gpus,
         cores=spec.resources.cores,

@@ -45,6 +45,16 @@ class PlanningContext:
 
     __slots__ = ("goal", "observation", "in_flight", "attempt", "last_rejection")
 
+    @property
+    def orphans(self) -> list[str]:
+        """Task ids whose every objective is now DELETED - cancellable work.
+
+        Read off the observation rather than passed separately, because that is what crosses
+        the process boundary in phase 7. Deciding to cancel is the Planner's; computing the
+        fact needs both the task registry and the applied Spec, which only the executor sees.
+        """
+        return list(self.observation.orphan_tasks)
+
     def __init__(self, goal: Goal, observation: CampaignObservation,
                  in_flight: list[str] | None = None, attempt: int = 0,
                  last_rejection: ValidationFailure | None = None) -> None:

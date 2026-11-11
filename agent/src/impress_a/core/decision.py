@@ -105,4 +105,9 @@ class CampaignObservation(BaseModel):
     #: actually applied rather than against ones it imagined, and so an external caller sees
     #: the same Spec the in-process roles do (ADR 0007's parity of evidence).
     spec: Spec | None = None
+    #: Task ids that are still pending or deployed and whose EVERY objective is now DELETED.
+    #: Computed by the executor, which is the only thing that can see both the task registry
+    #: and the applied Spec. Carried here rather than behind a new protocol operation, because
+    #: the observation already crosses the boundary and ADR 0007 would otherwise be in play.
+    orphan_tasks: list[str] = Field(default_factory=list)
     last_rejection: ValidationFailure | None = None

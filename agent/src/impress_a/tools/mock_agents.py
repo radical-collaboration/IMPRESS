@@ -24,9 +24,15 @@ def _upstream(inputs: dict[str, Any]) -> list[Any]:
     Not the whole input dict. Inputs also carry each upstream task's QC report, so seeding
     on `str(inputs)` made the mock's science a function of the QC schema: adding one field
     to `GateResult` reshuffled every downstream draw and changed the demo campaign's outcome.
+
+    **And not the input KEYS either**, which is the same lesson learned twice. They used to be
+    in the seed, so when the dispatcher started keying inputs by declared port instead of
+    `dep0..depN`, every downstream draw reshuffled and the demo campaign's cycle count changed
+    - a rename of the wiring altering the science. Sorted by key for a deterministic order,
+    seeded on the CONTENT only.
     """
-    return [(k, v.get("tool"), v.get("outputs"), v.get("metrics"))
-            if isinstance(v, dict) else (k, v) for k, v in sorted(inputs.items())]
+    return [(v.get("tool"), v.get("outputs"), v.get("metrics"))
+            if isinstance(v, dict) else (v,) for _, v in sorted(inputs.items())]
 
 
 class GenerateAgent(TaskAgent):
@@ -71,6 +77,39 @@ class FoldAgent(TaskAgent):
                 "outputs": {"complex": "CPLX"},
                 "metrics": {"iptm": round(iptm, 3), "sc_rmsd": round(sc_rmsd, 3),
                             "ss_fraction": round(0.3 + iptm * 0.5, 3)}}
+
+
+class JoinAgent(TaskAgent):
+    """Two typed inputs, and it checks which one it got on which port.
+
+    Reports `wired_correctly: 1.0` only if `backbone` resolves to a Backbone-ish artifact and
+    `sequences` to a ProteinSequence-ish one. An integrity gate refuses anything else, so a
+    mis-wire fails the node rather than quietly producing a plausible number - which is the
+    whole failure mode: the positional scan returned whichever dep came first, and both of
+    these are dicts with an `outputs` key.
+    """
+
+    async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
+        del params
+        backbone = self._value_of(req.input_ref("backbone"))
+        sequences = self._value_of(req.input_ref("sequences"))
+        # The mock producers emit bare strings as their output values: GenerateAgent and
+        # NoodleAgent emit "backbone[n]", DesignAgent emits "SEQ". Checking which arrived
+        # where is the whole job of this tool, so the strings are the assertion.
+        ok = (isinstance(backbone, str) and backbone.startswith("backbone")
+              and sequences == "SEQ")
+        return {"result": "joined", "count": 1, "outputs": {"complex": "CPLX"},
+                "metrics": {"wired_correctly": 1.0 if ok else 0.0,
+                            "inputs_seen": float(len(req.inputs))}}
+
+    @staticmethod
+    def _value_of(ref: Any) -> Any:
+        """An `ArtifactRef`, or its serialized form once it has crossed a process boundary."""
+        if ref is None:
+            return None
+        if isinstance(ref, dict):
+            return ref.get("value")
+        return getattr(ref, "value", None)
 
 
 class ScoreAgent(TaskAgent):
