@@ -124,10 +124,12 @@ jobs:
       #            the only thing that catches LangChainOracle claiming structured output
       #            over a brace-slice. No endpoint or key is contacted.
       #   figures  four mock-lab tests behind `importorskip("matplotlib")`.
+      #   telemetry  test_telemetry.py turns the engine's telemetry on and reads what it
+      #            wrote; behind `importorskip("opentelemetry.sdk")`.
       # Measured: 511 passed and 0 skipped with all four, against 506 passed and 5 skipped
       # with dev+aucam alone.
       - name: Install impress-a
-        run: pip install -e ".[dev,aucam,oracle,figures]"
+        run: pip install -e ".[dev,aucam,oracle,figures,telemetry]"
       # A skip is not a pass, and the extra going missing again would be silent otherwise:
       # pytest exits 0 with the whole file skipped. This step fails loudly instead. The import
       # is `src.aucam`, not `aucam` - upstream's `include = ["src*"]` publishes the generic

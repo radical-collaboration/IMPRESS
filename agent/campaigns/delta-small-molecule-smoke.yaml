@@ -23,6 +23,12 @@ backend_startup_heartbeat_s: 30
 # Abandoning a stuck teardown is safe here: results are already durable in provenance and
 # the ledger by that point.
 backend_shutdown_timeout_s: 300
+# The engine's own telemetry: a span per Stage block with its nodes and their commands under it,
+# each command naming the backend it really ran on, plus resource polls - checkpointed to
+# <root>/<campaign>/telemetry/. This is the smoke that has to show GPU placement under Dragon
+# (one device per lineage), and the trace is where that is read off. Needs the `[telemetry]`
+# extra, which scripts/delta_env_setup.sh installs.
+telemetry_checkpoint_s: 60
 # How long the execution process runs without a word from the control process before it drains
 # and stops. Only meaningful when the two are split (`impress-a serve` + `impress-a control`);
 # in one process the roles are coroutines beside the pump and cannot go silent without the

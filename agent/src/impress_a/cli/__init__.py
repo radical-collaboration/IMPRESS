@@ -83,6 +83,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         backend_config=d.get("backend_config", {}),
         backend_startup_timeout_s=float(d.get("backend_startup_timeout_s", 0) or 0),
         backend_shutdown_timeout_s=float(d.get("backend_shutdown_timeout_s", 0) or 0),
+        telemetry_checkpoint_s=float(d.get("telemetry_checkpoint_s", 0) or 0),
         backend_startup_heartbeat_s=float(d.get("backend_startup_heartbeat_s", 30) or 30),
         # Env for the same reason as trust_root below: the launcher points this at the job's
         # own directory so provenance (and asyncflow's session dir, which the executor puts

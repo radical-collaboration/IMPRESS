@@ -198,6 +198,8 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 the `Dispatcher` it replaced, against `tests/data/dispatcher_parity_campaign.json`) ·
 `test_placement.py` (each tool command as an engine task, and its placement per backend) ·
 `test_engine_routes.py` (the engine's `compute` and `local` routes) ·
+`test_telemetry.py` (the engine's own telemetry, on: a span per Stage block; needs the
+`[telemetry]` extra) ·
 `test_real_toolkits.py` (the real specs, without executing any real binary) ·
 `test_backend_bound.py` (backend-construction timeout/heartbeat, against a fake backend
 that blocks its own thread's event loop the way Dragon's `Batch()` does) ·

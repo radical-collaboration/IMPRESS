@@ -150,6 +150,13 @@ class CampaignSpec:
     # worst place to hang, because the campaign has its results and is throwing them away
     # by never writing the run to completion. 0 disables, as above.
     backend_shutdown_timeout_s: float = 0.0
+    # The engine's own telemetry (asyncflow over rhapsody's TelemetryManager): one span per
+    # Stage block with its nodes and their commands under it, task lifecycle events that name
+    # the backend each task really ran on, and resource polls - written as JSONL under
+    # `<root>/<campaign>/telemetry/` every this-many seconds and at stop. 0 disables, which is
+    # the default because it needs the `[telemetry]` extra; a campaign that asks for it without
+    # the extra is refused at start rather than run blind.
+    telemetry_checkpoint_s: float = 0.0
     # WHICH tools this campaign is about. Without it every policy falls back to its own
     # default chain - which is the mock one - so a campaign naming real toolkits would
     # load them, validate them, and then run mocks.
@@ -280,6 +287,8 @@ class CampaignExecutor:
         #: once at `start()`. `[]` means unknown. Placement reads it; `spec.site` remains the
         #: declaration the validator checks graphs against.
         self.topology: list[dict[str, Any]] = []
+        #: rhapsody's TelemetryManager, when `spec.telemetry_checkpoint_s` asks for one.
+        self.telemetry: Any = None
         #: Cores this campaign may use, when its caller knows better than the cgroup - under
         #: an enclosing campaign manager the cgroup is shared with every sibling workflow
         #: (`integrations/aucam`). `None` reads the cgroup. Sizes each command's thread caps.
@@ -1401,6 +1410,7 @@ class CampaignExecutor:
         log.info("engine: %s backend ready", self.spec.backend)
         self.topology = await probe_topology(self._backend)
         self._check_site_against_topology()
+        await self._start_telemetry()
         threads = thread_share(self.cpu_share, self.spec.concurrency, self.spec.replicas)
         log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
                  f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
@@ -1510,6 +1520,54 @@ class CampaignExecutor:
             if self.flow is not None:
                 await self._shutdown_engine()
 
+    async def _start_telemetry(self) -> None:
+        """Turn on the engine's telemetry, if the campaign asked for it.
+
+        Through `WorkflowEngine.start_telemetry`, so every backend on the engine is attached
+        and every task and block is traced by the engine itself rather than by us.
+        """
+        every = self.spec.telemetry_checkpoint_s
+        if every <= 0:
+            return
+        path = self.root / "telemetry"
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.telemetry = await self.flow.start_telemetry(
+                checkpoint_interval=every, checkpoint_path=str(path))
+        except ImportError as exc:
+            raise RuntimeError(
+                f"telemetry_checkpoint_s={every} asks for the engine's telemetry, which needs "
+                "the `[telemetry]` extra (pip install -e '.[telemetry]'). Install it or set "
+                "telemetry_checkpoint_s to 0.") from exc
+        log.info("engine: telemetry on, checkpointing to %s every %.0fs", path, every)
+
+    async def _stop_telemetry(self) -> None:
+        """Stop telemetry BEFORE the engine goes, bounded like the engine itself.
+
+        `flow.shutdown()` does not stop it, and its `stop()` drains the event backlog and
+        writes the final checkpoint - which is the point of having it. Bounded because a stall
+        here is the same hazard as a stalled teardown (job 22491438). asyncflow does not
+        forward rhapsody's `drain_on_stop=False`, so a bound is the only way to cut it short.
+        """
+        if self.telemetry is None:
+            return
+        timeout_s = self.spec.backend_shutdown_timeout_s or None
+        try:
+            # `asyncio.timeout`, not `wait_for(shield(...))`: those run `stop()` in a new task,
+            # and OpenTelemetry then detaches the session's context token in a different
+            # Context from the one `start_telemetry` attached it in ("Failed to detach
+            # context"). A cancelled `stop()` is retried by the manager, so not shielding it
+            # costs nothing.
+            async with asyncio.timeout(timeout_s):
+                await self.telemetry.stop()
+        except TimeoutError:
+            log.warning("engine: telemetry did not stop within %.0fs - its final checkpoint "
+                        "may be incomplete", timeout_s)
+        except Exception as exc:              # noqa: BLE001 - never sink a finished campaign
+            log.warning("engine: telemetry stop failed: %r", exc)
+        finally:
+            self.telemetry = None
+
     def _check_site_against_topology(self) -> None:
         """Say so when the declared site promises more GPUs than the backend can see.
 
@@ -1541,6 +1599,7 @@ class CampaignExecutor:
         is about to exit anyway. The timeout is therefore logged, not raised - an
         abandoned teardown must not turn a finished campaign into a failed one.
         """
+        await self._stop_telemetry()
         timeout_s = self.spec.backend_shutdown_timeout_s
         if timeout_s <= 0:
             await self.flow.shutdown()

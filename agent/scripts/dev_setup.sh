@@ -58,6 +58,10 @@ echo "== installing the aucam extra (the enclosing campaign manager)"
 echo "== installing the figures extra (the mock lab's plots)"
 .venv/bin/pip install --quiet -e ".[figures]"
 
+# The engine's telemetry (OpenTelemetry, NVML, psutil). test_telemetry.py skips without it.
+echo "== installing the telemetry extra"
+.venv/bin/pip install --quiet -e ".[telemetry]"
+
 echo "== verifying"
 .venv/bin/python - <<'EOF'
 import radical.asyncflow as af, rhapsody

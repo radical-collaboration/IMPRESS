@@ -62,6 +62,10 @@ figures = ["matplotlib>=3.8"]
 # `requests` dependency that release forgets. An EXTRA, because the laptop tier, CI and the
 # knob-lab notebook all run on the concurrent backend and must not need Dragon to install.
 dragon = ["rhapsody-py[dragon]>=0.7.0"]
+# The engine's telemetry (`CampaignSpec.telemetry_checkpoint_s`): OpenTelemetry, NVML and psutil,
+# through rhapsody's own extra. Installed by the dev and Delta setup scripts and in CI, so the
+# test that turns it on is a guard rather than a skip.
+telemetry = ["rhapsody-py[telemetry]>=0.7.0"]
 # `cloudpickle` is a TEST dependency, not a runtime one: tests/test_real_toolkits.py uses it
 # to prove `SubprocessError` survives being pickled across a process boundary. It was in no
 # extra, so the `pytest.importorskip("cloudpickle")` guarding that assertion skipped it in
