@@ -1,9 +1,12 @@
 site_name: IMPRESS
 site_description: Intelligent Multi-Pipeline Protein Engineering System for HPC
 site_author: IMPRESS Team
-site_url: https://impress-framework.readthedocs.io/
+# gh-pages is what actually happens: ci.yml runs `mkdocs gh-deploy`, and there is no
+# .readthedocs.yaml anywhere in this tree. The previous value advertised a site that does
+# not exist, which also made every absolute link mkdocs generates point at it.
+site_url: https://radical-collaboration.github.io/IMPRESS/
 
-repo_name: impress-framework/impress
+repo_name: radical-collaboration/IMPRESS
 repo_url: https://github.com/radical-collaboration/IMPRESS
 edit_uri: edit/main/docs/
 
@@ -89,6 +92,6 @@ extra:
       link: https://github.com/radical-collaboration/IMPRESS
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/impress-framework/
-  version:
-    provider: mike
+  # No `version.provider: mike`. `mike` is not in the doc extra and CI has never run
+  # `mike deploy`, so the theme rendered a version switcher with no versions to switch to.
 
