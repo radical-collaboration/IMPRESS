@@ -2184,6 +2184,8 @@ process group, and `timeout` leads its own - so neither task ever completed and 
 downstream started ([upstream](../../plans/upstream/dragon-unreaped-process-group-leader.md)).
 Fixed by not wrapping under Dragon and letting Dragon's own task `timeout` bound the command
 (`exec/launch.py`, regression test `test_under_dragon_the_walltime_is_dragons_...`).
+23814643 cancelled at 22 min (stuck). **Re-run submitted as job 23815248** on commit `ed0fde2`,
+same settings.
 
 **I2. Upstream gaps, each worked around in code and marked for removal.** File them; none needs
 anything from us beyond the report.
