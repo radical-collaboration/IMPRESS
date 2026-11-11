@@ -125,7 +125,7 @@ Each exists because of a specific failure mode. Details in `docs/impress-a/refer
 | **`policy` must not import `tools`, `exec` or `runtime`** | review | Policies emit abstract `ExperimentIntent`. If a policy can reach a tool adapter, control models stop being swappable |
 | **`compose` must not import `exec`** | review | Keeps the whole validation path testable with no backend — the entire laptop test tier |
 | A QC `FAIL` node is **never** eligible for the Pareto front | `core/qc.py`, `core/pareto.py` | These tools fail *silently*; exit code is never sufficient evidence |
-| **P6 tools are inlined, never scheduled** | `compose/validate.py` gate 4 | Scheduling overhead would exceed the work. A scheduled P6 node is a composer bug |
+| **P6 tools are inlined, never scheduled** - and until inlining exists, refused at load | `compose/validate.py` gate 4; `tools/spec.py` | Scheduling overhead would exceed the work. A scheduled P6 node is a composer bug. The composer drops P6 tools and nothing runs them in their place, so a P6 declaration is a load-time error rather than a stage that silently vanishes |
 | `replicas: N` means **N independent lineages**, one `DesignNode` each | `compose/composer.py`, `runtime/executor._absorb` | Fanning out then funnelling back collapses N candidates into one |
 | Pattern signatures ignore **parameter values** — shape only | `compose/graph.py` | Otherwise every parameter tweak resets a pattern's accumulated trust |
 | A measurement **supersedes but never deletes** a prediction | `core/tree.ingest_measurement` | The predicted-vs-measured gap is the surrogate-calibration signal |
