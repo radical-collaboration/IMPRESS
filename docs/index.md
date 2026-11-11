@@ -55,6 +55,7 @@ hand it to `ImpressManager`, and shut it down when `start()` returns.
 
 ## Learn More
 
+- [Run It In Colab](notebooks/impress_adaptive_quickstart.ipynb) — a real adaptive run you can execute in a browser tab, no allocation and no GPU: set a threshold, watch a pipeline spawn a child, then read the Gantt and the genealogy
 - [Architecture](concepts/architecture.md) — how `ImpressManager`, `ImpressBasePipeline`, and `PipelineSetup` fit together
 - [Adaptive Execution](concepts/adaptive-execution.md) — a worked walkthrough of adaptive child-pipeline spawning
 - [Examples](examples/protein-binding.md) — real HPC workflows: protein binding, discontinuous scaffolds, small molecule binding

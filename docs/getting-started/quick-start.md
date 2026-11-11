@@ -4,6 +4,14 @@ This tutorial walks you step-by-step through writing and running an **asynchrono
 
 By the end, you will have a working script that runs *N pipelines concurrently*, each of which executes 3 tasks asynchronously.
 
+!!! tip "Want to run something first?"
+
+    The task commands on this page are placeholders for your own tools, so the
+    script below will not execute as written. For a version that runs end to
+    end in a browser tab — real manager, real backend, real adaptive spawning,
+    simulated science — see
+    [Run It In Colab](../notebooks/impress_adaptive_quickstart.ipynb).
+
 ---
 
 ## Overview

@@ -2,6 +2,8 @@
 
 This documentation walks through the adaptive capabilities of the IMPRESS pipeline framework, focusing specifically on how pipelines can dynamically spawn child pipelines during execution. For a conceptual overview of the underlying protocol, see [Architecture](architecture.md); for real-world adaptive workflows, see [Examples](../examples/protein-binding.md).
 
+To watch this mechanism run instead of reading about it — including what changing the spawn threshold does to the pipeline tree — see [Run It In Colab](../notebooks/impress_adaptive_quickstart.ipynb).
+
 ## Adaptive Pipeline Components
 
 ### 1. Pipeline Configuration for Adaptivity
