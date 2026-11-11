@@ -245,7 +245,7 @@ def test_a_campaign_that_never_mentions_replicas_is_not_capped():
     assert spec.replicas == 0, "unset must mean 'the policy decides'"
 
     smoke = load_spec("campaigns/delta-small-molecule-smoke.yaml")
-    assert smoke.replicas == 1, "an explicit 1 must still bind"
+    assert smoke.replicas == 2, "an explicit width must still bind"
 
 
 async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatch):

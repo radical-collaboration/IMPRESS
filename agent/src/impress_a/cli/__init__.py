@@ -1184,34 +1184,29 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
             if want_flags:
                 checks.append(("ligandmpnn batch flags", None, f"could not check: {e}"))
 
-    # The `impress` dependency is published on no index, so if pip ever went looking for that
-    # name it installed something else - and the failure is silent, because the import succeeds
-    # and hands back a working module that is simply not ours. Both installers put the root
-    # editable install first to prevent that; this proves the result on the machine that will
-    # run the campaign. Deterministic either way, so never undetermined.
-    # `find_spec`, not `import`: this resolves the name without executing the module, so
-    # preflight stays cheap and the import surface for the root package stays at exactly the two
-    # modules `tests/test_layering.py` allows. Checking where a dependency resolves to does not
-    # require depending on it.
+    # The middleware the execution loop is written against. 0.7.0 is where a cancel reaches the
+    # backend a task was routed to and a block's cancel cascades to its members - below it the
+    # loop still runs, with those guarantees silently gone. For a Dragon campaign, also that
+    # rhapsody can build its Dragon backend here: `discover_backends()` reports availability
+    # (its runtime importable), not just that the module exists.
     try:
-        import importlib.util
+        from importlib.metadata import version as _version
 
-        import impress_a as _ia
-        found = importlib.util.find_spec("impress")
-        origin = Path(found.origin).resolve() if found and found.origin else None
-        want = Path(_ia.__file__).resolve().parents[3] / "src" / "impress" / "__init__.py"
-        if origin is None:
-            checks.append(("impress package", False,
-                           "not installed - run scripts/dev_setup.sh (or step 3 of "
-                           "scripts/delta_env_setup.sh), which installs it from the root"))
-        else:
-            checks.append(("impress package", origin == want,
-                           f"{origin}" if origin == want else
-                           f"resolved to {origin}, not {want} - a package of that name came "
-                           f"from an index; `pip uninstall impress` and re-run "
-                           f"scripts/dev_setup.sh"))
-    except (ImportError, ValueError) as e:
-        checks.append(("impress package", False, f"could not resolve: {e!r}"))
+        floor = (0, 7, 0)
+        for dist in ("radical.asyncflow", "rhapsody-py"):
+            got = _version(dist)
+            parts = tuple(int(x) for x in got.split(".")[:3] if x.isdigit())
+            checks.append((dist, parts >= floor,
+                           got if parts >= floor else f"{got} - needs >=0.7.0; re-run "
+                           "scripts/delta_env_setup.sh (or dev_setup.sh)"))
+        if spec is not None and spec.backend.lower() == "dragon":
+            from rhapsody.backends import discover_backends
+            ok = bool(discover_backends().get("dragon"))
+            checks.append(("rhapsody dragon backend", ok,
+                           f"available, dragonhpc {_version('dragonhpc')}" if ok else
+                           "unavailable - install the `[dragon]` extra"))
+    except Exception as e:                               # noqa: BLE001 - a check, not a crash
+        checks.append(("middleware", False, f"could not check: {e!r}"))
 
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))

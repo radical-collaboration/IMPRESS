@@ -51,6 +51,8 @@ site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
 # Sized against the INTERLOCK, not just the chain. A novel composition pattern is
 # capped at 10% of available budget until it earns trust, and one pass of this chain
 # costs 0.5 gpu-h / 0.75 cpu-h - so anything under 5.0/7.5 rejects its own first run.
+# (Re-checked 2026-11-11 with `impress-a offer` at `replicas: 2`: the declared figures have
+# since come down, and one two-lineage cycle is 0.34 gpu-h / 0.64 cpu-h - inside the cap.)
 budget:
   gpu_hours: 6.0
   cpu_hours: 10.0
@@ -75,7 +77,9 @@ params:
     ligand_params_path: "data/alr/ALR.params"
   boltz_predict:
     ligand_smiles: "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12"
-replicas: 1
+# Two lineages, deliberately: the one-engine branch (agent/plans/backlog.md I1) has to show one
+# GPU per lineage under Dragon's Policy(gpu_affinity=...), and one lineage cannot.
+replicas: 2
 concurrency: 1
 objectives:
   - {name: total_score,            direction: minimize}
