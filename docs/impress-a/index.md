@@ -63,6 +63,7 @@ langgraph, rhapsody and biopython.
 | [Compute Patterns](reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
 | [Authoring Tools](reference/authoring-tools.md) | Writing tools, gates and skill documents |
 | [Middleware Integration](reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
+| [AuCaM Integration](reference/aucam.md) | Running as one subordinate workflow under an enclosing campaign manager: the seam, the offer handshake, and the pin |
 | [The Mock Knob Lab](reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |
 | [Known Limitations](limitations.md) | Known gaps and residual risks, stated plainly |
 | [Decisions](decisions/index.md) | Numbered, immutable architecture decision records |

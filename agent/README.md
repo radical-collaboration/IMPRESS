@@ -223,6 +223,7 @@ as subprocesses or in containers and do not constrain the agent environment. Bui
 | [`docs/impress-a/reference/compute-patterns.md`](../docs/impress-a/reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
 | [`docs/impress-a/reference/authoring-tools.md`](../docs/impress-a/reference/authoring-tools.md) | Writing tools, gates and skill documents |
 | [`docs/impress-a/reference/middleware-integration.md`](../docs/impress-a/reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
+| [`docs/impress-a/reference/aucam.md`](../docs/impress-a/reference/aucam.md) | Running as one subordinate workflow under an enclosing campaign manager: the seam, the offer handshake, and the pin |
 | [`docs/impress-a/decisions/`](../docs/impress-a/decisions/) | Numbered, immutable architecture decision records |
 | [`docs/impress-a/limitations.md`](../docs/impress-a/limitations.md) | Known gaps and residual risks, stated plainly |
 

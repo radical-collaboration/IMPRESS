@@ -52,11 +52,10 @@ impress-a preflight campaigns/<spec>.yaml            # real-toolkit env check, B
 impress-a offer campaigns/mock-small-molecule-binding.yaml   # what one invocation would COST
 #   and which goals it could address, computed from the toolkit without running anything. A
 #   different question from `preflight`: that asks whether this machine can run the binaries,
-#   this asks what a caller is buying. `--json` is the form an enclosing campaign manager
-#   reads to size its own budget (decision 0014); `--validation <validate_tasks.json>` is the
-#   only route by which a MEASURED figure enters an offer. Everything else is declared, and
-#   the payload says so - declared cost models sit above measurement on purpose, because they
-#   feed gates that refuse graphs. See docs/impress-a/reference/observation.md
+#   this asks what a caller is buying. `--json` sizes an enclosing manager's own spec and
+#   `--validation <validate_tasks.json>` is the only route by which a MEASURED figure enters
+#   an offer: docs/impress-a/reference/aucam.md has both, and why declared figures sit above
+#   measurement on purpose
 impress-a validate-tasks campaigns/<spec>.yaml       # run each Task once and check it, ON
 #   hardware. Exits non-zero if any Task fails an INTEGRITY row; an acceptance row that falls
 #   short does not fail it (a weak design is not a broken Task). This is what justifies
@@ -193,8 +192,12 @@ that blocks its own thread's event loop the way Dragon's `Batch()` does) ·
 `test_layering.py` (the import contract, walked with `ast` rather than trusted to review) ·
 `test_gate_fixtures.py` (each real tool's gates against its known-bad fixtures, and the
 registry against the tool directories on disk) ·
-`test_toolchain.py` (that the `impress` dependency resolves to this repository and that the
-local `[tool.ruff]` table exists with `fix = false`).
+`test_aucam.py` (a real campaign as one AuCaM workflow, driven through AuCaM's own reporter;
+skipped without the `aucam` extra, which CI installs - see
+../docs/impress-a/reference/aucam.md) ·
+`test_toolchain.py` (that the `impress` dependency resolves to this repository, that the
+local `[tool.ruff]` table exists with `fix = false`, and that the `aucam` extra pins a commit
+rather than a branch).
 
 **Counts are not restated in prose.** `test_gate_fixtures.py` derives the tool count from the
 toolkit directories rather than asserting 11, and there is no asserted test count.
