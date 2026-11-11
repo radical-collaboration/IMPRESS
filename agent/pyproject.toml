@@ -67,7 +67,10 @@ figures = ["matplotlib>=3.8"]
 # to prove `SubprocessError` survives being pickled across a process boundary. It was in no
 # extra, so the `pytest.importorskip("cloudpickle")` guarding that assertion skipped it in
 # CI while passing on any developer machine that happened to have it - a skip is not a pass.
-dev = ["pytest", "pytest-asyncio", "ruff", "httpx", "cloudpickle",
+# `ruff` is pinned to one minor: unpinned, a release adds rules overnight and turns the lint
+# gate red on untouched code, and the ceiling here is zero. Same pin in the root project's
+# `lint` extra and in tox.ini's lint env, which is what CI runs; move all three together.
+dev = ["pytest", "pytest-asyncio", "ruff>=0.17,<0.18", "httpx", "cloudpickle",
        "tomli; python_version<'3.11'"]
 
 [project.scripts]
