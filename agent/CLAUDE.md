@@ -170,8 +170,12 @@ Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones tha
   the `local` route - a thread in this process, under its own `asyncio.run`. Each command it starts
   through `run_cmd` is an executable task on `compute`, placed per backend (`exec/launch.py`). An
   adapter that shelled out any other way would run its binary on the campaign host, unplaced.
-- **A cancel does not kill a running command on the concurrent backend** (rhapsody 0.7.0). Commands
-  carry their own `timeout --kill-after` for that reason; see `docs/impress-a/limitations.md`.
+- **A cancel does not kill a running command on the concurrent backend** (rhapsody 0.7.0). There,
+  and ONLY there, each command carries its own `timeout --kill-after` for that reason. **Never add
+  that wrapper under Dragon**: `timeout` leads its own process group, Dragon's local services reaps
+  only its own, so the wrapper becomes an unreaped zombie and the task never completes — it hung job
+  23814643 at stage 1. Dragon is given `walltime_s + KILL_GRACE_S` as the task's own `timeout`
+  instead. See `docs/impress-a/limitations.md`.
 - **No retry primitive, no durable job state** in asyncflow. Both are ours (`exec/ledger.py`).
 - asyncflow writes `asyncflow.session.*` into the CWD on every engine run *unless given a `work_dir`*.
   `make_engine`/`make_engine_bounded` take one, and the executor passes the campaign root, so sessions
@@ -241,9 +245,18 @@ one-node Pareto front. All four campaign objectives carry real values (`total_sc
 `shape_complementarity` 0.591, `complex_plddt` 0.507, `ligand_iptm` 0.752). Per-tool cost is
 measured for all six.
 
-Read that as a floor, not a result. It is **one lineage, one cycle, one draw**: `replicas > 1`
-has never run, so the independence invariant is unexercised; and no measurement has ever
-superseded a prediction, so the calibration machinery is untested against reality.
+Read that as a floor, not a result: it is one lineage, one cycle, one draw.
+
+**Width 2 has since run, on the one-engine loop.** Job 23815248 ran `replicas: 2` to `12/12 tasks
+ok` in 3m45s, lineage 0 pinned to GPU 0 and lineage 1 to GPU 1 by Dragon's `Policy(gpu_affinity=…)`
+with GPUs 2-3 idle, one telemetry block span per Stage, Dragon up in 4.5 s and down in 2 s. The two
+lineages produced different metrics, so the independence invariant has now been exercised — at 2,
+not at the declared width of 4. Both nodes failed acceptance gates only, so the front was empty.
+
+Still untested: width 4; a cancel reaching a command already running under Dragon; Dragon's own
+task timeout; a locally hosted reasoner (the `local-dragon` profile names no model yet). And no
+measurement has ever superseded a prediction, so the calibration machinery is untested against
+reality.
 
 **The trusted path has executed, and held.** Job 22728140 promoted after r0002 and ran three
 consecutive trusted cycles with no demotion and no integrity failure (`plans/next-run-sustained-trust.md`).
