@@ -21,3 +21,4 @@ Numbered, immutable records of decisions whose rationale should outlive the conv
 | [0012](0012-one-property-two-sources.md) | One property, two sources; forward-declare pattern P8 | 1 |
 | [0013](0013-trust-counts-integrity-not-acceptance.md) | Trust counts integrity gates, not acceptance gates (amends 0003) | — |
 | [0014](0014-an-enclosing-campaign-manager-is-not-a-control-model.md) | An enclosing campaign manager is a caller, not a control model | — |
+| [0015](0015-one-engine-and-the-process-boundary.md) | One engine, two processes, and where each boundary falls | — |
