@@ -68,6 +68,11 @@ def _resolve_path_params(params: dict[str, Any], base: Path) -> dict[str, Any]:
 
 def load_spec(path: str | Path) -> CampaignSpec:
     d: dict[str, Any] = yaml.safe_load(Path(path).read_text())
+    if "runner" in d:
+        # Refused rather than ignored: a key the loader drops does nothing and says nothing.
+        raise ValueError(
+            f"{path}: `runner:` was removed - there is one execution loop now, each Stage an "
+            "asyncflow block on the campaign's engine (exec/stage.py). Delete the key.")
     return CampaignSpec(
         campaign_id=d["campaign_id"], goal=d["goal"],
         objectives=[Objective(**o) for o in d["objectives"]],
@@ -78,6 +83,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         backend_config=d.get("backend_config", {}),
         backend_startup_timeout_s=float(d.get("backend_startup_timeout_s", 0) or 0),
         backend_shutdown_timeout_s=float(d.get("backend_shutdown_timeout_s", 0) or 0),
+        telemetry_checkpoint_s=float(d.get("telemetry_checkpoint_s", 0) or 0),
         backend_startup_heartbeat_s=float(d.get("backend_startup_heartbeat_s", 30) or 30),
         # Env for the same reason as trust_root below: the launcher points this at the job's
         # own directory so provenance (and asyncflow's session dir, which the executor puts
@@ -96,7 +102,6 @@ def load_spec(path: str | Path) -> CampaignSpec:
         # `sites/*.yaml`'s `tool_delivery` switch has been doing since it was written (E1),
         # and what `control_liveness_timeout_s: 120` did in all three Delta specs until this
         # line existed.
-        runner=d.get("runner", "dispatcher"),
         control_liveness_timeout_s=float(d.get("control_liveness_timeout_s", 0) or 0),
         max_unproductive_runs=int(d.get("max_unproductive_runs", 8)),
         target_front=int(d.get("target_front", 0)),
@@ -199,6 +204,9 @@ def build_roles(model: str, spec: CampaignSpec, guard: bool = True,
     # property of how the CLI assembled it, not of the two-half contract that `policy`
     # defines and that `impress-a control` honours across a socket.
     pair.reasoner_sink = opts.sink
+    # Same late binding, for a model served by the campaign's own engine: the oracle needs a
+    # `CampaignSession`, and there is none until the manager (or a remote session) exists.
+    pair.session_oracle = opts.oracle if hasattr(opts.oracle, "bind") else None
     return pair
 
 
@@ -285,9 +293,29 @@ def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
     Loaded here rather than in `policy/` because `policy` may import `core` only and reading a
     YAML file is not `core`'s business either; the same reason `_replay_records` lives here.
     """
+    chosen = _load_profile(profile)
+    if chosen is None:
+        return None
+    from ..policy.llm import build_oracle
+    return build_oracle(chosen, stages=list(spec.stages) or None)
+
+
+def _inference_for(profile: str | None) -> dict[str, Any]:
+    """`CampaignSpec.inference` for a profile whose model runs on the campaign's own engine.
+
+    Empty for every other kind. Read by the process that hosts the ENGINE - `run`, or `serve`
+    in the split - which is not always the process that hosts the reasoner: under
+    `serve` + `control` the model is served by the first and called by the second.
+    """
+    chosen = _load_profile(profile)
+    return chosen.inference() if chosen is not None else {}
+
+
+def _load_profile(profile: str | None) -> Any:
+    """The named `ModelProfile`, or `None` when no profile is named."""
     if not profile:
         return None
-    from ..policy.llm import build_oracle, load_profiles
+    from ..policy.llm import load_profiles
     # The PACKAGED file, unless an operator names another one explicitly. It used to try the
     # current working directory first, and that is a credential path rather than a
     # convenience: a profile's `base_url` is where the request goes and its `api_key_env`
@@ -312,7 +340,7 @@ def _client_for(profile: str | None, spec: CampaignSpec) -> Any:
     log.info("control model: profile %s from %s (kind=%s, model=%s, endpoint=%s, key=%s)",
              profile, path, chosen.kind, chosen.model, chosen.base_url or "-",
              chosen.api_key_env or "none")
-    return build_oracle(chosen, stages=list(spec.stages) or None)
+    return chosen
 
 
 def _declares_halves(spec_letter: str, plan_letter: str) -> bool:
@@ -486,8 +514,6 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
     reg = Registry().load()
     reasoner: Any = _Idle()
     if model:
@@ -495,7 +521,12 @@ async def serve_campaign(spec_path: str, host: str = "127.0.0.1", port: int = 0,
                                caller_timeout_s=caller_timeout_s)
         log.info("serving campaign with %s attached: an external caller steers it in place, "
                  "rather than a control process attaching to it", reasoner.name)
+    # Even with no reasoner attached: in the split, the control process names a
+    # `rhapsody_vllm` profile and calls `infer`, and the model has to be on THIS engine.
+    spec.inference = _inference_for(profile)
     mgr = CampaignManager(spec, reasoner, reg)
+    if (oracle := getattr(reasoner, "session_oracle", None)) is not None:
+        oracle.bind(mgr.session)
     plane = InProcessControlPlane()
     cid = plane.register(mgr)
     if heartbeat_s is None:
@@ -552,6 +583,8 @@ async def control_campaign(url: str, campaign_id: str, model: str = "D",
                     target_front=obs.target_front)
         pair = _role_pair(model, specifier, planner, list(obs.stages), guard, profile,
                           replicas=obs.replicas)
+        if (oracle := getattr(pair, "session_oracle", None)) is not None:
+            oracle.bind(session)      # the model is on the serving process's engine
         log.info("control: driving campaign %s at %s with %s", campaign_id, url, pair.name)
         # The campaign's OWN bounds, from the observation. `max_turns=10_000` was here, and
         # it is not a neutral default: every in-process arm is driven through
@@ -605,6 +638,7 @@ def _role_pair(model: str, specifier: str | None, planner: str | None,
     if guard:
         pair.planner = StageGuard(pair.planner, forbid_tools=("mock_noodle",))
     pair.reasoner_sink = opts.sink
+    pair.session_oracle = client if hasattr(client, "bind") else None
     return pair
 
 
@@ -661,8 +695,6 @@ async def validate_tasks_command(spec_path: str, out: str | None = None) -> int:
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
 
     out_dir = Path(out) if out else Path(spec.root) / spec.campaign_id / "validation"
     log.info("validating %d task(s) of %s; writing to %s",
@@ -782,43 +814,6 @@ async def _heartbeat(mgr: CampaignManager, period: float, t0: float) -> None:
                          f"{'' if r.trusted else ' untrusted'}]" for r in running))
 
 
-def _thread_caps(spec: CampaignSpec, ncpu: int | None = None) -> dict[str, str]:
-    """How many threads each CPU-bound child may take, sized from what this process was
-    actually given rather than from the machine.
-
-    `os.cpu_count()` reports the node, not the allocation, so on anything less than a
-    whole node every Rosetta stage would claim every core on the box and the stages
-    would fight each other. `sched_getaffinity` reports the cgroup we were placed in.
-    The divisor is the number of pipelines that can be in flight at once - concurrent
-    experiments times replica lineages, each of which can be running a CPU-bound P2
-    stage - halved again, which is upstream's sizing
-    (`run_small_molecule_binding.py:134-143`) and leaves headroom for the GPU stages'
-    host-side work.
-
-    Computed here rather than in an adapter because this is the only layer that knows
-    both numbers: a `TaskRequest` carries no concurrency information, and an agent
-    cannot see how many siblings it has. Applied with `setdefault`, so an operator who
-    exported their own value keeps it.
-
-    `ncpu` overrides what the cgroup reports, for the one case where the cgroup is not the
-    right answer: under an enclosing campaign manager this process shares its cgroup with
-    every sibling workflow, so `sched_getaffinity` describes the allocation rather than our
-    share of it, and the caller's own resource grant is the honest number
-    (`integrations/aucam`).
-    """
-    if ncpu is None and hasattr(os, "sched_getaffinity"):
-        ncpu = len(os.sched_getaffinity(0))
-    elif ncpu is None:  # not Linux; the campaign path is, but the test tier need not be
-        ncpu = os.cpu_count() or 1
-    pipelines = max(1, spec.concurrency) * max(1, spec.replicas)
-    per = max(1, ncpu // (pipelines * 2))
-    caps = {v: str(per) for v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
-                                  "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
-    # Spinning idle threads burn a core each while a stage waits on the GPU stages.
-    caps["OMP_WAIT_POLICY"] = "PASSIVE"
-    return caps
-
-
 async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
                        heartbeat_s: float | None = None,
                        replay_from: str | None = None,
@@ -830,14 +825,6 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     if err := _check_ligand_smiles(spec):
         log.error("%s", err)
         return 1
-    for var, val in _thread_caps(spec).items():
-        os.environ.setdefault(var, val)
-        # The effective value, not the computed one: an operator who exported their own
-        # keeps it, and a log that reported our suggestion instead would be describing a
-        # run that is not the one happening.
-        actual = os.environ[var]
-        log.info("thread cap %-22s %s%s", var, actual,
-                 "" if actual == val else f"  (kept from the environment, not {val})")
     # Naming either half implies the role pipeline: a Specifier has nowhere to run in the
     # single-`decide` path. Stated as an implication rather than an error so that
     # `--specifier B --planner D` is one flag pair rather than three.
@@ -892,8 +879,11 @@ async def run_campaign(spec_path: str, model: str = "D", guard: bool = True,
     reg = Registry().load()
     log.info("registry: %d tools (%s)%s", len(reg.ids()), ", ".join(reg.ids()),
              f" ERRORS: {reg.errors}" if reg.errors else "")
+    spec.inference = _inference_for(profile)
     mgr = CampaignManager(spec, policy, reg)
     mgr.add_prov_listener(_prov_heartbeat)
+    if (oracle := getattr(policy, "session_oracle", None)) is not None:
+        oracle.bind(mgr.session)
     # The halves were built before the manager existed, so their sink has had nowhere to
     # write until now. Everything a reasoner records - its prompts, its replies, the model
     # id that answered, how long each call took and whether it degraded - reaches
@@ -1228,34 +1218,29 @@ def preflight(spec: CampaignSpec | None = None, quick: bool = False) -> int:
             if want_flags:
                 checks.append(("ligandmpnn batch flags", None, f"could not check: {e}"))
 
-    # The `impress` dependency is published on no index, so if pip ever went looking for that
-    # name it installed something else - and the failure is silent, because the import succeeds
-    # and hands back a working module that is simply not ours. Both installers put the root
-    # editable install first to prevent that; this proves the result on the machine that will
-    # run the campaign. Deterministic either way, so never undetermined.
-    # `find_spec`, not `import`: this resolves the name without executing the module, so
-    # preflight stays cheap and the import surface for the root package stays at exactly the two
-    # modules `tests/test_layering.py` allows. Checking where a dependency resolves to does not
-    # require depending on it.
+    # The middleware the execution loop is written against. 0.7.0 is where a cancel reaches the
+    # backend a task was routed to and a block's cancel cascades to its members - below it the
+    # loop still runs, with those guarantees silently gone. For a Dragon campaign, also that
+    # rhapsody can build its Dragon backend here: `discover_backends()` reports availability
+    # (its runtime importable), not just that the module exists.
     try:
-        import importlib.util
+        from importlib.metadata import version as _version
 
-        import impress_a as _ia
-        found = importlib.util.find_spec("impress")
-        origin = Path(found.origin).resolve() if found and found.origin else None
-        want = Path(_ia.__file__).resolve().parents[3] / "src" / "impress" / "__init__.py"
-        if origin is None:
-            checks.append(("impress package", False,
-                           "not installed - run scripts/dev_setup.sh (or step 3 of "
-                           "scripts/delta_env_setup.sh), which installs it from the root"))
-        else:
-            checks.append(("impress package", origin == want,
-                           f"{origin}" if origin == want else
-                           f"resolved to {origin}, not {want} - a package of that name came "
-                           f"from an index; `pip uninstall impress` and re-run "
-                           f"scripts/dev_setup.sh"))
-    except (ImportError, ValueError) as e:
-        checks.append(("impress package", False, f"could not resolve: {e!r}"))
+        floor = (0, 7, 0)
+        for dist in ("radical.asyncflow", "rhapsody-py"):
+            got = _version(dist)
+            parts = tuple(int(x) for x in got.split(".")[:3] if x.isdigit())
+            checks.append((dist, parts >= floor,
+                           got if parts >= floor else f"{got} - needs >=0.7.0; re-run "
+                           "scripts/delta_env_setup.sh (or dev_setup.sh)"))
+        if spec is not None and spec.backend.lower() == "dragon":
+            from rhapsody.backends import discover_backends
+            ok = bool(discover_backends().get("dragon"))
+            checks.append(("rhapsody dragon backend", ok,
+                           f"available, dragonhpc {_version('dragonhpc')}" if ok else
+                           "unavailable - install the `[dragon]` extra"))
+    except Exception as e:                               # noqa: BLE001 - a check, not a crash
+        checks.append(("middleware", False, f"could not check: {e!r}"))
 
     reg = Registry().load()
     checks.append(("toolkits", not reg.errors, "; ".join(reg.errors) or "all registered"))

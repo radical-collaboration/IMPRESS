@@ -6,15 +6,27 @@ How IMPRESS-A sits on `radical.asyncflow` and `rhapsody`, and the behaviours tha
 
 ```
   campaign manager  ── validated DAG ──►  radical.asyncflow.WorkflowEngine
-        ▲                                          │
-        └──── typed results, QC ────  rhapsody backend (Dragon / Concurrent / …)
+        ▲                                   │      │        │
+        │                             compute    local      ai
+        │                          (Dragon or   (thread   (rhapsody
+        │                           Concurrent)  pool)     vLLM)
+        └──── typed results, QC ───────┴────────┴─────────┘
 ```
 
+**One engine per campaign, carrying named routes.** `exec/backend.make_engine` builds `compute`
+first, so it is the default; `local` is asyncflow's own `LocalExecutionBackend` over a thread pool,
+for work that must not be pickled and must not sit on the engine's loop; `ai` is added only when the
+campaign declares a locally hosted reasoner. A decorator names its route (`backend="compute"`), and
+an unknown name fails at decoration rather than at submission.
+
 The agent owns the `WorkflowEngine` directly, and keeps several graphs in flight on it at once.
-`Dispatcher.submit` registers a graph and returns a handle without awaiting it; `collect` awaits one.
+`StageExecutor.submit` (`exec/stage.py`) runs a graph as one asyncflow **block** and returns the
+block's future without awaiting it; `collect` waits for one. Inside a node, the adapter runs on the
+engine's `local` route and each tool command is an executable task on `compute`, placed per backend
+(`exec/launch.py`, `exec/resources.py`).
 Backends are constructed by `exec/backend.py` and named only in site configuration.
 
-Two things make concurrent graphs safe on one engine, both verified against 0.5.1. Task **names** come
+Two things make concurrent graphs safe on one engine, both verified against 0.7.0. Task **names** come
 from `fn.__name__` and collide across graphs, but they are only labels: components are keyed by a unique
 uid and dependencies resolve by future *identity*, never by name. And `workflow_id=` tags every task of
 a run, which is what keeps a log readable when two identical chains are running — though asyncflow
@@ -39,6 +51,22 @@ Two idioms, both needed and **not interchangeable**:
 | passing unawaited futures as call arguments | **edges** in the DAG |
 | `asyncio.gather` | awaiting **independent** work (replica fan-out) |
 
+## A node is two kinds of engine work
+
+The factory above builds only half of a node. The adapter — pre-process, parameterize, post-process
+and the deterministic QC gates — is a `function_task` on **`local`**, a thread in the campaign
+process under its own `asyncio.run`. Every command that adapter starts through `tools/_subprocess.run_cmd`
+is a separate `executable_task` on **`compute`**, submitted by `exec/launch.Launcher` and found
+through a `LAUNCHER` contextvar rather than passed down every call site.
+
+That split is what puts a binary where the placement says and keeps the adapter's Python off both the
+engine's loop and the backend's pickle boundary. An adapter that shelled out any other way would run
+its binary on the campaign host, unplaced and uncounted.
+
+A whole Stage is one `@flow.block` (`exec/stage.StageExecutor`): the block's future is the graph's
+result, its members inherit its uid as `workflow_id`, and cancelling it cascades to every unfinished
+member with each cancel sent to the backend that member was routed to (0.7.0, asyncflow #118).
+
 ## Gotchas
 
 **Rhapsody backends are awaitable and must be awaited.** `__await__` triggers `_async_init()`, which
@@ -62,6 +90,24 @@ and `DaskExecutionBackend` come from `rhapsody.backends`, and are resolved **by 
 **Resource shapes are not portable.** RADICAL takes `{"ranks", "gpus_per_rank"}`; Dragon takes
 `process_template` / `process_templates`. There is no shared vocabulary, so `exec/resources.py` owns the
 translation from `ToolSpec.resources`. Treat site-level resource defaults as required, not convenience.
+
+What a node needs is decided once, at submission (`Placement`), and rendered per command
+(`Placement.describe`), because a tool's commands differ in environment and working directory but
+share their GPU and their thread share. Two asymmetries are easy to get backwards:
+
+- **Who sets `CUDA_VISIBLE_DEVICES`.** Under Dragon, *nothing here does*: the placement carries
+  `Policy(host_name=…, gpu_affinity=[g])` and Dragon sets the variable itself. Setting it in the
+  template's env does not work — local services merges the template env and applies the policy
+  layout afterwards, and a policy with no `gpu_affinity` resolves to every GPU on the node. On the
+  concurrent backend the env is the only pinning mechanism, so there it carries the variable.
+- **How much of the environment travels.** The concurrent backend *replaces* a child's environment,
+  so it is given the whole thing. Dragon *merges* a template's env into the target node's own, so it
+  is given only what differs from ours — sending the head node's entire environment would overwrite
+  the remote node's.
+
+Thread caps (`thread_caps`, `thread_share`) are part of a placement and therefore **per command**.
+They used to be written into the campaign process's own environment at start-up and inherited by
+every child, which meant one campaign's caps leaked into its siblings under an enclosing manager.
 
 **asyncflow provides no retry primitive and no durable job state.** Engine state is in-process and cleared
 at shutdown. Retry policy and the external-job ledger (`exec/ledger.py`) are ours.
@@ -95,11 +141,34 @@ flow, be = await make_engine_bounded("dragon", cfg, 600, 60)
 assert flow.loop is asyncio.get_running_loop()   # false => every submit hangs forever
 ```
 
-**Version drift is real.** Check the installed version before trusting any API note here; this integration
-was written against `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0. **Re-verified on 0.6.0 / 0.6.0**
-(2026-11-06, Python 3.10.12): every note above still holds and the whole local tier is green, including
-the loop-ownership guard in `tests/test_backend_bound.py` that puts real work through a bounded engine.
-Nothing here is pinned to 0.5.x, so the floor in `pyproject.toml` stays `>=0.5.1`.
+**A coreutils `timeout` wrapper must not be used under Dragon.** `timeout` leads its own process
+group; Dragon's local services reaps only its own, so a wrapped command exits, its wrapper becomes
+`[timeout] <defunct>`, and the task never reaches a terminal state. Job 23814643 hung at stage 1
+exactly this way. The wrapper is applied on the concurrent backend only; Dragon is handed
+`walltime_s + KILL_GRACE_S` as the task's own `timeout` and enforces it itself
+(`exec/launch.py`, `exec/resources.py`).
+
+**Telemetry starts and stops with the engine, and its stop does not drain.** `flow.start_telemetry`
+takes a checkpoint path; the executor points it at `<campaign root>/telemetry/` when
+`telemetry_checkpoint_s > 0`. `stop()` does not forward rhapsody's `drain_on_stop`, so a stalled
+drain can only be cut short by a timeout of ours, and stopping telemetry from a task other than the
+one that started it makes OpenTelemetry log `Failed to detach context`. Counts read off a checkpoint
+can double-count across flushes — read a span's shape, not its totals.
+
+**`LocalExecutionBackend.shutdown` joins its pool synchronously on the engine loop.** If an adapter
+thread on the `local` route is still waiting on a command, teardown deadlocks: the command's
+completion needs the loop that is blocked in the join. `exec/stage._settle` and `Launcher.idle` wait
+for in-flight commands before shutdown for that reason.
+
+**Version drift is real.** Check the installed version before trusting any API note here; this
+integration was first written against `radical.asyncflow` 0.5.1 and `rhapsody-py` 0.5.0.
+**Verified on 0.7.0 / 0.7.0** (2026-11-11, Python 3.12.12, both installed editable from sibling
+checkouts): the whole local tier is green, including the loop-ownership guard in
+`tests/test_backend_bound.py` that puts real work through a bounded engine, and job 23815248 ran the
+stack on Delta with `dragonhpc` 0.15.0. `agent/pyproject.toml` floors both at `>=0.7.0`, because the
+execution loop relies on 0.7.0 specifically: a cancel reaches the backend a task was routed to, a
+block cancel cascades to its members, `future.uid` exists at call time, and every task event names
+its real backend.
 
 **Session directories.** asyncflow writes an `asyncflow.session.*` directory into `work_dir` on every
 engine run, and `work_dir` defaults to the CWD. `exec/backend.make_engine` and `make_engine_bounded` both
@@ -109,6 +178,11 @@ whatever directory you ran from.
 
 ## Python floor
 
-Python **≥3.11** where Dragon is used (`dragonhpc` requires it). **3.10 is sufficient** for the
-mock/laptop path. Heavy scientific tools run in containers or as subprocesses and do not constrain the
-agent environment — only the in-process P6 libraries do.
+Python **≥3.11**, unconditionally: `radical.asyncflow` and `rhapsody-py` 0.7.0 both require it, so
+the floor no longer depends on whether Dragon is in use. Dragon itself is the `[dragon]` extra
+(`rhapsody-py[dragon]`), which keeps CI, the laptop tier and the knob-lab notebook runnable with no
+Dragon installed. Heavy scientific tools run in containers or as subprocesses and do not constrain
+the agent environment.
+
+The root `impress` package is a separate matter: it is `>=3.9` with radical.pilot, and this project
+does not depend on it. That is the dependency firewall, not a conflict.

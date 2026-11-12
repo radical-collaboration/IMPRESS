@@ -3,12 +3,12 @@
 **Autonomous protein design on HPC.**
 
 > IMPRESS-A lives in the IMPRESS repository under `agent/`, as a subproject with its own
-> `pyproject.toml`: run every command below from `agent/`. It **depends on** the `impress` package
-> at the repository root and may not modify it — the execution loop is built on
-> `ImpressBasePipeline` and `ImpressManager` rather than re-deriving the engine conventions
-> (named backends, `task_description` defaults, GPU pinning) a second time, and
-> `tests/test_layering.py` asserts that only `runtime/runner.py` and `runtime/pipelines.py`
-> import it. It used to import nothing from there; that changed with the control-plane refactor.
+> `pyproject.toml`: run every command below from `agent/`. It runs on the same middleware as
+> IMPRESS - one `radical.asyncflow` engine over `rhapsody` backends - but not on the `impress`
+> package itself: each Stage is an asyncflow block, and each tool command an engine task placed
+> per backend (`exec/stage.py`, `exec/launch.py`). An earlier execution loop was built on
+> `ImpressBasePipeline`/`ImpressManager`; blocks gave natively what that layer had to be taught,
+> and `tests/test_layering.py` asserts nothing imports `impress` now.
 > The rest of the relationship is shared science — `examples/small_molecule_binding` runs the same
 > rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes
 > it per cycle.
@@ -95,15 +95,18 @@ unconditional external guard, or either half in `LoggingSpecifier`/`LoggingPlann
 See [`docs/impress-a/reference/control-models.md`](../docs/impress-a/reference/control-models.md).
 
 **Interface frontend — control-plane adapters.** One transport-agnostic protocol (`observe`, `events`,
-`steer`, `artifacts`, `provenance`, `ingest_measurement`, lifecycle). `observe()` returns the **same
+`steer`, `artifacts`, `provenance`, `ingest_measurement`, `infer`, lifecycle). `observe()` returns the **same
 observation object an in-process half is given** — informed monitoring means parity of evidence, not a
 progress bar. The protocol also carries runs by id — `submit_run`, `list_runs`, `run_result`,
 `cancel_run` — with **synchronous admission**: accepted with an id, or refused with the gate and the
 reason that refused it. In-process and HTTP+SSE adapters ship; MCP is the same protocol behind a
 different transport.
 
-**The substrate is pluggable too.** Execution backends are selected *by name* from site configuration —
-`concurrent` on a laptop, `dragon` or `radical` on HPC — so no backend class is named outside one module.
+**The substrate is pluggable too.** One `radical.asyncflow` engine per campaign carries named routes:
+`compute` for tool commands — selected *by name* from site configuration, `concurrent` on a laptop,
+`dragon` or `radical` on HPC, so no backend class is named outside one module — `local` for adapters
+and QC, and `ai` when the campaign serves its own reasoner. `infer` reaches that one: the decision
+stays wherever the reasoner runs, the weights sit beside the tools.
 
 ### What the engine guarantees
 
@@ -135,8 +138,8 @@ different transport.
 ## Quickstart
 
 ```bash
-./scripts/dev_setup.sh && source .venv/bin/activate       # installs `impress` from .. first
-                                                          # - it is unreleased, so order matters
+./scripts/dev_setup.sh && source .venv/bin/activate       # this project editable, plus the
+                                                          # extras its tests guard
 
 ruff check src tests                                      # reports; never rewrites. Ceiling: zero
 pytest tests -q                                           # the whole local tier, ~19s, no allocation
@@ -175,9 +178,15 @@ manifest.json            job id, campaign, model, nodes, git sha (+dirty), start
 slurm.out                the job's SLURM output, moved here on exit
 campaign.log             the campaign transcript
 <campaign_id>-<model>/   provenance/*.jsonl and jobs/ledger.jsonl
+                         and telemetry/, when the spec asks for it
 work/                    one directory per tool task, with its real outputs
 runinfo/                 Dragon's own
 ```
+
+`telemetry/` is the engine's own trace — a span per Stage block with its node tasks and tool
+commands under it, each naming the backend it really ran on. It is opt-in per campaign
+(`telemetry_checkpoint_s`, 0 disables) and needs the `[telemetry]` extra, because a trace is worth
+its cost on an allocation and not on a laptop.
 
 The trust ledger is site-scoped and lives outside it, in `$WORK_DIR/_trust/`.
 `$WORK_DIR/impress_a_runs/INDEX.md` records which jobs were kept and what each one showed.
@@ -188,6 +197,7 @@ The trust ledger is site-scoped and lives outside it, in `$WORK_DIR/_trust/`.
 campaign_id: stabilize-lysozyme
 goal: "Stabilize the given protein while preserving the designed fold"
 backend: concurrent                 # or dragon / radical on HPC
+telemetry_checkpoint_s: 0           # >0 writes the engine's own trace under the campaign root
 budget: {gpu_hours: 2.0, cpu_hours: 12.0}
 objectives:
   - {name: sc_rmsd, direction: minimize, max: 3.0}    # constraints prune
@@ -205,7 +215,8 @@ requires touching the composer, validator or manager. See
 
 ## Requirements
 
-Python **≥3.11** where Dragon is used; **3.10** suffices for the mock/laptop path. Scientific tools run
+Python **≥3.11** everywhere (radical.asyncflow and rhapsody 0.7.0 require it); Dragon is the
+`[dragon]` extra. Scientific tools run
 as subprocesses or in containers and do not constrain the agent environment. Built on
 [`radical.asyncflow`](https://github.com/radical-cybertools/radical.asyncflow) and
 [`rhapsody`](https://github.com/radical-cybertools/rhapsody); LangGraph drives the control-model-A loop.
@@ -232,7 +243,8 @@ documentation, and is not part of the published package.
 
 ## Status
 
-Reference implementation, exercised end to end on a laptop and not yet on real hardware.
+Reference implementation. The whole loop runs on a laptop with stubbed science; four campaigns have
+run the real six-tool chain on Delta.
 
 | | |
 |---|---|
@@ -241,17 +253,20 @@ Reference implementation, exercised end to end on a laptop and not yet on real h
 | Concurrent experiments, durable runs, reattach after restart | works |
 | Control plane — in-process and HTTP+SSE adapters | works |
 | Mock toolkit campaign | works |
-| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | six-stage chain executed end to end on Delta; trusted path reached (job 22726105); `replicas > 1` never run |
+| Real toolkits (RFdiffusion3, LigandMPNN, PyRosetta, Boltz) | six-stage chain executed end to end on Delta; trusted path reached (job 22726105); two lineages on one GPU each (job 23815248); width 4 never run |
 
-`pytest tests -q` — ~10s, no allocation. A complete campaign runs on a laptop with stubbed
+`pytest tests -q` — ~19s, no allocation. A complete campaign runs on a laptop with stubbed
 science, which is deliberate: HPC iteration is slow and expensive, so almost everything is verifiable
 locally. The corollary is that everything *only* verifiable on HPC is unverified.
 
 ## Known issues
 
-**No real campaign has ever run.** The four real toolkits register, validate, type-check as a chain
-and dry-run, and their adapters invoke real binaries — but no line of RFdiffusion, LigandMPNN,
-PyRosetta or Boltz code has executed through this system. Treat the real path as untested.
+**The real path has run, but not widely.** Four campaigns have executed the real six-tool chain on
+Delta: 22692304 end to end on one lineage, 22726105 and 22728140 through promotion and three trusted
+cycles, and 23815248 at two lineages with one GPU each. What that leaves untested is narrower than it
+used to be, and worth naming: the declared width of 4, a cancel reaching a command already running
+under Dragon, Dragon's own task timeout, and a locally hosted reasoner, whose profile still names no
+model. No measurement has ever superseded a prediction.
 
 **The Dragon backend can hang silently during construction.** `Batch()` is built synchronously with
 no `await` points, so a stall there blocks the event loop entirely — no heartbeat, no timeout, until
@@ -297,6 +312,7 @@ outstanding work with a recommended order, `plans/*.md` are stubs for the next t
 `plans/done/` records completed work and the decisions behind it — the rulings are the part worth
 keeping, not the task lists.
 
-Nearest term: structural QC gates (the known-bad fixtures now exist), then the first real Delta run. Further out:
+Nearest term: structural QC gates (the known-bad fixtures now exist), then a campaign at the declared
+replica width and a locally hosted reasoner on hardware. Further out:
 the MCP adapter, checkpoint/restart resume (the ledger and `reattach` exist; nothing resumes from
 them yet), registry hardening, and the P5 network-service governor.

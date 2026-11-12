@@ -92,10 +92,26 @@ profiles:
     extra_body:
       reasoning_effort: medium   # low | medium | high | xhigh | max
 
-  # A model served on or near the cluster. Point base_url at the server. If it
-  # runs inside the allocation it takes a GPU away from the tool pool, which
-  # changes the comparison against the other three arms - size the allocation
-  # for it, and say so in the write-up.
+  # A model served INSIDE the allocation, by the campaign's own engine: rhapsody's
+  # DragonVllmInferenceBackend on an `ai` route, each reasoner call a prompt_task
+  # (CampaignSession.infer). Preferred over an operator-started server, because the
+  # engine then places the model's GPUs and traces its calls beside the tools.
+  # `model` must be a provenance-compliant open model (Llama, Mistral, Gemma,
+  # gpt-oss, Nemotron, ...); a barred vendor is refused at load. It takes
+  # `hardware.num_gpus` GPUs away from the tool pool, which changes the comparison
+  # against the other arms - size the allocation for it, and say so in the
+  # write-up. Sampling is fixed per model at load (max_tokens, temperature), the
+  # backend has no response_format, and token counts are word-count estimates
+  # (plans/upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md).
+  local-dragon:
+    kind: rhapsody_vllm
+    model: REPLACE-ME
+    max_tokens: 4096
+    hardware: {num_nodes: 1, num_gpus: 1, node_offset: 0}
+    model_options: {tp_size: 1, max_model_len: 8192}
+    hf_token_env: HF_TOKEN
+
+  # A model served by a server outside the allocation. Point base_url at it.
   local-vllm:
     kind: openai_compat
     base_url: http://localhost:8000/v1

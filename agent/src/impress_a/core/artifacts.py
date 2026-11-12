@@ -8,7 +8,7 @@ tomorrow are interchangeable without touching the campaign spec.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,7 @@ from .types import ArtifactType
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 #: Above this, hashing costs more than the provenance is worth; size is recorded either

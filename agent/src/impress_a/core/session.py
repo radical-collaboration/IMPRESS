@@ -109,6 +109,16 @@ class CampaignSession(Protocol):
     async def request_human(self, question: str,
                             context: dict[str, Any] | None = None) -> None: ...
 
+    async def infer(self, node: str, prompt: str) -> str:
+        """One call to the campaign's locally hosted model, as an engine task.
+
+        For a reasoner whose model runs on the campaign's own allocation (a `rhapsody_vllm`
+        profile): the call is a `prompt_task` on the engine's `ai` route, so the model and its
+        calls are scheduled, placed and traced by the same engine as the tools. Raises when the
+        campaign has no local model - a hosted model is reached over its own API, not this.
+        """
+        ...
+
     async def stop(self, reason: str) -> None:
         """Ask the campaign to end. The executor decides when it actually has."""
         ...

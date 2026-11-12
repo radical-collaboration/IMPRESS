@@ -14,7 +14,7 @@ import os
 import socket
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,17 +42,12 @@ class TaskRequest:
     input_ports: dict[str, str] = field(default_factory=dict)
     node_id: str | None = None
     seed: int | None = None
-    #: Which GPU this task may use, when the site has more than one. Backlog A10: concurrent
-    #: GPU tasks were not pinned, so several could land on the same device while others sat
-    #: idle - measured as GPU-busy at most 17% with three of four GPUs never holding work.
-    #: Informational: which device this lineage was assigned. The env that actually pins is
-    #: `gpu_env` below, resolved by `exec/dispatch.node_task` where the backend is known -
-    #: under Dragon the placement policy pins and the env does not, so an adapter deciding
-    #: this for itself could point a child at a device Dragon never gave it.
+    #: Which GPU this task's commands were placed on, when its tool declares one and the site
+    #: has more than one. Informational: the placement itself is the engine's, applied to each
+    #: command by `exec/resources.Placement` - an env var under the concurrent backend, a
+    #: `Policy` under Dragon - so an adapter never pins anything itself. Backlog A10 is why it
+    #: exists: unpinned GPU tasks piled onto one device while three of four sat idle.
     gpu_index: int | None = None
-    #: Environment an adapter merges into its child's, unexamined. Empty under Dragon and
-    #: whenever nothing is pinned, so merging it is always safe.
-    gpu_env: dict[str, str] = field(default_factory=dict)
     #: Where this task may write. Defaults to the process CWD - see
     #: `_subprocess.workdir_for`, which is what every real adapter uses.
     workdir: str | None = None
@@ -223,7 +218,7 @@ class TaskAgent:
         and the two have to be distinguishable or "the task was slow" and "the task waited"
         read the same.
         """
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         t0 = time.monotonic()
         phases: dict[str, float] = {}
 
@@ -242,7 +237,7 @@ class TaskAgent:
 
         usage = TaskUsage(
             started_at=started.isoformat(),
-            finished_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=datetime.now(UTC).isoformat(),
             wall_s=round(time.monotonic() - t0, 6),
             phases=phases,
             host=socket.gethostname(),

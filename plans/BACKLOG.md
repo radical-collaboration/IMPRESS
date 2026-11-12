@@ -23,7 +23,7 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 
 | # | Item | Tier | Status | Doc |
 |---|---|---|---|---|
-| F2 | Per-task resources translated per backend: thread caps and GPU pinning (`_tool_task_description` in smb). `gpus_per_rank` is silently ignored by Dragon in discontinuous_scaffolds | 2 | open | [pr2](2026-10-08-framework-pr2.md#f2) |
+| F2 | Per-task resources translated per backend: thread caps and GPU pinning (`_tool_task_description` in smb). `gpus_per_rank` is silently ignored by Dragon in discontinuous_scaffolds | 2 | open; a hardware-proven reference now exists to lift: `agent/src/impress_a/exec/resources.py` (`thread_caps`, `Placement.describe`, `_dragon_policy`), confirmed on job 23815248 — note it sets `CUDA_VISIBLE_DEVICES` **only** off Dragon, because Dragon applies its policy layout after merging a template's env | [pr2](2026-10-08-framework-pr2.md#f2) |
 | F3 | `register_pipeline_tasks()` runs in `__init__` before subclass attributes and `self.logger` exist; crashed `22692267` | 2 (bug) | open | [pr2](2026-10-08-framework-pr2.md#f3) |
 | F4 | `start()` returns no per-pipeline results; no test that the manager exits when every pipeline fails (smb 20) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f4) |
 | F5 | Telemetry defaults (`checkpoint_interval`, `resource_poll_interval`, absolute path) and a bounded shutdown helper (smb 2) | 2 | open | [pr2](2026-10-08-framework-pr2.md#f5) |
@@ -34,22 +34,39 @@ back. See [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md).
 | F10 | Staggered pipeline start as a manager option (smb `start_delay`; OOM on `22714785` without it) | 3 | open | [pr3](2026-10-08-framework-pr3.md#f10) |
 | F11 | Stage-failure policy: `expected_outputs` / retries (smb 15, 16; protein_binding `s5`) | 4 | open, needs design and a reproducer | [deferred](2026-10-08-framework-deferred.md#f11) |
 | F12 | Event-driven manager loop instead of 0.5 s polling | 4 | open, not a measured bottleneck | [deferred](2026-10-08-framework-deferred.md#f12) |
-| F13 | asyncflow upstream: wrong backend name on lifecycle events, no `node_id`, `fut.cancel()` always uses the default backend, executable tasks labelled `bash`, `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
-| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: merged in PR #72 (`a74b71d`). Part 1, the runner swap: **blocked upstream**, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
-| F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break); blocked on F13's cancel bug | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
+| F13 | asyncflow upstream, five asks. **Fixed in 0.7.0** (verified against the installed checkout, merge `482f166`): lifecycle events name the backend a task is routed to (`workflow_manager.py:377`), and `fut.cancel()` routes to the task's own backend (#118, `:53-111`). **Still open:** no `node_id`; executable tasks labelled `bash` (`_tel_executable` prefers `EXECUTABLE` over `name`, `:932`); `LocalExecutionBackend` drops a command's quoting (`backends.py:330`) and ignores per-task `env` | — | upstream; no framework code | [deferred](2026-10-08-framework-deferred.md#f13) |
+| F15 | Dev path on asyncflow's own `LocalExecutionBackend`, plus a non-rhapsody variant of the stdio integration test: without rhapsody the suite is 115 passed / 5 skipped, and the skips are PR 1's own defaults | 2 | split. Part 2, the test variant: merged in PR #72 (`a74b71d`). Part 1, the runner swap: **still blocked upstream** on 0.7.0, because `LocalExecutionBackend` drops a command's quoting and ignores per-task `env` (F13 asks 4 and 5 — re-checked, not assumed) | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f15) |
+| F16 | Local stages as `function_task`s on a named backend, retiring `wrap_local_task` and the `impress.LocalStage` schema | 3 | open, needs decision (trace-schema break). **No longer blocked on F13's cancel bug** — fixed in asyncflow 0.7.0 and exercised by IMPRESS-A (`agent/src/impress_a/exec/stage.py`, `agent/tests/test_stage_block.py`). Now gated only on that decision and on F26's Python floor | [pattern-rollback](2026-10-15-asyncflow-pattern-rollback.md#f16) |
 | F21 | A child config with a bare `adaptive_fn` raises `TypeError` out of `manager.start()` mid-run (`PipelineSetup.from_dict` in the poll loop, `impress_manager.py:203`), not before any pipeline starts; found in the docs review of `9a413cd` | 3 | open, needs decision: drop that child and continue, or fail fast by contract | [docs-drift](2026-10-21-docs-drift-findings.md#f21) |
-| F22 | `pyproject.toml:22` floors `radical-asyncflow>=0.4.0`, but the code needs named backends, `function_task(backend=)` and `capture_stdio`; only 0.5.0/0.5.1 have been run (F19 acceptance). No rhapsody floor | 3 | open | [docs-drift](2026-10-21-docs-drift-findings.md#f22) |
+| F26 | Re-base `ImpressBasePipeline`/`ImpressManager` on asyncflow blocks: a pipeline is a block, `adaptive_fn` a member task, a child pipeline a block call, `kill_parent` a block cancel that reaches the backend. IMPRESS-A made the move first (`agent/src/impress_a/exec/stage.py`) | 2 | open, needs decision: Python floor (asyncflow 0.7.0 is `>=3.11`) and a shim vs migrating the examples. Would close F4, F9, F12, F16, F21. The case strengthened on 2026-11-11: that loop has now run on hardware (job 23815248, two lineages, 12/12 tasks) | [pipelines-as-blocks](2026-11-11-pipelines-as-blocks.md) |
+| F22 | `pyproject.toml:22` floors `radical-asyncflow>=0.4.0`, but the code needs named backends, `function_task(backend=)` and `capture_stdio`; only 0.5.0/0.5.1 have been run by the root package (F19 acceptance). No rhapsody floor. 0.7.0 + rhapsody 0.7.0 + dragonhpc 0.15.0 have now run on Delta under `agent/` (jobs 23814643, 23815248), which is evidence about the middleware but not about this package's own use of it | 3 | open | [docs-drift](2026-10-21-docs-drift-findings.md#f22) |
 | F23 | protein_binding: `protein_binding.py:152` reads MSAs from hard-coded `~/boltz/msa_cache` while `delta_env_setup.sh:165` writes `${WORK_DIR}/boltz/msa_cache`; `delta_gpu_run.sh:63` defaults `BOLTZ_VENV` to `$HOME`. Documented with a workaround in `a5bc68e`; not run | 3 | open | [docs-drift](2026-10-21-docs-drift-findings.md#f23) |
 | F24 | No generation or depth concept anywhere in the framework, and no cap: an adaptive rule that always spawns never lets `start()` reach its empty-queues exit, so the failure is a hang rather than an error. All three examples carry their own cap, each invented separately | 3 | open, needs decision: optional `max_generations` on `PipelineSetup`, manager refuses past it and logs why | [colab-examples](2026-11-11-colab-live-examples.md#f24) |
 | F25 | `manager.start()` indexes `config["name"]` directly when draining a child request (`impress_manager.py:201`), so a child config without one raises `KeyError` out of the poll loop mid-run rather than a validation error naming the parent. Same shape as F21, probably the same fix | 3 | open | [colab-examples](2026-11-11-colab-live-examples.md#f25) |
+
+## Upstream
+
+Defects in the middleware, written to be filed with asyncflow and rhapsody. F13 is the older
+asyncflow list; these seven were found on 2026-11-11 by IMPRESS-A's one-engine branch, which
+works around each in code. `agent/plans/backlog.md` I2 lists four and I4 the two vLLM ones; the
+Dragon defect was inside I1, which is now closed, so **I10** owns the filing for all seven. None
+is reported upstream yet, and filing them is the maintainer's call rather than an agent's.
+
+- [rhapsody: concurrent `cancel_task` leaves a running executable's process alive](upstream/rhapsody-concurrent-cancel-leaves-process-running.md)
+- [rhapsody: concurrent backend runs executables without any concurrency bound](upstream/rhapsody-concurrent-executables-unbounded.md)
+- [asyncflow: `LocalExecutionBackend.shutdown` joins its pool synchronously on the event loop](upstream/asyncflow-local-backend-shutdown-blocks-loop.md)
+- [asyncflow: `start_telemetry` does not expose rhapsody's `drain_on_stop`](upstream/asyncflow-start-telemetry-no-drain-on-stop.md)
+- [rhapsody: vLLM chat endpoint ignores sampling parameters and fakes token counts](upstream/rhapsody-vllm-chat-endpoint-drops-parameters.md)
+- [rhapsody + asyncflow: a `prompt_task` routed to the vLLM backend never resolves](upstream/rhapsody-vllm-prompt-result-not-stdout.md)
+- [dragon: a process that leads its own process group is never reaped, so its task never completes](upstream/dragon-unreaped-process-group-leader.md) (job 23814643)
 
 ## Order
 
 1. PR 2: F2–F7. F3 and F4 first (bug fix, then a test that may move
    smb 20 to teardown).
 2. PR 3: F8–F10.
-3. F11 and F12 once smb 15/16 have a reproducer; F13 goes to the asyncflow maintainers, and
-   F16 and F15 part 1 wait for its answer.
+3. F11 and F12 once smb 15/16 have a reproducer. Part of F13's answer has arrived in 0.7.0, so
+   **F16 no longer waits on it**; F15 part 1 still does, on asks 4 and 5.
 4. F21–F23, from the post-PR #72 docs review. F23 is a small example fix that can ride with any
    protein_binding change; F21 needs its decision first; F22 needs a check against an older
    asyncflow.
@@ -61,7 +78,12 @@ survives, with line numbers shifted ~23 — the table in
 **None of F13's asks 1, 3, 4 or 5 are fixed in 0.6.0** (lifecycle events still name the default
 backend, as both F19 acceptance runs show; `_tel_executable` still prefers `executable` over
 `name`; `LocalExecutionBackend` still `" ".join`s a command and still passes no `env=`), so F15
-part 1 and F16 stay blocked — no need to re-check. Note the venv still has the
+part 1 and F16 stay blocked.
+
+**Superseded for 0.7.0 (2026-11-11).** "No need to re-check" was wrong: asks 1 and 3 *are* fixed
+in 0.7.0, which is what unblocked F16. Asks 4 and 5 are not, so F15 part 1 stays blocked. The
+lesson is the one this file keeps relearning — a survey's conclusion expires with the version it
+was taken on, so record the version and re-check rather than carrying the verdict forward. Note the venv still has the
 `radical_asyncflow-0.5.0` dist, so the test suite and the F19 acceptance runs exercised 0.5.0;
 upgrading is its own decision.
 

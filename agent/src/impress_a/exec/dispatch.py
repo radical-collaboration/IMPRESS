@@ -1,9 +1,9 @@
-"""Generic DAG dispatch to asyncflow.
+"""The node factory and result assembly every Stage shares.
 
-VALIDATED BY SPIKE (asyncflow 0.5.1, rhapsody 0.5.0): a DAG described as *data* is
-dispatched with ONE generic factory - no code generation, no AST work. Dependencies are
-expressed by passing UNAWAITED futures as call arguments; asyncflow's scheduler resolves
-order from its own dependency-count structure.
+`node_task` turns one graph node into engine work; `results_from` turns a Stage's payloads back
+into typed `ExecutionResults`. The Stage itself - one asyncflow block per graph - is
+`exec/stage.py`. This module used to hold the `Dispatcher` too, which registered a graph's tasks
+on the engine directly; Stages as blocks replaced both it and the IMPRESS-pipeline Runner.
 
 Two asyncflow idioms, both needed and not interchangeable:
   * dependency-as-argument -> expresses EDGES
@@ -15,15 +15,18 @@ GOTCHA: asyncflow takes the task name from `fn.__name__`; the decorator accepts 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from ..compose.graph import TaskGraph
 from ..core.qc import QCReport, QCVerdict
 from ..core.results import RunOutcome, RunState, TaskOutcome
+from ..tools._subprocess import LAUNCHER
 from ..tools.agent import TaskRequest, TaskResult, TaskUsage
 from ..tools.registry import Registry
-from .resources import gpu_env
+from .backend import LOCAL
+from .launch import Launcher
+from .resources import Placement, placement_for
 
 
 @dataclass
@@ -138,56 +141,42 @@ class ExecutionResults:
         return q
 
 
-@dataclass
-class DispatchHandle:
-    """Retained submission state for one in-flight graph.
-
-    The execution-layer seam always called for these ("cancellation is why submission
-    handles are retained per graph"); nothing kept one, because nothing needed one while
-    every graph was awaited where it was submitted.
-    """
-
-    run_id: str
-    graph_id: str
-    futures: dict[str, Any] = field(default_factory=dict)
-    gather: Any = None
-    cancelled: bool = False
-
-
 def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
               params: dict[str, Any], *, invocation: str = "",
               seed: int | None = None, dep_order: tuple[str, ...] = (),
               wiring: tuple[tuple[str, str, str], ...] = (),
-              workdir: str | None = None, gpu_index: int | None = None,
-              backend_kind: str = "concurrent",
-              seed_inputs: dict[str, Any] | None = None):
+              workdir: str | None = None, placement: Placement | None = None,
+              workflow_id: str | None = None,
+              seed_inputs: dict[str, Any] | None = None,
+              launchers: list[Launcher] | None = None,
+              slots: asyncio.Semaphore | None = None):
     """ONE generic factory for every node in every graph.
 
-    `wiring` is the node's typed `inputs` map, flattened to
-    `(port, dep_id, out_port)` triples - the composer computed it and the validator
-    type-checked it, and until now the dispatcher threw it away: inputs were keyed
-    `dep0..depN` positionally, and every real adapter recovered its artifact by SCANNING
-    the payloads for one whose `outputs` happened to contain the port it wanted.
+    **A node is two kinds of engine work.** The adapter - pre-process, parameterize, run,
+    post-process and the QC gates - is a function task on the `local` route: a thread in this
+    process, so it can be handed the campaign's own objects and nothing about it is pickled.
+    Every command the adapter starts through `run_cmd` is a separate executable task on the
+    `compute` route, placed by `placement` (`exec/launch.py`). So the backend schedules the
+    binaries, with their GPU and thread share, rather than a Python callable that hides them.
 
-    That works only while every node has exactly one upstream dependency. A node with two
-    typed inputs type-checks at composition and mis-wires at runtime, silently, because
-    the scan returns whichever dep is first. An Aim hierarchy with real dependencies hits
-    that on its first branch - which is why this is fixed before the Runner, and before
-    anything composes a branching Stage.
-
-    **The GPU pinning env is computed here, not in the adapter.** `TaskRequest.gpu_index` said
-    an adapter should turn it into an environment through `exec/resources.gpu_env`, which
-    would mean every adapter knowing which backend it is running under - and getting that
-    wrong is not a cosmetic error. Under a concurrent backend the env is what pins; under
-    Dragon the placement policy is, because local services merges a process template's env and
-    applies the layout afterwards - so an adapter that set `CUDA_VISIBLE_DEVICES=2` inside a
-    process Dragon had already restricted to one device would point it at a device it was
-    never given. Resolved once, where the backend is known; the adapter merges a dict it does
-    not have to interpret.
+    `wiring` is the node's typed `inputs` map, flattened to `(port, dep_id, out_port)`
+    triples - the composer computed it and the validator type-checked it. A node with two
+    typed inputs gets the right artifact on each; keying them positionally used to mis-wire
+    exactly that case, silently.
     """
     spec = reg.get(tool_id)
-    pinning = gpu_env(gpu_index, backend_kind)
     agent_cls = reg.agent_for(tool_id)
+    placement = placement or placement_for(spec.resources, "concurrent", threads=1)
+    # Built here, on the engine loop, rather than inside `_run`: `_run` executes on a `local`
+    # thread under its own `asyncio.run`, and commands must be submitted on the loop the engine
+    # was built on - in THIS context, which inside a Stage block is the block's, so its
+    # commands become block members (`exec/launch.py`). `launchers` is how the Stage reaches
+    # them to cancel.
+    launcher = Launcher(flow, flow.loop, invocation or node_id, placement,
+                        workflow_id=workflow_id, context=contextvars.copy_context(),
+                        slots=slots)
+    if launchers is not None:
+        launchers.append(launcher)
 
     async def _run(*deps: Any) -> dict[str, Any]:
         agent = agent_cls(spec)
@@ -203,26 +192,42 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
                 inputs[f"dep{i}"] = payload
         req = TaskRequest(tool=tool_id, params=params,
                           node_id=invocation, seed=seed, workdir=workdir,
-                          inputs=inputs, gpu_index=gpu_index, gpu_env=dict(pinning),
+                          inputs=inputs, gpu_index=placement.gpu_index,
                           seed_inputs=dict(seed_inputs or {}),
                           input_ports={port: out for port, _, out in wiring})
-        res = await agent(req)
+        token = LAUNCHER.set(launcher)
+        launcher.entered()
+        try:
+            res = await agent(req)
+        finally:
+            LAUNCHER.reset(token)
+            launcher.left()
+        usage = res.usage
+        if launcher.commands:
+            # Time a command spent waiting for the backend is the backend's, not the tool's:
+            # counting it would read a saturated pool as a slow tool, and `cost_measured`
+            # exists to notice declared figures drifting below what tools really take.
+            usage.phases["queued"] = round(launcher.queued_s, 6)
+            usage.wall_s = round(max(0.0, usage.wall_s - launcher.queued_s), 6)
+            res.cost_measured = usage.as_cost(spec.resources.gpus, spec.resources.cores)
+        usage.cuda_visible_devices = ("" if placement.gpu_index is None
+                                      else str(placement.gpu_index))
         return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
                 "qc": res.qc.model_dump(), "cost": res.cost,
-                # Measured, beside declared. The closure crosses a process boundary, so
-                # both travel as plain data.
+                # Measured, beside declared.
                 "usage": asdict(res.usage), "cost_measured": res.cost_measured}
 
     _run.__name__ = node_id   # asyncflow reads the name from __name__
-    return flow.function_task(_run)
+    return flow.function_task(_run, backend=LOCAL)
 
 
 def results_from(graph_id: str, payloads: dict[str, Any]) -> ExecutionResults:
     """Assemble typed results from `{node_id: payload-or-exception}`.
 
-    One assembly implementation, shared by the Dispatcher and the Runner. Two would be two
-    places for the declared/measured cost split to drift, and the `strict=True` zip that feeds
-    this is where a misattribution would otherwise hide.
+    One assembly implementation, so the declared/measured cost split has one place to live.
+    The payloads must be keyed by the node that produced them - `exec/stage.py` builds them
+    with a `strict=True` zip in topo order, which is where a misattribution would otherwise
+    hide.
     """
     out = ExecutionResults(graph_id=graph_id)
     for tid, r in payloads.items():
@@ -244,101 +249,27 @@ def results_from(graph_id: str, payloads: dict[str, Any]) -> ExecutionResults:
     return out
 
 
+def host_for(lineage: int, gpus_per_node: int, hosts: tuple[str, ...]) -> str | None:
+    """The node a lineage's GPU lives on, round-robin over (host, GPU) slots.
+
+    `None` - let the backend choose - on a single host, which is every campaign run so far:
+    naming the only host constrains nothing and costs a policy field.
+    """
+    if len(hosts) <= 1:
+        return None
+    slot = lineage % (len(hosts) * max(1, gpus_per_node))
+    return hosts[slot // max(1, gpus_per_node)]
+
+
 def gpu_for(lineage: int, gpus_per_node: int) -> int | None:
     """One lineage, one GPU - round-robin across the devices the site declares.
 
-    Module level rather than a `Dispatcher` method because the Runner needs the same answer,
-    and A10 is the standing proof of what happens when nothing answers it: concurrent GPU
+    Backlog A10 is the standing proof of what happens when nothing answers it: concurrent GPU
     tasks were not pinned at all, so several could land on one device while others sat idle -
     consistent with GPU-busy measuring at most 17% while three of four GPUs never held work.
-    Two implementations of one round-robin is two things to keep in step.
 
     1 means "do not pin", which is also the honest answer for a laptop.
     """
     if gpus_per_node <= 1:
         return None
     return lineage % gpus_per_node
-
-
-class Dispatcher:
-    def __init__(self, flow, reg: Registry, backend_kind: str = "concurrent",
-                 workdir: str | None = None, gpus_per_node: int = 1):
-        self.flow, self.reg, self.backend_kind = flow, reg, backend_kind
-        #: Devices available per node, from the campaign's `SiteCaps`. 1 means "do not pin",
-        #: which is also the honest answer for a laptop.
-        self.gpus_per_node = gpus_per_node
-        # None means "whatever the process CWD is", which is what the launcher sets.
-        self.workdir = workdir
-
-    def _gpu_for(self, lineage: int) -> int | None:
-        """This dispatcher's site caps, through the shared round-robin."""
-        return gpu_for(lineage, self.gpus_per_node)
-
-    def _make_task(self, node_id: str, tool_id: str, params: dict[str, Any],
-                   invocation: str = "", seed: int | None = None,
-                   dep_order: tuple[str, ...] = (),
-                   wiring: tuple[tuple[str, str, str], ...] = (),
-                   gpu_index: int | None = None,
-                   seed_inputs: dict[str, Any] | None = None):
-        return node_task(self.flow, self.reg, node_id, tool_id, params,
-                         invocation=invocation, seed=seed, dep_order=dep_order,
-                         wiring=wiring, workdir=self.workdir, gpu_index=gpu_index,
-                         backend_kind=self.backend_kind, seed_inputs=seed_inputs)
-
-
-    def submit(self, g: TaskGraph, run_id: str = "") -> DispatchHandle:
-        """Register the whole graph and return WITHOUT awaiting it.
-
-        Submission is where the outer loop used to lose control: it awaited the entire
-        graph, so the reasoner could not be consulted again until the slowest lineage
-        finished. Registration is synchronous, so by the time this returns every task is
-        known to the scheduler and the caller holds a handle to the work.
-
-        The handle is also the run's index. asyncflow tags tasks with `workflow_id` but
-        exposes no way to look tasks up by it, so the caller's own table remains the only
-        way to answer "what belongs to run R" - which cancellation and draining need.
-        """
-        invocation = run_id or g.id
-        tasks = {tid: self._make_task(
-                     tid, n.tool, n.params, f"{invocation}:{tid}", n.seed,
-                     dep_order=tuple(n.deps),
-                     wiring=tuple((port, *ref.split(".", 1)) if "." in ref
-                                  else (port, ref, "")
-                                  for port, ref in n.inputs.items()),
-                     gpu_index=self._gpu_for(n.lineage),
-                     seed_inputs=n.seed_inputs)
-                 for tid, n in g.nodes.items()}
-        futures: dict[str, Any] = {}
-        for tid in g.topo_order():                       # edges via unawaited futures
-            deps = [futures[d] for d in g.nodes[tid].deps]
-            futures[tid] = (tasks[tid](*deps, workflow_id=run_id) if run_id
-                            else tasks[tid](*deps))
-        # return_exceptions=True: one bad task must not cancel its siblings, and the
-        # gather is not awaited yet, so a raising task would otherwise go unretrieved.
-        gather = asyncio.gather(*futures.values(), return_exceptions=True)
-        return DispatchHandle(run_id=run_id, graph_id=g.id, futures=futures,
-                              gather=gather)
-
-    async def collect(self, h: DispatchHandle) -> ExecutionResults:
-        """Await a submitted graph and assemble its typed results."""
-        raw = await h.gather
-        # Zip against `futures`, which is built in topo order - the same order `gather` was
-        # given. Zipping against `graph.nodes` (insertion order) misattributes every payload
-        # for anything wider than one lineage, because Kahn's algorithm emits roots first.
-        return results_from(h.graph_id, dict(zip(h.futures.keys(), raw, strict=True)))
-
-    def cancel(self, h: DispatchHandle) -> None:
-        """Ask for a run to stop. ADVISORY - see `DispatchHandle.cancelled`.
-
-        A task that has already started cannot be recalled: the concurrent backend calls
-        `Future.cancel()`, which returns False once the callable is running, and
-        asyncflow discards that answer anyway. So this reclaims queued work only, and the
-        run's real outcome still has to come from `collect`.
-        """
-        h.cancelled = True
-        for f in h.futures.values():
-            f.cancel()
-
-    async def run(self, g: TaskGraph, invocation: str = "") -> ExecutionResults:
-        """Submit and await in one step - the serial path."""
-        return await self.collect(self.submit(g, run_id=invocation))

@@ -1,6 +1,6 @@
 """T1 - unit tests. Pure logic, no I/O."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -422,7 +422,7 @@ def test_an_undeclared_walltime_limit_never_refuses_anything():
 
 
 def test_remaining_walltime_is_the_limit_less_elapsed():
-    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    started = datetime.now(UTC) - timedelta(seconds=100)
     led = BudgetLedger(walltime=Walltime(started_at=started, limit_s=150.0))
     assert 99 <= led.walltime.elapsed_s <= 102
     assert 48 <= led.walltime.remaining_s <= 51
@@ -436,7 +436,7 @@ def test_burn_rate_is_measured_not_declared():
     The one thing it must not be is the declared estimate in new units: those figures sit
     2.25x-69x above measurement on purpose, because they feed gates that REFUSE graphs.
     """
-    started = datetime.now(timezone.utc) - timedelta(seconds=100)
+    started = datetime.now(UTC) - timedelta(seconds=100)
     led = BudgetLedger(limits={"gpu_hours": 10.0},
                        walltime=Walltime(started_at=started, limit_s=1000.0))
     assert led.burn_rate().per_s == {}, "nothing settled yet, so no rate exists"
@@ -563,3 +563,16 @@ def test_an_offers_bounds_are_the_floor_and_ceiling_of_every_dimension():
         cost={"gpu_hours": CostRange(floor=0.1, expected=0.4, ceiling=8.0, unit="gpu_hours"),
               "cpu_hours": CostRange(floor=1.0, expected=2.0, ceiling=9.0, unit="cpu_hours")})
     assert offer.bounds() == {"gpu_hours": (0.1, 8.0), "cpu_hours": (1.0, 9.0)}
+
+
+def test_a_p6_tool_is_refused_at_load_rather_than_silently_dropped():
+    """The composer drops P6 tools from every graph and nothing runs them instead, so a P6
+    stage used to vanish from a campaign without a word. Loading is validating."""
+    import pytest
+
+    from impress_a.tools.registry import Registry
+    from impress_a.tools.spec import ToolSpec
+
+    base = Registry().load().get("mock_generate").model_dump()
+    with pytest.raises(ValueError, match="P6"):
+        ToolSpec(**{**base, "pattern": "P6"})

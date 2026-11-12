@@ -14,11 +14,11 @@ down, or can be retried for free.
 
 | ID | Pattern | Scheduling implication | Examples |
 |---|---|---|---|
-| **P1** | GPU-node-local, in-job | Placed on a GPU the agent already holds; contends with other P1 work | Diffusion generators, inverse folding, structure prediction |
+| **P1** | GPU-node-local, in-job | Placed on a GPU the agent already holds, one device per lineage; contends with other P1 work | Diffusion generators, inverse folding, structure prediction |
 | **P2** | CPU-parallel fan-out, in-job | Scales by replica count; the natural knob for adaptive batch sizing | Physics ensembles, structural search, per-design scoring |
 | **P3** | MPI multi-node, in-job | Needs a reserved rank topology; not resizable mid-run | Molecular dynamics, MPI-parallel design protocols |
 | **P4** | External HPC job | Async submit/poll; **outlives the agent**; needs a durable ledger entry | Long production runs, work needing a different queue |
-| **P5** | Network service over HTTPS | No local resource cost; fails by latency, quota, outage, **schema drift** | Structure/sequence databases, MSA services, an LLM oracle |
+| **P5** | Network service over HTTPS | No local resource cost; fails by latency, quota, outage, **schema drift** | Structure/sequence databases, MSA services, a hosted LLM oracle |
 | **P6** | In-process library call | **Must never be scheduled** — overhead would exceed the work | Cheminformatics, structure parsing, metric computation |
 | **P7** | Composite pipeline | Parameterize and launch; internal stages are not individually steered | A whole externally-defined multi-stage pipeline |
 | **P8** | External experiment | Latency of days to weeks; completes **out-of-band**, often after the campaign ends | Wet-lab or robotic-lab assay |
@@ -29,9 +29,14 @@ down, or can be retried for free.
 leaves it, so the work can outlive the agent process. That demands a durable job ledger
 (`exec/ledger.py`) and introduces queue wait as a cost term unrelated to the science.
 
-**P6 is an instruction to inline.** A tool that takes 30 ms does real damage if treated as a task: the
-orchestration layer pays scheduling, serialization and filesystem cost orders of magnitude greater than
-the work. The composer inlines P6 tools and validation gate 4 rejects any graph that schedules one.
+**P6 is an instruction to inline — and inlining is not built.** A tool that takes 30 ms does real damage
+if treated as a task: the orchestration layer pays scheduling, serialization and filesystem cost orders
+of magnitude greater than the work. The composer was supposed to inline P6 tools, and never did: it
+dropped them from every graph instead, with nothing running them in their place, so a declared stage
+vanished without a word. A P6 declaration is therefore a **load-time error** now (`tools/spec.py`), and
+a whole toolkit that declares one registers nothing. Gate 4 still rejects a scheduled P6 node, as a
+backstop against a composer bug. The pattern stays in the taxonomy because the intent is unchanged;
+what a reader must not assume is that declaring P6 gets a tool run.
 
 **P8 is forward-declared.** No tool in the current registry is P8. It exists so the data model, the
 storage layout and the control plane are shaped correctly now, when that is nearly free, rather than
@@ -45,9 +50,14 @@ Pattern alone is insufficient. `ToolSpec` also declares:
 | Attribute | Why it matters |
 |---|---|
 | `gpu_portability` (cuda / hip / sycl_xpu) | Checked at compose time against the site's `gpu_api`. A tool with no proven path on the running platform is refused before it consumes anything |
-| `resources` | Normalized per backend by `exec/resources.py`; backends do **not** share a resource vocabulary |
+| `resources` | Become a per-command `Placement` (`exec/resources.py`): the GPU, the thread share and the environment one command runs with. Backends do **not** share a resource vocabulary, so the translation is per backend — a Dragon `Policy`, or a child environment on the concurrent backend |
 | `cost_model` | Feeds the budget gate and the cost objective |
-| `qc_gates` | Mandatory for non-P6 tools; gate 2 refuses a tool composed without them |
+| `qc_gates` | Mandatory for every tool that can be registered; gate 2 refuses a tool composed without them |
+
+A campaign that serves its own reasoner reserves the first devices for the model, and
+`StageExecutor.gpu_offset` shifts every tool's placement past them — so a tool never lands on the GPU
+the model is holding. That reasoner is not P5: it runs inside the allocation on the engine's `ai`
+route, with none of P5's latency, quota or outage failure modes and all of P1's contention.
 
 ## Classification rules
 

@@ -23,6 +23,14 @@ implementation.
 | `null` | an empty `Spec` | never asked | 0 | implemented |
 | `replay` | re-authors a recorded `specs.jsonl` | re-authors a recorded `stages.jsonl` | 0 | partial |
 
+**A letter is a decision frontend, not a deployment topology.** Any of them runs either in one
+process (`impress-a run`) or split across `impress-a serve` + `impress-a control`; the one exception
+is C, which `run` refuses because it means an external caller steers and `run` attaches no plane.
+Where the model is *hosted* is a third, separate axis: a `--model-profile` names a hosted endpoint
+(`kind: openai_compat`) or a model served inside the allocation on the campaign's own engine
+(`kind: rhapsody_vllm`, e.g. the `local-dragon` profile), and the latter is reached through
+`session.infer` rather than over the network.
+
 `null` and `replay` are shipped deciders **outside** the four-model taxonomy, which is why
 "exactly one of four" and `--model`'s choices do not agree. `replay` reads the two
 **executor-written** records rather than anything a reasoner kept, so the record exists for every
@@ -72,14 +80,14 @@ impress-a run      CampaignSpec ─┬→ _options_for()   → ReasonerOptions �
 impress-a control  CampaignObservation → _role_pair() + a Goal rebuilt from the observation
 ```
 
-`ReasonerOptions` (`policy/registry.py:53`, filled by `cli._options_for:235`) is the
+`ReasonerOptions` (`policy/registry.py:53`, filled by `cli._options_for:243`) is the
 construction-time half. Every field is optional because most models use two or three:
 
 | option | from | read by |
 |---|---|---|
 | `stages` | `stages:` | **all four planners.** Without it every model falls back to its built-in default, which is the **mock** chain — so a campaign naming real toolkits would load them, validate them, and then execute mocks |
 | `replicas` | `replicas:` | all four planners, as `base_replicas` |
-| `oracle` **and** `reasoner` | `--model-profile` | B's single-call seam and A's per-node seam. **One client fills both**, because `OpenAICompatOracle` implements `reasoning.NodeReasoner`; a letter picks one shape or the other, so a second client would only be a second connection to the same endpoint |
+| `oracle` **and** `reasoner` | `--model-profile` | B's single-call seam and A's per-node seam. **One client fills both**, because `OpenAICompatOracle` implements `reasoning.NodeReasoner`; a letter picks one shape or the other, so a second client would only be a second connection to the same endpoint. A `rhapsody_vllm` profile fills them with `SessionOracle` instead, which calls `session.infer` rather than an endpoint |
 | `timeout_s`, `on_timeout` | `control_liveness_timeout_s:` | **C only** |
 | `records`, `spec_records`, `stage_records` | `--replay-from` | `replay` only |
 | `fallback` | built by the caller | B and C |

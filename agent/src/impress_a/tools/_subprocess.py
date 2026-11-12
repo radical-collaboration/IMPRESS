@@ -15,8 +15,19 @@ import asyncio
 import os
 import re
 import shlex
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
+
+#: The launcher a node's commands go through while that node runs on the engine. Set by
+#: `exec/dispatch.node_task` around one adapter call and nowhere else; `None` means "not on
+#: the engine" - `impress-a preflight`, a gate fixture, a test calling an adapter directly -
+#: and there `run_cmd` runs the command itself, as it always did.
+#:
+#: A context variable rather than a `TaskRequest` field so that no adapter can forget to pass
+#: it: an adapter that did would run its binary on the campaign's own host, unplaced, and
+#: nothing would say so. Every real adapter already calls `run_cmd`; none had to change.
+LAUNCHER: ContextVar[Any] = ContextVar("impress_a_launcher", default=None)
 
 
 class SubprocessError(RuntimeError):
@@ -36,7 +47,14 @@ class SubprocessError(RuntimeError):
 
 async def run_cmd(cmd: list[str], cwd=None, env=None,
                   timeout_s: float | None = None) -> tuple[str, str]:
-    """Run `cmd`, wait for it, return (stdout, stderr). Raises SubprocessError on nonzero exit."""
+    """Run `cmd`, wait for it, return (stdout, stderr). Raises SubprocessError on nonzero exit.
+
+    Inside a node on the engine, the command is an engine task on the `compute` route,
+    placed by the node's `Placement` (see `exec/launch.py`). Outside one, it runs here.
+    """
+    launcher = LAUNCHER.get()
+    if launcher is not None:
+        return await launcher.run(cmd, cwd=cwd, env=env, timeout_s=timeout_s)
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=cwd, env=env,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -68,7 +86,7 @@ async def run_cmd(cmd: list[str], cwd=None, env=None,
     try:
         await asyncio.wait_for(proc.wait(), timeout=timeout_s)
         await asyncio.gather(*readers)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         for r in readers:
@@ -123,19 +141,19 @@ def input_path(req: Any, port: str):
 
 
 def child_env(req: Any, base: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment a real tool's child process should run with.
+    """The environment a real tool's child process should run with: a whole one.
 
-    Merges `TaskRequest.gpu_env` - the pinning `exec/dispatch.node_task` resolved where the
-    backend was known - into `base`, defaulting to this process's own environment because the
-    env passed to `create_subprocess_exec` REPLACES the child's rather than extending it, so
-    passing only the pinning would strip PATH, MPNN_DIR and BOLTZ_CACHE.
+    Whole because the env passed to `create_subprocess_exec` REPLACES the child's rather than
+    extending it, so passing only additions would strip PATH, MPNN_DIR and BOLTZ_CACHE.
 
-    Empty `gpu_env` under Dragon and whenever nothing is pinned, so an adapter never has to
-    ask which case it is in: there the placement policy pins, and a `CUDA_VISIBLE_DEVICES`
-    set here would name a device Dragon never gave the process.
+    It carries no GPU pinning and no thread caps any more. Those are the node's `Placement`,
+    rendered per backend by `exec/resources` where the backend is known: the concurrent
+    backend gets them in the env, Dragon gets a `Policy` - and an adapter that set
+    `CUDA_VISIBLE_DEVICES` itself under Dragon would name a device Dragon never gave it.
+    `req` is kept for adapters that call it with one.
     """
-    return {**(base if base is not None else dict(os.environ)),
-            **(getattr(req, "gpu_env", None) or {})}
+    del req
+    return dict(base if base is not None else os.environ)
 
 
 def workdir_for(req: Any, prefix: str) -> Path:

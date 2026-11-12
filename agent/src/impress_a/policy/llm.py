@@ -67,7 +67,10 @@ class ModelProfile:
     """One model under comparison, named in `models.yaml`."""
 
     name: str
-    kind: str = "openai_compat"       # openai_compat | rehearsal
+    #: openai_compat | rehearsal | rhapsody_vllm. The last is a model served on the campaign's
+    #: own allocation by rhapsody's DragonVllmInferenceBackend and reached as engine
+    #: `prompt_task`s through `CampaignSession.infer` - no `base_url`, no key.
+    kind: str = "openai_compat"
     base_url: str | None = None
     model: str | None = None
     api_key_env: str | None = None
@@ -80,10 +83,32 @@ class ModelProfile:
     request_timeout_s: float = 300.0
     max_retries: int = 4
     extra_body: dict[str, Any] = field(default_factory=dict)
+    #: `rhapsody_vllm` only. Dragon `HardwareConfig` fields (`num_nodes`, `num_gpus`,
+    #: `node_offset`): which of the allocation's GPUs the model takes.
+    hardware: dict[str, Any] = field(default_factory=dict)
+    #: `rhapsody_vllm` only. Further Dragon `ModelConfig` fields (`tp_size`, `dtype`,
+    #: `max_model_len`, ...). `model`, `max_tokens` and `temperature` above fill the rest, so
+    #: sampling stays pinned the same way for every kind.
+    model_options: dict[str, Any] = field(default_factory=dict)
+    #: `rhapsody_vllm` only. The environment variable holding a Hugging Face token, for a
+    #: gated model. Never the token itself.
+    hf_token_env: str | None = None
 
     @property
     def is_live(self) -> bool:
-        return self.kind == "openai_compat"
+        return self.kind in ("openai_compat", "rhapsody_vllm")
+
+    def inference(self) -> dict[str, Any]:
+        """A `rhapsody_vllm` profile as `CampaignSpec.inference`: plain data the execution side
+        turns into its `ai` route (`exec/backend.make_ai_backend`)."""
+        if self.kind != "rhapsody_vllm":
+            return {}
+        if not self.model:
+            raise LLMError(f"profile {self.name!r} is rhapsody_vllm and names no model")
+        return {"model": {"model_name": self.model, "max_tokens": self.max_tokens,
+                          "temperature": self.temperature, **self.model_options},
+                "hardware": dict(self.hardware),
+                "hf_token_env": self.hf_token_env}
 
 
 #: Vendors barred machine-wide by `~/.claude/CLAUDE.md`, by any route - weights on project
@@ -134,10 +159,67 @@ def build_oracle(profile: ModelProfile, stages: list[str] | None = None) -> Any:
     if profile.kind == "rehearsal":
         from .oracle import RehearsalOracle
         return RehearsalOracle(stages=stages)
+    if profile.kind == "rhapsody_vllm":
+        return SessionOracle(profile)
     if profile.kind != "openai_compat":
         raise LLMError(f"profile {profile.name!r} has unknown kind {profile.kind!r}; "
-                       f"expected 'openai_compat' or 'rehearsal'")
+                       f"expected 'openai_compat', 'rhapsody_vllm' or 'rehearsal'")
     return OpenAICompatOracle(profile)
+
+
+class SessionOracle:
+    """One structured decision per call, from a model on the campaign's own allocation.
+
+    The model is served by the execution side's engine (`CampaignSession.infer`), so this
+    holds no client and no credential - only the session, bound once the manager exists
+    (`bind`, the same late binding as the reasoner sink: the halves are built first). It
+    imports nothing outside `core`, which is what keeps `policy` swappable.
+
+    What it cannot do yet, from the backend rather than from here: sampling is fixed per model
+    at load (`ModelConfig.max_tokens`/`temperature`, from this profile), there is no
+    `response_format`, and the backend reports no token counts - so the counts below are
+    WORD-count estimates, recorded as such (`plans/upstream/rhapsody-vllm-chat-endpoint-drops-
+    parameters.md`). A reply is parsed by `_json_object`, and an unusable one goes back through
+    `reasoning.ask`'s corrective retry like any other.
+    """
+
+    #: Marks the token counts as estimated in what `reasoning.ask` records.
+    token_counts_estimated = True
+
+    def __init__(self, profile: ModelProfile) -> None:
+        self.profile = profile
+        self.model_id = profile.model or profile.name
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self._session: Any = None
+        self._history: list[tuple[str, str]] = []
+
+    def bind(self, session: Any) -> None:
+        """The `CampaignSession` whose engine serves the model - in-process or remote."""
+        self._session = session
+
+    def reset(self) -> None:
+        self._history = []
+
+    async def think(self, node: str, prompt: str,
+                    schema: dict[str, str]) -> dict[str, Any]:
+        if self._session is None:
+            raise LLMError(f"{self.model_id}: no campaign session bound - a rhapsody_vllm "
+                           "model is served by the campaign's own engine")
+        turn = OpenAICompatOracle._render(prompt, schema)
+        # One prompt per call: a prompt task carries text, not messages, so the corrective
+        # exchange is rendered as alternating turns rather than sent as a message list.
+        text = "".join(f"User: {u}\n\nAssistant: {a}\n\n" for u, a in self._history)
+        text += f"User: {turn}\n\nAssistant:"
+        try:
+            reply = await self._session.infer(node, text)
+        except Exception as failure:              # noqa: BLE001 - transport, not parsing
+            raise LLMError(f"{self.model_id}: {failure!r}") from failure
+        self._history = (self._history + [(turn, reply)])[-MAX_EXCHANGE:]
+        self.prompt_tokens += len(text.split())
+        self.completion_tokens += len(reply.split())
+        log.info("oracle: %s answered node %s on the campaign's engine", self.model_id, node)
+        return _json_object(reply, self.model_id)
 
 
 class OpenAICompatOracle:

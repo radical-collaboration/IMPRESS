@@ -212,6 +212,9 @@ class ControlPlaneServer:
             body = req.json()
             await p.request_human(cid, body["question"], body.get("context"))
             return 200, {"requested": True}
+        if head == "infer":
+            body = req.json()
+            return 200, {"text": await p.infer(cid, body["node"], body["prompt"])}
         if head == "steer":
             return 200, await p.steer(cid, req.json())
         if head in ("pause", "resume"):
@@ -430,3 +433,13 @@ class ControlPlaneClient:
                             context: dict[str, Any] | None = None) -> None:
         await self._c.post(f"/campaigns/{campaign_id}/human",
                            json={"question": question, "context": context or {}})
+
+    async def infer(self, campaign_id: str, node: str, prompt: str,
+                    timeout: float = 900.0) -> str:
+        """A model call takes far longer than the client's default request timeout allows, so
+        the bound is the call's own: long enough for a cold model's first batch."""
+        r = await self._c.post(f"/campaigns/{campaign_id}/infer",
+                               json={"node": node, "prompt": prompt}, timeout=timeout)
+        if r.status_code >= 400:
+            raise RuntimeError(f"infer: {r.json().get('error', r.status_code)}")
+        return r.json()["text"]

@@ -245,7 +245,7 @@ def test_a_campaign_that_never_mentions_replicas_is_not_capped():
     assert spec.replicas == 0, "unset must mean 'the policy decides'"
 
     smoke = load_spec("campaigns/delta-small-molecule-smoke.yaml")
-    assert smoke.replicas == 1, "an explicit 1 must still bind"
+    assert smoke.replicas == 2, "an explicit width must still bind"
 
 
 async def test_rfd3_agent_uses_the_real_hydra_contract(reg, tmp_path, monkeypatch):
@@ -574,39 +574,6 @@ def test_check_ligand_smiles_catches_the_silent_wrong_answer():
 
     no_boltz = CampaignSpec(**base, stages=["rfd3_design"], params={})
     assert _check_ligand_smiles(no_boltz) is None
-
-
-def test_thread_caps_divide_the_allocation_not_the_node(monkeypatch):
-    """The three Rosetta stages are CPU-bound and run one per lineage.
-
-    Sized from `os.cpu_count()` they would each claim the whole node and fight; sized
-    from the cgroup and divided by the pipelines in flight they do not. Backlog C9.
-    """
-    from impress_a.cli import _thread_caps
-    from impress_a.core.pareto import Direction, Objective
-    from impress_a.manager import CampaignSpec
-
-    base = {"campaign_id": "c", "goal": "g",
-            "objectives": [Objective(name="x", direction=Direction.MIN)]}
-    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: set(range(64)))
-
-    caps = _thread_caps(CampaignSpec(**base, concurrency=2, replicas=4))
-    assert caps["OMP_NUM_THREADS"] == "4", "64 cpus / (2*4 pipelines * 2) = 4"
-    assert {caps[v] for v in ("MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
-                              "NUMEXPR_NUM_THREADS")} == {"4"}, \
-        "all four libraries must agree, or the widest one wins"
-    assert caps["OMP_WAIT_POLICY"] == "PASSIVE"
-
-    # Never zero: more pipelines than cores must still leave each child one thread.
-    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: {0, 1})
-    starved = _thread_caps(CampaignSpec(**base, concurrency=4, replicas=8))
-    assert starved["OMP_NUM_THREADS"] == "1"
-
-    # replicas defaults to 0 ("policy decides"), which must not divide by zero or
-    # hand a single lineage the entire allocation's worth of threads per stage.
-    monkeypatch.setattr("os.sched_getaffinity", lambda _pid: set(range(16)))
-    unset = _thread_caps(CampaignSpec(**base))
-    assert unset["OMP_NUM_THREADS"] == "8"
 
 
 def test_the_boltz_cache_guard_serialises_once_then_gets_out_of_the_way(tmp_path):

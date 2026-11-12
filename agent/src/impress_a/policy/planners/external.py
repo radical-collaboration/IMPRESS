@@ -117,7 +117,7 @@ class ExternalPlanner(BasePlanner):
             return await self.inbox.get()
         try:
             directive = await asyncio.wait_for(self.inbox.get(), timeout=self.timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning("external planner: no directive in %.1fs; on_timeout=%s",
                         self.timeout_s, self.on_timeout)
             if self.sink:

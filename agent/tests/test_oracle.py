@@ -458,7 +458,11 @@ async def test_every_profile_declares_what_a_live_run_needs():
     for name, profile in profiles.items():
         if not profile.is_live:
             continue
-        assert profile.base_url, f"{name} declares no base_url"
+        if profile.kind == "rhapsody_vllm":
+            # Served by the campaign's own engine: no URL, but a layout for its GPUs.
+            assert "num_gpus" in profile.hardware, f"{name} declares no GPU layout"
+        else:
+            assert profile.base_url, f"{name} declares no base_url"
         assert profile.model, f"{name} declares no model id"
         assert profile.max_tokens >= 1024, f"{name}: {profile.max_tokens} is too small"
 

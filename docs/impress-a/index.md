@@ -29,11 +29,11 @@ the output of a reasoner, and nothing in the graph is written down ahead of time
 ### One experiment, one variable step
 
 ```
-observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
-         (reasoner)   (typed     (5 gates    (asyncflow) (QC        (tree,
-                       DAG)       + dry-run)             gates)     Pareto,
-                                      │                             provenance)
-                                      └── reject ──→ back to DECIDE (bounded retry)
+observe ─→ SPECIFY ─→ PLAN ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
+          (reasoner halves)   (typed    (5 gates    (one       (QC       (tree,
+                               DAG)      + dry-run)  engine)    gates)    Pareto,
+                                  │                                       provenance)
+                                  └── reject ──→ back to PLAN (bounded retry)
 ```
 
 Those steps happen in that order for any one experiment, but the reasoner is not the loop body, so
@@ -42,21 +42,24 @@ only writer.
 
 ## Relationship to IMPRESS
 
-IMPRESS-A is a **separate package**: `impress_a`, Python >= 3.10, living in this repository under
+IMPRESS-A is a **separate package**: `impress_a`, Python >= 3.11, living in this repository under
 [`agent/`](https://github.com/radical-collaboration/IMPRESS/tree/main/agent). It is not on PyPI and
 is not installed by `pip install .` at the repository root — see
 [Installation](../getting-started/installation.md).
 
-It **depends on** `impress`. The execution loop is built on `ImpressBasePipeline` and
-`ImpressManager` rather than re-deriving the engine conventions — named backends,
-`task_description` defaults, GPU pinning — a second time; see
-[Architecture](../concepts/architecture.md) for those. The two also share science:
+It runs on the same middleware as IMPRESS — one `radical.asyncflow` engine over `rhapsody`
+backends, reaching Dragon only through them — but not on the `impress` package: each Stage is an
+asyncflow block, and each tool command an engine task placed per backend. One engine per campaign
+carries named routes — `compute` for tool commands, `local` for adapters and QC, and `ai` when the
+campaign serves its own reasoner — which is recorded in
+[decision 0015](decisions/0015-one-engine-and-the-process-boundary.md) along with where the control
+and execution processes divide. The two projects also share science:
 [Small Molecule Binding](../examples/small-molecule-binding.md) runs the same
 rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes it
 per cycle.
 
-The dependency runs one way only. The two packages are never installed into one environment as a
-merged dependency set: IMPRESS targets Python >= 3.9 with radical.pilot, and IMPRESS-A >= 3.10 with
+Neither package depends on the other. The two are never installed into one environment as a
+merged dependency set: IMPRESS targets Python >= 3.9 with radical.pilot, and IMPRESS-A >= 3.11 with
 langgraph, rhapsody and biopython.
 
 ## This section

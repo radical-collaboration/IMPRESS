@@ -77,7 +77,7 @@ doc = [
 
 [tool.ruff]
 # This table governs `impress` only. `agent/pyproject.toml` declares its own, at
-# line-length 100 and target-version py310, and `agent/tests/test_toolchain.py` asserts it
+# line-length 100 and target-version py311, and `agent/tests/test_toolchain.py` asserts it
 # is there - ruff resolves configuration per file, so one `tox -e lint` covers both
 # projects without either having to adopt the other's width. Do not merge the two tables.
 line-length = 88

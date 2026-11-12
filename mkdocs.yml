@@ -91,6 +91,7 @@ nav:
       - 0012 One property, two sources: impress-a/decisions/0012-one-property-two-sources.md
       - 0013 Trust counts integrity, not acceptance: impress-a/decisions/0013-trust-counts-integrity-not-acceptance.md
       - 0014 An enclosing campaign manager is a caller: impress-a/decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md
+      - 0015 One engine, two processes: impress-a/decisions/0015-one-engine-and-the-process-boundary.md
     - Roadmap:
       - Academy for Task Agents: impress-a/roadmap/academy-for-task-agents.md
 

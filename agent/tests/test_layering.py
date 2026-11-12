@@ -169,27 +169,19 @@ def test_the_import_contract_holds():
     assert bad == [], "\n".join(bad)
 
 
-#: The only modules that may import the root `impress` package. IMPRESS-A depends on it for the
-#: execution loop (`ImpressBasePipeline`, `ImpressManager`) and for nothing else: a `policy` or
-#: `core` module reaching it would put framework types into the reasoner contract, and
-#: `ImpressBasePipeline` cannot cross the `CampaignSession` boundary.
-IMPRESS_IMPORTERS = {"runtime/runner.py", "runtime/pipelines.py"}
+def test_nothing_imports_impress():
+    """IMPRESS-A runs on asyncflow directly; the root `impress` package is not a dependency.
 
-
-def test_only_the_runner_imports_impress():
-    """The dependency boundary, asserted the same way as the internal one.
-
-    `agent/` depends on the repository root's `impress` and may not modify it. Keeping the
-    import surface to two modules is what makes that a boundary rather than a coupling: it is
-    the difference between "the execution loop is built on IMPRESS" and "IMPRESS-A is a fork of
-    it". Passes trivially while nothing imports it, which is the point - it holds as the Runner
-    lands rather than being written afterwards to describe whatever happened.
+    The execution loop used to be built on `ImpressBasePipeline`/`ImpressManager`, and two
+    modules were allowed to import them. Both are gone: each Stage is an asyncflow block
+    (`exec/stage.py`), which gives natively what the pipeline layer had to be taught - a
+    cancel that reaches the work, a result without a side-channel future, no keep-alive. So
+    the allowed set is now empty, and an import of `impress` from here is a regression to a
+    second execution layer rather than a use of the first.
     """
     bad = []
     for path in sorted(SRC.rglob("*.py")):
         rel = path.relative_to(SRC).as_posix()
-        if rel in IMPRESS_IMPORTERS:
-            continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -202,9 +194,25 @@ def test_only_the_runner_imports_impress():
             # `impress_a` also starts with "impress"; match the package, not the prefix.
             if mod == "impress" or mod.startswith("impress."):
                 bad.append(f"{rel}:{node.lineno}: imports {mod!r}")
-    assert bad == [], (
-        "only " + ", ".join(sorted(IMPRESS_IMPORTERS)) + " may import the root `impress` "
-        "package:\n" + "\n".join(bad))
+    assert bad == [], "nothing in impress_a may import the root `impress` package:\n" + \
+        "\n".join(bad)
+
+
+def test_only_resources_names_dragon():
+    """Dragon is reached through rhapsody; the one thing this package builds itself is a
+    placement `Policy`, in `exec/resources.py`, imported lazily so the extra stays optional."""
+    bad = []
+    for path in sorted(SRC.rglob("*.py")):
+        rel = path.relative_to(SRC).as_posix()
+        if rel == "exec/resources.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            names = ([node.module or ""] if isinstance(node, ast.ImportFrom)
+                     else [a.name for a in node.names] if isinstance(node, ast.Import) else [])
+            bad += [f"{rel}:{node.lineno}: imports {n!r}" for n in names
+                    if n == "dragon" or n.startswith("dragon.")]
+    assert bad == [], "\n".join(bad)
 
 
 def test_the_offer_cannot_reach_the_execution_layer():

@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,13 +57,14 @@ from ..core.spec import (
     TaskState,
 )
 from ..core.tree import CampaignTree, DesignNode, NodeStatus
-from ..exec.dispatch import Dispatcher, ExecutionResults
+from ..exec.dispatch import ExecutionResults
 from ..exec.ledger import JobLedger
+from ..exec.resources import thread_share
+from ..exec.stage import StageExecutor, command_slots
 from ..exec.task_ledger import TaskLedger
 from ..tools.registry import Registry
 from ..tools.view import view_of
 from .reviewer import StageReviewer
-from .runner import StageRunner
 
 
 class CampaignAborted(RuntimeError):
@@ -111,17 +112,6 @@ class CampaignSpec:
     # recorded in `campaign` provenance because a draw nobody can name is one nobody can
     # repeat.
     seed_salt: str = ""
-    # Which execution loop runs a graph. `dispatcher` registers tasks on the engine directly;
-    # `impress` deploys each Stage as an `ImpressBasePipeline` through `ImpressManager`,
-    # reusing the framework's task labelling, failure reporting and the examples' own
-    # task_description and GPU-pinning conventions.
-    #
-    # The default stays `dispatcher` until a Delta smoke has run. The Runner is tested against
-    # ConcurrentExecutionBackend, but the component it replaces is the one whose failure modes
-    # cost jobs 22328172 and 22328262 their full allocations, and swapping a dispatcher that
-    # works for one that has never seen Dragon is exactly the move this project's records
-    # argue against.
-    runner: str = "dispatcher"
     # How long the execution process will run without a word from the control process before
     # it drains and stops. 0 disables, which is right in-process - the roles are coroutines
     # beside the pump and cannot go silent without the whole process going with them.
@@ -160,6 +150,18 @@ class CampaignSpec:
     # worst place to hang, because the campaign has its results and is throwing them away
     # by never writing the run to completion. 0 disables, as above.
     backend_shutdown_timeout_s: float = 0.0
+    # The engine's own telemetry (asyncflow over rhapsody's TelemetryManager): one span per
+    # Stage block with its nodes and their commands under it, task lifecycle events that name
+    # the backend each task really ran on, and resource polls - written as JSONL under
+    # `<root>/<campaign>/telemetry/` every this-many seconds and at stop. 0 disables, which is
+    # the default because it needs the `[telemetry]` extra; a campaign that asks for it without
+    # the extra is refused at start rather than run blind.
+    telemetry_checkpoint_s: float = 0.0
+    # A locally hosted reasoner, served by an `ai` route on this campaign's own engine
+    # (`exec/backend.make_ai_backend`). Plain data from a `rhapsody_vllm` model profile - set by
+    # the CLI from `--model-profile`, never from the campaign YAML, because which model reasons
+    # is the arm, not the campaign. Empty: no `ai` route, and `infer` refuses.
+    inference: dict[str, Any] = field(default_factory=dict)
     # WHICH tools this campaign is about. Without it every policy falls back to its own
     # default chain - which is the mock one - so a campaign naming real toolkits would
     # load them, validate them, and then run mocks.
@@ -286,7 +288,18 @@ class CampaignExecutor:
         self._counted_through = 0
         self._failed_runs = 0
         self.flow = None
-        self.dispatcher: Dispatcher | None = None
+        #: What the compute backend reports it has, `[{"id", "cores", "gpus"}, ...]`, probed
+        #: once at `start()`. `[]` means unknown. Placement reads it; `spec.site` remains the
+        #: declaration the validator checks graphs against.
+        self.topology: list[dict[str, Any]] = []
+        #: rhapsody's TelemetryManager, when `spec.telemetry_checkpoint_s` asks for one.
+        self.telemetry: Any = None
+        #: Cores this campaign may use, when its caller knows better than the cgroup - under
+        #: an enclosing campaign manager the cgroup is shared with every sibling workflow
+        #: (`integrations/aucam`). `None` reads the cgroup. Sizes each command's thread caps.
+        self.cpu_share: int | None = None
+        #: The execution loop: each admitted graph runs as one block on `flow`.
+        self.dispatcher: StageExecutor | None = None
         self.last_rejection: ValidationFailure | None = None
         self._runs: dict[str, RunRecord] = {}
         self._inflight: dict[str, RunRecord] = {}
@@ -1000,7 +1013,7 @@ class CampaignExecutor:
                 graph_node_id=mapping.task_id, tool=mapping.tool,
                 objectives=list(mapping.objectives), state=TaskState.DEPLOYED,
                 directive=TaskDirective.RUN,
-                deployed_at=datetime.now(timezone.utc),
+                deployed_at=datetime.now(UTC),
                 commitment=dict(stage.commitment)))
         # `mappings` carries each task's PARAMETERS, lineage, wiring and seed beside the
         # tool id. Without it the parameter vector a Planner chose is recorded nowhere -
@@ -1115,6 +1128,32 @@ class CampaignExecutor:
                                 "from": node_id, "new": branch.id,
                                 "rationale": rationale})
         return branch.id
+
+    async def infer(self, node: str, prompt: str) -> str:
+        """One reasoner call, as a `prompt_task` on this engine's `ai` route.
+
+        So a locally hosted reasoner's calls are engine tasks like any other - traced under the
+        campaign's telemetry, labelled `<campaign>:reason:<node>`, on GPUs the engine placed -
+        rather than requests to a server nobody scheduled. Refused when the campaign has no
+        `ai` route: a hosted model is reached over its own API, not through here.
+        """
+        from ..exec.backend import AI
+        if self.flow is None:
+            raise RuntimeError("infer: the campaign's engine has not started")
+        if not prompt:
+            raise ValueError("infer: an empty prompt")
+        async def reason() -> str:
+            return prompt
+
+        # asyncflow names a task from `__name__` when it is decorated, so set it first.
+        reason.__name__ = "reason_" + "".join(c if c.isalnum() else "_" for c in node)
+        try:
+            task = self.flow.prompt_task(backend=AI)(reason)
+        except ValueError as exc:
+            raise RuntimeError(
+                "infer: this campaign has no local model - its reasoner profile is not a "
+                "`rhapsody_vllm` one") from exc
+        return await task(workflow_id=f"{self.spec.campaign_id}:reason:{node}")
 
     def request_human(self, question: str, context: dict[str, Any] | None = None) -> None:
         self.pending_human = RequestHuman(question=question, context=context or {})
@@ -1387,28 +1426,38 @@ class CampaignExecutor:
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
-        from ..exec.backend import make_engine_bounded
+        from ..exec.backend import make_engine_bounded, probe_topology
         # Logged either side because this call is the only stretch of a campaign that
         # precedes its own provenance: rhapsody's Dragon backend builds `Batch()` - the
         # results DDict, the worker pool, telemetry - synchronously in its constructor, so
         # a stall there leaves no campaign.jsonl and no other trace at all. Bounded by
         # `backend_startup_timeout_s` (0 = unbounded, the default) precisely because of
         # that: see `exec.backend.make_engine_bounded`.
+        ai = None
+        if self.spec.inference:
+            from ..exec import backend as _backend_mod
+            log.info("engine: starting the local reasoner's model (%s)",
+                     (self.spec.inference.get("model") or {}).get("model_name", "?"))
+            ai = await _backend_mod.make_ai_backend(self.spec.inference)
         log.info("engine: constructing %s backend (config=%s)",
                  self.spec.backend, self.spec.backend_config or {})
         self.flow, self._backend = await make_engine_bounded(
             self.spec.backend, self.spec.backend_config, self.spec.backend_startup_timeout_s,
-            self.spec.backend_startup_heartbeat_s, work_dir=str(self.root))
+            self.spec.backend_startup_heartbeat_s, work_dir=str(self.root), ai=ai)
         log.info("engine: %s backend ready", self.spec.backend)
-        if self.spec.runner == "impress":
-            self.dispatcher = StageRunner(
-                self.flow, self.reg, self.spec.backend, workdir=None,
-                gpus_per_node=self.spec.site.gpus_per_node)
-            await self.dispatcher.start()
-            log.info("execution loop: impress ImpressManager (one pipeline per stage)")
-        else:
-            self.dispatcher = Dispatcher(self.flow, self.reg, self.spec.backend,
-                                         gpus_per_node=self.spec.site.gpus_per_node)
+        self.topology = await probe_topology(self._backend)
+        self._check_site_against_topology()
+        await self._start_telemetry()
+        threads = thread_share(self.cpu_share, self.spec.concurrency, self.spec.replicas)
+        log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
+                 f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
+        hosts = tuple(str(n["id"]) for n in self.topology if n.get("id"))
+        self.dispatcher = StageExecutor(self.flow, self.reg, self.spec.backend,
+                                        gpus_per_node=self.spec.site.gpus_per_node,
+                                        threads=threads, hosts=hosts,
+                                        command_slots=command_slots(self.spec.backend,
+                                                                    self.spec.backend_config),
+                                        gpu_offset=self._model_gpus())
         self.jobs.record(event="campaign_started",
                          campaign=self.spec.campaign_id,
                          policy=getattr(self.policy, "name", "?"))
@@ -1509,6 +1558,92 @@ class CampaignExecutor:
             if self.flow is not None:
                 await self._shutdown_engine()
 
+    async def _start_telemetry(self) -> None:
+        """Turn on the engine's telemetry, if the campaign asked for it.
+
+        Through `WorkflowEngine.start_telemetry`, so every backend on the engine is attached
+        and every task and block is traced by the engine itself rather than by us.
+        """
+        every = self.spec.telemetry_checkpoint_s
+        if every <= 0:
+            return
+        path = self.root / "telemetry"
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.telemetry = await self.flow.start_telemetry(
+                checkpoint_interval=every, checkpoint_path=str(path))
+        except ImportError as exc:
+            raise RuntimeError(
+                f"telemetry_checkpoint_s={every} asks for the engine's telemetry, which needs "
+                "the `[telemetry]` extra (pip install -e '.[telemetry]'). Install it or set "
+                "telemetry_checkpoint_s to 0.") from exc
+        log.info("engine: telemetry on, checkpointing to %s every %.0fs", path, every)
+
+    async def _stop_telemetry(self) -> None:
+        """Stop telemetry BEFORE the engine goes, bounded like the engine itself.
+
+        `flow.shutdown()` does not stop it, and its `stop()` drains the event backlog and
+        writes the final checkpoint - which is the point of having it. Bounded because a stall
+        here is the same hazard as a stalled teardown (job 22491438). asyncflow does not
+        forward rhapsody's `drain_on_stop=False`, so a bound is the only way to cut it short.
+        """
+        if self.telemetry is None:
+            return
+        timeout_s = self.spec.backend_shutdown_timeout_s or None
+        try:
+            # `asyncio.timeout`, not `wait_for(shield(...))`: those run `stop()` in a new task,
+            # and OpenTelemetry then detaches the session's context token in a different
+            # Context from the one `start_telemetry` attached it in ("Failed to detach
+            # context"). A cancelled `stop()` is retried by the manager, so not shielding it
+            # costs nothing.
+            async with asyncio.timeout(timeout_s):
+                await self.telemetry.stop()
+        except TimeoutError:
+            log.warning("engine: telemetry did not stop within %.0fs - its final checkpoint "
+                        "may be incomplete", timeout_s)
+        except Exception as exc:              # noqa: BLE001 - never sink a finished campaign
+            log.warning("engine: telemetry stop failed: %r", exc)
+        finally:
+            self.telemetry = None
+
+    def _model_gpus(self) -> int:
+        """GPUs per node the campaign's own model holds, when it shares the tools' node.
+
+        Only for a model on the first node (`node_offset` 0) of a one-node layout - which is
+        every allocation run so far. A model given whole nodes of its own takes nothing from
+        the tools' nodes.
+        """
+        hw = (self.spec.inference or {}).get("hardware") or {}
+        if not self.spec.inference or int(hw.get("node_offset", 0) or 0) != 0:
+            return 0
+        if self.spec.site.nodes > 1 and int(hw.get("num_nodes", 1) or 1) < self.spec.site.nodes:
+            return 0
+        wanted = int(hw.get("num_gpus", 1))
+        # -1 is Dragon's "every GPU on the node": then nothing is left for tools, and
+        # `StageExecutor._gpu_for` says so rather than pinning a tool onto the model.
+        return self.spec.site.gpus_per_node if wanted < 0 else wanted
+
+    def _check_site_against_topology(self) -> None:
+        """Say so when the declared site promises more GPUs than the backend can see.
+
+        A warning, not a refusal: the probe is best effort, and a concurrent backend on a
+        login node or laptop truthfully sees no GPU while running a mock campaign that
+        declares one. But on a real allocation, round-robin pinning to a device that does
+        not exist fails inside a science tool rather than anywhere the campaign can read.
+        """
+        if not self.topology:
+            log.info("engine: compute backend reports no topology; placement uses the "
+                     "declared site (%d GPU/node)", self.spec.site.gpus_per_node)
+            return
+        seen = min(int(n.get("gpus") or 0) for n in self.topology)
+        log.info("engine: compute topology %s",
+                 ", ".join(f"{n.get('id')}: {n.get('cores')} cores/{n.get('gpus')} GPUs"
+                           for n in self.topology))
+        if seen and seen < self.spec.site.gpus_per_node:
+            log.warning("engine: the campaign declares %d GPUs per node but the compute "
+                        "backend sees %d on its smallest node", self.spec.site.gpus_per_node,
+                        seen)
+
     async def _shutdown_engine(self) -> None:
         """Tear the engine down, bounded, and never let teardown sink the campaign.
 
@@ -1519,24 +1654,14 @@ class CampaignExecutor:
         is about to exit anyway. The timeout is therefore logged, not raised - an
         abandoned teardown must not turn a finished campaign into a failed one.
         """
-        # The Runner's manager drains BEFORE the engine goes, and does not own it: the caller
-        # owns the engine in `ImpressManager`'s design, so the bounded teardown below stays
-        # exactly where it was. Teardown is the expensive end - on job 22491438
-        # `flow.shutdown()` never returned and the job sat 60 minutes, about 64 GPU-hours,
-        # after the science was already done.
-        if isinstance(self.dispatcher, StageRunner):
-            try:
-                await self.dispatcher.shutdown()
-            except Exception as exc:          # noqa: BLE001 - never sink a finished campaign
-                log.warning("execution loop: runner shutdown ended with %r", exc)
-
+        await self._stop_telemetry()
         timeout_s = self.spec.backend_shutdown_timeout_s
         if timeout_s <= 0:
             await self.flow.shutdown()
             return
         try:
             await asyncio.wait_for(asyncio.shield(self.flow.shutdown()), timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning(
                 "engine: %s backend did not shut down within %.0fs - abandoning it. "
                 "The campaign's results are already durable; this leaks backend state in "

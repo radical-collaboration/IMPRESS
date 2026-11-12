@@ -17,7 +17,7 @@ for the files it points at.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -26,7 +26,7 @@ from .pareto import Objective
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Goal(BaseModel):

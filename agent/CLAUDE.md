@@ -16,10 +16,11 @@ by nothing.
 
 **What that rule was really protecting, and what still holds:**
 
-- **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.10` with
-  langgraph, rhapsody and biopython. The dependency runs one way: `impress` is installed editable
-  into this project's environment, root first, because it is on no index. The reverse must never
-  happen — do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
+- **The dependency firewall.** IMPRESS is `>=3.9` with radical.pilot; this project is `>=3.11` with
+  langgraph, rhapsody and biopython. The two share middleware - asyncflow and rhapsody - and
+  nothing else: this project does not depend on `impress` any more (its Stages are asyncflow
+  blocks; `test_layering.test_nothing_imports_impress`), and the root must never depend on this
+  one. Do not merge the two `dependencies` lists, do not put langgraph/rhapsody/biopython in
   front of a root test, and do not add an agent install to the 3.9 leg.
 - **`examples/` is IMPRESS's**, not this project's.
 - **`agent/.gitignore` stays**, and its trailing `!*.pdb` / `!*.fa` with it — they undo the root
@@ -78,20 +79,21 @@ Without the editable install, prefix with `PYTHONPATH=src` and use `python -m im
 
 ### Environment
 
-Use the project `.venv`, built by **`./scripts/dev_setup.sh`**. It does two editable installs and
-the order is load-bearing: `pip install -e ..` (the root `impress` package, which this project now
-depends on and which exists on no index) *before* `pip install -e ".[dev]"`, or pip resolves the
-name `impress` against PyPI and installs whatever it finds there — a failure that is silent until
-an import returns the wrong module. `tests/test_toolchain.py` asserts the installed `impress` is
-this repository's.
+Use the project `.venv`, built by **`./scripts/dev_setup.sh`**: one editable install of this
+project and the extras its tests guard with. It used to install the root `impress` package first,
+because this project depended on that unreleased name and pip would otherwise resolve it against
+PyPI. The dependency is gone, and `tests/test_toolchain.py::test_impress_is_not_a_dependency`
+keeps that exposure from coming back.
 
 Do not run the tier against the system Python. The reason recorded here was that it carried
 `radical.asyncflow` **0.3.1**; measured 2026-11-06 it carries **0.5.1** in `~/.local`, so that
 specific claim is stale — but a user-site install that drifts under you is the hazard, not any
 particular version, and `rhapsody` there has pointed at a different checkout.
 
-**Verified middleware: `radical.asyncflow` 0.6.0 / `rhapsody-py` 0.6.0**, 186 tests green in ~19s
-(2026-11-06, Python 3.10.12). `docs/impress-a/reference/middleware-integration.md` was written against
+**Verified middleware: `radical.asyncflow` 0.7.0 / `rhapsody-py` 0.7.0**, 510 passed / 1 skipped
+(2026-11-11, Python 3.12.12, both installed editable from sibling checkouts). The line this
+replaces claimed 0.6.0 while `$WORK_DIR/ve/impress_a` still carried 0.5.1/0.5.0 - so name the
+venv a claim was measured in. `docs/impress-a/reference/middleware-integration.md` was written against
 0.5.1/0.5.0 and its API notes still hold; check the installed version before trusting any of them.
 
 On Delta, `.venv` is a **symlink** to `$WORK_DIR/ve/impress_a`, and `$WORK_DIR` must be on NVMe
@@ -123,7 +125,7 @@ Each exists because of a specific failure mode. Details in `docs/impress-a/refer
 | **`policy` must not import `tools`, `exec` or `runtime`** | review | Policies emit abstract `ExperimentIntent`. If a policy can reach a tool adapter, control models stop being swappable |
 | **`compose` must not import `exec`** | review | Keeps the whole validation path testable with no backend — the entire laptop test tier |
 | A QC `FAIL` node is **never** eligible for the Pareto front | `core/qc.py`, `core/pareto.py` | These tools fail *silently*; exit code is never sufficient evidence |
-| **P6 tools are inlined, never scheduled** | `compose/validate.py` gate 4 | Scheduling overhead would exceed the work. A scheduled P6 node is a composer bug |
+| **P6 tools are inlined, never scheduled** - and until inlining exists, refused at load | `compose/validate.py` gate 4; `tools/spec.py` | Scheduling overhead would exceed the work. A scheduled P6 node is a composer bug. The composer drops P6 tools and nothing runs them in their place, so a P6 declaration is a load-time error rather than a stage that silently vanishes |
 | `replicas: N` means **N independent lineages**, one `DesignNode` each | `compose/composer.py`, `runtime/executor._absorb` | Fanning out then funnelling back collapses N candidates into one |
 | Pattern signatures ignore **parameter values** — shape only | `compose/graph.py` | Otherwise every parameter tweak resets a pattern's accumulated trust |
 | A measurement **supersedes but never deletes** a prediction | `core/tree.ingest_measurement` | The predicted-vs-measured gap is the surrogate-calibration signal |
@@ -162,7 +164,18 @@ Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones tha
   `__name__` before decorating is what lets one generic factory serve every DAG node.
 - **Two asyncflow idioms, not interchangeable.** Unawaited futures as call arguments express DAG *edges*;
   `asyncio.gather` awaits *independent* work.
-- **Resource shapes are not portable** across backends; `exec/resources.py` owns the translation.
+- **Resource shapes are not portable** across backends; `exec/resources.py` owns the translation
+  (`Placement.describe`), and holds the package's only - lazy - `dragon` import.
+- **A node is two kinds of engine work.** The adapter (pre-process through QC) is a function task on
+  the `local` route - a thread in this process, under its own `asyncio.run`. Each command it starts
+  through `run_cmd` is an executable task on `compute`, placed per backend (`exec/launch.py`). An
+  adapter that shelled out any other way would run its binary on the campaign host, unplaced.
+- **A cancel does not kill a running command on the concurrent backend** (rhapsody 0.7.0). There,
+  and ONLY there, each command carries its own `timeout --kill-after` for that reason. **Never add
+  that wrapper under Dragon**: `timeout` leads its own process group, Dragon's local services reaps
+  only its own, so the wrapper becomes an unreaped zombie and the task never completes — it hung job
+  23814643 at stage 1. Dragon is given `walltime_s + KILL_GRACE_S` as the task's own `timeout`
+  instead. See `docs/impress-a/limitations.md`.
 - **No retry primitive, no durable job state** in asyncflow. Both are ours (`exec/ledger.py`).
 - asyncflow writes `asyncflow.session.*` into the CWD on every engine run *unless given a `work_dir`*.
   `make_engine`/`make_engine_bounded` take one, and the executor passes the campaign root, so sessions
@@ -185,6 +198,12 @@ implementations are shared by id from `tools/gates.py` rather than reimplemented
 
 `tests/test_core.py` (pure logic) · `test_validation.py` (the five gates + interlock) ·
 `test_campaign.py` (full campaigns on `ConcurrentExecutionBackend` with mock tools) ·
+`test_stage_block.py` (each Stage as one asyncflow block: attribution, cancel cascade, parity with
+the `Dispatcher` it replaced, against `tests/data/dispatcher_parity_campaign.json`) ·
+`test_placement.py` (each tool command as an engine task, and its placement per backend) ·
+`test_engine_routes.py` (the engine's `compute` and `local` routes) ·
+`test_telemetry.py` (the engine's own telemetry, on: a span per Stage block; needs the
+`[telemetry]` extra) ·
 `test_real_toolkits.py` (the real specs, without executing any real binary) ·
 `test_backend_bound.py` (backend-construction timeout/heartbeat, against a fake backend
 that blocks its own thread's event loop the way Dragon's `Batch()` does) ·
@@ -195,9 +214,8 @@ registry against the tool directories on disk) ·
 `test_aucam.py` (a real campaign as one AuCaM workflow, driven through AuCaM's own reporter;
 skipped without the `aucam` extra, which CI installs - see
 ../docs/impress-a/reference/aucam.md) ·
-`test_toolchain.py` (that the `impress` dependency resolves to this repository, that the
-local `[tool.ruff]` table exists with `fix = false`, and that the `aucam` extra pins a commit
-rather than a branch).
+`test_toolchain.py` (that `impress` is not a dependency, that the local `[tool.ruff]` table
+exists with `fix = false`, and that the `aucam` extra pins a commit rather than a branch).
 
 **Counts are not restated in prose.** `test_gate_fixtures.py` derives the tool count from the
 toolkit directories rather than asserting 11, and there is no asserted test count.
@@ -206,8 +224,8 @@ toolkit directories rather than asserting 11, and there is no asserted test coun
 41 and did not reproduce, because no `[tool.ruff]` table existed here and ruff resolved to the
 root project's config: 449 findings against that, 9 against ruff's own defaults. With a local
 table at `line-length = 100` the residual was 57; all 57 were fixed and `N818` was declined with
-its reason in `pyproject.toml`. So a finding now is a regression, not a budget — which is the
-only form in which a ceiling is worth anything.
+its reason in `pyproject.toml` (as was `UP042`, when the target moved to py311). So a finding now
+is a regression, not a budget — which is the only form in which a ceiling is worth anything.
 
 **A magic number in a test is often a bug report.** `stagnation_limit = 10_000` appeared in three
 tests before anyone noticed the defect was in the executor, not the test setup. If a test needs an
@@ -227,9 +245,18 @@ one-node Pareto front. All four campaign objectives carry real values (`total_sc
 `shape_complementarity` 0.591, `complex_plddt` 0.507, `ligand_iptm` 0.752). Per-tool cost is
 measured for all six.
 
-Read that as a floor, not a result. It is **one lineage, one cycle, one draw**: `replicas > 1`
-has never run, so the independence invariant is unexercised; and no measurement has ever
-superseded a prediction, so the calibration machinery is untested against reality.
+Read that as a floor, not a result: it is one lineage, one cycle, one draw.
+
+**Width 2 has since run, on the one-engine loop.** Job 23815248 ran `replicas: 2` to `12/12 tasks
+ok` in 3m45s, lineage 0 pinned to GPU 0 and lineage 1 to GPU 1 by Dragon's `Policy(gpu_affinity=…)`
+with GPUs 2-3 idle, one telemetry block span per Stage, Dragon up in 4.5 s and down in 2 s. The two
+lineages produced different metrics, so the independence invariant has now been exercised — at 2,
+not at the declared width of 4. Both nodes failed acceptance gates only, so the front was empty.
+
+Still untested: width 4; a cancel reaching a command already running under Dragon; Dragon's own
+task timeout; a locally hosted reasoner (the `local-dragon` profile names no model yet). And no
+measurement has ever superseded a prediction, so the calibration machinery is untested against
+reality.
 
 **The trusted path has executed, and held.** Job 22728140 promoted after r0002 and ran three
 consecutive trusted cycles with no demotion and no integrity failure (`plans/next-run-sustained-trust.md`).

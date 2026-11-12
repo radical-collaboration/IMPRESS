@@ -147,6 +147,15 @@ class ToolSpec(BaseModel):
                     f"graph containing this tool")
         if self.pattern is Pattern.P1 and self.resources.gpus == 0:
             raise ValueError(f"{self.id}: P1 declared but resources.gpus == 0")
+        if self.pattern is Pattern.P6:
+            # Refused rather than accepted: the composer drops P6 tools from every graph
+            # ("inlined, never scheduled"), and nothing anywhere executes them in its place -
+            # so a P6 stage would vanish from a campaign without a word. No toolkit declares
+            # one. When inlining exists, this check is where it gets switched on.
+            raise ValueError(
+                f"{self.id}: P6 (in-process) tools are not executed by anything yet - the "
+                "composer drops them from graphs. Declare it P2, which runs it as an ordinary "
+                "node, or implement inlining first.")
         # An acceptance threshold must not be the only thing that notices a value is
         # missing: that is how a fabricated 0.0 passed for a measurement (decision 0013).
         reported = {m for g in self.qc_gates

@@ -47,9 +47,9 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 | observe | manager | Builds a `CampaignObservation` — front, population stats, budget, failures, and the `ToolkitView` a reasoner chooses from |
 | **specify** | **policy** | `Specifier.revise` returns a `SpecRevision` — objectives to add, delete or re-status. The executor applies it and is the only writer |
 | **plan** | **policy** | `Planner.plan` returns a candidate `Stage` of `TaskMapping`s, or `None`. `replan` answers a rejection; `RequestHuman` and a stop request remain available through the session |
-| compose | manager | A Stage (or abstract intent) → concrete typed DAG; P6 tools inlined |
+| compose | manager | A Stage (or abstract intent) → concrete typed DAG. P6 inlining is designed but not built, so a P6 declaration is refused at load |
 | review | manager | Coverage against the applied Spec, five gates, budget, then dry-run; rejection returns the gate and reason to the Planner |
-| execute | exec layer | Generic dispatch to asyncflow, per compute pattern |
+| execute | exec layer | The Stage runs as one asyncflow **block** on the campaign's single engine; each node's adapter is a task on the `local` route and each tool command an executable task on `compute`, placed per backend |
 | analyze | task agents | Typed metrics extracted; **QC gates enforced** |
 | update | manager | Nodes appended, front recomputed, provenance written, budget charged |
 
@@ -63,7 +63,8 @@ manager.py  the outer loop
 core/       tree · pareto · budget · qc · decision · provenance · artifacts
 compose/    TaskGraph · composer · five gates · self-promoting interlock
 tools/      ToolSpec · registry · gate library · task agents
-exec/       backend factory · resource normalization · dispatcher · job ledger
+exec/       engine + named backend routes · Stage-as-block · command launcher ·
+            placement · job ledger
 analysis/   per-Task validation and the four-arm scoring harness. May not import
             `policy` or `control`: a scorer that could reach a reasoner could score a
             campaign by asking it
@@ -77,22 +78,27 @@ science imports into `run()` bodies, and a deferred `from ..exec import ...` ins
 be exactly as fatal as one at the top of the file.
 
 ```
-cli      → control, manager, runtime, policy, compose, tools, core
-control  → manager, runtime, core
-policy   → core                           (NOT tools, NOT exec, NOT runtime)
-manager  → runtime, policy, tools, core   (a facade; the executor owns the work)
-runtime   → policy, compose, exec, tools, core
-compose  → tools, core                    (NOT exec)
-tools    → exec, core
-exec     → compose, tools, core
-core     → (nothing internal)
+cli          → control, manager, runtime, policy, compose, tools, core, analysis
+control      → manager, runtime, core
+policy       → core                           (NOT tools, NOT exec, NOT runtime)
+manager      → runtime, policy, tools, core   (a facade; the executor owns the work)
+runtime      → policy, compose, exec, tools, core
+compose      → tools, core                    (NOT exec)
+tools        → exec, core
+exec         → compose, tools, core
+analysis     → runtime, exec, compose, tools, core   (NOT policy, NOT control)
+integrations → cli, manager, runtime, tools, core    (NOT exec)
+core         → (nothing internal)
 ```
 
-`__main__` imports `cli` and nothing else.
+`__main__` imports `cli` and nothing else. `integrations` is a second composition root, like `cli`:
+nothing else in the package imports it, so an adapter may name another project's types without any
+layer of IMPRESS-A knowing that project exists. `exec` is absent from its row on purpose — an
+integration drives the executor, it does not dispatch.
 
 Three notes on accuracy. `exec → compose, tools` has been true since the first prototype
-(`exec/dispatch.py` imports `TaskGraph` and `TaskAgent`); this line records what the code does rather
-than what an earlier version of this document claimed. And `policy → core` is what forced
+(`exec/stage.py` imports `TaskGraph`, `exec/dispatch.py` imports `TaskAgent`); this line records what
+the code does rather than what an earlier version of this document claimed. And `policy → core` is what forced
 `core/session.py` and `core/results.py` to exist: a reasoner may hold a `RunOutcome`, so `RunOutcome`
 cannot live in `exec/` beside the `ExecutionResults` it projects from. And `manager → tools` is
 real — `manager.py` imports `Registry` — and was missing from this table until the layering test
@@ -107,6 +113,25 @@ Two rules carry real weight:
 - **`compose ↛ exec`.** Composition and validation must be testable with no backend at all — that is what
   makes the whole laptop test tier possible.
 
+## One engine, and two boundaries
+
+All task work in a campaign is deployed by **one** long-lived `radical.asyncflow` `WorkflowEngine`,
+which reaches Dragon only through rhapsody. It carries named routes: `compute` (Dragon on an
+allocation, rhapsody's concurrent backend off one), `local` (a thread pool for adapters and QC), and
+`ai` when the campaign declares a locally hosted reasoner. A Stage is one `@flow.block`, so the
+block's future is the graph's result and cancelling it cascades to every unfinished member on the
+backend that member was routed to.
+
+The other boundary is between processes. `impress-a run` keeps the reasoner and the executor in one
+process as two asyncio tasks — the executor's pump raced against the reasoner's `conduct` — and
+`impress-a serve` + `impress-a control` splits them, with `CampaignSession` as the seam. What does
+**not** split is the engine: it belongs to the loop it was built on, and a second engine or a second
+event loop is not how the processes are separated. The Reviewer and Deployer stay execution-side
+because the dry-run instantiates task agents and must run where the toolkit is installed.
+
+Both boundaries, what each one buys, and what it does not, are recorded in
+[decision 0015](../decisions/0015-one-engine-and-the-process-boundary.md).
+
 ## Composition and validation
 
 The agent composes **arbitrary typed DAGs at runtime**. Five gates run before anything executes, then a
@@ -117,7 +142,7 @@ dry-run in which every task agent parameterizes *without* executing:
 | 1 type | An edge whose producer output type does not unify with the consumer input type |
 | 2 structure | Cycles, empty graphs, a tool composed without its QC gates |
 | 3 parameter | Out-of-range values, unknown parameters, any `frozen_parameters` |
-| 4 resource | P6 scheduled, resource shapes exceeding the site, unproven GPU portability, disallowed external submission |
+| 4 resource | P6 scheduled (unreachable now that a P6 declaration fails at load, and kept as a backstop), resource shapes exceeding the site, unproven GPU portability, disallowed external submission |
 | 5 budget | An estimate exceeding remaining budget in any dimension |
 
 Rejection is cheap and informative: the policy receives a structured `ValidationFailure` through
@@ -162,7 +187,8 @@ Per tool, four phases: **pre-process → parameterize → execute → post-proce
 whether the agent is deterministic code or LLM-driven.
 
 `execute()` is not overridden by tool adapters — pattern dispatch belongs to the execution layer, and an
-adapter scheduling its own work would bypass the P6-inline and P4-ledger rules.
+adapter scheduling its own work would bypass the P4-ledger rule and place its command nowhere. Every
+command goes through `run_cmd`, which submits it to the engine as a placed task.
 
 **QC gates are deterministic in both cases.** An LLM may author a protocol; it does not judge whether the
 result passed its clash check.
