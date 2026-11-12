@@ -69,7 +69,7 @@ on hardware. `exec/dispatch.Dispatcher`, `runtime/runner.py`, `runtime/pipelines
 
 **The root `impress` package is no longer a dependency.** `tests/test_layering.py::test_nothing_imports_impress`
 and `tests/test_toolchain.py::test_impress_is_not_a_dependency` keep it that way; the second because
-`impress` is on no index, so re-declaring it would be a dependency-confusion exposure.
+`impress` is on no index, so declaring it again would be a dependency-confusion exposure.
 
 ## Consequences
 
