@@ -69,10 +69,11 @@ langgraph, rhapsody and biopython.
 | [Architecture](reference/architecture.md) | The loop, layers, import contract, invariants |
 | [Resolution](reference/resolution.md) | How the toolkit, goal, budget and parameters become specified targets and a programmed Stage — step by step, with what refuses each one |
 | [Observation](reference/observation.md) | How a running campaign's state becomes a `CampaignObservation`, who is shown it, what survives to disk, and how any of it reaches a caller |
+| [Invocation](reference/invocation.md) | How a tool spec becomes a command running on a compute node: the adapter, the argv each shipped tool runs, how it is placed, and what is recorded |
 | [Pluggable Frontends](reference/frontends.md) | The two frontend axes: which seams are swappable, the protocols they implement, and how to write one |
 | [Control Models](reference/control-models.md) | The four reasoners: what each is shown, what it may choose, how its reply is constrained |
 | [Compute Patterns](reference/compute-patterns.md) | P1–P8 — normative for every `ToolSpec` |
-| [Authoring Tools](reference/authoring-tools.md) | Writing tools, gates and skill documents |
+| [Authoring Tools](reference/authoring-tools.md) | Writing a tool: the spec, the adapter and its command builder, gates and skill documents |
 | [Middleware Integration](reference/middleware-integration.md) | asyncflow / rhapsody seam and its gotchas |
 | [AuCaM Integration](reference/aucam.md) | Running as one subordinate workflow under an enclosing campaign manager: the seam, the offer handshake, and the pin |
 | [The Mock Knob Lab](reference/mock-lab.md) | The laptop knob lab and the reasoner axis: what it runs and what its numbers license |

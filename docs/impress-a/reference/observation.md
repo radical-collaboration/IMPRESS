@@ -38,6 +38,9 @@ almost every rule below exists to keep that window shut.
 
 ## Step 1 — a run is absorbed, and the window is shut
 
+What ran between admission and this step — each task's command, and where it is recorded — is
+[`invocation.md`](invocation.md).
+
 **In:** `ExecutionResults` from the backend. **Owner:** `runtime/executor._absorb:578`.
 **Out:** `DesignNode`s on the tree, one `results` provenance record each, and one id appended
 to `_absorbed` per lineage (`:601`).

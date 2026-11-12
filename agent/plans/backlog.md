@@ -2400,6 +2400,77 @@ and the code went the other way: `runtime/roles.conduct` awaits `_respecify` and
 just made - but is not what the plan said. Amend 0005 to say sequential, or record the divergence.
 Leaving a planned amendment unwritten is how the next reader infers concurrency that is not there.
 
+## J. Invocation (2026-11-12, branch `agent/invocation-path`)
+
+The question was what commands the system actually drives, answerable from the code. Tracing a
+spec to a running process found that no page described the path, that each argv was assembled
+inline in a long `run()`, and that the realized command line was never recorded. The branch
+gives every real adapter one pure command builder, records each command in `tasks` provenance,
+and writes the path down in `docs/impress-a/reference/invocation.md`, whose findings table these
+items are. What remains:
+
+**J1. Admission proves parameters, not commands.** `Validator.dry_run` (`compose/validate.py:186`)
+calls `parameterize` on a `TaskRequest` with no inputs, no work directory and no seed, so an
+admitted graph has legal parameter values and nothing else: not a binary on `PATH`, not a set
+environment variable, not a flag the real CLI has. Four defects reached hardware through exactly
+this gap. `impress-a preflight` covers environment and executables, outside the loop and only if
+someone runs it. The cheap closure is a `TaskAgent.preconditions()` hook that `dry_run` calls -
+each adapter's own "is `$MPNN_DIR` set, is `apptainer` on PATH" check, which today is the first
+lines of `run()` and so fires inside the allocation. Test: a real-toolkit graph with the
+variable unset is refused at the dry-run gate, naming the variable.
+
+**J2. `ligandmpnn_design.num_seqs` is declared and passed nowhere.** It validates, is offered to
+a planner (it has no `trades` sentence, so `_knobs` will not move it - by luck, not design),
+lands in `stages` provenance, and reaches no command (the mock adapters read it, to report a
+`count`; the real one does not). `test_every_declared_parameter_reaches_its_command`
+now refuses a *new* parameter like it; this one is exempted by name in `_NOT_IN_THE_COMMAND`.
+Either delete it from the spec (checking no campaign YAML sets it) or keep the exemption
+knowingly. Closes when the exemption table has no entry whose reason is "retained".
+
+**J3. Where an executable comes from is an environment contract nobody declares.**
+`FOUNDRY_SIF_PATH`, `MPNN_DIR`, `BOLTZ_CACHE`, plus `apptainer` and `boltz` on `PATH`: named in
+each adapter's `run()`, in `scripts/delta_env_setup.sh`, in `preflight`, and in no spec. So the
+list of what a toolkit needs from a machine exists in three hand-maintained copies. By design
+that the *value* is not in a spec; not by design that the *name* is not. A `requires: {env: [...],
+executables: [...]}` block on `ToolSpec`, read by `preflight` and by J1's hook, would make it one
+copy. Neighbour of E1.
+
+**J4. `TaskRequest.workdir` is never set.** `StageExecutor` takes a `workdir` and the executor
+does not pass one (`runtime/executor.py:1459`), so every task writes under the process CWD.
+Correct on Delta only because `delta_gpu_run.sh` changes directory first; a campaign started
+from a checkout writes `work/` into it. Pass the campaign root, as `make_engine` already is.
+Test: two campaigns with different `root`s started from one CWD write disjoint `work/` trees.
+
+**J5. The Rosetta adapters pass no `env` to `run_cmd`.** `_run_worker`
+(`tools/rosetta_agents.py:290`) omits it where the other three adapters pass `child_env(req)`.
+Equivalent today through `Placement.describe`'s fallback on both backends. Make it explicit, so
+the equivalence is the adapter's statement rather than a default's.
+
+**J6. `ToolSpec.pattern` selects no dispatch path, and three documents said it did.** `exec/`
+never reads it; gates 2 and 4 do. `compute-patterns.md`, `architecture.md` and the invariants
+table in `CLAUDE.md` described "pattern dispatch" and an `execute()` method that does not exist;
+all three are corrected on this branch. ADR 0006 says the same and is left as the historical
+record it is. What stays open is the substance: P4's ledger rule and P6 inlining are designed
+against a dispatch-by-pattern seam that was never built (see C-items on P6).
+
+**J7. A failed task's commands are not in `tasks` provenance.** `Launcher.records` reaches the
+row through `TaskUsage`, which exists only when the adapter returned. A task whose adapter
+raised records its error string - which does contain the failing command line, via
+`SubprocessError` - and no `commands` list, so earlier commands of a multi-command adapter are
+lost. `StageExecutor` already holds every `Launcher` (`launchers`); `results_from` could attach
+their records to `failures`. Test: an adapter that runs one good command then one failing one
+leaves both argvs in provenance.
+
+**J8. CLOSED - the realized command line was never recorded.** `exec/launch.py` built
+`shlex.join(argv)` and handed it to the engine alone; provenance held chosen parameters and
+measured results with nothing between. Each command's argv (as submitted, `timeout` wrapper
+included), cwd, backend, host, GPU index, placement environment, exit code and queued/ran split
+now reach `provenance/tasks.jsonl` as `commands`. Closed by
+`test_placement.py::test_a_command_is_an_engine_task_placed_on_its_lineages_gpu` and
+`test_campaign.py`'s telemetry test on the concurrent tier. **Not yet seen on Dragon**: the
+record is built before submission from the same values `Placement.describe` uses, so nothing
+Dragon-specific is expected, and the next Delta run's `tasks.jsonl` is the check.
+
 ## Recommended order
 
 This order was written at the stagnation fix, before C8-C10 and G2-G5 existed. Two things it got

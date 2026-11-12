@@ -48,7 +48,7 @@ budget, stagnation and repeated failure are facts about state a reasoner cannot 
 | **specify** | **policy** | `Specifier.revise` returns a `SpecRevision` — objectives to add, delete or re-status. The executor applies it and is the only writer |
 | **plan** | **policy** | `Planner.plan` returns a candidate `Stage` of `TaskMapping`s, or `None`. `replan` answers a rejection; `RequestHuman` and a stop request remain available through the session |
 | compose | manager | A Stage (or abstract intent) → concrete typed DAG. P6 inlining is designed but not built, so a P6 declaration is refused at load |
-| review | manager | Coverage against the applied Spec, five gates, budget, then dry-run; rejection returns the gate and reason to the Planner |
+| review | manager | Coverage against the applied Spec, six gates, budget, then dry-run; rejection returns the gate and reason to the Planner |
 | execute | exec layer | The Stage runs as one asyncflow **block** on the campaign's single engine; each node's adapter is a task on the `local` route and each tool command an executable task on `compute`, placed per backend |
 | analyze | task agents | Typed metrics extracted; **QC gates enforced** |
 | update | manager | Nodes appended, front recomputed, provenance written, budget charged |
@@ -134,8 +134,9 @@ Both boundaries, what each one buys, and what it does not, are recorded in
 
 ## Composition and validation
 
-The agent composes **arbitrary typed DAGs at runtime**. Five gates run before anything executes, then a
-dry-run in which every task agent parameterizes *without* executing:
+The agent composes **arbitrary typed DAGs at runtime**. Six gates run before anything executes, then a
+dry-run in which every task agent parameterizes *without* executing — which proves parameter values
+are legal and nothing about the command that will run ([`invocation.md`](invocation.md), step 3):
 
 | Gate | Rejects |
 |---|---|
@@ -144,6 +145,7 @@ dry-run in which every task agent parameterizes *without* executing:
 | 3 parameter | Out-of-range values, unknown parameters, any `frozen_parameters` |
 | 4 resource | P6 scheduled (unreachable now that a P6 declaration fails at load, and kept as a backstop), resource shapes exceeding the site, unproven GPU portability, disallowed external submission |
 | 5 budget | An estimate exceeding remaining budget in any dimension |
+| 6 tool delivery | Mock tools in a campaign that declares `tool_delivery: real`, and the reverse |
 
 Rejection is cheap and informative: the policy receives a structured `ValidationFailure` through
 `on_rejected` and gets another attempt within the same cycle, bounded by `max_attempts`.
@@ -183,12 +185,16 @@ non-destructive backtracking.
 
 ## Task agents
 
-Per tool, four phases: **pre-process → parameterize → execute → post-process**. `ToolSpec.agent` declares
-whether the agent is deterministic code or LLM-driven.
+Per tool, four phases: **pre-process → parameterize → run → post-process**, driven by
+`TaskAgent.__call__`. An adapter overrides `run()` only; the inherited `parameterize` and
+`post_process` are what make parameter checks and QC gates impossible to skip. `ToolSpec.agent`
+declares whether the agent is deterministic code or LLM-driven, and nothing reads it yet: every
+shipped adapter is deterministic code.
 
-`execute()` is not overridden by tool adapters — pattern dispatch belongs to the execution layer, and an
-adapter scheduling its own work would bypass the P4-ledger rule and place its command nowhere. Every
-command goes through `run_cmd`, which submits it to the engine as a placed task.
+Inside `run()` the adapter builds its tool's command in one pure function and hands it to `run_cmd`,
+which submits it to the engine as a placed task — an adapter that started a process any other way
+would run it on the campaign host, unplaced and unrecorded. The whole path from a spec to a running
+command, with each shipped tool's command written out, is [`invocation.md`](invocation.md).
 
 **QC gates are deterministic in both cases.** An LLM may author a protocol; it does not judge whether the
 result passed its clash check.

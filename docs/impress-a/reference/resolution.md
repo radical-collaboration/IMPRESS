@@ -323,6 +323,9 @@ Three properties `compose_stage` preserves, because the rest of the system rests
   campaign's `seed_salt`.
 - **P6 is inlined, never scheduled** — a scheduled P6 node is a composer bug (gate 4).
 
+What each node of that graph then *executes* — the adapter, the command line, its placement — is
+[`invocation.md`](invocation.md).
+
 A refinement Stage's root tasks are seeded from the parent design's artifacts by **declared type**
 (`_seed_inputs`), not by name: the producer names an artifact for its own output port and the
 consumer for its own purpose, so matching by name would work only where the two happen to agree.
