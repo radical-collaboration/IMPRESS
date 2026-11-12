@@ -169,6 +169,68 @@ def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
     return str(out)
 
 
+def _binds(*host_paths: Any) -> list[str]:
+    """`--bind` arguments for the host trees the container must see, de-duplicated.
+
+    apptainer binds $HOME, /tmp and the CWD by default, and nothing else. Two separate
+    trees have to reach the container and they are no longer siblings: `out_dir=` is under
+    $WORK_DIR (NVMe), while `inputs=` points into the repo, which deliberately stayed on
+    /work/hdd. The reference pipeline binds only $WORK_DIR because it moved its checkout
+    there too (IMPRESS 3c7c67d, which fixed exactly this after its own SCRATCH->WORK_DIR
+    migration: the container saw nothing and every input JSON raised FileNotFoundError).
+    Binding one of ours would reproduce that bug for the other, so bind every tree given,
+    skipping one already inside another.
+    """
+    binds: list[str] = []
+    seen: set[str] = set()
+    for host_path in host_paths:
+        if not host_path:
+            continue
+        resolved = str(Path(host_path).resolve())
+        if resolved in seen or any(
+                resolved == s or resolved.startswith(s + "/") for s in seen):
+            continue
+        seen.add(resolved)
+        binds += ["--bind", f"{resolved}:{resolved}"]
+    return binds
+
+
+def rfd3_command(params: dict[str, Any], *, image: Any, inputs: Any, out_dir: Any,
+                 binds: list[str] | None = None) -> list[str]:
+    """THE command `rfd3_design` runs. Pure: every path is an argument, nothing is read.
+
+        apptainer exec --nv [--bind H:H ...] <image> rfd3 design key=value ...
+
+    `apptainer` comes from PATH and `image` from `$FOUNDRY_SIF_PATH`; neither is in the
+    spec. `rfd3 design` takes Hydra overrides, never `--flags` (see the module docstring).
+    `inputs` is the staged copy of `params["input_spec_path"]` with its paths made absolute,
+    which is how that parameter reaches the command.
+
+    Deliberately NOT adding the reference's `--writable-tmpfs`: that gives the container a
+    throwaway writable root, and the same pipeline records rfd3 exiting 0 having written
+    its output into that overlay, leaving an empty out_dir - a silent failure. Add it only
+    if a real run shows the container needs it.
+    """
+    overrides = [
+        f"out_dir={out_dir}",
+        f"inputs={inputs}",
+        "skip_existing=False",
+        # False, not the CLI's default True: upstream measured trajectories at
+        # 11.85 MB of each 11.92 MB output dir - 99.4% - and flipped it (IMPRESS
+        # 0800ad8), taking a campaign from ~30 GB to ~3.8 GB. Safe for us because
+        # nothing here reads them: the candidates are discovered by globbing
+        # `*.cif.gz`, and trajectory files ship no sidecar `.json` (see G2).
+        "dump_trajectories=False",
+        "prevalidate_inputs=True",
+        f"diffusion_batch_size={params['num_designs']}",
+        f"inference_sampler.num_timesteps={params['diffusion_steps']}",
+    ]
+    if params.get("seed") is not None:
+        overrides.append(f"seed={params['seed']}")
+    return ["apptainer", "exec", "--nv", *(binds or []), str(image),
+            "rfd3", "design", *overrides]
+
+
 class RFD3DesignAgent(TaskAgent):
     """De novo backbone generation. More `diffusion_steps` trades wall-clock for quality."""
 
@@ -184,54 +246,13 @@ class RFD3DesignAgent(TaskAgent):
                 "DesignInputSpecification JSON (see campaigns/data/alr/ALR_binder_design.json)")
 
         work = workdir_for(req, "rfd3")
-        overrides = [
-            f"out_dir={work}",
-            f"inputs={_inputs_with_absolute_paths(params['input_spec_path'], work)}",
-            "skip_existing=False",
-            # False, not the CLI's default True: upstream measured trajectories at
-            # 11.85 MB of each 11.92 MB output dir - 99.4% - and flipped it (IMPRESS
-            # 0800ad8), taking a campaign from ~30 GB to ~3.8 GB. Safe for us because
-            # nothing here reads them: the candidates are discovered by globbing
-            # `*.cif.gz`, and trajectory files ship no sidecar `.json` (see G2).
-            "dump_trajectories=False",
-            "prevalidate_inputs=True",
-            f"diffusion_batch_size={params['num_designs']}",
-            f"inference_sampler.num_timesteps={params['diffusion_steps']}",
-        ]
-        if params.get("seed") is not None:
-            overrides.append(f"seed={params['seed']}")
-
-        # apptainer binds $HOME, /tmp and the CWD by default, and nothing else. Two
-        # separate trees have to reach the container and they are no longer siblings:
-        # `out_dir=` is under $WORK_DIR (NVMe), while `inputs=` points into the repo,
-        # which deliberately stayed on /work/hdd. The reference pipeline binds only
-        # $WORK_DIR because it moved its checkout there too (IMPRESS 3c7c67d, which fixed
-        # exactly this after its own SCRATCH->WORK_DIR migration: the container saw
-        # nothing and every input JSON raised FileNotFoundError). Binding one of ours
-        # would reproduce that bug for the other, so bind both, de-duplicated.
-        #
-        # Deliberately NOT adding the reference's `--writable-tmpfs`: that gives the
-        # container a throwaway writable root, and the same pipeline records rfd3 exiting
-        # 0 having written its output into that overlay, leaving an empty out_dir - a
-        # silent failure. Add it only if a real run shows the container needs it.
-        binds: list[str] = []
-        seen: set[str] = set()
-        for host_path in (os.environ.get("WORK_DIR"),
-                          str(Path(params["input_spec_path"]).resolve().parent),
-                          str(work.resolve())):
-            if not host_path:
-                continue
-            resolved = str(Path(host_path).resolve())
-            if resolved in seen or any(
-                    resolved == s or resolved.startswith(s + "/") for s in seen):
-                continue
-            seen.add(resolved)
-            binds += ["--bind", f"{resolved}:{resolved}"]
-
-        await run_cmd([
-            "apptainer", "exec", "--nv", *binds, foundry,
-            "rfd3", "design", *overrides,
-        ], env=_container_env(), timeout_s=float(self.spec.resources.walltime_s))
+        inputs = _inputs_with_absolute_paths(params["input_spec_path"], work)
+        cmd = rfd3_command(
+            params, image=foundry, inputs=inputs, out_dir=work,
+            binds=_binds(os.environ.get("WORK_DIR"),
+                         Path(params["input_spec_path"]).resolve().parent, work))
+        await run_cmd(cmd, env=_container_env(),
+                      timeout_s=float(self.spec.resources.walltime_s))
 
         # A candidate is a model that carries a sidecar metadata JSON - NOT whatever a bare
         # `*.cif.gz` glob turns up first. RFD3 writes its trajectories as `.cif.gz` too
