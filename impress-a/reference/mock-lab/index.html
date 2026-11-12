@@ -1,0 +1,2624 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Intelligent Multi-Pipeline Protein Engineering System for HPC">
+      
+      
+        <meta name="author" content="IMPRESS Team">
+      
+      
+        <link rel="canonical" href="https://radical-collaboration.github.io/IMPRESS/impress-a/reference/mock-lab/">
+      
+      
+        <link rel="prev" href="../aucam/">
+      
+      
+        <link rel="next" href="../../limitations/">
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.9">
+    
+    
+      
+        <title>The Mock Knob Lab - IMPRESS</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.f2e4d321.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#the-mock-knob-lab" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="IMPRESS" class="md-header__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IMPRESS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              The Mock Knob Lab
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/architecture/" class="md-tabs__link">
+          
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../examples/protein-binding/" class="md-tabs__link">
+          
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../reference/" class="md-tabs__link">
+          
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../" class="md-tabs__link">
+          
+  
+  IMPRESS-A
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="IMPRESS" class="md-nav__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    IMPRESS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build A Protein Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_adaptive_quickstart/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Watch IMPRESS adapt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adaptive-execution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Adaptive Execution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Examples
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Examples
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/protein-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Protein Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/discontinuous-scaffolds/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Discontinuous Scaffolds
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/agentic-small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Agentic Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/manager/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressManager
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressBasePipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/setup/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PipelineSetup
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/logger/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressLogger
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    IMPRESS-A
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            IMPRESS-A
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_a_knob_lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ten minutes with a mock campaign
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resolution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Resolution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Observation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../invocation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Invocation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontends/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pluggable Frontends
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compute-patterns/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compute Patterns
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authoring-tools/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authoring Tools
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware-integration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Middleware Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aucam/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AuCaM Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    The Mock Knob Lab
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    The Mock Knob Lab
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-figure-from-here-is-allowed-to-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a figure from here is allowed to claim
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running it
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-two-kinds-of-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      The two kinds of cell
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-and-why-it-is-not-tidiness" class="md-nav__link">
+    <span class="md-ellipsis">
+      Isolation, and why it is not tidiness
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-reasoner-axis" class="md-nav__link">
+    <span class="md-ellipsis">
+      The reasoner axis
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The reasoner axis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-rules-the-live-path-enforces" class="md-nav__link">
+    <span class="md-ellipsis">
+      Three rules the live path enforces
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-lab-reads-about-a-reasoner" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the lab reads about a reasoner
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-live-runs-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the live runs found
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#difficulty-is-operator_only" class="md-nav__link">
+    <span class="md-ellipsis">
+      difficulty is operator_only
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      The tables
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      The figures
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The figures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#f10-and-f11-the-comparison-as-a-live-campaign-will-make-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      f10 and f11: the comparison as a live campaign will make it
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-things-the-lab-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      Three things the lab found
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      Extending it
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15" id="__nav_6_15_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Decisions
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15">
+            <span class="md-nav__icon md-icon"></span>
+            Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0001-impress-is-a-tool-not-the-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0001 IMPRESS is a tool, not the control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0002-model-c-is-control-mode-2/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0002 Model C is control mode 2
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0003-free-graph-composition-with-self-promoting-interlock/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0003 Free graph composition with a self-promoting interlock
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0004-population-pareto-front-with-backtracking/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0004 A population with a Pareto front and backtracking
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0005-control-model-fixed-at-launch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0005 The control model is fixed at launch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0006-hybrid-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0006 Task agents are hybrid, declared per tool
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0007-transport-agnostic-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0007 A transport-agnostic control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0008-platform-priority/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0008 Platform priority
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0009-package-naming/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0009 Package naming
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0010-single-package-with-import-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0010 One package, with a CI-enforced import contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0011-toolkits-are-top-level-and-declarative/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0011 toolkits/ is top-level and declarative
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0012-one-property-two-sources/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0012 One property, two sources
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0013-trust-counts-integrity-not-acceptance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0013 Trust counts integrity, not acceptance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0014 An enclosing campaign manager is a caller
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0015-one-engine-and-the-process-boundary/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0015 One engine, two processes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_16" id="__nav_6_16_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Roadmap
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_16">
+            <span class="md-nav__icon md-icon"></span>
+            Roadmap
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/academy-for-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Academy for Task Agents
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-figure-from-here-is-allowed-to-claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a figure from here is allowed to claim
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running it
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-two-kinds-of-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      The two kinds of cell
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#isolation-and-why-it-is-not-tidiness" class="md-nav__link">
+    <span class="md-ellipsis">
+      Isolation, and why it is not tidiness
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-reasoner-axis" class="md-nav__link">
+    <span class="md-ellipsis">
+      The reasoner axis
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The reasoner axis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-rules-the-live-path-enforces" class="md-nav__link">
+    <span class="md-ellipsis">
+      Three rules the live path enforces
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-lab-reads-about-a-reasoner" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the lab reads about a reasoner
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-live-runs-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the live runs found
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#difficulty-is-operator_only" class="md-nav__link">
+    <span class="md-ellipsis">
+      difficulty is operator_only
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      The tables
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-figures" class="md-nav__link">
+    <span class="md-ellipsis">
+      The figures
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The figures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#f10-and-f11-the-comparison-as-a-live-campaign-will-make-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      f10 and f11: the comparison as a live campaign will make it
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-things-the-lab-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      Three things the lab found
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      Extending it
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="the-mock-knob-lab">The mock knob lab<a class="headerlink" href="#the-mock-knob-lab" title="Permanent link">&para;</a></h1>
+<p><strong>A measuring harness, not a result.</strong> It runs the laptop surrogate of the small-molecule
+binding chain across a grid of knob settings, flattens what the executor wrote into four
+CSVs, and draws six figures from them. The whole thing finishes in about half a minute on a
+laptop and needs no allocation.</p>
+<p>Read <code>campaigns/README.md</code> first for what the surrogate campaign is and what each knob does.
+This page is about the harness around it: what it runs, what it measures, and which of its
+numbers mean anything.</p>
+<p>To drive it rather than read about it, <a href="../../../notebooks/impress_a_knob_lab/">Ten minutes with a mock
+campaign</a> runs the four arms in Colab and walks the
+two traps below — the G14 stop-reason gap and the decision-0013 trust split — as a
+predict-then-run exercise.</p>
+<h2 id="what-a-figure-from-here-is-allowed-to-claim">What a figure from here is allowed to claim<a class="headerlink" href="#what-a-figure-from-here-is-allowed-to-claim" title="Permanent link">&para;</a></h2>
+<p>Every metric the six surrogates report is a <strong>seeded random draw</strong>
+(<code>toolkits/mock/SKILL.md</code>). A response surface drawn here is a statement about the
+surrogate's own arithmetic. It is not evidence about any molecule, and the disclaimer is
+printed on every figure from <code>analysis/mock_lab.DISCLAIMER</code> rather than typed into a caption
+a reader could drop when they paste the PNG into a slide.</p>
+<p>What <em>is</em> measured honestly is the campaign's <strong>behaviour</strong> — how many cycles it took, which
+gate refused what, whether the Pareto front filled, how long the control plane spent
+deciding — because that is the same executor, the same composer, the same five gates and the
+same interlock the Delta arms run. A behaviour observed here is the behaviour the real
+campaign would show; a number observed here is not a measurement.</p>
+<h2 id="running-it">Running it<a class="headerlink" href="#running-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>impress-a<span class="w"> </span>mock-lab<span class="w">                                   </span><span class="c1"># sweep, collect, figures</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>impress-a<span class="w"> </span>mock-lab<span class="w"> </span>--only<span class="w"> </span>arms<span class="w"> </span>--stage<span class="w"> </span>sweep<span class="w">         </span><span class="c1"># the four arms, nothing else</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>impress-a<span class="w"> </span>mock-lab<span class="w"> </span>--stage<span class="w"> </span>figures<span class="w">                   </span><span class="c1"># redraw from the tables already there</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>impress-a<span class="w"> </span>mock-lab<span class="w"> </span>--repeats<span class="w"> </span><span class="m">6</span><span class="w"> </span>--jobs<span class="w"> </span><span class="m">8</span><span class="w">              </span><span class="c1"># a tighter band, same wall clock</span>
+</code></pre></div>
+<p>Figures need the optional extra: <code>pip install -e ".[figures]"</code>. The sweep and collect stages
+do not — they write CSVs with the standard library, so a machine with no plotting stack can
+still produce the tables.</p>
+<p>Output lands in <code>campaigns/_runs/_analysis</code> by default, which is gitignored:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>manifest.json          every cell, its knob setting, its exit code, its run directory
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>specs/&lt;cell&gt;.yaml      the campaign that cell actually ran
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>runs/&lt;cell&gt;/           that campaign's own run root - provenance, ledger, trust
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>logs/&lt;cell&gt;.log        its stdout and stderr tail
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>tables/*.csv           lineages, tasks, cycles, campaigns, phases
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>figures/*.png          the six figures
+</code></pre></div>
+<h2 id="the-two-kinds-of-cell">The two kinds of cell<a class="headerlink" href="#the-two-kinds-of-cell" title="Permanent link">&para;</a></h2>
+<p><strong>Four arms</strong>, which are the settings the ten-minute activity walks through and the four hues
+in <code>analysis/plot_style.py</code>. Each is one reproducible campaign a person can re-run by hand
+and get back.</p>
+<p><strong>They are named for what the campaign DOES, not for what the surrogate reports.</strong> Every mock
+metric is a seeded random draw, so a name like "low-plddt" would be naming noise, while "aborted
+after three all-failed runs" is a control-plane outcome that reproduces. The tier each arm takes
+in the palette follows the same rule and is assigned once, in <code>analysis/plot_style.py</code>, never per
+figure.</p>
+<table>
+<thead>
+<tr>
+<th>Arm</th>
+<th>Setting</th>
+<th>What the campaign does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>baseline</code></td>
+<td>shipped defaults</td>
+<td>clears every bar; the Spec is satisfied; the front fills</td>
+</tr>
+<tr>
+<td><code>rescued</code></td>
+<td><code>difficulty: 0.55</code>, plus <code>diffusion_steps: 200</code>, <code>packmin.cycles: 5</code>, <code>diffusion_samples: 25</code></td>
+<td>the same difficulty, bought back by three knobs</td>
+</tr>
+<tr>
+<td><code>hard</code></td>
+<td><code>difficulty: 0.55</code></td>
+<td>acceptance shortfall; the front stays empty; trust untouched</td>
+</tr>
+<tr>
+<td><code>hopeless</code></td>
+<td><code>difficulty: 0.85</code></td>
+<td>integrity failure; <code>CampaignAborted</code> after three all-failed runs</td>
+</tr>
+</tbody>
+</table>
+<p>Two things the table cannot say. <strong><code>hard</code> and <code>rescued</code> are a matched pair</strong> at identical
+<code>difficulty</code>, differing only in the three knobs raised to buy it back — which is what separates
+"can knobs recover this campaign?" from "is this campaign hard?". Under a one-dial sweep those two
+questions are the same column, which is why the pair exists as arms rather than as sweep points.</p>
+<p>One caveat on <code>rescued</code>, measured from its own <code>stages.jsonl</code> rather than assumed: <strong>two of its
+three knobs only hold for cycle 1.</strong> Exploring emits no parameters, so the arm's values stand; from
+cycle 2 the planner escalates <code>diffusion_steps</code> and <code>packmin.cycles</code> from the <em>tool spec's</em>
+defaults (50 and 1) and the policy wins the merge, so they become 88 and 2 — below what the arm
+declared. <code>diffusion_samples</code> survives at 25 because it is a <strong>breadth</strong> knob no planner may touch.
+The campaign is real and the measured behaviour is real; what the label overstates is how much of
+it is held across cycles. Backlog G17, which is where the fix is being argued.</p>
+<p>And <strong><code>hard</code> versus <code>hopeless</code> is the acceptance/integrity line</strong>, not a matter of degree. Between
+roughly 0.5 and 0.75 the dial only misses the 0.5 acceptance threshold: the node FAILs and the
+pattern's trust is untouched. Above about 0.75 it drives <code>ss_fraction</code> under the 0.3
+<code>has_secondary_structure</code> floor, which is an <strong>integrity</strong> failure — the node FAILs <em>and</em> the
+pattern is demoted (<a href="../../decisions/0013-trust-counts-integrity-not-acceptance/">decision 0013</a>).
+Reaching for the dial to "make the campaign fail" without noticing which kind of failure you
+bought is the mistake the mock toolkit exists to make visible.</p>
+<p><strong>Sweep cells</strong>, one campaign per knob value per repeat, each repeat under a different seed
+salt. These carry the ensembles: 8 lineages a cell times 3 repeats is 24 independent draws
+per point at the default settings.</p>
+<p>Two deliberate differences from the shipped campaign, applied to every cell equally:</p>
+<ul>
+<li><code>replicas: 4</code> (arms) or <code>8</code> (sweeps), because one lineage per cycle is not a distribution.
+  This changes the pattern signature, so every cell runs <strong>untrusted</strong> under the interlock's
+  10% cost cap — the same interlock for all of them.</li>
+<li>A sweep cell runs exactly <strong>one cycle</strong>. <code>ThresholdSpecifier.revise</code> adds a refinement
+  objective as soon as the front is non-empty, so a multi-cycle cell mixes the knob's
+  response with the planner's escalation away from it, and a sweep that cannot separate those
+  is not a response surface.</li>
+</ul>
+<h2 id="isolation-and-why-it-is-not-tidiness">Isolation, and why it is not tidiness<a class="headerlink" href="#isolation-and-why-it-is-not-tidiness" title="Permanent link">&para;</a></h2>
+<p>Each cell runs as a subprocess of <code>impress-a run</code> with its own <code>IMPRESS_A_RUN_ROOT</code>,
+<code>IMPRESS_A_TRUST_DIR</code> and <code>IMPRESS_A_SEED_SALT</code>.</p>
+<p>The trust directory is the one that bites. The trust ledger is <strong>cross-run state</strong>: a cell
+that promoted a pattern changes the interlock every later cell runs under, so a shared ledger
+makes the sweep a function of its own iteration order rather than of the knob. The salt is
+what makes <code>--repeat</code> draw different lineages instead of the same ones again (backlog G7).</p>
+<p><strong>The four arms always run one at a time</strong>, whatever <code>--jobs</code> says, because every wall-clock
+figure comes from them. Run eight-wide, one arm's first cycle came back at 0.10s against
+1.10s for the other three — scheduling noise presented as a property of the knob setting.
+Sweep cells are read only for the metrics their tools drew, which CPU contention cannot
+change, so they run in parallel.</p>
+<h2 id="the-reasoner-axis">The reasoner axis<a class="headerlink" href="#the-reasoner-axis" title="Permanent link">&para;</a></h2>
+<p>The six surrogates mock the <strong>tools</strong>. <code>--reasoners</code> mocks nothing: it varies the control
+model <em>above</em> them, so the four knob arms run under each named reasoner and the lab measures
+the half the four-model taxonomy is actually about.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>impress-a<span class="w"> </span>mock-lab<span class="w"> </span>--reasoners<span class="w"> </span>D<span class="w"> </span>--reasoners<span class="w"> </span>null<span class="w">                    </span><span class="c1"># offline, free</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>impress-a<span class="w"> </span>mock-lab<span class="w"> </span>--reasoners<span class="w"> </span>D<span class="w"> </span>--reasoners<span class="w"> </span>B<span class="w"> </span>--model-profile<span class="w"> </span>beam<span class="w">  </span><span class="c1"># live</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>letter</th>
+<th>what drives the campaign</th>
+<th>needs a profile</th>
+<th>repeated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>D</code></td>
+<td><code>ThresholdSpecifier</code> + <code>ThresholdPlanner</code>; rules end to end</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>null</code></td>
+<td>an empty Spec, so the campaign stops at cycle 0</td>
+<td>no</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>A</code></td>
+<td>the four-node graph; two nodes call the model (<code>hypothesize</code>, <code>select_tasks</code>)</td>
+<td><strong>yes</strong></td>
+<td><code>--reasoner-repeats</code>, default 3</td>
+</tr>
+<tr>
+<td><code>B</code></td>
+<td>two schemas, one call each (<code>SPEC_SCHEMA</code>, <code>STAGE_SCHEMA</code>)</td>
+<td><strong>yes</strong></td>
+<td><code>--reasoner-repeats</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>C</code> is absent: it needs <code>impress-a serve</code> plus an <code>impress-a control</code> sidecar waiting on the
+0600 <code>control_plane.url</code>, which is two processes per cell, and its caller-side reasoner
+records have nowhere to land (backlog H8).</p>
+<p>Sweeps stay on <code>D</code> whatever the axis says. They measure the surrogate's own response surface,
+which no reasoner changes, so running them under four models buys four readings of one piece
+of arithmetic.</p>
+<h3 id="three-rules-the-live-path-enforces">Three rules the live path enforces<a class="headerlink" href="#three-rules-the-live-path-enforces" title="Permanent link">&para;</a></h3>
+<p><strong>A live model with no profile is refused, not quietly run.</strong> <code>--model A</code> without one runs its
+rule cascades and <code>--model B</code> runs <code>RehearsalOracle</code>. Both report zero LLM calls — which is
+exactly what a <em>degraded</em> live arm reports. A figure labelled "model B" drawn from the
+rehearsal is the pre-registration's §8 void outcome manufactured on purpose, so the lab exits
+2 and names the models it refused, before spending anything.</p>
+<p><strong>One probe call before any live cell.</strong> <code>cli._client_for</code> opens no socket, so without this the
+first failure lands inside a campaign cycle, where <code>reasoning.ask</code> retries twice, writes
+<code>reasoner_degraded</code> and runs model D's cascade — and the campaign exits 0. Every live cell
+would do the same and the lab would draw a full set of figures for a model that never
+answered. One round trip up front is the difference between "the endpoint is down" and
+twenty-four quietly degraded arms.</p>
+<p><strong>A cap on what it may spend.</strong> <code>--max-llm-calls</code> (default 400), counted from what each cell
+actually recorded rather than estimated — a corrective retry is a second call and a degraded
+node is two calls that bought nothing. A cell the cap stopped is named in the manifest and
+carries a <code>skipped</code> reason, because one silently missing from a figure reads as a model that
+had nothing to show.</p>
+<h3 id="what-the-lab-reads-about-a-reasoner">What the lab reads about a reasoner<a class="headerlink" href="#what-the-lab-reads-about-a-reasoner" title="Permanent link">&para;</a></h3>
+<p>Nothing recorded a control model's behaviour until <code>890829d</code>: <code>ReasonerOptions.sink</code> had
+writers throughout <code>policy/</code> and no subscriber, so a campaign left no prompt, no reply, no
+model id, no timing and no degraded event. Two of the collected tables exist because of that
+fix.</p>
+<ul>
+<li><strong><code>decisions.csv</code></strong> — one row per LLM call: <code>node</code>, <code>attempt</code>, whether it was accepted,
+  the <code>model_id</code> that answered, <code>elapsed_s</code>, and prompt/completion tokens as deltas. The
+  prompt and reply bodies stay in <code>decisions.jsonl</code>; a CSV is for counting.</li>
+<li><strong><code>params.csv</code></strong> — the parameter vector each Planner chose, from <code>stages.jsonl</code>'s
+  <code>mappings</code>. <code>source</code> separates <code>campaign</code> from <code>reasoner</code>, because <code>mappings</code> holds the
+  <em>effective</em> vector and <code>_apply_campaign_defaults</code> merges the campaign's <code>params:</code> into it
+  before composition. Without the split every model would read as having set every knob.</li>
+<li><strong><code>campaigns.csv</code></strong> gains <code>llm_calls</code>, <code>llm_retries</code>, <code>llm_s</code>, <code>llm_share</code>, token totals,
+  <code>s_per_llm_call</code>, <code>degraded_events</code>, and <code>model_id</code> — read from the records rather than
+  from the flag the lab passed, so a cell that asked for <code>beam</code> and was answered by something
+  else shows it.</li>
+</ul>
+<p><strong>Check <code>degraded_events</code> before reading any live arm's yield.</strong> A non-zero count means the
+arm fell back to model D's cascade, and what it produced is not that model's result. That is
+the pre-registration's void rule, enforceable for the first time now that anything writes
+these events.</p>
+<h3 id="what-the-live-runs-found">What the live runs found<a class="headerlink" href="#what-the-live-runs-found" title="Permanent link">&para;</a></h3>
+<p><code>Beam-501B-A23B</code> via profile <code>beam</code>, 2026-11-10: model B alone (20 calls), then D + A + B at
+one repeat (31), then <strong>three repeats of every live cell (89 calls, 28 cells)</strong>, which is the
+run the figures are drawn from. Zero retries and zero degraded turns in all three, and no
+allocation.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>model D</th>
+<th>model A (live)</th>
+<th>model B (live)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>seconds per decision</td>
+<td>0.33</td>
+<td>9.23</td>
+<td><strong>19.36</strong></td>
+</tr>
+<tr>
+<td>seconds per call</td>
+<td>—</td>
+<td>2.8</td>
+<td>7.2</td>
+</tr>
+<tr>
+<td>completion tokens per call</td>
+<td>—</td>
+<td>386</td>
+<td>1110</td>
+</tr>
+<tr>
+<td>share of campaign wall clock at the endpoint</td>
+<td>—</td>
+<td>84–99%</td>
+<td><strong>93–99%</strong></td>
+</tr>
+<tr>
+<td>cycles run</td>
+<td>2–4</td>
+<td>1–1</td>
+<td><strong>1–6</strong></td>
+</tr>
+<tr>
+<td>knobs it moved</td>
+<td>3, all quality</td>
+<td>4, all quality</td>
+<td>9, mostly breadth</td>
+</tr>
+<tr>
+<td>front on <code>hard</code>, over 3 repeats</td>
+<td>0 of 12</td>
+<td><strong>3–4 of 4</strong></td>
+<td>0 of 16</td>
+</tr>
+<tr>
+<td>predicted GPU-h per campaign</td>
+<td>1.4–2.0</td>
+<td>0.68, flat</td>
+<td><strong>0.68–4.1</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>A live model is not a function, and three repeats is the smallest number that shows it.</strong>
+Model B ran the <code>rescued</code> arm as one cycle with an empty front twice and as six cycles with
+four designs on the front once — same arm, same salt, same endpoint. Model A was identical in
+all three. Any single-repeat figure here would have been a draw reported as a property; the
+repeats are what let <code>f7</code> and <code>f11</code> draw a range instead of a bar.</p>
+<p><strong>A and B differ in what they are shown, not only in what they choose.</strong> Model A's parameter
+vector comes from <code>parameterize</code>, a deterministic node the model steers only by naming a
+strategy, and <code>_knobs.tunable</code> keeps breadth parameters away from it. Model B is handed the
+whole task card and picks for itself. So A raising four quality dials and B raising
+<code>num_designs</code> is a comparison of a filtered knob set against an unfiltered one.</p>
+<p>Two things worth carrying off the laptop. <strong>The endpoint is the campaign</strong> on this tier: the
+six tools return in milliseconds and 94–99% of each live cell's wall clock was one model
+thinking. And <strong>model B raises breadth parameters that models A and D are forbidden to touch</strong>
+— <code>num_designs</code> to 2, 3, 4 and 8 — because <code>OraclePlanner._prompt</code> filters what it shows by
+<code>tunable</code>, which does not look at kind. <code>rfd3_design</code>'s own spec records that <code>num_designs</code>
+stays at 1 because its adapter keeps index 0, and its <code>cost_model</code> is per <em>invocation</em>, so
+nothing prices the extra draws either. Backlog <strong>H10</strong>.</p>
+<p>And <strong>a live Specifier can skip the abort rule</strong>. On <code>hopeless</code> — difficulty 0.85, the arm
+whose backbone breaks — model A stopped at cycle 1 on "every spec objective satisfied" with
+all four lineages failing the <code>ss_fraction</code> integrity gate and an empty front, where the
+deterministic control ran on and aborted on three consecutive all-failed runs. Its Specifier
+emitted no refinement objective, so nothing was left unsatisfied and a third cycle never
+came. The quality dials it had raised made the <em>numbers</em> good on a structure difficulty 0.85
+had already destroyed — which is visible in <code>f10</code>, where that arm clears every band but
+<code>ss_fraction</code>.</p>
+<p>Over three repeats it is <strong>A 3 of 3 and B 1 of 3</strong>, so it is not a model-A property: it is
+what any live Specifier does when it declines to add a refinement objective, and B does that
+one time in three. Backlog <strong>H11</strong> — G14's mechanism with a safety consequence rather than a
+reporting one.</p>
+<h3 id="difficulty-is-operator_only"><code>difficulty</code> is <code>operator_only</code><a class="headerlink" href="#difficulty-is-operator_only" title="Permanent link">&para;</a></h3>
+<p><code>OraclePlanner</code> shows a live model every tunable parameter with its range and its <code>trades</code>
+sentence, and <code>_apply_campaign_defaults</code> states that a policy wins on any key it set. The
+dial reads "how hard this campaign is", 0.0 to 1.0. A model asked to satisfy the objectives
+turns it down, the <code>hard</code> arm quietly becomes the easy one, and nothing says so.</p>
+<p>So it is marked <code>operator_only</code> in <code>mock_rfd3_design/spec.yaml</code>: the campaign may declare it,
+a reasoner may not propose it. Enforced in one seam, <code>tools/view.card_for</code>, which reports it
+under <code>TaskCard.frozen</code> and leaves it out of <code>TaskCard.parameters</code> — <code>_knobs.tunable</code> skips
+it, B's prompt omits it, and B's schema check refuses a reply naming it with the reason the
+spec gave. Gate 3 reads <code>ToolSpec.frozen_parameters</code>, which stays empty, so the campaign path
+is untouched and no seeded draw moves.</p>
+<p>Checked rather than assumed: <code>campaigns.csv</code> carries <code>difficulty_proposed</code>, which is empty
+unless a reasoner's value reached a deployed stage or a rejection named the dial as frozen,
+and <code>f9-knobs-moved.png</code> asserts that it appears for nobody.</p>
+<h2 id="the-tables">The tables<a class="headerlink" href="#the-tables" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>One row per</th>
+<th>Carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lineages.csv</code></td>
+<td><code>DesignNode</code></td>
+<td>the whole chain's metrics merged, the QC verdict, and the failed gates split into <code>failed_integrity</code> / <code>failed_acceptance</code></td>
+</tr>
+<tr>
+<td><code>tasks.csv</code></td>
+<td>task</td>
+<td>its <code>stage_index</code> in the chain, verdict, gates, timing, both sides of its cost, and every metric it reported prefixed <code>m_</code></td>
+</tr>
+<tr>
+<td><code>cycles.csv</code></td>
+<td>composed graph</td>
+<td>signature, whether it was trusted, the interlock's scrutiny, the estimate, and the gate that refused it if one did</td>
+</tr>
+<tr>
+<td><code>campaigns.csv</code></td>
+<td>cell</td>
+<td>stop reason, whether it aborted, cycles, front size, verdict counts, wall clock, busy time, overhead, decisions and tasks per second</td>
+</tr>
+<tr>
+<td><code>phases.csv</code></td>
+<td>cycle</td>
+<td>where that cycle's wall clock went, segment by segment</td>
+</tr>
+</tbody>
+</table>
+<p>Two things in there are easy to get subtly wrong, so they are done once and tested:</p>
+<ul>
+<li><strong>Busy time is a union of intervals, not a sum of durations.</strong> <code>workers: 4</code> overlaps
+  tasks, so a sum double-counts; and <code>wall - sum</code> can go negative and then reads as negative
+  overhead. The union is correct at any concurrency.</li>
+<li><strong>A metric a tool did not report is <code>None</code>, never <code>0.0</code>.</strong> A tool omits a metric it could
+  not read (the <code>metrics_reported</code> invariant), and fabricating a zero turns "the tool broke"
+  into "the design is weak".</li>
+</ul>
+<h2 id="the-figures">The figures<a class="headerlink" href="#the-figures" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>f1-metric-ensembles.png</code></td>
+<td>each campaign objective against <code>difficulty</code>, mean ± 2σ population spread, with its acceptance bar and the arms marked</td>
+</tr>
+<tr>
+<td><code>f2-knob-response.png</code></td>
+<td><code>complex_plddt</code> against the four knobs that have a real counterpart, on one shared y-axis so the spans are comparable</td>
+</tr>
+<tr>
+<td><code>f3-stage-funnel.png</code></td>
+<td>per-stage pass rate per arm, and the failures split into acceptance shortfalls and integrity failures</td>
+</tr>
+<tr>
+<td><code>f4-decision-rate.png</code></td>
+<td>elapsed seconds against decision index — slope is seconds per decision — and decisions/s against tasks/s</td>
+</tr>
+<tr>
+<td><code>f5-control-time.png</code></td>
+<td>where a cycle's wall clock goes, cycle 0 against every cycle after it</td>
+</tr>
+<tr>
+<td><code>f6-stop-vs-front.png</code></td>
+<td>what each arm's campaign <em>said</em> against what it actually had on the front</td>
+</tr>
+<tr>
+<td><code>f7-reasoner-yield.png</code></td>
+<td>front size per arm per control model — does a reasoner rescue a campaign the rules cannot?</td>
+</tr>
+<tr>
+<td><code>f8-decision-cost.png</code></td>
+<td>what one decision costs in seconds and in tokens, by who made it</td>
+</tr>
+<tr>
+<td><code>f9-knobs-moved.png</code></td>
+<td>which knobs each model moved, and how far up their declared ranges</td>
+</tr>
+<tr>
+<td><code>f10-protein-metrics.png</code></td>
+<td>every metric a live arm is tiered on, per arm per model, against <code>tiers</code>' own T2/T3 bands</td>
+</tr>
+<tr>
+<td><code>f11-predicted-cost.png</code></td>
+<td>what the same decisions would have cost on hardware, at the real specs' rates</td>
+</tr>
+</tbody>
+</table>
+<h3 id="f10-and-f11-the-comparison-as-a-live-campaign-will-make-it">f10 and f11: the comparison as a live campaign will make it<a class="headerlink" href="#f10-and-f11-the-comparison-as-a-live-campaign-will-make-it" title="Permanent link">&para;</a></h3>
+<p><code>analysis/compare_arms.py</code> scores a Delta arm on two axes, and these two draw the same axes
+on the surrogate — with the two places the surrogate cannot follow stated rather than papered
+over.</p>
+<p><strong>f10, the protein axis.</strong> The seven metrics <code>tiers.T2_THRESHOLDS</code> and <code>T3_THRESHOLDS</code> test,
+read at import rather than retyped, one panel each, a mark per arm per model and the band
+shaded on the side that clears. What it does <strong>not</strong> draw is a tier count: the live headline
+is <code>distinct_t2</code>/<code>distinct_t3</code>, which is tiers <em>after</em> clustering at 90 % sequence identity
+and 2.5 Å Cα RMSD, and the surrogate emits neither a sequence nor a structure. A count here
+would be an upper bound wearing a measured number's name. The yield comparison stays in f7,
+where the denominator is the Pareto front and nothing is implied about distinctness.</p>
+<p><strong>f11, the cost axis.</strong> <code>compare_arms</code> charges an arm <code>AllocNodes × gpus_per_node ×
+Elapsed_h</code> from <code>sacct</code>. There is no allocation here, and the laptop's clock is not a
+stand-in — 82–99 % of it is one model thinking, which inverts completely on hardware. What
+<em>does</em> transfer is the decision: which tools ran and how many times. Charged at the <strong>real</strong>
+toolkit's declared rates (rfd3 0.1 GPU-h, ligandmpnn 0.02, boltz 0.05, fastrelax 0.25 CPU-h),
+that is the same arithmetic gate 5 and the untrusted-pattern cap do before admitting a graph.
+Every number on it is labelled predicted. The mock specs' own cost models are deliberately
+uniform at 0.002 and carry no information, so they are not used.</p>
+<p>It also shows H10 without having to argue it: models A and B cost <strong>the same</strong> predicted
+GPU-hours in every arm, because the estimate is per <em>invocation</em> and B's <code>num_designs: 4</code>
+does not enter it.</p>
+<p><strong>f3, f4 and f5 are drawn for one control model.</strong> They pool by arm, and an arm stops being
+one campaign once the reasoner axis exists: averaging D's 0.14s decision with B's 20.5s one
+under the arm's hue measures the endpoint, not the knob. When a lab has more than one model
+these three keep the deterministic control — D, or the first model on the axis if D is not
+on it — and say so in the caption. A single-model lab is unaffected, caption included.</p>
+<p><strong>The control model does not get a hue.</strong> The four validated colours are spent on the four
+knob arms and colour follows the entity, so in f7–f9 a model takes the <em>fill</em> channel —
+hatch and face alpha inside the arm's own colour (<code>plot_style.MODEL_FILLS</code>). It survives
+every CVD simulation by construction, reads in greyscale, and the arm identity a reader
+learned in f1–f6 carries straight across.</p>
+<p>Colour follows <code>analysis/plot_style.py</code> and means the same thing in all nine: blue is the
+best-performing configuration, magenta is the run that did not complete, and a sweep line is
+drawn in the <strong>neutral</strong> grey because a sweep is a measure rather than one of the compared
+entities. Bands are <code>± 2σ</code> <strong>population spread over lineages</strong>, never a standard error — at
+24 lineages the two differ by about five times, and a band read as a confidence interval
+makes adjacent knob settings look separated when they are not.</p>
+<h2 id="three-things-the-lab-found">Three things the lab found<a class="headerlink" href="#three-things-the-lab-found" title="Permanent link">&para;</a></h2>
+<p>Worth knowing before you read its output, because two of them are defects in the system it
+measures rather than in the surrogate.</p>
+<ol>
+<li><strong><code>hard</code> stops on "every spec objective satisfied" with an empty Pareto front.</strong> Not a
+   bug in the lab. <code>DataRegistry.ingest</code> records a task's metrics whatever the QC verdict and
+   <code>SatisfactionRule</code> counts those readings, while <code>core/pareto</code> correctly refuses a FAIL node
+   a place on the front. <code>f6-stop-vs-front.png</code> exists to make that gap unmissable. Backlog
+   <strong>G14</strong>.</li>
+<li><strong>An aborted campaign's provenance says <code>reason: completed</code>.</strong> <code>hopeless</code> raises
+   <code>CampaignAborted</code> and the only durable trace of why is the process's stderr, so
+   <code>collect</code> derives <code>aborted</code> from the exit code instead. Backlog <strong>G15</strong>.</li>
+<li><strong>About one first cycle in eight stalls for an extra ~1.0s</strong> inside asyncflow's
+   run-component loop, which waits on its component-change event with a 1.0s timeout.
+   Irrelevant on hardware, 90% of the first cycle here, and the reason every wall-clock
+   caption says so. Backlog <strong>G16</strong>.</li>
+</ol>
+<h2 id="extending-it">Extending it<a class="headerlink" href="#extending-it" title="Permanent link">&para;</a></h2>
+<p>Add a knob to <code>SWEEPS</code> in <code>analysis/mock_lab.py</code> — the tool, the parameter and the values —
+and it sweeps. Add an arm to <code>ARMS</code> and it must also get a hue in <code>plot_style.RUN_STYLES</code>;
+<code>style_for</code> raises on an unknown arm rather than inventing one, because a silent fifth hue
+would break the colour identity every figure in a report depends on. A fifth categorical
+colour has to be re-validated first — see the <code>campaign-plot-style</code> skill's
+<code>references/palette.md</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/radical-collaboration/IMPRESS" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://pypi.org/project/impress-framework/" target="_blank" rel="noopener" title="pypi.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6zM286.2 404c11.1 0 20.1 9.1 20.1 20.3 0 11.3-9 20.4-20.1 20.4-11 0-20.1-9.2-20.1-20.4.1-11.3 9.1-20.3 20.1-20.3zM167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4zm-6.7-142.6c-11.1 0-20.1-9.1-20.1-20.3.1-11.3 9-20.4 20.1-20.4 11 0 20.1 9.2 20.1 20.4s-9 20.3-20.1 20.3z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "search.share", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      
+    
+  </body>
+</html>

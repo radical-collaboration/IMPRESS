@@ -1,0 +1,2727 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Intelligent Multi-Pipeline Protein Engineering System for HPC">
+      
+      
+        <meta name="author" content="IMPRESS Team">
+      
+      
+        <link rel="canonical" href="https://radical-collaboration.github.io/IMPRESS/impress-a/reference/invocation/">
+      
+      
+        <link rel="prev" href="../observation/">
+      
+      
+        <link rel="next" href="../frontends/">
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.9">
+    
+    
+      
+        <title>Invocation - IMPRESS</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.f2e4d321.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#invocation-from-a-tool-spec-to-a-running-command" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="IMPRESS" class="md-header__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IMPRESS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Invocation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/architecture/" class="md-tabs__link">
+          
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../examples/protein-binding/" class="md-tabs__link">
+          
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../reference/" class="md-tabs__link">
+          
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../" class="md-tabs__link">
+          
+  
+  IMPRESS-A
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="IMPRESS" class="md-nav__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    IMPRESS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build A Protein Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_adaptive_quickstart/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Watch IMPRESS adapt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adaptive-execution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Adaptive Execution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Examples
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Examples
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/protein-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Protein Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/discontinuous-scaffolds/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Discontinuous Scaffolds
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/agentic-small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Agentic Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/manager/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressManager
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressBasePipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/setup/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PipelineSetup
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/logger/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressLogger
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    IMPRESS-A
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            IMPRESS-A
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_a_knob_lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ten minutes with a mock campaign
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resolution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Resolution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Observation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Invocation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Invocation
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-0-what-a-spec-says-about-invocation-and-what-it-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 0 — what a spec says about invocation, and what it does not
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-entry-becomes-a-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 — entry: becomes a class
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-a-graph-node-becomes-a-request-and-a-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 — a graph node becomes a request, and a placement
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-parameters-are-resolved-and-that-is-all-admission-proved" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3 — parameters are resolved, and that is all admission proved
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-the-adapter-builds-the-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4 — the adapter builds the command
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 4 — the adapter builds the command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rfd3_design-toolsrfd3_agentsrfd3_command198" class="md-nav__link">
+    <span class="md-ellipsis">
+      rfd3_design — tools/rfd3_agents.rfd3_command:198
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ligandmpnn_design-toolsligandmpnn_agentsligandmpnn_command133" class="md-nav__link">
+    <span class="md-ellipsis">
+      ligandmpnn_design — tools/ligandmpnn_agents.ligandmpnn_command:133
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boltz_predict-toolsboltz_agentsboltz_command112-boltz_input93" class="md-nav__link">
+    <span class="md-ellipsis">
+      boltz_predict — tools/boltz_agents.boltz_command:112, boltz_input:93
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#packmin-fastrelax-filter_shape-toolsrosetta_agentsworker_command278" class="md-nav__link">
+    <span class="md-ellipsis">
+      packmin, fastrelax, filter_shape — tools/rosetta_agents.worker_command:278
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mocks-stop-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mocks stop here
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-the-command-becomes-an-engine-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 5 — the command becomes an engine task
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-files-come-back-as-typed-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 6 — files come back as typed results
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-what-is-written-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 7 — what is written down
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-invocation-does-not-enforce" class="md-nav__link">
+    <span class="md-ellipsis">
+      What invocation does not enforce
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeing-it-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Seeing it on disk
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontends/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pluggable Frontends
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compute-patterns/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compute Patterns
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authoring-tools/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authoring Tools
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware-integration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Middleware Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aucam/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AuCaM Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mock-lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    The Mock Knob Lab
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15" id="__nav_6_15_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Decisions
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15">
+            <span class="md-nav__icon md-icon"></span>
+            Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0001-impress-is-a-tool-not-the-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0001 IMPRESS is a tool, not the control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0002-model-c-is-control-mode-2/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0002 Model C is control mode 2
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0003-free-graph-composition-with-self-promoting-interlock/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0003 Free graph composition with a self-promoting interlock
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0004-population-pareto-front-with-backtracking/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0004 A population with a Pareto front and backtracking
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0005-control-model-fixed-at-launch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0005 The control model is fixed at launch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0006-hybrid-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0006 Task agents are hybrid, declared per tool
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0007-transport-agnostic-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0007 A transport-agnostic control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0008-platform-priority/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0008 Platform priority
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0009-package-naming/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0009 Package naming
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0010-single-package-with-import-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0010 One package, with a CI-enforced import contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0011-toolkits-are-top-level-and-declarative/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0011 toolkits/ is top-level and declarative
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0012-one-property-two-sources/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0012 One property, two sources
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0013-trust-counts-integrity-not-acceptance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0013 Trust counts integrity, not acceptance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0014 An enclosing campaign manager is a caller
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0015-one-engine-and-the-process-boundary/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0015 One engine, two processes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_16" id="__nav_6_16_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Roadmap
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_16">
+            <span class="md-nav__icon md-icon"></span>
+            Roadmap
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/academy-for-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Academy for Task Agents
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-0-what-a-spec-says-about-invocation-and-what-it-does-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 0 — what a spec says about invocation, and what it does not
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-entry-becomes-a-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 — entry: becomes a class
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-a-graph-node-becomes-a-request-and-a-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 — a graph node becomes a request, and a placement
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-parameters-are-resolved-and-that-is-all-admission-proved" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3 — parameters are resolved, and that is all admission proved
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-the-adapter-builds-the-command" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4 — the adapter builds the command
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 4 — the adapter builds the command">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rfd3_design-toolsrfd3_agentsrfd3_command198" class="md-nav__link">
+    <span class="md-ellipsis">
+      rfd3_design — tools/rfd3_agents.rfd3_command:198
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ligandmpnn_design-toolsligandmpnn_agentsligandmpnn_command133" class="md-nav__link">
+    <span class="md-ellipsis">
+      ligandmpnn_design — tools/ligandmpnn_agents.ligandmpnn_command:133
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boltz_predict-toolsboltz_agentsboltz_command112-boltz_input93" class="md-nav__link">
+    <span class="md-ellipsis">
+      boltz_predict — tools/boltz_agents.boltz_command:112, boltz_input:93
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#packmin-fastrelax-filter_shape-toolsrosetta_agentsworker_command278" class="md-nav__link">
+    <span class="md-ellipsis">
+      packmin, fastrelax, filter_shape — tools/rosetta_agents.worker_command:278
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mocks-stop-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      Mocks stop here
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-the-command-becomes-an-engine-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 5 — the command becomes an engine task
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-files-come-back-as-typed-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 6 — files come back as typed results
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-what-is-written-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 7 — what is written down
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-invocation-does-not-enforce" class="md-nav__link">
+    <span class="md-ellipsis">
+      What invocation does not enforce
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeing-it-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Seeing it on disk
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="invocation-from-a-tool-spec-to-a-running-command">Invocation: from a tool spec to a running command<a class="headerlink" href="#invocation-from-a-tool-spec-to-a-running-command" title="Permanent link">&para;</a></h1>
+<p><a href="../resolution/"><code>resolution.md</code></a> ends with an admitted graph, and
+<a href="../observation/"><code>observation.md</code></a> begins when a run is absorbed. This page is the part between:
+how one node of that graph — a tool id and a parameter dict — becomes <strong>a command line running
+on a compute node</strong>, and what is written down about it.</p>
+<p>Every step says what it takes, who owns it, what it produces and what refuses it, in the order a
+task executes them. If this page and the code disagree, the code is right and this page is a bug.</p>
+<p>Two things to read it for. <strong>Knowing what the system actually executes</strong>, from the source rather
+than from a finished run's logs — step 4 is the answer, one table per tool, each anchored to the
+single function that builds that tool's command. And <strong>adding or changing a tool safely</strong>, for
+which <a href="../authoring-tools/"><code>authoring-tools.md</code></a> is the how-to and this page is the reason behind
+each rule in it.</p>
+<p>The one fact to carry through the rest: <strong>a spec declares what a tool accepts; it does not
+declare what the tool runs.</strong> There is no command template in <code>spec.yaml</code>. The executable, the
+flag names, the config-file schema and the environment contract live in Python, in the adapter
+<code>entry:</code> points at — and in exactly one function of it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>toolkits/&lt;tk&gt;/tools/&lt;id&gt;/spec.yaml ──→ ToolSpec                              step 0
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>ToolSpec.entry ──importlib──→ a TaskAgent subclass (the adapter)             step 1
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>TaskGraph node ──node_task──→ TaskRequest + Placement    (a `local` thread)  step 2
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>TaskRequest.params ──parameterize──→ resolved params      (= the dry run)    step 3
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>resolved params ──&lt;tool&gt;_command()──→ argv                 (pure, in Python) step 4
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>argv ──run_cmd → Launcher──→ an executable task on `compute`, placed         step 5
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>files in work/&lt;tool&gt;_&lt;node&gt;/ ──post_process──→ ArtifactRefs, metrics, QC     step 6
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>Launcher.records ──→ provenance/tasks.jsonl `commands`                       step 7
+</code></pre></div>
+<p>Anchors are relative to <code>agent/src/impress_a/</code>.</p>
+<hr />
+<h2 id="step-0-what-a-spec-says-about-invocation-and-what-it-does-not">Step 0 — what a spec says about invocation, and what it does not<a class="headerlink" href="#step-0-what-a-spec-says-about-invocation-and-what-it-does-not" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> <code>toolkits/&lt;toolkit&gt;/tools/&lt;id&gt;/spec.yaml</code>. <strong>Owner:</strong> <code>tools/spec.ToolSpec:109</code>.
+<strong>Out:</strong> the typed contract every later step reads.</p>
+<table>
+<thead>
+<tr>
+<th>declared</th>
+<th>what it does for invocation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>entry:</code> (<code>:131</code>)</td>
+<td>the dotted path of the adapter class — step 1</td>
+</tr>
+<tr>
+<td><code>parameters</code>, <code>frozen_parameters</code></td>
+<td>the only keys a node may set, with their bounds — step 3</td>
+</tr>
+<tr>
+<td><code>inputs</code> / <code>outputs</code> ports</td>
+<td>which upstream file the adapter opens, and the type its results are filed under — steps 4 and 6</td>
+</tr>
+<tr>
+<td><code>resources</code></td>
+<td><code>gpus</code> decides whether the command is pinned to a device; <code>walltime_s</code> becomes its timeout — step 5</td>
+</tr>
+<tr>
+<td><code>qc_gates</code>, <code>metrics</code></td>
+<td>what the adapter's return value is held to — step 6</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not declared, anywhere in a spec:</strong> the executable, its flags, its environment variables, its
+container image, its working directory. <code>ToolSpec</code> has no field for any of them. So a spec can
+be valid, load cleanly and be planned against while naming a parameter no command ever receives
+— finding 2 — and nothing at load time can compare a spec with the CLI it fronts.</p>
+<h2 id="step-1-entry-becomes-a-class">Step 1 — <code>entry:</code> becomes a class<a class="headerlink" href="#step-1-entry-becomes-a-class" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> a tool id. <strong>Owner:</strong> <code>tools/registry.Registry.agent_for:90</code>. <strong>Out:</strong> a <code>TaskAgent</code>
+subclass.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">mod</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="bp">cls</span> <span class="o">=</span> <span class="n">spec</span><span class="o">.</span><span class="n">entry</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">"."</span><span class="p">)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">return</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">mod</span><span class="p">),</span> <span class="bp">cls</span><span class="p">)</span>
+</code></pre></div>
+<p>An ordinary import, so the adapter has to be importable from the campaign's environment:
+toolkit directories are <em>not</em> put on <code>sys.path</code>. Every shipped tool points into the package
+(<code>impress_a.tools.&lt;toolkit&gt;_agents</code>). A spec with no <code>entry:</code> gets <code>EchoTaskAgent</code>
+(<code>tools/agent.py:266</code>), which runs nothing.</p>
+<p>Adapters keep heavy imports (PyRosetta, gemmi, Biopython) <strong>inside <code>run()</code></strong>, never at module
+scope. This import happens at load, on a login node, and in the dry run; a module-level
+<code>import pyrosetta</code> would cost minutes there and fail where PyRosetta is not installed.</p>
+<h2 id="step-2-a-graph-node-becomes-a-request-and-a-placement">Step 2 — a graph node becomes a request, and a placement<a class="headerlink" href="#step-2-a-graph-node-becomes-a-request-and-a-placement" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> an admitted <code>TaskGraph</code>. <strong>Owner:</strong> <code>runtime/executor._dispatch:1036</code> →
+<code>exec/stage.StageExecutor.submit:119</code> → <code>exec/dispatch.node_task:144</code>. <strong>Out:</strong> one
+<code>TaskRequest</code> (<code>tools/agent.py:28</code>) and one <code>Placement</code> (<code>exec/resources.py:86</code>) per node.</p>
+<p><code>node_task</code> is the <strong>single factory for every node of every graph</strong> — there is no per-tool and
+no per-pattern dispatch (finding 6). For each node it builds:</p>
+<table>
+<thead>
+<tr>
+<th>field of <code>TaskRequest</code></th>
+<th>from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tool</code>, <code>params</code></td>
+<td>the node, i.e. the planner's <code>TaskMapping</code> with the campaign's <code>params:</code> merged under it (<code>resolution.md</code> step 6)</td>
+</tr>
+<tr>
+<td><code>node_id</code></td>
+<td><code>&lt;run_label&gt;:&lt;task id&gt;</code> — also the name of the task's work directory</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td>the lineage's seed, from the composer</td>
+</tr>
+<tr>
+<td><code>inputs</code>, <code>input_ports</code></td>
+<td>the composer's typed wiring: this tool's own input port → the upstream payload, and which of its output ports was meant</td>
+</tr>
+<tr>
+<td><code>seed_inputs</code></td>
+<td>artifacts from outside the graph: the parent design a refinement starts from</td>
+</tr>
+<tr>
+<td><code>gpu_index</code></td>
+<td>informational only; the placement is what pins</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>Placement</code> is decided here, once per node: the lineage's GPU (round-robin over
+<code>site.gpus_per_node</code>, and only if the tool declares <code>gpus &gt; 0</code>), a host, and the thread share.</p>
+<p><strong>A node is two kinds of engine work</strong>, and this is the step that splits them. The adapter runs
+as a function task on the engine's <code>local</code> route (<code>exec/dispatch.py:222</code>) — a thread <em>in the
+campaign process</em>. Each command it starts is a separate task on the <code>compute</code> route (step 5).
+So nothing about the adapter is pickled, and the backend schedules binaries rather than an
+opaque Python callable.</p>
+<h2 id="step-3-parameters-are-resolved-and-that-is-all-admission-proved">Step 3 — parameters are resolved, and that is all admission proved<a class="headerlink" href="#step-3-parameters-are-resolved-and-that-is-all-admission-proved" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> <code>TaskRequest.params</code>. <strong>Owner:</strong> <code>tools/agent.TaskAgent.parameterize:151</code>, inherited by
+every adapter. <strong>Out:</strong> the <code>params</code> dict <code>run()</code> receives.</p>
+<ol>
+<li>Start from the spec's defaults — <strong>only those that are not <code>null</code></strong>. A parameter whose
+   default is <code>null</code> (<code>seed</code>, everywhere) is simply absent, which is why adapters read it with
+   <code>params.get("seed")</code>.</li>
+<li>For each key the node set: refuse it if it is in <code>frozen_parameters</code>, refuse it if the spec
+   does not declare it, refuse it if <code>ParameterSpec.validate_value</code> (<code>tools/spec.py:57</code>) rejects
+   its type, choice or range. Otherwise it overrides the default.</li>
+<li>If the request carries a seed, the spec declares <code>seed</code>, and the node did not set one:
+   <code>seed = req.seed % 2**31</code>.</li>
+</ol>
+<p>Each refusal is a <code>ValueError</code> naming the tool and the key. These are the same rules gate 3
+applied at admission; this is the second, authoritative application, in the process that is
+about to act on them.</p>
+<p><strong>The dry-run gate is this step and nothing after it.</strong> <code>compose/validate.Validator.dry_run:186</code>
+calls <code>agent.dry_run</code> (<code>tools/agent.py:260</code>) — <code>pre_process</code> then <code>parameterize</code> — on a
+<code>TaskRequest</code> holding only the tool and its params: no inputs, no work directory, no seed. An
+admitted graph has therefore been shown to have legal <em>parameter values</em>. Whether the binary
+exists, the environment variable is set, or the flag is one the real CLI has, admission never
+asked (finding 1). <code>impress-a preflight</code> and <code>impress-a validate-tasks</code> ask it, outside the
+loop.</p>
+<h2 id="step-4-the-adapter-builds-the-command">Step 4 — the adapter builds the command<a class="headerlink" href="#step-4-the-adapter-builds-the-command" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> resolved params and the request. <strong>Owner:</strong> each adapter's <code>run()</code>, which is the only
+method an adapter overrides — and inside it, <strong>one pure function per tool that returns the
+argv</strong>. <strong>Out:</strong> a <code>list[str]</code>.</p>
+<p><code>run()</code> does four things in order: check the environment and fail loudly if a variable is
+unset; stage files into the task's work directory (<code>workdir_for</code>, step 6) and find its inputs
+(<code>input_path(req, port)</code>); call its command builder; hand the result to <code>run_cmd</code>. The builder
+takes params and paths as arguments, reads no environment and touches no disk, so the command
+below can be read — and is tested — without a binary, a GPU or an allocation.</p>
+<p><strong>Where the executable comes from</strong> is never the spec and never <code>sites/*.yaml</code>:</p>
+<table>
+<thead>
+<tr>
+<th>tool</th>
+<th>executable</th>
+<th>supplied by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rfd3_design</code></td>
+<td><code>apptainer exec … &lt;image&gt; rfd3 design</code></td>
+<td><code>apptainer</code> on <code>PATH</code>; image from <code>$FOUNDRY_SIF_PATH</code></td>
+</tr>
+<tr>
+<td><code>ligandmpnn_design</code></td>
+<td><code>&lt;python&gt; mpnn_run.py &lt;checkout&gt;</code></td>
+<td><code>sys.executable</code>; checkout from <code>$MPNN_DIR</code></td>
+</tr>
+<tr>
+<td><code>boltz_predict</code></td>
+<td><code>boltz predict</code></td>
+<td><code>boltz</code> on <code>PATH</code> (the campaign's venv); weights from <code>$BOLTZ_CACHE</code></td>
+</tr>
+<tr>
+<td><code>packmin</code>, <code>fastrelax</code>, <code>filter_shape</code></td>
+<td><code>&lt;python&gt; worker.py</code></td>
+<td><code>sys.executable</code>; PyRosetta is an import inside the worker</td>
+</tr>
+</tbody>
+</table>
+<p><code>scripts/delta_env_setup.sh</code> is what sets those variables on Delta.</p>
+<h3 id="rfd3_design-toolsrfd3_agentsrfd3_command198"><code>rfd3_design</code> — <code>tools/rfd3_agents.rfd3_command:198</code><a class="headerlink" href="#rfd3_design-toolsrfd3_agentsrfd3_command198" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>apptainer exec --nv --bind &lt;tree&gt;:&lt;tree&gt; … $FOUNDRY_SIF_PATH \
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  rfd3 design out_dir=&lt;work&gt; inputs=&lt;work&gt;/&lt;staged spec&gt;.json skip_existing=False \
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  dump_trajectories=False prevalidate_inputs=True \
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  diffusion_batch_size=&lt;num_designs&gt; inference_sampler.num_timesteps=&lt;diffusion_steps&gt; \
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  [seed=&lt;seed&gt;]
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>parameter</th>
+<th>becomes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>input_spec_path</code></td>
+<td><code>inputs=</code> — not the file itself but a copy staged into the work directory with its relative paths made absolute (<code>_inputs_with_absolute_paths:143</code>)</td>
+</tr>
+<tr>
+<td><code>num_designs</code></td>
+<td><code>diffusion_batch_size=</code></td>
+</tr>
+<tr>
+<td><code>diffusion_steps</code></td>
+<td><code>inference_sampler.num_timesteps=</code></td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td><code>seed=</code>, when set</td>
+</tr>
+</tbody>
+</table>
+<p><code>rfd3 design</code> takes <strong>Hydra overrides, not <code>--flags</code></strong>. Binds are <code>$WORK_DIR</code>, the input spec's
+directory and the work directory, de-duplicated (<code>_binds:172</code>). Environment: the campaign's,
+minus <code>PYTHONPATH</code> / <code>PYTHONUSERBASE</code> / <code>PYTHONDONTWRITEBYTECODE</code>, plus <code>PYTHONNOUSERSITE=1</code>
+(<code>_container_env:28</code>), so the container imports its own Python stack. No <code>cwd</code>.</p>
+<h3 id="ligandmpnn_design-toolsligandmpnn_agentsligandmpnn_command133"><code>ligandmpnn_design</code> — <code>tools/ligandmpnn_agents.ligandmpnn_command:133</code><a class="headerlink" href="#ligandmpnn_design-toolsligandmpnn_agentsligandmpnn_command133" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;sys.executable&gt; &lt;work&gt;/mpnn_run.py $MPNN_DIR --model_type ligand_mpnn \
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  --checkpoint_ligand_mpnn $MPNN_DIR/model_params/ligandmpnn_v_32_010_25.pt \
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  --checkpoint_path_sc     $MPNN_DIR/model_params/ligandmpnn_sc_v_32_002_16.pt \
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  --pdb_path &lt;upstream backbone&gt; --out_folder &lt;work&gt; \
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  --temperature &lt;temperature&gt; --batch_size &lt;batch_size&gt; --number_of_batches &lt;number_of_batches&gt; \
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  [--seed &lt;seed&gt;] \
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>  [--pack_side_chains 1 --pack_with_ligand_context 1 --number_of_packs_per_design 1] \
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>  [--fixed_residues &lt;fixed_residues&gt;]
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>parameter</th>
+<th>becomes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>temperature</code>, <code>batch_size</code>, <code>number_of_batches</code></td>
+<td>the flags of the same name</td>
+</tr>
+<tr>
+<td><code>pack_side_chains</code></td>
+<td>when true, the three packing flags, each fixed at <code>1</code></td>
+</tr>
+<tr>
+<td><code>fixed_residues</code></td>
+<td><code>--fixed_residues</code>, when non-empty</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td><code>--seed</code>, when set</td>
+</tr>
+<tr>
+<td><code>num_seqs</code></td>
+<td><strong>nothing</strong> — declared, validated, never passed (finding 2)</td>
+</tr>
+</tbody>
+</table>
+<p><code>mpnn_run.py</code> is <code>MPNN_SHIM</code> (<code>:69</code>), written into the work directory at run time: it patches
+the numpy aliases LigandMPNN's vendored openfold still uses and then runs <code>$MPNN_DIR/run.py</code>.
+<code>--pdb_path</code> is the artifact wired to this tool's <code>backbone</code> port. Runs with <code>cwd=$MPNN_DIR</code>
+and the campaign's whole environment.</p>
+<h3 id="boltz_predict-toolsboltz_agentsboltz_command112-boltz_input93"><code>boltz_predict</code> — <code>tools/boltz_agents.boltz_command:112</code>, <code>boltz_input:93</code><a class="headerlink" href="#boltz_predict-toolsboltz_agentsboltz_command112-boltz_input93" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>boltz predict &lt;work&gt;/boltz_input.yaml --out_dir &lt;work&gt;/out --cache $BOLTZ_CACHE \
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  --devices 1 --accelerator gpu --diffusion_samples &lt;diffusion_samples&gt; \
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  --output_format pdb --no_kernels [--seed &lt;seed&gt;] [--use_msa_server]
+</code></pre></div>
+<p>Two parameters reach the tool through <strong>a config file rather than a flag</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>parameter</th>
+<th>becomes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>diffusion_samples</code></td>
+<td><code>--diffusion_samples</code></td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td><code>--seed</code>, when set</td>
+</tr>
+<tr>
+<td><code>use_msa_server</code></td>
+<td><code>--use_msa_server</code>, <strong>and</strong> <code>msa: auto</code> (else <code>empty</code>) in <code>boltz_input.yaml</code></td>
+</tr>
+<tr>
+<td><code>ligand_smiles</code></td>
+<td>a <code>ligand: {id: [B], smiles: …}</code> entry in <code>boltz_input.yaml</code>, when non-empty</td>
+</tr>
+</tbody>
+</table>
+<p>The protein sequence in that file is extracted from the artifact on the <code>structure</code> port. A
+<code>flock</code> on the cache is held across the first run, because Boltz extracts its component
+dictionary inside <code>boltz predict</code>. No <code>cwd</code>; the campaign's whole environment.</p>
+<h3 id="packmin-fastrelax-filter_shape-toolsrosetta_agentsworker_command278"><code>packmin</code>, <code>fastrelax</code>, <code>filter_shape</code> — <code>tools/rosetta_agents.worker_command:278</code><a class="headerlink" href="#packmin-fastrelax-filter_shape-toolsrosetta_agentsworker_command278" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>&lt;sys.executable&gt; &lt;work&gt;/worker.py &lt;positional args…&gt; &lt;work&gt;/result.json
+</code></pre></div>
+<p>PyRosetta is a Python API, not a binary, so each tool writes a worker script (<code>_PACKMIN_WORKER</code>
+<code>:20</code>, <code>_FASTRELAX_WORKER</code> <code>:72</code>, <code>_FILTER_SHAPE_WORKER</code> <code>:171</code>) into its work directory and
+runs it in a fresh interpreter. Its arguments are <strong>positional</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>tool</th>
+<th>builder</th>
+<th>arguments, in order</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>packmin</code></td>
+<td><code>packmin_args:331</code></td>
+<td>structure, out pdb, <code>cycles</code>, <code>seed</code>|<code>none</code>, <code>ligand_params_path</code>|<code>none</code></td>
+</tr>
+<tr>
+<td><code>fastrelax</code></td>
+<td><code>fastrelax_args:337</code></td>
+<td>structure, out pdb, <code>relax_cycles</code>, <code>nstruct</code>, <code>seed</code>|<code>none</code>, <code>ligand_params_path</code>|<code>none</code></td>
+</tr>
+<tr>
+<td><code>filter_shape</code></td>
+<td><code>filter_shape_args:343</code></td>
+<td>structure, <code>ligand_params_path</code>|<code>none</code></td>
+</tr>
+</tbody>
+</table>
+<p>The flags Rosetta itself sees are assembled inside the worker and passed to <code>pyrosetta.init</code>:
+<code>-mute all</code>, plus <code>-run:constant_seed -run:jran &lt;seed&gt;</code> when a seed was given, plus
+<code>-extra_res_fa &lt;ligand_params_path&gt; -ignore_unrecognized_res -ignore_zero_occupancy</code> when a
+ligand params file was. No <code>cwd</code>, and no <code>env</code> (finding 5).</p>
+<h3 id="mocks-stop-here">Mocks stop here<a class="headerlink" href="#mocks-stop-here" title="Permanent link">&para;</a></h3>
+<p>The mock adapters (<code>tools/mock_agents.py</code>, <code>tools/mock_smb_agents.py</code>) override <code>run()</code> and
+return seeded draws. They never call <code>run_cmd</code>, so steps 5 and 7 do not happen for them: no
+executable task is submitted and their <code>commands</code> list is empty.</p>
+<p><strong>What refuses a change here:</strong> <code>tests/test_real_toolkits.py</code> pins each builder's argv at its
+spec defaults, and <code>test_every_declared_parameter_reaches_its_command</code> compares each spec's
+parameters against the keys its builder reads. A parameter that is declared and unread must be
+added to that test's exemption table with a reason.</p>
+<h2 id="step-5-the-command-becomes-an-engine-task">Step 5 — the command becomes an engine task<a class="headerlink" href="#step-5-the-command-becomes-an-engine-task" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> <code>run_cmd(argv, cwd=, env=, timeout_s=)</code>. <strong>Owner:</strong> <code>tools/_subprocess.run_cmd:48</code> →
+<code>exec/launch.Launcher.run:123</code> → <code>_submit_and_wait:194</code>. <strong>Out:</strong> <code>(stdout, stderr)</code>, or a
+<code>SubprocessError</code> carrying the command line, the exit code and both streams.</p>
+<p><code>run_cmd</code> does not start a process. Inside a node it finds that node's <code>Launcher</code> in the
+<code>LAUNCHER</code> context variable (<code>tools/_subprocess.py:30</code>, set at <code>exec/dispatch.py:198</code>) and
+hands the command over; the <code>Launcher</code> submits it to the engine as an <code>executable_task</code> on the
+<code>compute</code> route. A context variable rather than an argument, so that no adapter can forget to
+pass it — one that shelled out with <code>subprocess</code> directly would run its binary on the campaign
+host, unplaced, and nothing would say so.</p>
+<p>What is added to the adapter's argv on the way, by backend (<code>exec/resources.Placement.describe:116</code>):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>concurrent backend</th>
+<th>Dragon</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>walltime</td>
+<td>argv is prefixed <code>timeout --kill-after=10 &lt;walltime_s&gt;</code></td>
+<td>the task's own <code>timeout</code>, <code>walltime_s + 10</code>; <strong>never</strong> the wrapper</td>
+</tr>
+<tr>
+<td>GPU</td>
+<td><code>CUDA_VISIBLE_DEVICES=&lt;index&gt;</code> in the environment</td>
+<td><code>Policy(gpu_affinity=[index])</code>; the variable is not set</td>
+</tr>
+<tr>
+<td>threads</td>
+<td><code>OMP_</code>/<code>MKL_</code>/<code>OPENBLAS_</code>/<code>NUMEXPR_NUM_THREADS</code>, <code>OMP_WAIT_POLICY=PASSIVE</code></td>
+<td>the same</td>
+</tr>
+<tr>
+<td>environment</td>
+<td>the adapter's <code>env</code>, or <code>os.environ</code>, replaced whole</td>
+<td>only what differs from the campaign's, merged into the node's</td>
+</tr>
+<tr>
+<td>concurrency</td>
+<td>bounded by <code>workers</code> (<code>exec/stage.command_slots:44</code>)</td>
+<td>the backend's own</td>
+</tr>
+</tbody>
+</table>
+<p>The walltime only reaches a command because <strong>each adapter passes
+<code>timeout_s=spec.resources.walltime_s</code></strong>; a <code>run_cmd</code> call without it is unbounded. Why the
+wrapper is refused under Dragon, and what a cancel does and does not kill, are in
+<a href="../middleware-integration/"><code>middleware-integration.md</code></a> and
+<a href="../../limitations/"><code>limitations.md</code></a> and are not repeated here.</p>
+<p>Outside a node — <code>impress-a preflight</code>, the gate fixtures, a direct test — no <code>Launcher</code> is
+set and <code>run_cmd</code> runs the child itself with <code>asyncio.create_subprocess_exec</code>.</p>
+<h2 id="step-6-files-come-back-as-typed-results">Step 6 — files come back as typed results<a class="headerlink" href="#step-6-files-come-back-as-typed-results" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> whatever the command wrote, and <code>run()</code>'s return dict. <strong>Owner:</strong>
+<code>tools/_subprocess.workdir_for:159</code>, then <code>tools/agent.TaskAgent.post_process:203</code>.
+<strong>Out:</strong> a <code>TaskResult</code>.</p>
+<p>Every real adapter writes under <code>workdir_for(req, prefix)</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>&lt;campaign process CWD&gt;/work/&lt;prefix&gt;_&lt;run_label&gt;_&lt;task id&gt;/
+</code></pre></div>
+<p>created on demand and never cleaned — it holds the campaign's results. The root is the process
+CWD because <code>TaskRequest.workdir</code> is never set (finding 4); on Delta the launcher has already
+changed into a per-job directory on shared storage.</p>
+<p>The adapter reads its tool's native output there (a sidecar JSON, FASTA headers, a confidence
+file, the worker's <code>result.json</code>) and returns <code>{"outputs": …, "metrics": …}</code> plus whatever keys
+its gates inspect. <code>post_process</code> then, without the adapter's help:</p>
+<ul>
+<li>turns each output into an <code>ArtifactRef</code> whose <strong>type is the spec's declared output port</strong>
+  (<code>_as_artifacts:175</code>); a <code>Path</code> is hashed as a file, anything else is an inline value, and an
+  output name the spec does not declare <strong>raises</strong>;</li>
+<li>runs the spec's QC gates over the return value;</li>
+<li>records the declared cost beside the measured one.</li>
+</ul>
+<p>An adapter <strong>omits</strong> a metric it could not read; the <code>metrics_reported</code> gate is what turns the
+omission into an integrity failure rather than a low score.</p>
+<h2 id="step-7-what-is-written-down">Step 7 — what is written down<a class="headerlink" href="#step-7-what-is-written-down" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> the <code>Launcher</code>'s records and the <code>TaskResult</code>. <strong>Owner:</strong>
+<code>runtime/executor._log_task_telemetry:1319</code>. <strong>Out:</strong> one row per task in
+<code>provenance/tasks.jsonl</code>.</p>
+<table>
+<thead>
+<tr>
+<th>question</th>
+<th>where it is answered</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>which parameters did the planner choose?</td>
+<td><code>provenance/stages.jsonl</code>, <code>mappings</code></td>
+</tr>
+<tr>
+<td><strong>what command ran?</strong></td>
+<td><code>provenance/tasks.jsonl</code>, <code>commands</code></td>
+</tr>
+<tr>
+<td>where and for how long?</td>
+<td>the same row: <code>host</code>, <code>pid</code>, <code>cuda_visible_devices</code>, <code>wall_s</code>, <code>phases</code></td>
+</tr>
+<tr>
+<td>what did it write?</td>
+<td><code>work/&lt;prefix&gt;_&lt;node&gt;/</code>, and the node's <code>ArtifactRef</code>s in <code>results.jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>commands</code> has one entry per <code>run_cmd</code> call, in order, as the backend was handed it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span><span class="nt">"argv"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"timeout"</span><span class="p">,</span><span class="w"> </span><span class="s2">"--kill-after=10"</span><span class="p">,</span><span class="w"> </span><span class="s2">"900"</span><span class="p">,</span><span class="w"> </span><span class="s2">"apptainer"</span><span class="p">,</span><span class="w"> </span><span class="s2">"exec"</span><span class="p">,</span><span class="w"> </span><span class="s2">"--nv"</span><span class="p">,</span><span class="w"> </span><span class="s2">"…"</span><span class="p">],</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w"> </span><span class="nt">"cwd"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"backend"</span><span class="p">:</span><span class="w"> </span><span class="s2">"concurrent"</span><span class="p">,</span><span class="w"> </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"gpu_index"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w"> </span><span class="nt">"placement_env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"OMP_NUM_THREADS"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4"</span><span class="p">,</span><span class="w"> </span><span class="nt">"…"</span><span class="p">:</span><span class="w"> </span><span class="s2">"…"</span><span class="p">,</span><span class="w"> </span><span class="nt">"CUDA_VISIBLE_DEVICES"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0"</span><span class="p">},</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w"> </span><span class="nt">"timeout_s"</span><span class="p">:</span><span class="w"> </span><span class="mf">900.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"exit_code"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"queued_s"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="p">,</span><span class="w"> </span><span class="nt">"ran_s"</span><span class="p">:</span><span class="w"> </span><span class="mf">44.9</span><span class="p">}</span>
+</code></pre></div>
+<p><code>argv</code> is the realized form of what step 4's builder returned — the <code>timeout</code> wrapper is there
+when one was added — so the page above can be checked against a run instead of trusted. The
+environment recorded is <strong>only what the placement added</strong>: adapters pass their child a copy of
+<code>os.environ</code>, and provenance is not the place for whatever that holds.</p>
+<hr />
+<h2 id="what-invocation-does-not-enforce">What invocation does not enforce<a class="headerlink" href="#what-invocation-does-not-enforce" title="Permanent link">&para;</a></h2>
+<p>Seven places where the implementation does not do what a reader of the design would reasonably
+assume. Each is verified against the source at the anchor given. <strong>Read this section before
+changing any step above.</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>the reasonable assumption</th>
+<th>what the code does</th>
+<th>anchor</th>
+<th>item</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>An admitted graph is one whose commands can run</td>
+<td>Admission's dry run calls <code>parameterize</code> on a request with <strong>no inputs, no work directory and no seed</strong>. It proves parameter values are legal and nothing about the binary, the environment variable, the container image or whether a flag exists. Four defects reached hardware through this gap; <code>preflight</code> and <code>validate-tasks</code> exist because of it, and run outside the loop</td>
+<td><code>compose/validate.py:186-195</code>, <code>tools/agent.py:260</code></td>
+<td>J1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>A parameter a spec declares changes what the tool does</td>
+<td>Nothing connects a spec's parameters to its adapter. <code>ligandmpnn_design.num_seqs</code> is validated, shown to a planner, written to <code>stages</code> provenance, and passed to no command. A test now refuses a <em>new</em> one; this one is exempted by name</td>
+<td><code>tools/ligandmpnn_agents.py:133</code>, <code>tests/test_real_toolkits.py</code> (<code>_NOT_IN_THE_COMMAND</code>)</td>
+<td>J2</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Asking a tool for N candidates yields N to choose from</td>
+<td><code>rfd3_design</code> passes <code>num_designs</code> as the diffusion batch size and converts <code>cif_models[0]</code> only: N are paid for and one is kept. LigandMPNN and Boltz do select. The spec says so, and the planner may not move it (<code>resolution.md</code> step 6)</td>
+<td><code>tools/rfd3_agents.py:198</code>, <code>toolkits/rfd3/tools/rfd3_design/spec.yaml</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Where a tool writes is the campaign's decision</td>
+<td><code>StageExecutor</code> is built without <code>workdir</code>, so <code>TaskRequest.workdir</code> is always <code>None</code> and every task writes under the <strong>process CWD</strong>. Correct only because the launcher scripts <code>cd</code> first; nothing in the package enforces it</td>
+<td><code>runtime/executor.py:1459</code>, <code>tools/_subprocess.py:159</code></td>
+<td>J4</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Every tool's child sees the same environment contract</td>
+<td>The three Rosetta tools pass no <code>env</code> to <code>run_cmd</code>; the others pass <code>child_env(req)</code>. Equivalent today on both backends, by the fallback in <code>Placement.describe</code> rather than by intent</td>
+<td><code>tools/rosetta_agents.py:290</code>, <code>exec/resources.py:116</code></td>
+<td>J5</td>
+</tr>
+<tr>
+<td>6</td>
+<td>A tool's compute pattern selects how it is dispatched</td>
+<td><code>exec/</code> never reads <code>ToolSpec.pattern</code>. Every node takes the one path in step 2. Pattern is read by gates 2 and 4 only — whether QC gates are mandatory, whether P6 was scheduled, whether external submission is allowed</td>
+<td><code>exec/dispatch.py:144</code>, <code>compose/validate.py:94,121,125</code></td>
+<td>J6</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Every command a campaign ran is on the record</td>
+<td>A task whose adapter <strong>raises</strong> records its error string — which contains the failing command line — and no <code>commands</code> list; a command run outside the engine records nothing; and the base environment is never recorded, by decision</td>
+<td><code>exec/dispatch.py:213</code>, <code>exec/launch.py:121</code></td>
+<td>J7</td>
+</tr>
+</tbody>
+</table>
+<p>Two properties that are <strong>by design</strong> and are listed so they are not mistaken for the above.
+The executable's location is an environment contract rather than a spec field or a
+<code>sites/*.yaml</code> entry, because the right value is machine-specific and a spec is shared across
+machines; the cost is that only <code>impress-a preflight</code> checks it (backlog J3). And <code>filter_shape</code>
+returns its <em>input</em> structure as its output: it is a filter, so the artifact it passes
+downstream is the one it was given, with the same content hash.</p>
+<h2 id="seeing-it-on-disk">Seeing it on disk<a class="headerlink" href="#seeing-it-on-disk" title="Permanent link">&para;</a></h2>
+<p><code>impress-a mock-lab --only arms --stage sweep</code> writes one campaign per arm in about half a
+minute with no allocation, and shows steps 2, 3, 6 and 7 — with <code>commands: []</code>, because mocks
+run none. Steps 4 and 5 need a tool that shells out: <code>tests/test_placement.py</code> runs real
+commands through a real engine on a laptop, and a Delta run shows the science tools.</p>
+<table>
+<thead>
+<tr>
+<th>step</th>
+<th>where it landed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2</td>
+<td><code>provenance/graphs.jsonl</code> — the admitted graph, each node with its tool; <code>provenance/tasks.jsonl</code> — each task's <code>lineage</code> and <code>seed</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>provenance/stages.jsonl</code>, <code>mappings</code> — the parameter vector before defaults are filled in; a refusal carries its gate</td>
+</tr>
+<tr>
+<td>4, 5</td>
+<td><code>provenance/tasks.jsonl</code>, <code>commands[].argv</code> — the builder's argv, plus the <code>timeout</code> wrapper where one was added</td>
+</tr>
+<tr>
+<td>5</td>
+<td>the same entry's <code>backend</code>, <code>gpu_index</code>, <code>placement_env</code>, <code>queued_s</code>, <code>ran_s</code>, <code>exit_code</code>; <code>telemetry/</code>, when on, has a span per command named <code>&lt;node&gt;.&lt;program&gt;</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>work/&lt;prefix&gt;_&lt;node&gt;/</code> — the staged inputs (<code>boltz_input.yaml</code>, <code>mpnn_run.py</code>, <code>worker.py</code>) and the tool's own outputs</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>provenance/tasks.jsonl</code> — one row per task</td>
+</tr>
+</tbody>
+</table>
+<p>A step whose output cannot be pointed at in one of those files is a step this page has
+described wrongly.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/radical-collaboration/IMPRESS" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://pypi.org/project/impress-framework/" target="_blank" rel="noopener" title="pypi.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6zM286.2 404c11.1 0 20.1 9.1 20.1 20.3 0 11.3-9 20.4-20.1 20.4-11 0-20.1-9.2-20.1-20.4.1-11.3 9.1-20.3 20.1-20.3zM167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4zm-6.7-142.6c-11.1 0-20.1-9.1-20.1-20.3.1-11.3 9-20.4 20.1-20.4 11 0 20.1 9.2 20.1 20.4s-9 20.3-20.1 20.3z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "search.share", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      
+    
+  </body>
+</html>

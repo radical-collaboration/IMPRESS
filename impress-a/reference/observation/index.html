@@ -1,0 +1,2541 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Intelligent Multi-Pipeline Protein Engineering System for HPC">
+      
+      
+        <meta name="author" content="IMPRESS Team">
+      
+      
+        <link rel="canonical" href="https://radical-collaboration.github.io/IMPRESS/impress-a/reference/observation/">
+      
+      
+        <link rel="prev" href="../resolution/">
+      
+      
+        <link rel="next" href="../invocation/">
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.9">
+    
+    
+      
+        <title>Observation - IMPRESS</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.f2e4d321.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#observation-what-a-caller-is-told-and-when" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="IMPRESS" class="md-header__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            IMPRESS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Observation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../concepts/architecture/" class="md-tabs__link">
+          
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../examples/protein-binding/" class="md-tabs__link">
+          
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../reference/" class="md-tabs__link">
+          
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../" class="md-tabs__link">
+          
+  
+  IMPRESS-A
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="IMPRESS" class="md-nav__button md-logo" aria-label="IMPRESS" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"/></svg>
+
+    </a>
+    IMPRESS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/radical-collaboration/IMPRESS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    radical-collaboration/IMPRESS
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Getting Started
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/installation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Installation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Build A Protein Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_adaptive_quickstart/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Watch IMPRESS adapt
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Concepts
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/adaptive-execution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Adaptive Execution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Examples
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Examples
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/protein-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Protein Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/discontinuous-scaffolds/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Discontinuous Scaffolds
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/agentic-small-molecule-binding/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Agentic Small Molecule Binding
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/manager/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressManager
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressBasePipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/setup/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    PipelineSetup
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/logger/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ImpressLogger
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    IMPRESS-A
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            IMPRESS-A
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../notebooks/impress_a_knob_lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ten minutes with a mock campaign
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Architecture
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resolution/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Resolution
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Observation
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Observation
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-a-run-is-absorbed-and-the-window-is-shut" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 — a run is absorbed, and the window is shut
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-observe-assembles-the-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 — observe() assembles the snapshot
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-the-two-halves-are-shown-it-whole" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3 — the two halves are shown it, whole
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-provenance-is-mirrored-to-every-listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4 — provenance is mirrored to every listener
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-the-event-stream-is-that-mirror-kept-in-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 5 — the event stream is that mirror, kept in memory
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-the-observation-crosses-a-process-boundary-intact" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 6 — the observation crosses a process boundary intact
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-what-is-actually-durable" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 7 — what is actually durable
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-8-so-what-must-a-caller-do-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 8 — so what must a caller do today
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-9-the-bridge-which-is-that-pump-with-a-sink" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 9 — the bridge, which is that pump with a sink
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-observation-plane-does-not-enforce" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the observation plane does not enforce
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeing-it-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Seeing it on disk
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#being-one-workflow-of-a-larger-campaign" class="md-nav__link">
+    <span class="md-ellipsis">
+      Being one workflow of a larger campaign
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../invocation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Invocation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../frontends/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pluggable Frontends
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-models/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Control Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../compute-patterns/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Compute Patterns
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authoring-tools/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Authoring Tools
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../middleware-integration/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Middleware Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../aucam/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    AuCaM Integration
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mock-lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    The Mock Knob Lab
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Known Limitations
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_15" id="__nav_6_15_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Decisions
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_15">
+            <span class="md-nav__icon md-icon"></span>
+            Decisions
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0001-impress-is-a-tool-not-the-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0001 IMPRESS is a tool, not the control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0002-model-c-is-control-mode-2/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0002 Model C is control mode 2
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0003-free-graph-composition-with-self-promoting-interlock/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0003 Free graph composition with a self-promoting interlock
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0004-population-pareto-front-with-backtracking/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0004 A population with a Pareto front and backtracking
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0005-control-model-fixed-at-launch/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0005 The control model is fixed at launch
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0006-hybrid-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0006 Task agents are hybrid, declared per tool
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0007-transport-agnostic-control-plane/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0007 A transport-agnostic control plane
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0008-platform-priority/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0008 Platform priority
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0009-package-naming/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0009 Package naming
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0010-single-package-with-import-contract/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0010 One package, with a CI-enforced import contract
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0011-toolkits-are-top-level-and-declarative/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0011 toolkits/ is top-level and declarative
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0012-one-property-two-sources/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0012 One property, two sources
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0013-trust-counts-integrity-not-acceptance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0013 Trust counts integrity, not acceptance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0014 An enclosing campaign manager is a caller
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../decisions/0015-one-engine-and-the-process-boundary/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    0015 One engine, two processes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_16" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_16" id="__nav_6_16_label" tabindex="">
+            
+  
+  <span class="md-ellipsis">
+    Roadmap
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_16_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_16">
+            <span class="md-nav__icon md-icon"></span>
+            Roadmap
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/academy-for-task-agents/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Academy for Task Agents
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-a-run-is-absorbed-and-the-window-is-shut" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 1 — a run is absorbed, and the window is shut
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-observe-assembles-the-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 2 — observe() assembles the snapshot
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-the-two-halves-are-shown-it-whole" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 3 — the two halves are shown it, whole
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-provenance-is-mirrored-to-every-listener" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 4 — provenance is mirrored to every listener
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-the-event-stream-is-that-mirror-kept-in-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 5 — the event stream is that mirror, kept in memory
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-the-observation-crosses-a-process-boundary-intact" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 6 — the observation crosses a process boundary intact
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-what-is-actually-durable" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 7 — what is actually durable
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-8-so-what-must-a-caller-do-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 8 — so what must a caller do today
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-9-the-bridge-which-is-that-pump-with-a-sink" class="md-nav__link">
+    <span class="md-ellipsis">
+      Step 9 — the bridge, which is that pump with a sink
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-observation-plane-does-not-enforce" class="md-nav__link">
+    <span class="md-ellipsis">
+      What the observation plane does not enforce
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seeing-it-on-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      Seeing it on disk
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#being-one-workflow-of-a-larger-campaign" class="md-nav__link">
+    <span class="md-ellipsis">
+      Being one workflow of a larger campaign
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="observation-what-a-caller-is-told-and-when">Observation: what a caller is told, and when<a class="headerlink" href="#observation-what-a-caller-is-told-and-when" title="Permanent link">&para;</a></h1>
+<p><a href="../resolution/"><code>resolution.md</code></a> runs one direction — <strong>toolkit, goal, budget and parameters</strong>
+become specified targets and a programmed Stage. This page runs the other: how the state of a
+running campaign becomes a <strong><code>CampaignObservation</code></strong>, who is shown it, what of it survives to
+disk, and by what mechanism any of it reaches a caller outside this process.</p>
+<p>Every step says what it takes, who owns it, what it produces and what refuses it, in the
+order a cycle executes them. Anything true of how a decision is <em>made</em> from an observation is
+in <a href="../control-models/"><code>control-models.md</code></a> and is not repeated here. If this page and the
+code disagree, the code is right and this page is a bug.</p>
+<p>Two things to read it for. <strong>Wiring IMPRESS-A beneath an enclosing campaign manager</strong>, which
+needs to know the cadence, the shape and the cost of being told — see
+<a href="../../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model/">decision 0014</a>.
+And <strong>changing any of this safely</strong>, for which the thing to preserve is named in each step:
+the observation is assembled inside a window where the executor is not mutating anything, and
+almost every rule below exists to keep that window shut.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>   absorb a run ────────────────────────────────────────────────  step 1
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │  await-free: tree, ledger, provenance, _absorbed
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>   observe()  ──→  CampaignObservation  ─────────────────────────  step 2
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        │             (built fresh, never stored)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ├──→  the reasoner's two halves, in-process  ────────────  step 3
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        ├──→  prov_sink  ──→  the plane's event list  ───────────  steps 4, 5
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        └──→  GET /observe?since=  ──→  another process  ────────  step 6
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                  │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>   provenance/*.jsonl, jobs/*.jsonl  ─────────────────────────────  step 7
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                  │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>   what a caller must do today  ──────────────────────────────────  step 8
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>   Bridge ──→ CampaignDigest ──→ a sink, per absorbed cycle  ─────  step 9
+</code></pre></div>
+<hr />
+<h2 id="step-1-a-run-is-absorbed-and-the-window-is-shut">Step 1 — a run is absorbed, and the window is shut<a class="headerlink" href="#step-1-a-run-is-absorbed-and-the-window-is-shut" title="Permanent link">&para;</a></h2>
+<p>What ran between admission and this step — each task's command, and where it is recorded — is
+<a href="../invocation/"><code>invocation.md</code></a>.</p>
+<p><strong>In:</strong> <code>ExecutionResults</code> from the backend. <strong>Owner:</strong> <code>runtime/executor._absorb:578</code>.
+<strong>Out:</strong> <code>DesignNode</code>s on the tree, one <code>results</code> provenance record each, and one id appended
+to <code>_absorbed</code> per lineage (<code>:601</code>).</p>
+<p><strong>The executor is the only writer of campaign state, and every mutating block is free of
+<code>await</code>.</strong> Its own module docstring (<code>runtime/executor.py:1-16</code>) states the rule and the
+reason: <em>"adding an <code>await</code> inside <code>observe</code> or <code>_absorb</code> would reintroduce torn reads, and
+they are nearly impossible to diagnose from provenance afterwards."</em> That property is a
+discipline, not something the language enforces, and it is the single constraint that shapes
+everything below — <strong>an observation cannot be pushed anywhere from inside the code that
+produces the state it describes.</strong> A sink that must be awaited cannot be called here.</p>
+<p><code>_absorbed</code> (<code>:318</code>) is an append-only list of node ids in absorption order, and <code>_cursor</code>
+(<code>:319</code>) is how far the last consumer read. Those two integers are the whole of the
+campaign's notion of "what is new", and step 2 is where they are read.</p>
+<h2 id="step-2-observe-assembles-the-snapshot">Step 2 — <code>observe()</code> assembles the snapshot<a class="headerlink" href="#step-2-observe-assembles-the-snapshot" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> the executor's own state, plus an optional <code>since</code> watermark. <strong>Owner:</strong>
+<code>runtime/executor.observe:540</code>. <strong>Out:</strong> a <code>CampaignObservation</code>
+(<code>core/decision.py:75</code>).</p>
+<p>Synchronous, read-only, and <strong>the only place in the package that constructs one</strong>. It
+computes the Pareto front over live nodes, builds <code>PopulationStats</code> (<code>core/decision.py:66</code>)
+inline, and reads <code>recent</code> out of <code>_absorbed[cursor:]</code> (<code>:549</code>) with <code>seq = len(_absorbed)</code>
+(<code>:550</code>).</p>
+<p><code>since</code> is the one subtle parameter. Omitted, it reports from <code>_cursor</code> — what the last
+consumer saw. Given, it reports from that watermark instead, <strong>without moving the cursor</strong>,
+so an observer can read the same evidence a policy is about to read without disturbing it.
+The docstring calls this parity of evidence, and <a href="../../decisions/0007-transport-agnostic-control-plane/">ADR 0007</a>
+makes it binding rather than incidental.</p>
+<p>Two declared fields are never populated by this method: <code>failures</code> (<code>core/decision.py:87</code>)
+and <code>PopulationStats.diversity</code> (<code>:71</code>). And one thing a reader would expect is absent — the
+<strong>parameter values a planner chose</strong>. Those reach <code>stages</code> provenance under <code>mappings</code>
+(<code>runtime/executor.py:1005</code>, written at <code>:1019</code>) and nowhere else, so an observation says what
+a campaign found and not what it tried.</p>
+<h2 id="step-3-the-two-halves-are-shown-it-whole">Step 3 — the two halves are shown it, whole<a class="headerlink" href="#step-3-the-two-halves-are-shown-it-whole" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> the observation. <strong>Owner:</strong> <code>runtime/roles.py:86</code> (<code>obs = await session.observe()</code>,
+once at the top of every turn). <strong>Out:</strong> <code>SpecEvidence</code> (<code>policy/specifier.py:36</code>) and
+<code>PlanningContext</code> (<code>policy/planner.py:37</code>).</p>
+<p>Both wrappers <strong>hold</strong> the observation rather than summarising it — <code>SpecEvidence</code>'s own
+docstring says <code>observation</code> <em>is</em> the object <code>observe()</code> returned, not a digest of it. So
+there is exactly one description of campaign state in the system, and a reasoner, an external
+caller and a test all read the same fields. That is what makes the control models comparable:
+a difference in their behaviour is a difference in judgement, not in what they were told.</p>
+<p><strong>What refuses a second shape here:</strong> nothing mechanical. The discipline is the import
+contract — <code>policy</code> may import <code>core</code> and nothing else (<code>tests/test_layering.py</code>), so a half
+cannot reach the executor to ask a narrower question.</p>
+<h2 id="step-4-provenance-is-mirrored-to-every-listener">Step 4 — provenance is mirrored to every listener<a class="headerlink" href="#step-4-provenance-is-mirrored-to-every-listener" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> every provenance record. <strong>Owner:</strong> <code>runtime/executor._log:356</code>. <strong>Out:</strong> a write to
+<code>provenance/&lt;kind&gt;.jsonl</code>, then a guarded call to each registered listener.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">_log</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">kind</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">record</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">prov</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="n">record</span><span class="p">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">for</span> <span class="n">sink</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_prov_listeners</span><span class="p">):</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            <span class="n">sink</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">spec</span><span class="o">.</span><span class="n">campaign_id</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="nb">dict</span><span class="p">(</span><span class="n">record</span><span class="p">))</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">broken</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">prov_dropped</span> <span class="o">+=</span> <span class="mi">1</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>            <span class="n">log</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p>This is <strong>the only synchronous hook out of a running campaign</strong>, which is why a sink that
+must be awaited cannot be one — that is step 9's job. It was a single slot until recently, and
+two call sites assigned it without checking for each other: <code>control/plane.py:104</code> for the
+event stream and <code>cli/__init__.py:890</code> for the log heartbeat. Last writer won, in silence, so
+serving a campaign over HTTP turned off its own progress log. Both now call
+<code>add_prov_listener</code>, <code>prov_sink</code> remains as a property over the first listener so no caller
+had to move, and each call is guarded and its failures counted — <code>_log</code> runs on every
+settlement and every absorption, so a listener that raised was aborting a campaign from inside
+the record of work already done (finding 3).</p>
+<h2 id="step-5-the-event-stream-is-that-mirror-kept-in-memory">Step 5 — the event stream is that mirror, kept in memory<a class="headerlink" href="#step-5-the-event-stream-is-that-mirror-kept-in-memory" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> <code>prov_sink</code> calls. <strong>Owner:</strong> <code>control/plane.InProcessControlPlane.emit:112</code>, into
+<code>self._events</code> (<code>:94</code>). <strong>Out:</strong> <code>events()</code> (<code>:143</code>), by cursor page or as a tail.</p>
+<p><code>_events</code> is a <code>dict[str, list[Event]]</code> in the serving process. It is unbounded, never
+persisted and lost when the process exits. <code>events(stream=True)</code> polls its own list every
+50 ms, and the SSE layer polls that at 100 ms (<code>control/http.py:151</code>). The method's own
+docstring is honest about it: it polls <em>"because provenance is appended to rather than
+published. A push-based source would replace the body of this loop and nothing else."</em></p>
+<p><strong>What refuses an addition here:</strong> ADR 0007 — <em>no adapter may add an operation absent from
+the core protocol.</em> A new way to be told would be a change to <code>CampaignControlPlane</code>, not an
+adapter's business.</p>
+<h2 id="step-6-the-observation-crosses-a-process-boundary-intact">Step 6 — the observation crosses a process boundary intact<a class="headerlink" href="#step-6-the-observation-crosses-a-process-boundary-intact" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> <code>GET /campaigns/&lt;cid&gt;/observe?since=</code>. <strong>Owner:</strong> <code>control/http.py:200</code> server side,
+<code>ControlPlaneClient.observe:304</code> client side. <strong>Out:</strong> the same <code>CampaignObservation</code>, rebuilt
+from <code>model_dump(mode="json")</code>.</p>
+<p>This already works and is exercised end to end. It is the only machine-readable, serialisable
+description of campaign state the system has, and anything that wants to tell a caller
+something should start from it rather than invent a second vocabulary.</p>
+<p>Its cost is the other half of the fact. The payload embeds the whole <code>ToolkitView</code> — every
+<code>TaskCard</code>, and <strong>each toolkit's full <code>SKILL.md</code> text</strong> (<code>tools/view.view_of:67</code>) — plus
+the applied <code>Spec</code> and every <code>DesignNode</code> on the front, rebuilt on every call, with no
+projection and no field selector. <code>ToolkitView.skills</code> is read by no prompt and no consumer
+(<code>resolution.md</code> finding 6), so the largest part of what crosses the wire is read by nothing
+at either end.</p>
+<h2 id="step-7-what-is-actually-durable">Step 7 — what is actually durable<a class="headerlink" href="#step-7-what-is-actually-durable" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> records from <code>_log</code> and the two ledgers. <strong>Owner:</strong> <code>core/provenance.append:24</code>,
+<code>exec/ledger.py</code>, <code>exec/task_ledger.py</code>. <strong>Out:</strong> append-only JSONL under the campaign root.</p>
+<table>
+<thead>
+<tr>
+<th>file</th>
+<th>holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provenance/campaign.jsonl</code></td>
+<td>the spec, goal, objectives and budget, once at start</td>
+</tr>
+<tr>
+<td><code>provenance/specs.jsonl</code></td>
+<td>each Spec generation and its rationale</td>
+</tr>
+<tr>
+<td><code>provenance/graphs.jsonl</code></td>
+<td>each composed graph, its signature, trust and estimate</td>
+</tr>
+<tr>
+<td><code>provenance/stages.jsonl</code></td>
+<td>the deployed Stage — <strong>the only record of chosen parameters</strong></td>
+</tr>
+<tr>
+<td><code>provenance/executions.jsonl</code></td>
+<td>settlement and run-finished events</td>
+</tr>
+<tr>
+<td><code>provenance/results.jsonl</code></td>
+<td>one row per absorbed node: QC verdict, failed gates, metrics</td>
+</tr>
+<tr>
+<td><code>provenance/tasks.jsonl</code></td>
+<td>per task, including <code>cost_estimated</code> and <code>cost_measured</code></td>
+</tr>
+<tr>
+<td><code>provenance/decisions.jsonl</code></td>
+<td>the reasoner's transcript</td>
+</tr>
+<tr>
+<td><code>provenance/transitions.jsonl</code></td>
+<td>promotions, demotions, stops, losses</td>
+</tr>
+<tr>
+<td><code>jobs/ledger.jsonl</code>, <code>jobs/tasks.jsonl</code></td>
+<td>run and task state, folded on read</td>
+</tr>
+</tbody>
+</table>
+<p><code>append</code> opens, writes and closes per record, so a record is durable when the call returns.
+The log is truth; checkpoints are an index.</p>
+<p><strong>There is no <code>observations.jsonl</code>.</strong> An observation is computed on demand and discarded, so
+cycle N's view of the campaign cannot be read back — it has to be re-derived from <code>graphs</code>,
+<code>results</code>, <code>executions</code> and <code>specs</code>. Nothing today needs to replay one, which is why this is
+recorded as a property rather than fixed.</p>
+<h2 id="step-8-so-what-must-a-caller-do-today">Step 8 — so what must a caller do today<a class="headerlink" href="#step-8-so-what-must-a-caller-do-today" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> a wish to be told. <strong>Out:</strong> one of three unsatisfying options.</p>
+<table>
+<thead>
+<tr>
+<th>option</th>
+<th>how</th>
+<th>what it costs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Assign <code>prov_sink</code></td>
+<td><code>mgr.prov_sink = fn</code>, as <code>cli/__init__.py:890</code> does for the log heartbeat</td>
+<td>one slot, synchronous, unguarded; the caller must reconstruct cycles from provenance records</td>
+</tr>
+<tr>
+<td>Run <code>impress-a serve</code> and poll</td>
+<td><code>serve_campaign:459</code>, then <code>GET /observe</code></td>
+<td>a second process and a socket, and the whole <code>ToolkitView</code> on every poll</td>
+</tr>
+<tr>
+<td>Hold the manager and schedule a task</td>
+<td><code>mgr.observe()</code> through the <code>_DELEGATED</code> allowlist (<code>manager.py:46</code>)</td>
+<td>the caller must write the pump, and nothing tells it when something landed</td>
+</tr>
+</tbody>
+</table>
+<p>The third is the one that works, and the precedent for it is already in the tree.
+<code>cli._heartbeat:758</code> does exactly this for logging, and its docstring states the licence:
+<em>"Reads only the executor's synchronous snapshot API. Its mutating blocks are await-free by
+invariant, so a heartbeat scheduled between them can never see a torn state."</em> A pump that
+awaits a sink <strong>outside</strong> the executor is a heartbeat with a sink instead of a logger, and it
+needs nothing added to the executor at all.</p>
+<h2 id="step-9-the-bridge-which-is-that-pump-with-a-sink">Step 9 — the bridge, which is that pump with a sink<a class="headerlink" href="#step-9-the-bridge-which-is-that-pump-with-a-sink" title="Permanent link">&para;</a></h2>
+<p><strong>In:</strong> a <code>CampaignManager</code> and a <code>CycleSink</code>. <strong>Owner:</strong> <code>integrations/reporting.Bridge</code>.
+<strong>Out:</strong> one <code>CampaignDigest</code> per absorbed cycle, and <code>reports/&lt;sink&gt;.jsonl</code> beside
+provenance.</p>
+<p><code>run_with_sink(manager, sink)</code> races the campaign against the pump, exactly as
+<code>cli.run_campaign</code> already races it against the heartbeat. The executor is unchanged: the
+pump reads <code>observe()</code> between its mutating blocks and awaits the sink outside them, so no
+<code>await</code> enters a block that writes campaign state.</p>
+<table>
+<thead>
+<tr>
+<th>decision</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Triggered on <code>obs.seq</code> advancing</td>
+<td>the absorption watermark. <strong>Not <code>cycle</code></strong>, which is incremented in <code>_dispatch:1036</code> and so counts <em>submissions</em> — a report fired there carries no results. Not <code>_activity</code>, which <code>pump:1471</code> clears, so a second consumer would race it. A monotone integer is race-free.</td>
+</tr>
+<tr>
+<td><code>period_s</code> is a floor, not the only trigger</td>
+<td>a cycle of the real chain runs minutes of tasks with nothing absorbed, and a caller's staleness bound has to be satisfiable while that happens</td>
+</tr>
+<tr>
+<td>One report before the run, one after</td>
+<td>the first is a liveness anchor before any work exists to describe; the last is the only one guaranteed to be read, because the stores a caller receives these through keep one value per workflow — so no digest may be a delta</td>
+</tr>
+<tr>
+<td>Every sink call guarded</td>
+<td>a sink is somebody else's code reaching into a process holding an allocation. A listener that raises costs a log line and a counter, never the run — the rule <code>policy/reasoning.py:175</code> already applies, and the one <code>_log</code> still does not (finding 3)</td>
+</tr>
+<tr>
+<td>Digests land in <code>reports/</code>, not <code>provenance/</code></td>
+<td>the executor is the only writer there, and a tenth provenance kind would make a record of <em>what somebody else was told</em> look like a record of what the campaign did</td>
+</tr>
+</tbody>
+</table>
+<p><code>CampaignDigest</code> (<code>core/decision.py</code>) is a projection of <code>observe()</code>'s return value, not a new
+operation, so ADR 0007 stays out of play for the same reason adding a field to the observation
+does. It drops the <code>ToolkitView</code>, the <code>Spec</code> and the <code>DesignNode</code> bodies — static for the
+campaign, and already given to a caller once by <code>impress-a offer</code> — and carries both spending
+scales under distinct names, because declared and measured are two different numbers and a
+caller charging its own budget wants the second (finding 8).</p>
+<p>Pause is in the same loop, because it is the same cadence. It gates <strong>admission</strong>: in-flight
+runs are allowed to finish, since cancellation is advisory, so a paused campaign keeps
+spending for up to one cycle.</p>
+<hr />
+<h2 id="what-the-observation-plane-does-not-enforce">What the observation plane does not enforce<a class="headerlink" href="#what-the-observation-plane-does-not-enforce" title="Permanent link">&para;</a></h2>
+<p>Eleven places where the implementation does not do what a reader of the design would
+reasonably assume, two of them since repaired and marked in place rather than deleted,
+because the evidence that forced them is the useful part. Each is verified against the source at the anchor given. <strong>Read this
+section before changing any step above.</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>the reasonable assumption</th>
+<th>what the code does</th>
+<th>anchor</th>
+<th>item</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>An observation reports what went wrong, and how diverse the population is</td>
+<td><code>failures</code> and <code>PopulationStats.diversity</code> are <strong>declared and never populated</strong> by the only method that builds one</td>
+<td><code>core/decision.py:87,71</code>, <code>runtime/executor.py:536-562</code></td>
+<td>G</td>
+</tr>
+<tr>
+<td>2</td>
+<td>A campaign's own view of itself at cycle N can be read back</td>
+<td><strong>No observation is ever persisted.</strong> Nine provenance kinds, none of them observations; cycle N's view must be re-derived from four other files</td>
+<td><code>core/provenance.py:22</code>, <code>runtime/executor.py:484</code></td>
+<td>G</td>
+</tr>
+<tr>
+<td>3</td>
+<td>A campaign can be watched by more than one listener</td>
+<td><strong>RESOLVED.</strong> It could not: <code>prov_sink</code> was one slot, and <code>control/plane.py:104</code> and <code>cli/__init__.py:890</code> both assigned it, so attaching a monitor evicted the log heartbeat silently — and the call was unguarded, so a listener that raised stopped the campaign from inside a provenance write, the most expensive place to raise. It is a guarded list now, with <code>prov_dropped</code> counting failures so a deaf subscriber is discoverable, and <code>prov_sink</code> kept as a property over the first listener. The rule is <code>policy/reasoning.py:175</code>'s, arriving late</td>
+<td><code>runtime/executor.py:343-365</code></td>
+<td>G18</td>
+</tr>
+<tr>
+<td>4</td>
+<td>The event stream is a stream</td>
+<td><code>_events</code> is an unbounded in-memory list, never persisted, lost on exit; "streaming" is a 50 ms poll of that list with a 100 ms poll on top</td>
+<td><code>control/plane.py:94,160-167</code>, <code>control/http.py:151</code></td>
+<td>G</td>
+</tr>
+<tr>
+<td>5</td>
+<td>An observation says what the campaign tried, not only what it found</td>
+<td><strong>Chosen parameter values are absent.</strong> They reach <code>stages</code> provenance under <code>mappings</code> and no observation field, so a caller sees scores without the knobs that produced them</td>
+<td><code>runtime/executor.py:1005,1019</code></td>
+<td>G, and <code>resolution.md</code> finding 7's neighbour</td>
+</tr>
+<tr>
+<td>6</td>
+<td>The payload carries what its consumers read</td>
+<td>It embeds every <code>TaskCard</code> <strong>and each toolkit's whole <code>SKILL.md</code></strong>, plus the applied <code>Spec</code> and the full front, rebuilt per call with no projection — and <code>ToolkitView.skills</code> is read by nothing at either end</td>
+<td><code>tools/view.py:67</code>, <code>runtime/executor.py:533-562</code></td>
+<td>G</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Watching a campaign is free of consequence</td>
+<td><strong><code>observe()</code> refreshes the liveness clock.</strong> <code>touch()</code> sets <code>_last_contact</code>, and <code>_control_lost_for</code> is what drains and stops a campaign whose caller vanished. The coupling is deliberate — the Listener polls <code>observe()</code> every cycle, so no heartbeat operation was added — but the consequence is that a <strong>purely passive observer keeps drain-and-stop from ever firing</strong>, which is exactly the shape of a caller that watches without steering</td>
+<td><code>runtime/executor.py:532,491-498,501-525</code></td>
+<td>G</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Spending reported to a caller is spending</td>
+<td><strong>RESOLVED.</strong> It was not: <code>BudgetLedger.spent</code> is declared cost - <code>_settle</code> settles <code>results.cost</code>, documented <em>"DECLARED, summed - unchanged on purpose"</em> - and declared figures sit multiples above measurement deliberately, because they feed gates that <em>refuse</em> graphs. So an outer manager told our spend was told the headroom too, and its own learned cost could never converge. <code>_settle</code> now also calls <code>charge_measured(results.cost_measured)</code>, which was already summed per run and folded into nothing, and <code>CampaignDigest</code> reports both scales under distinct names. The measured figure bounds nothing and gates nothing, deliberately: a measurement arrives after the work it describes is paid for, so an admission gate reading it would refuse tomorrow's work on yesterday's luck</td>
+<td><code>runtime/executor.py:1170-1175</code>, <code>core/budget.py:84-91</code></td>
+<td>G20</td>
+</tr>
+<tr>
+<td>9</td>
+<td>A <code>TaskCard</code> carries the cost terms its spec declares</td>
+<td><strong>RESOLVED.</strong> It did not: <code>tools/view.py:46-48</code> passed <code>burn_rate=</code> and <code>max_commitment=</code> to a model that declared neither field, and pydantic's default <code>extra</code> is <code>ignore</code>, so both were discarded in silence while <code>core/budget.py:67</code> documented the rule <code>min(goal.budget[d], card.max_commitment[d])</code> against a field that could not exist. Both are fields now. The fix is <strong>not</strong> <code>extra="forbid"</code> — these models cross the HTTP boundary, so forbidding extras would turn a newer peer's observation into a 500 — so the general case is guarded mechanically instead, by <code>tests/test_layering.py::test_every_keyword_passed_to_a_core_model_is_a_field_of_it</code></td>
+<td><code>tools/view.py:46-48</code>, <code>core/toolkit.py:59-89</code></td>
+<td>D1, realised in our own code rather than in a user's YAML</td>
+</tr>
+<tr>
+<td>10</td>
+<td>A caller can project a burn-down from what it is told</td>
+<td>There is no rate. <code>BudgetLedger</code> is constructed without <code>walltime=</code>, so <code>burn_rate()</code> returns empty permanently and <code>project()</code> is inert. Limits, spent and holds cross; a rate does not</td>
+<td><code>runtime/executor.py:230</code>, <code>core/budget.py:160,172</code></td>
+<td>E</td>
+</tr>
+<tr>
+<td>11</td>
+<td>The chain that runs is the chain the campaign declared</td>
+<td><code>_admit_once</code> composes against the <strong>whole <code>Registry</code></strong> and reports <code>available: self.reg.ids()</code>; nothing restricts a submitted Stage to <code>spec.stages</code>. The bound holds by construction for the shipped planners, whose <code>ToolkitView</code> is narrowed — it is not a gate, and anything pricing a campaign from <code>stages</code> is relying on that</td>
+<td><code>runtime/executor.py:673-694</code>, <code>tools/view.py:55</code></td>
+<td>G, and <code>resolution.md</code>'s <em>"available means three different things"</em></td>
+</tr>
+</tbody>
+</table>
+<p>One asymmetry that is <strong>by design</strong> and is listed so it is not mistaken for the above. Gate 1
+does not check that a required root port was satisfied — the loop is a literal <code>pass</code>
+commented <em>"roots may be satisfied from campaign inputs"</em> (<code>compose/validate.py:81</code>) — because
+input data arrives through <code>params:</code> rather than as typed reference data. That is
+<code>resolution.md</code> finding 1, and it belongs to resolution rather than to observation; it appears
+here only because a caller reading <code>unsatisfied_root_ports</code> off an offer is reading a
+computation, not a gate.</p>
+<hr />
+<h2 id="seeing-it-on-disk">Seeing it on disk<a class="headerlink" href="#seeing-it-on-disk" title="Permanent link">&para;</a></h2>
+<p>Every step's output except step 2's is in provenance, which is the only way to check this
+page rather than trust it. <code>impress-a mock-lab --only arms --stage sweep</code> writes one campaign
+per arm in about half a minute with no allocation.</p>
+<table>
+<thead>
+<tr>
+<th>step</th>
+<th>where it landed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>provenance/results.jsonl</code> — one row per absorbed node</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>nowhere</strong> — finding 2</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>provenance/decisions.jsonl</code> — what each half was asked and answered</td>
+</tr>
+<tr>
+<td>4, 5</td>
+<td><code>provenance/*.jsonl</code> is the record; the event list is memory only</td>
+</tr>
+<tr>
+<td>6</td>
+<td>the campaign's <code>control_plane.url</code>, written <code>0600</code> under <code>serve</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>the table in step 7</td>
+</tr>
+<tr>
+<td>8</td>
+<td>the <code>heartbeat +…</code> lines in a run log, which is step 8's third option already working</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>reports/&lt;sink&gt;.jsonl</code> under the campaign root — one line per digest, with the <code>ts</code> it was sent</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>telemetry/</code> under the campaign root, when <code>telemetry_checkpoint_s &gt; 0</code>: the engine's own trace, a span per Stage block with its node tasks and tool commands under it, each naming the backend it ran on. Not one of the nine steps — it is the execution layer's record, not the campaign's</td>
+</tr>
+</tbody>
+</table>
+<p>A step whose output cannot be pointed at in one of those files is a step this page has
+described wrongly — step 2 included, and that is finding 2 rather than an exception.</p>
+<hr />
+<h2 id="being-one-workflow-of-a-larger-campaign">Being one workflow of a larger campaign<a class="headerlink" href="#being-one-workflow-of-a-larger-campaign" title="Permanent link">&para;</a></h2>
+<p>The two steps above are the whole of what an enclosing campaign manager needs, and
+<code>integrations/aucam.py</code> is the hundred lines that connect them to one. It is the only module
+in the package that imports AuCaM, which <code>tests/test_layering.py</code> asserts, so the dependency
+stays optional and one file wide.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">impress_a.integrations.aucam</span><span class="w"> </span><span class="kn">import</span> <span class="n">launch_bounds</span><span class="p">,</span> <span class="n">reward_fn</span><span class="p">,</span> <span class="n">workflow_config</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">workflow_config</span><span class="p">(</span><span class="s2">"campaigns/delta-small-molecule.yaml"</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">"D"</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># -&gt; an AuCaM WorkflowConfig: declared_spending and spending_limit from the offer,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1">#    resources from its resource shape, supports_pause=True, stale_timeout_s at 4x</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">#    the report interval the offer declares.</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">bounds</span> <span class="o">=</span> <span class="n">launch_bounds</span><span class="p">(</span><span class="n">offer</span><span class="p">)</span>          <span class="c1"># for the caller's own LaunchRequest.bounds</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">policy</span> <span class="o">=</span> <span class="n">BanditSchedulingPolicy</span><span class="p">(</span><span class="n">reward_fn</span><span class="o">=</span><span class="n">reward_fn</span><span class="p">)</span>
+</code></pre></div>
+<p>Four things in that adapter are decisions rather than plumbing, and each is a defect avoided:</p>
+<ul>
+<li><strong>It does not declare <code>flow</code>.</strong> AuCaM passes its shared engine to a block that asks for
+  one. Taking it would be wrong twice: <code>WorkflowEngine.__init__</code> captures the loop it is built
+  on, and the executor must build its own through <code>exec.backend.make_engine_bounded</code>, which
+  also bounds Dragon's synchronous startup. There is no "use this engine instead" seam, and
+  inventing one is how jobs 22328172 and 22328262 spent their allocations on an engine that
+  dispatched nothing. The price is that our tasks are invisible to the caller's per-task
+  telemetry — which is why spending travels in our own reports.</li>
+<li><strong>The caller's spending limit becomes the campaign's own budget</strong>, narrowing it and never
+  loosening it. A limit enforced from outside can only cancel a campaign after it has
+  overspent; the same number as a budget is refused by <code>reserve</code> and gate 5 before a task
+  runs, and the campaign stops itself with a reason naming the dimension.</li>
+<li><strong><code>score</code> is a float, not a dict.</strong> AuCaM's default bandit reward is
+  <code>1.0 if returncode == 0 else 0.0</code> — throughput, and its own comment says science scores
+  belong to the controller — so no shipped policy of theirs can rank a dict. The scalar is
+  progress toward the asked-for front; <code>reward_fn</code> is what ranks arms by it.</li>
+<li><strong><code>metrics</code> carries the MEASURED spend</strong> under the keys the caller charges from. Without
+  them it prorates our declared cost, and the declared figures are inflated on purpose
+  (finding 8).</li>
+</ul>
+<p>The campaign is still ours throughout: it keeps the engine, the outer loop and the decision to
+stop, and the caller gets no privilege over campaign state that a policy would not have. That
+is <a href="../../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model/">decision 0014</a>,
+and <code>tests/test_aucam.py</code> runs a real AuCaM campaign over a real IMPRESS-A one to prove the
+page is describing something that works.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/radical-collaboration/IMPRESS" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://pypi.org/project/impress-framework/" target="_blank" rel="noopener" title="pypi.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6zM286.2 404c11.1 0 20.1 9.1 20.1 20.3 0 11.3-9 20.4-20.1 20.4-11 0-20.1-9.2-20.1-20.4.1-11.3 9.1-20.3 20.1-20.3zM167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4zm-6.7-142.6c-11.1 0-20.1-9.1-20.1-20.3.1-11.3 9-20.4 20.1-20.4 11 0 20.1 9.2 20.1 20.4s-9 20.3-20.1 20.3z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "search.share", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.8fd75fb4.min.js"></script>
+      
+    
+  </body>
+</html>
