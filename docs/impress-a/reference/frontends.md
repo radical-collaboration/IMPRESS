@@ -170,6 +170,14 @@ One transport-agnostic protocol; adapters translate transport only ([decision 00
 | `steer` | Inject a directive — this is model C's planning call, routed to a half by its `role` key |
 | `artifacts` / `provenance` | Retrieve results and the audit trail |
 | `ingest_measurement` | Out-of-band P8 arrival; accepted even after termination |
+| `infer` | One prompt to the campaign's **locally hosted** reasoner, answered as text |
+
+`infer` is in the core protocol, and therefore in every adapter, for the reason decision 0007 gives:
+an operation that only one transport carries forks the semantics. It also makes a split that is easy
+to miss — the model runs on the *execution* side, as a `prompt_task` on the engine's `ai` route,
+sharing that process's GPUs; only the prompt and the answer cross the socket. A reasoner in the
+control process therefore decides where the campaign goes while its weights sit beside the tools.
+A campaign that declares no local model refuses the call rather than falling back to a hosted one.
 
 The `observe` symmetry is the point: an external caller, an LLM oracle and a user-written half all
 consume the identical observation and answer in the identical vocabulary — a `SpecRevision` from the
@@ -204,7 +212,9 @@ delete objectives but may **not** declare one satisfied: satisfaction is compute
 
 Backends are selected **by name** from site configuration and resolved through
 `rhapsody.backends.get_backend()`, so no backend class is named outside `exec/backend.py`:
-`concurrent` for laptop and mock, `dragon` / `radical` / `dask` on HPC.
+`concurrent` for laptop and mock, `dragon` / `radical` / `dask` on HPC. That name selects the
+campaign's `compute` route; the same engine also carries `local` for adapters and QC, and `ai` when
+a local reasoner is declared.
 
 
 ## Running the two processes
@@ -221,7 +231,18 @@ impress-a serve campaigns/<spec>.yaml            # execution: executor, Reviewer
 impress-a control --connect <url> --campaign <id> --model D
 ```
 
-Three things worth knowing before using it.
+**What the split is and is not for.** It is tempting to read it as the thing that keeps reasoning
+from blocking execution. That independence is already there in one process: `impress-a run` races
+the executor's pump against the reasoner's `conduct` as two asyncio tasks, and the shipped test for
+this seam (`tests/test_split_process.py`) exercises the same property either way — "in one process
+that independence is a property of the loop; across a socket it is a property of the process
+boundary." What the boundary adds is tolerance of a reasoner that blocks *synchronously*, and
+honesty for model C, where an external caller really is a separate program. Note also what does not
+move: the Spec Loop and the Planning Loop are co-resident because a plan consumes the revision just
+made, and the Reviewer and Deployer stay execution-side because the dry-run instantiates task agents
+and needs the toolkit. See [decision 0015](../decisions/0015-one-engine-and-the-process-boundary.md).
+
+Four more things worth knowing before using it.
 
 **Loopback is the security boundary.** The plane has no auth and no TLS, so both ends belong on
 the same compute node; `--host` exists for a deliberate choice rather than a casual one
@@ -236,6 +257,12 @@ process has its own loop and never touches an engine, which is why it is free to
 bounds the silence; on expiry the executor stops admitting, lets in-flight work finish and be
 absorbed, and stops with a reason naming the loss. Draining rather than aborting is deliberate:
 cancellation is advisory, so that work will finish whether or not anyone collects it.
+
+The bound arms only once a plane has registered, and is suspended while work is in flight. Both
+conditions were learned the expensive way: in a single-process campaign the "caller" is the role
+driver in the same process, silent exactly when it is busy awaiting the tasks it just asked for, and
+job 23671367 lost three arms after one cycle each to a 120 s bound against ~180 s of normal task
+time.
 
 **`impress-a run --model C` is refused**, because `run` attaches no plane and model C means an
 external caller steers. It used to time out every five seconds and run its fallback, reporting

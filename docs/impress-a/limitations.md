@@ -93,9 +93,33 @@ executable task on the engine (`exec/launch.py`), and asyncflow 0.7.0 sends a ca
 task was routed to. On the concurrent backend that still does not stop a running command:
 `cancel_task` cancels the backend's own coroutine and leaves the child process running (reproduced
 with a `sleep` that outlived its cancelled task). That is an upstream gap in rhapsody, not something to
-work around here. What does hold on every backend is the walltime: each command is wrapped in coreutils
-`timeout --kill-after`, so a command cannot outlive `resources.walltime_s` by more than the grace
-period, whatever its backend does with a cancel.
+work around here.
+
+What holds in place of a cancel is the walltime, but it is enforced by two different mechanisms and
+the difference matters. On the concurrent backend each command is wrapped in coreutils
+`timeout --kill-after`, so it cannot outlive `resources.walltime_s` by more than the grace period.
+**Under Dragon there is no wrapper** - the task itself carries `walltime_s + KILL_GRACE_S` and Dragon
+enforces it (`exec/launch.py:195`, `exec/resources.py:139`). The wrapper was removed there because it
+hung a job outright; see the next section. Dragon's own timeout has not yet fired on hardware, so
+that half is bounded by design and unexercised in practice.
+
+## A `timeout` wrapper under Dragon hangs the task it was meant to bound
+
+Job 23814643 submitted two lineages of the smoke, and both stage-1 commands ran to completion on
+their GPUs - and then nothing finished. The `rfd3` processes exited; their `timeout` parents stayed
+as `[timeout] <defunct>`, and the tasks never reached a terminal state until the job was cancelled
+22 minutes in.
+
+Coreutils `timeout` puts itself in a new process group (`setpgid`) so it can signal its whole child
+tree. Dragon's local services reaps with `os.waitpid(0, WNOHANG)`
+(`dragon/localservices/server.py:2604`), which collects only children in **its own** process group.
+A `timeout` wrapper therefore becomes a zombie Dragon will never reap, and the task that owns it
+never completes. The wrapper is applied on the concurrent backend only
+(`exec/launch.py:195`), and Dragon is given the bound as the task's own `timeout` instead. Written
+up for upstream in the repository at `plans/upstream/dragon-unreaped-process-group-leader.md`.
+
+The general shape is the one this page keeps repeating: a mechanism that is correct in isolation
+becomes a hang when it crosses a boundary that owns process lifetime.
 
 ## Not yet implemented
 
@@ -103,6 +127,25 @@ The **MCP** control-plane adapter, checkpoint/restart **resume** (the job ledger
 and outcomes, and `RunService.reattach` reconciles what a previous process left open — but nothing
 resumes a campaign from it yet), and the P5 network-service governor (caching, per-service concurrency
 caps, `Retry-After` backoff).
+
+**P6 inlining does not exist**, and a P6 declaration is now a load-time error rather than a tool that
+quietly never runs (`tools/spec.py`). The composer used to drop P6 tools from every graph with nothing
+scheduling them in their place, which is the worse of the two failures: a declared stage that vanishes
+without a word. Inlining is still the intended design; refusal is what holds until it is built.
+
+**Engine telemetry is opt-in**, per campaign, through `CampaignSpec.telemetry_checkpoint_s`
+(0 disables, the default). It needs the `[telemetry]` extra, and asyncflow's `start_telemetry` cannot
+be asked to drain on stop, so a stalled drain is cut short by our own timeout.
+
+**A locally hosted reasoner has never run on hardware.** `CampaignSession.infer` and the
+`rhapsody_vllm` profile kind are built and tested against a stand-in backend, but the `local-dragon`
+profile in `models.yaml` still names no model, and two questions are open: whether Dragon Inference
+takes the first `num_gpus` devices (which `StageExecutor.gpu_offset` assumes when it keeps tools off
+them), and whether a model's start-up fits inside `backend_startup_timeout_s`, which it now shares
+with the compute backend.
+
+**A spec that sets `runner:` is rejected.** It selected between two execution loops; there is one now,
+and the CLI refuses the key with a pointer rather than ignoring it.
 
 ## The Dragon backend can hang silently during construction
 
@@ -205,21 +248,26 @@ too high**: the cost models were 6-69x over, the gpu side summed past the untrus
 cap, and the budget correction that followed silently truncated `boltz_predict` - the only
 producer of two of the campaign's four objectives - off the end of the chain.
 
-## One campaign has completed — what that does and does not establish
+## What has run on real hardware — and what that does and does not establish
 
-Job 22692304 ran all six real tools end to end (`6/6 tasks ok`, 2m53s), admitted on the first
-attempt, every stage passing its gates, terminating with a one-node Pareto front. All four
-campaign objectives carry real values: `total_score` -272.0, `shape_complementarity` 0.591,
-`complex_plddt` 0.507, `ligand_iptm` 0.752. Per-tool cost is measured for all six and the
-`cost_model` figures corrected from it.
+Four campaigns have now executed the real six-tool chain on Delta. Job **22692304** ran it end to
+end (`6/6 tasks ok`, 2m53s), admitted on the first attempt, every stage passing its gates,
+terminating with a one-node Pareto front; all four campaign objectives carry real values
+(`total_score` -272.0, `shape_complementarity` 0.591, `complex_plddt` 0.507, `ligand_iptm` 0.752),
+and per-tool cost is measured for all six. Job **22726105** promoted the six-stage pattern after
+r0002; job **22728140** then ran three consecutive trusted cycles with no demotion. Job
+**23815248** ran two lineages on the one-engine execution loop: `12/12 tasks ok` in 3m45s, lineage
+0 pinned to GPU 0 and lineage 1 to GPU 1 by Dragon's placement policy, with GPUs 2 and 3 idle
+throughout, and a single telemetry block span per Stage carrying every command under it.
 
-**It establishes that the machinery runs.** It does not establish that the science is good, and
-it is important not to read it as more than one draw:
+**They establish that the machinery runs.** They do not establish that the science is good, and
+the sample is still small enough to name exactly:
 
-- **One lineage.** `replicas > 1` has never executed, so `replicas: N` producing N *independent*
-  `DesignNode`s - the invariant the whole seed-plumbing exists for - remains unverified.
-- **One cycle.** `max_cycles: 1`, so no policy has ever acted on an observation, and backtracking
-  has never been exercised against real results.
+- **Two lineages, not four.** `replicas: 2` has executed and the two lineages produced different
+  metrics, so `replicas: N` really does yield N independent `DesignNode`s. The declared width of
+  4 has never completed a campaign, and the budget/signature half of that invariant is untouched.
+- **Cycles have run, backtracking has not.** Job 22728140 acted on observations across three
+  trusted cycles; backtracking has still never been exercised against real results.
 - **Nothing trusted, and for a while nothing could be.** The ledger resolved against a relative
   path inside each job's working directory, so every SLURM job started with an empty one and
   promotion - three *consecutive* clean runs in one file - was unreachable on Delta from the
@@ -229,6 +277,9 @@ it is important not to read it as more than one draw:
   untrusted nodes are always `suspect`, and all five trusted ones missed an acceptance threshold.
 - **No measurement has superseded a prediction.** `ingest_measurement` and the whole
   predicted-vs-measured calibration story still have no real assay data behind them.
+- **Two execution paths are built but unexercised on Dragon.** A block cancel reaching a command
+  that is already running, and Dragon's own task timeout firing. Both ran only against the
+  concurrent backend, where the failure modes are different ones.
 - **The QC thresholds have one or two observations each.** `complex_plddt` cleared its 0.5 bound
   by 0.007. `filter_shape` returned 0.524 against 0.55 on the run before and 0.591 here. Whether
   these numbers sit in the right place is unknown, and `packmin`'s turned out to be upstream's
@@ -278,12 +329,14 @@ fixed-residue constraint. None of the three Rosetta toolkits (`packmin`, `fastre
 had a way to pass a ligand `.params` file, so a real ligand-bearing PDB would likely raise in
 `pose_from_pdb()` rather than silently mis-score. All four are now fixed (see each toolkit's
 `SKILL.md`); LigandMPNN's own seed/batch flags were checked and confirmed correct as originally
-written. `impress-a preflight` still runs cleanly for the ALR benchmark target on a Delta login node,
-but this list is checked contracts, not an executed run - see "no campaign has yet run them on real
-hardware," above.
+written. `impress-a preflight` still runs cleanly for the ALR benchmark target on a Delta login node.
+Each of these was a checked contract before it was an executed one, and the executions above are what
+turned the list from plausible into verified.
 
 Related: the QC gates the real toolkits declare lean almost entirely on `metric_in_range` against a
-tool's **own** self-reported confidence — which is exactly what a confidently-wrong tool passes. There
-are no structural gates yet (is the ligand actually in the output complex, are there chain breaks, does
-the sequence length match the contig), and no toolkit carries the known-bad fixtures under `tests/` that
-this document's authoring guide asks for.
+tool's **own** self-reported confidence — which is exactly what a confidently-wrong tool passes. Since
+decision 0013 those are *acceptance* gates, so trust rests on the integrity gates alone, and there are
+still no structural ones (is the ligand actually in the output complex, are there chain breaks, does
+the sequence length match the contig). Known-bad fixtures now exist for every real tool under
+`toolkits/<toolkit>/tools/<id>/tests/`, and `tests/test_gate_fixtures.py` checks each one against the
+gates it is supposed to fail.

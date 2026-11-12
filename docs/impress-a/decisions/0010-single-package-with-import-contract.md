@@ -40,6 +40,13 @@ Load-bearing rules: `policy ↛ tools`, `policy ↛ exec`, `compose ↛ exec`, `
   and the artifacts on disk — never from an arm's bookkeeping.
 - `compose ↛ exec` is what makes the laptop-runnable mock campaign possible.
 - The only in-process scientific dependencies are the P6 tools (RDKit, Biotite, AtomWorks, US-align,
-  `paretoset`), which must be co-installable with `radical.*` on Python ≥3.12.
+  `paretoset`), which must be co-installable with `radical.*` on Python ≥3.12.[^0010-floor]
+
+[^0010-floor]:
+    **Corrected 2026-11-11.** Two things in that sentence are no longer true. The floor is
+    `>=3.11`, set by `radical.asyncflow` and `rhapsody-py` 0.7.0 rather than by the science
+    libraries. And there are no in-process P6 tools: P6 inlining was never built, so a P6
+    declaration is refused at load (`tools/spec.py`). The decision itself — one package, one
+    import contract — is unaffected; see [decision 0015](0015-one-engine-and-the-process-boundary.md).
 - Revisit if policies pull in both LangGraph and Academy, or if a site needs the execution layer without the
   policy layer. Splitting later is more disruptive than starting split.

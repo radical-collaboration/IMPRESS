@@ -29,11 +29,11 @@ the output of a reasoner, and nothing in the graph is written down ahead of time
 ### One experiment, one variable step
 
 ```
-observe ─→ DECIDE ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
-         (reasoner)   (typed     (5 gates    (asyncflow) (QC        (tree,
-                       DAG)       + dry-run)             gates)     Pareto,
-                                      │                             provenance)
-                                      └── reject ──→ back to DECIDE (bounded retry)
+observe ─→ SPECIFY ─→ PLAN ─→ compose ─→ validate ─→ execute ─→ analyze ─→ update ─→ terminate?
+          (reasoner halves)   (typed    (5 gates    (one       (QC       (tree,
+                               DAG)      + dry-run)  engine)    gates)    Pareto,
+                                  │                                       provenance)
+                                  └── reject ──→ back to PLAN (bounded retry)
 ```
 
 Those steps happen in that order for any one experiment, but the reasoner is not the loop body, so
@@ -49,9 +49,11 @@ is not installed by `pip install .` at the repository root — see
 
 It runs on the same middleware as IMPRESS — one `radical.asyncflow` engine over `rhapsody`
 backends, reaching Dragon only through them — but not on the `impress` package: each Stage is an
-asyncflow block, and each tool command an engine task placed per backend. See
-[Architecture](../concepts/architecture.md) for the shared engine conventions. The two also share
-science:
+asyncflow block, and each tool command an engine task placed per backend. One engine per campaign
+carries named routes — `compute` for tool commands, `local` for adapters and QC, and `ai` when the
+campaign serves its own reasoner — which is recorded in
+[decision 0015](decisions/0015-one-engine-and-the-process-boundary.md) along with where the control
+and execution processes divide. The two projects also share science:
 [Small Molecule Binding](../examples/small-molecule-binding.md) runs the same
 rfd3 → LigandMPNN → Rosetta → Boltz chain as a fixed adaptive pipeline, where IMPRESS-A composes it
 per cycle.

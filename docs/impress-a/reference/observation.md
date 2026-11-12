@@ -38,7 +38,7 @@ almost every rule below exists to keep that window shut.
 
 ## Step 1 — a run is absorbed, and the window is shut
 
-**In:** `ExecutionResults` from the backend. **Owner:** `runtime/executor._absorb:565`.
+**In:** `ExecutionResults` from the backend. **Owner:** `runtime/executor._absorb:578`.
 **Out:** `DesignNode`s on the tree, one `results` provenance record each, and one id appended
 to `_absorbed` per lineage (`:601`).
 
@@ -57,7 +57,7 @@ campaign's notion of "what is new", and step 2 is where they are read.
 ## Step 2 — `observe()` assembles the snapshot
 
 **In:** the executor's own state, plus an optional `since` watermark. **Owner:**
-`runtime/executor.observe:527`. **Out:** a `CampaignObservation`
+`runtime/executor.observe:540`. **Out:** a `CampaignObservation`
 (`core/decision.py:75`).
 
 Synchronous, read-only, and **the only place in the package that constructs one**. It
@@ -95,7 +95,7 @@ cannot reach the executor to ask a narrower question.
 
 ## Step 4 — provenance is mirrored to every listener
 
-**In:** every provenance record. **Owner:** `runtime/executor._log:331`. **Out:** a write to
+**In:** every provenance record. **Owner:** `runtime/executor._log:356`. **Out:** a write to
 `provenance/<kind>.jsonl`, then a guarded call to each registered listener.
 
 ```python
@@ -207,7 +207,7 @@ pump reads `observe()` between its mutating blocks and awaits the sink outside t
 
 | decision | why |
 |---|---|
-| Triggered on `obs.seq` advancing | the absorption watermark. **Not `cycle`**, which is incremented in `_dispatch:1026` and so counts *submissions* — a report fired there carries no results. Not `_activity`, which `pump:1460` clears, so a second consumer would race it. A monotone integer is race-free. |
+| Triggered on `obs.seq` advancing | the absorption watermark. **Not `cycle`**, which is incremented in `_dispatch:1036` and so counts *submissions* — a report fired there carries no results. Not `_activity`, which `pump:1471` clears, so a second consumer would race it. A monotone integer is race-free. |
 | `period_s` is a floor, not the only trigger | a cycle of the real chain runs minutes of tasks with nothing absorbed, and a caller's staleness bound has to be satisfiable while that happens |
 | One report before the run, one after | the first is a liveness anchor before any work exists to describe; the last is the only one guaranteed to be read, because the stores a caller receives these through keep one value per workflow — so no digest may be a delta |
 | Every sink call guarded | a sink is somebody else's code reaching into a process holding an allocation. A listener that raises costs a log line and a counter, never the run — the rule `policy/reasoning.py:175` already applies, and the one `_log` still does not (finding 3) |
@@ -245,7 +245,7 @@ section before changing any step above.**
 | 8 | Spending reported to a caller is spending | **RESOLVED.** It was not: `BudgetLedger.spent` is declared cost - `_settle` settles `results.cost`, documented *"DECLARED, summed - unchanged on purpose"* - and declared figures sit multiples above measurement deliberately, because they feed gates that *refuse* graphs. So an outer manager told our spend was told the headroom too, and its own learned cost could never converge. `_settle` now also calls `charge_measured(results.cost_measured)`, which was already summed per run and folded into nothing, and `CampaignDigest` reports both scales under distinct names. The measured figure bounds nothing and gates nothing, deliberately: a measurement arrives after the work it describes is paid for, so an admission gate reading it would refuse tomorrow's work on yesterday's luck | `runtime/executor.py:1170-1175`, `core/budget.py:84-91` | G20 |
 | 9 | A `TaskCard` carries the cost terms its spec declares | **RESOLVED.** It did not: `tools/view.py:46-48` passed `burn_rate=` and `max_commitment=` to a model that declared neither field, and pydantic's default `extra` is `ignore`, so both were discarded in silence while `core/budget.py:67` documented the rule `min(goal.budget[d], card.max_commitment[d])` against a field that could not exist. Both are fields now. The fix is **not** `extra="forbid"` — these models cross the HTTP boundary, so forbidding extras would turn a newer peer's observation into a 500 — so the general case is guarded mechanically instead, by `tests/test_layering.py::test_every_keyword_passed_to_a_core_model_is_a_field_of_it` | `tools/view.py:46-48`, `core/toolkit.py:59-89` | D1, realised in our own code rather than in a user's YAML |
 | 10 | A caller can project a burn-down from what it is told | There is no rate. `BudgetLedger` is constructed without `walltime=`, so `burn_rate()` returns empty permanently and `project()` is inert. Limits, spent and holds cross; a rate does not | `runtime/executor.py:230`, `core/budget.py:160,172` | E |
-| 11 | The chain that runs is the chain the campaign declared | `_admit_once` composes against the **whole `Registry`** and reports `available: self.reg.ids()`; nothing restricts a submitted Stage to `spec.stages`. The bound holds by construction for the shipped planners, whose `ToolkitView` is narrowed — it is not a gate, and anything pricing a campaign from `stages` is relying on that | `runtime/executor.py:660-681`, `tools/view.py:55` | G, and `resolution.md`'s *"available means three different things"* |
+| 11 | The chain that runs is the chain the campaign declared | `_admit_once` composes against the **whole `Registry`** and reports `available: self.reg.ids()`; nothing restricts a submitted Stage to `spec.stages`. The bound holds by construction for the shipped planners, whose `ToolkitView` is narrowed — it is not a gate, and anything pricing a campaign from `stages` is relying on that | `runtime/executor.py:673-694`, `tools/view.py:55` | G, and `resolution.md`'s *"available means three different things"* |
 
 One asymmetry that is **by design** and is listed so it is not mistaken for the above. Gate 1
 does not check that a required root port was satisfied — the loop is a literal `pass`
@@ -273,6 +273,7 @@ per arm in about half a minute with no allocation.
 | 7 | the table in step 7 |
 | 8 | the `heartbeat +…` lines in a run log, which is step 8's third option already working |
 | 9 | `reports/<sink>.jsonl` under the campaign root — one line per digest, with the `ts` it was sent |
+| — | `telemetry/` under the campaign root, when `telemetry_checkpoint_s > 0`: the engine's own trace, a span per Stage block with its node tasks and tool commands under it, each naming the backend it ran on. Not one of the nine steps — it is the execution layer's record, not the campaign's |
 
 A step whose output cannot be pointed at in one of those files is a step this page has
 described wrongly — step 2 included, and that is finding 2 rather than an exception.
