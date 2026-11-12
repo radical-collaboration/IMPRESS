@@ -275,6 +275,18 @@ json.dump({
 """
 
 
+def worker_command(python: Any, script: Any, args: list[str], result_json: Any) -> list[str]:
+    """THE command every PyRosetta tool runs. Pure.
+
+        <python> <workdir>/worker.py <positional args...> <workdir>/result.json
+
+    `python` is `sys.executable`: PyRosetta is an import inside the worker, not a binary, so
+    the flags Rosetta itself sees are the `pyrosetta.init(...)` string in the worker source
+    above. `args` is one of `packmin_args` / `fastrelax_args` / `filter_shape_args`.
+    """
+    return [str(python), str(script), *map(str, args), str(result_json)]
+
+
 async def _run_worker(script: str, args: list[str], timeout_s: float,
                       work: Path) -> Path:
     """Run a PyRosetta worker in its own interpreter, inside the task's work directory.
@@ -286,7 +298,7 @@ async def _run_worker(script: str, args: list[str], timeout_s: float,
     script_path = work / "worker.py"
     script_path.write_text(script)
     result_json = work / "result.json"
-    await run_cmd([sys.executable, str(script_path), *args, str(result_json)],
+    await run_cmd(worker_command(sys.executable, script_path, args, result_json),
                   timeout_s=timeout_s)
     return result_json
 
@@ -316,6 +328,23 @@ def _ligand_params_arg(params: dict[str, Any]) -> str:
     return params.get("ligand_params_path") or "none"
 
 
+def packmin_args(params: dict[str, Any], *, structure: Any, out_pdb: Any) -> list[str]:
+    """`_PACKMIN_WORKER`'s positional arguments: structure, out, cycles, seed, ligand params."""
+    return [str(structure), str(out_pdb), str(params["cycles"]), _seed_arg(params),
+            _ligand_params_arg(params)]
+
+
+def fastrelax_args(params: dict[str, Any], *, structure: Any, out_pdb: Any) -> list[str]:
+    """`_FASTRELAX_WORKER`'s: structure, out, relax_cycles, nstruct, seed, ligand params."""
+    return [str(structure), str(out_pdb), str(params["relax_cycles"]),
+            str(params["nstruct"]), _seed_arg(params), _ligand_params_arg(params)]
+
+
+def filter_shape_args(params: dict[str, Any], *, structure: Any) -> list[str]:
+    """`_FILTER_SHAPE_WORKER`'s: structure, ligand params. It writes no structure."""
+    return [str(structure), _ligand_params_arg(params)]
+
+
 class PackMinAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
         structure = input_path(req, "structure")
@@ -325,8 +354,7 @@ class PackMinAgent(TaskAgent):
         out_pdb = work / "packmin.pdb"
         result_json = await _run_worker(
             _PACKMIN_WORKER,
-            [structure, str(out_pdb), str(params["cycles"]), _seed_arg(params),
-             _ligand_params_arg(params)],
+            packmin_args(params, structure=structure, out_pdb=out_pdb),
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:
@@ -344,8 +372,7 @@ class FastRelaxAgent(TaskAgent):
         out_pdb = work / "fastrelax.pdb"
         result_json = await _run_worker(
             _FASTRELAX_WORKER,
-            [structure, str(out_pdb), str(params["relax_cycles"]),
-             str(params["nstruct"]), _seed_arg(params), _ligand_params_arg(params)],
+            fastrelax_args(params, structure=structure, out_pdb=out_pdb),
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:
@@ -363,7 +390,7 @@ class FilterShapeAgent(TaskAgent):
             raise RuntimeError("filter_shape: no upstream 'structure' output found")
         work = workdir_for(req, "filter_shape")
         result_json = await _run_worker(
-            _FILTER_SHAPE_WORKER, [structure, _ligand_params_arg(params)],
+            _FILTER_SHAPE_WORKER, filter_shape_args(params, structure=structure),
             timeout_s=float(self.spec.resources.walltime_s), work=work)
         metrics = _read_metrics(result_json)
         if metrics is None:

@@ -210,6 +210,7 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
             usage.phases["queued"] = round(launcher.queued_s, 6)
             usage.wall_s = round(max(0.0, usage.wall_s - launcher.queued_s), 6)
             res.cost_measured = usage.as_cost(spec.resources.gpus, spec.resources.cores)
+        usage.commands = list(launcher.records)
         usage.cuda_visible_devices = ("" if placement.gpu_index is None
                                       else str(placement.gpu_index))
         return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,

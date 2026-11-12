@@ -1,6 +1,9 @@
 # Compute Patterns
 
-**Normative.** Every `ToolSpec` declares one. Dispatch, validation and cost estimation all key off it.
+**Normative.** Every `ToolSpec` declares one. Validation keys off it today — whether QC gates are
+mandatory, whether a P6 tool was scheduled, whether external submission is allowed. Dispatch does
+**not**: every node takes the one path described in [`invocation.md`](invocation.md), whatever its
+pattern (that page's finding 6).
 
 ## Why patterns rather than categories
 

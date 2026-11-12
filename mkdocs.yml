@@ -67,6 +67,7 @@ nav:
     - Architecture: impress-a/reference/architecture.md
     - Resolution: impress-a/reference/resolution.md
     - Observation: impress-a/reference/observation.md
+    - Invocation: impress-a/reference/invocation.md
     - Pluggable Frontends: impress-a/reference/frontends.md
     - Control Models: impress-a/reference/control-models.md
     - Compute Patterns: impress-a/reference/compute-patterns.md

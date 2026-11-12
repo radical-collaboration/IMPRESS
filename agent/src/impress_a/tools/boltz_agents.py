@@ -90,6 +90,56 @@ def _claim_cache(cache: Path) -> int | None:
     return fd
 
 
+def boltz_input(params: dict[str, Any], sequence: str) -> dict[str, Any]:
+    """The body of `boltz_input.yaml` - where `ligand_smiles` and (half of) `use_msa_server`
+    reach `boltz predict`, which takes them from this file rather than from flags."""
+    # Built as data and dumped, never assembled as text. The hand-indented version
+    # this replaces put `msa:` one level too deep, under the `sequence:` scalar, so
+    # `boltz predict` aborted on spec parse before any model loaded.
+    sequences: list[dict[str, Any]] = [{
+        "protein": {
+            "id": ["A"],
+            "sequence": sequence,
+            "msa": "auto" if params["use_msa_server"] else "empty",
+        }
+    }]
+    if params["ligand_smiles"]:
+        sequences.append({"ligand": {"id": ["B"],
+                                     "smiles": params["ligand_smiles"]}})
+    return {"version": 1, "sequences": sequences}
+
+
+def boltz_command(params: dict[str, Any], *, input_yaml: Any, out_dir: Any,
+                  cache: Any) -> list[str]:
+    """THE command `boltz_predict` runs. Pure: every path is an argument.
+
+        boltz predict <input_yaml> --out_dir ... --cache ... --diffusion_samples N ...
+
+    `boltz` comes from PATH (the campaign's venv) and `cache` from `$BOLTZ_CACHE`; neither
+    is in the spec. `input_yaml` holds `boltz_input(...)`.
+    """
+    cmd = [
+        "boltz", "predict", str(input_yaml),
+        "--out_dir", str(out_dir),
+        "--cache", str(cache),
+        "--devices", "1", "--accelerator", "gpu",
+        "--diffusion_samples", str(params["diffusion_samples"]),
+        "--output_format", "pdb",
+        # Required, not optional: cuequivariance_ops_torch's fused kernel needs
+        # cublasGemmGroupedBatchedEx, absent from the nvidia-cublas-cu12 version
+        # torch==2.5.1+cu121 pins and loads first (present only from 12.5.3.2+), so
+        # the kernel import fails every time until that's reconciled. Verified in
+        # IMPRESS/examples/small_molecule_binding/scripts/boltz.sh - don't drop this
+        # without re-checking the installed torch/cuequivariance-ops-cu12 versions.
+        "--no_kernels",
+    ]
+    if params.get("seed") is not None:
+        cmd += ["--seed", str(params["seed"])]
+    if params["use_msa_server"]:
+        cmd.append("--use_msa_server")
+    return cmd
+
+
 class BoltzPredictAgent(TaskAgent):
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
         cache = os.environ.get("BOLTZ_CACHE")
@@ -102,42 +152,9 @@ class BoltzPredictAgent(TaskAgent):
         sequence = _extract_sequence(structure)
 
         work = workdir_for(req, "boltz")
-        # Built as data and dumped, never assembled as text. The hand-indented version
-        # this replaces put `msa:` one level too deep, under the `sequence:` scalar, so
-        # `boltz predict` aborted on spec parse before any model loaded.
-        sequences: list[dict[str, Any]] = [{
-            "protein": {
-                "id": ["A"],
-                "sequence": sequence,
-                "msa": "auto" if params["use_msa_server"] else "empty",
-            }
-        }]
-        if params["ligand_smiles"]:
-            sequences.append({"ligand": {"id": ["B"],
-                                         "smiles": params["ligand_smiles"]}})
         spec_path = work / "boltz_input.yaml"
-        spec_path.write_text(
-            yaml.safe_dump({"version": 1, "sequences": sequences}, sort_keys=False))
-
-        cmd = [
-            "boltz", "predict", str(spec_path),
-            "--out_dir", str(work / "out"),
-            "--cache", cache,
-            "--devices", "1", "--accelerator", "gpu",
-            "--diffusion_samples", str(params["diffusion_samples"]),
-            "--output_format", "pdb",
-            # Required, not optional: cuequivariance_ops_torch's fused kernel needs
-            # cublasGemmGroupedBatchedEx, absent from the nvidia-cublas-cu12 version
-            # torch==2.5.1+cu121 pins and loads first (present only from 12.5.3.2+), so
-            # the kernel import fails every time until that's reconciled. Verified in
-            # IMPRESS/examples/small_molecule_binding/scripts/boltz.sh - don't drop this
-            # without re-checking the installed torch/cuequivariance-ops-cu12 versions.
-            "--no_kernels",
-        ]
-        if params.get("seed") is not None:
-            cmd += ["--seed", str(params["seed"])]
-        if params["use_msa_server"]:
-            cmd.append("--use_msa_server")
+        spec_path.write_text(yaml.safe_dump(boltz_input(params, sequence), sort_keys=False))
+        cmd = boltz_command(params, input_yaml=spec_path, out_dir=work / "out", cache=cache)
 
         # Held across this whole call, not just a check: the extraction we are
         # serialising against happens *inside* `boltz predict`. Only the first run pays

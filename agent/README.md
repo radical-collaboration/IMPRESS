@@ -303,7 +303,9 @@ a GPU from an abandoned run is unsolved.
 literature figures, not measurements. This already bites: a campaign budget can be too small to admit
 its own first run.
 
-**`sites/*.yaml` is read by no code.** Its `tool_delivery: {real|mock}` switch is inert.
+**`sites/*.yaml` is read by no code.** `tool_delivery` is a campaign-spec field now, enforced as
+gate 6. Where a tool's executable comes from is neither: it is an environment variable or `PATH`,
+checked by `impress-a preflight` (`docs/impress-a/reference/invocation.md`, step 4).
 
 ## Plans
 

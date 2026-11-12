@@ -132,7 +132,8 @@ Each exists because of a specific failure mode. Details in `docs/impress-a/refer
 | The Pareto front is **not monotonic** once measurements arrive | `core/pareto.py` | A node promoted on an optimistic prediction can be demoted by its own assay |
 | Rejection triggers **bounded retry per experiment**, not a discarded cycle | `runtime/roles.py::_deploy` *and* an independent cap in `runtime/executor.py` | `Planner.replan` is handed the gate and the reason and gets another attempt. The executor caps admissions separately, because a `conduct` reasoner is under no obligation to honour `max_attempts` |
 | A reasoner is a **Specifier/Planner pair or a `conduct` implementation**, never a third thing | `manager.py::_reasoner` raises `TypeError` otherwise | `decide(obs) -> Decision` answered what the campaign is for and which tool runs next in one call, so no transcript could say which half earned a model its cost. Deleted in phase 11, with `CampaignSpec.control` - there is one vocabulary now. `tests/test_layering.py::test_no_module_defines_decide` is the mechanical proof |
-| `execute()` is not overridden by tool adapters | `tools/agent.py` | Pattern dispatch belongs to the exec layer; overriding bypasses P6-inline and P4-ledger rules |
+| A tool adapter overrides **`run()` only**, and every command it starts goes through **`run_cmd`** | `tools/agent.py`, `tools/_subprocess.py` | The inherited `parameterize` and `post_process` are what make parameter checks and QC unskippable; `run_cmd` is what places a command on the engine and records its argv. A command started any other way runs on the campaign host, unplaced and unrecorded |
+| Each real adapter builds its argv in **one pure function**, and every declared parameter reaches it | `tests/test_real_toolkits.py` | It is the only place a reader can learn what the system executes. A declared parameter no command receives is a knob a planner can turn forever with no effect (`ligandmpnn_design.num_seqs`, exempted by name) |
 | A tool's `outputs` are **typed `ArtifactRef`s**, never bare strings | `tools/agent.py::_as_artifacts` | The type comes from the spec's declared port, so a handle cannot disagree with what the composer type-checked. Return a `Path` for a file |
 | An **untrusted** pattern has at most one instance in flight | `runtime/executor.py::_admit_once` | Promotion counts *consecutive* clean runs; concurrent instances are one draw sampled N times |
 | The **executor is the only writer** of campaign state, and decides termination | `runtime/executor.py` | Every mutating block is `await`-free, so an observation is never taken mid-absorb. Adding an `await` inside `observe`/`_absorb` reintroduces torn reads |
@@ -184,8 +185,10 @@ Full notes in `docs/impress-a/reference/middleware-integration.md`. The ones tha
 
 ## Adding a tool
 
-`toolkits/<toolkit>/tools/<id>/spec.yaml` + a `TaskAgent` subclass (`entry:` points at it) + a mention in
-that toolkit's `SKILL.md`. Full guide: `docs/impress-a/reference/authoring-tools.md`.
+`toolkits/<toolkit>/tools/<id>/spec.yaml` + a `TaskAgent` subclass (`entry:` points at it) with its
+command in one pure builder function + a mention in that toolkit's `SKILL.md`. Full guide:
+`docs/impress-a/reference/authoring-tools.md`; how a spec becomes a running command, and what each
+shipped tool runs: `docs/impress-a/reference/invocation.md`.
 
 **Never edit the composer, validator or manager to add a tool.** If you need to, the layering is wrong.
 

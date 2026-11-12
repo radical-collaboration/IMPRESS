@@ -130,6 +130,61 @@ runpy.run_path(os.path.join(mpnn_dir, "run.py"), run_name="__main__")
 '''
 
 
+def ligandmpnn_command(params: dict[str, Any], *, python: Any, shim: Any, mpnn_dir: Any,
+                       backbone: Any, out_dir: Any) -> list[str]:
+    """THE command `ligandmpnn_design` runs. Pure: every path is an argument.
+
+        <python> <shim> <mpnn_dir> --model_type ligand_mpnn --checkpoint_... --pdb_path ...
+
+    `python` is `sys.executable`, `shim` is `MPNN_SHIM` written into the task's workdir,
+    and `mpnn_dir` is `$MPNN_DIR` (a LigandMPNN checkout); none is in the spec. The command
+    runs with `cwd=$MPNN_DIR`. `num_seqs` is declared by the spec and passed nowhere here.
+    """
+    root = Path(mpnn_dir)
+    cmd = [
+        str(python), str(shim), str(root),
+        "--model_type", "ligand_mpnn",
+        # Both checkpoints, ABSOLUTE and explicit. `run.py` defaults them to
+        # "./model_params/..." - relative to the CURRENT WORKING DIRECTORY, which for
+        # us is the campaign root, not the checkout. Left implicit, every invocation
+        # fails on a missing path. The original IMPRESS pipeline guards this twice
+        # over: it passes both flags AND chdir's into the checkout (its
+        # `scripts/mpnn_run.py` shim); we do the same below.
+        "--checkpoint_ligand_mpnn",
+        str(root / "model_params" / "ligandmpnn_v_32_010_25.pt"),
+        "--checkpoint_path_sc",
+        str(root / "model_params" / "ligandmpnn_sc_v_32_002_16.pt"),
+        "--pdb_path", str(backbone),
+        "--out_folder", str(out_dir),
+        "--temperature", str(params["temperature"]),
+        # ONE WIDE BATCH, not several narrow ones. `--batch_size` is candidates per
+        # forward pass and `--number_of_batches` is passes, so the old form - batches set
+        # to `num_seqs` with `--batch_size` left at its default of 1 - asked for N
+        # sequential batches of one, which is the worse of the two options for a model
+        # tuned for batched output. The comment here used to say "confirm against
+        # `run.py --help` before raising it", and that is now `impress-a preflight`'s job:
+        # A3's lesson is that a tool's contract was not merely unverified but WRONG
+        # (RFD3 was invoked with flags its real CLI does not have), so a flag nobody has
+        # run is a flag that may not exist.
+        "--batch_size", str(params["batch_size"]),
+        "--number_of_batches", str(params["number_of_batches"]),
+    ]
+    if params.get("seed") is not None:
+        cmd += ["--seed", str(params["seed"])]
+    if params["pack_side_chains"]:
+        # `--number_of_packs_per_design` defaults to 4 in run.py, and the adapter uses
+        # packed[0]. Job 22684607 produced backbone_0_packed_1_{1,2,3,4}.pdb and threw
+        # three away - and reported count: 4 for ONE sequence, which is wrong twice
+        # over: four packs of one design are not four candidates, and breadth in this
+        # project comes from `replicas`, never from a tool's internal N. The reference
+        # pipeline passes 1 explicitly (scripts/mpnn.sh:30).
+        cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1",
+                "--number_of_packs_per_design", "1"]
+    if params.get("fixed_residues"):
+        cmd += ["--fixed_residues", params["fixed_residues"]]
+    return cmd
+
+
 class LigandMPNNDesignAgent(TaskAgent):
     """Sequence design + side-chain packing conditioned on a backbone and its ligand."""
 
@@ -156,47 +211,8 @@ class LigandMPNNDesignAgent(TaskAgent):
         # comment at that line in MPNN_SHIM for why the guarantee is needed at all.
         shim = out / "mpnn_run.py"
         shim.write_text(MPNN_SHIM)
-        cmd = [
-            sys.executable, str(shim), str(root),
-            "--model_type", "ligand_mpnn",
-            # Both checkpoints, ABSOLUTE and explicit. `run.py` defaults them to
-            # "./model_params/..." - relative to the CURRENT WORKING DIRECTORY, which for
-            # us is the campaign root, not the checkout. Left implicit, every invocation
-            # fails on a missing path. The original IMPRESS pipeline guards this twice
-            # over: it passes both flags AND chdir's into the checkout (its
-            # `scripts/mpnn_run.py` shim); we do the same below.
-            "--checkpoint_ligand_mpnn",
-            str(root / "model_params" / "ligandmpnn_v_32_010_25.pt"),
-            "--checkpoint_path_sc",
-            str(root / "model_params" / "ligandmpnn_sc_v_32_002_16.pt"),
-            "--pdb_path", str(backbone_pdb),
-            "--out_folder", str(out),
-            "--temperature", str(params["temperature"]),
-            # ONE WIDE BATCH, not several narrow ones. `--batch_size` is candidates per
-            # forward pass and `--number_of_batches` is passes, so the old form - batches set
-            # to `num_seqs` with `--batch_size` left at its default of 1 - asked for N
-            # sequential batches of one, which is the worse of the two options for a model
-            # tuned for batched output. The comment here used to say "confirm against
-            # `run.py --help` before raising it", and that is now `impress-a preflight`'s job:
-            # A3's lesson is that a tool's contract was not merely unverified but WRONG
-            # (RFD3 was invoked with flags its real CLI does not have), so a flag nobody has
-            # run is a flag that may not exist.
-            "--batch_size", str(params["batch_size"]),
-            "--number_of_batches", str(params["number_of_batches"]),
-        ]
-        if params.get("seed") is not None:
-            cmd += ["--seed", str(params["seed"])]
-        if params["pack_side_chains"]:
-            # `--number_of_packs_per_design` defaults to 4 in run.py, and the adapter uses
-            # packed[0]. Job 22684607 produced backbone_0_packed_1_{1,2,3,4}.pdb and threw
-            # three away - and reported count: 4 for ONE sequence, which is wrong twice
-            # over: four packs of one design are not four candidates, and breadth in this
-            # project comes from `replicas`, never from a tool's internal N. The reference
-            # pipeline passes 1 explicitly (scripts/mpnn.sh:30).
-            cmd += ["--pack_side_chains", "1", "--pack_with_ligand_context", "1",
-                    "--number_of_packs_per_design", "1"]
-        if params.get("fixed_residues"):
-            cmd += ["--fixed_residues", params["fixed_residues"]]
+        cmd = ligandmpnn_command(params, python=sys.executable, shim=shim, mpnn_dir=root,
+                                 backbone=backbone_pdb, out_dir=out)
         # cwd=$MPNN_DIR: every other relative path inside `run.py` and its bundled
         # openfold resolves the same way the checkpoints do. `--out_folder` and
         # `--pdb_path` are absolute, so nothing lands in the checkout.

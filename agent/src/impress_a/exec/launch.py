@@ -109,6 +109,16 @@ class Launcher:
         #: Seconds they spent running, as the backend reported them started and finished.
         self.ran_s = 0.0
         self.commands = 0
+        #: One entry per command this node submitted, in order: the argv the backend was
+        #: handed, where, and how it ended. This is the realized form of what the adapter's
+        #: command builder returned, and it reaches `tasks` provenance through
+        #: `TaskUsage.commands` - before it did, the only durable trace of a command line was
+        #: the message of the exception a FAILED one raised.
+        #:
+        #: The environment recorded is what the placement ADDED, never the whole of it: an
+        #: adapter passes its child a copy of `os.environ`, and provenance is not a place
+        #: for whatever tokens that holds.
+        self.records: list[dict[str, Any]] = []
 
     async def run(self, cmd: Sequence[str], *, cwd: Any = None,
                   env: dict[str, str] | None = None,
@@ -212,6 +222,16 @@ class Launcher:
         if self.workflow_id:
             kwargs["workflow_id"] = self.workflow_id
 
+        record: dict[str, Any] = {
+            "argv": argv, "cwd": str(cwd) if cwd is not None else None,
+            "backend": self.placement.backend_kind, "host": self.placement.host,
+            "gpu_index": self.placement.gpu_index,
+            "placement_env": self.placement.placement_env(),
+            "timeout_s": timeout_s,
+            # `None` until the command ends: a record still saying so was cancelled.
+            "exit_code": None, "queued_s": None, "ran_s": None}
+        self.records.append(record)
+
         submitted = time.monotonic()
         if self.slots is not None:
             await self.slots.acquire()          # waiting for a slot is queueing too
@@ -238,6 +258,8 @@ class Launcher:
         self.commands += 1
         self.queued_s += started - submitted
         self.ran_s += finished - started
+        record["queued_s"] = round(started - submitted, 6)
+        record["ran_s"] = round(finished - started, 6)
 
         if fut.cancelled():
             if (self.placement.dragon and timeout_s and not self.cancelled
@@ -250,11 +272,13 @@ class Launcher:
         desc = getattr(fut, "task", None) or {}
         stdout, stderr = _read(desc.get("stdout")), _read(desc.get("stderr"))
         if fut.exception() is None:
+            record["exit_code"] = 0
             return stdout, stderr
         try:
             code = int(desc.get("exit_code"))
         except (TypeError, ValueError):
             code = -1
+        record["exit_code"] = code
         if timeout_s and code in _TIMED_OUT:
             raise SubprocessError(
                 cmd, -1, stdout, f"timed out after {timeout_s}s"

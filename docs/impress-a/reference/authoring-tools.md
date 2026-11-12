@@ -1,5 +1,26 @@
 # Authoring Tools and Toolkits
 
+## What a tool is, to the system
+
+A tool is three things, read by three different readers:
+
+| part | where | read by | says |
+|---|---|---|---|
+| the **spec** | `toolkits/<tk>/tools/<id>/spec.yaml` | the planner, the composer, the gates | what the tool accepts and produces: typed ports, parameters and their bounds, metrics, QC gates, cost |
+| the **adapter** | the `TaskAgent` subclass `entry:` names | the engine, once per task | how to stage inputs, run the tool and read its output back |
+| the **command builder** | one pure function in the adapter's module | **a person**, and a test | the exact argv the tool runs |
+
+The division matters because **a spec does not say what gets executed** — it has no command,
+executable or environment field. A reasoner chooses a tool and its parameter values from the spec
+alone and never sees a command line. The adapter turns those values into a command, and the
+engine places that command on a compute node. So the adapter is the only place where "which
+command does this system run" can be answered, and the rules below exist to make that answer
+short enough to read.
+
+[`invocation.md`](invocation.md) walks the whole path — spec, request, parameters, argv, placed
+process, recorded command — with the shipped tools' commands written out. Read it once before
+writing an adapter; this page is the how-to that follows from it.
+
 ## Layout
 
 Tools are declarative data plus a behaviour class. A toolkit is a directory:
@@ -22,9 +43,21 @@ a toolkit without forking the package.
 
 ## Adding a tool
 
-1. Write `spec.yaml`.
-2. Write a `TaskAgent` subclass; set `entry:` to its dotted path.
-3. Mention the tool in the toolkit's `SKILL.md`.
+1. **Run the real tool by hand first**, and keep the command that worked. Every flag in an
+   adapter should be one somebody has executed: RFD3 was once invoked with `--config`/`--out`,
+   flags its CLI does not have, on the strength of its documentation.
+2. Write `spec.yaml` (below). Declare a parameter only if step 3 will pass it to the tool.
+3. Write the **command builder**: a module-level function taking the resolved params and the
+   paths it needs, returning the argv, with no I/O in it.
+4. Write the `TaskAgent` subclass around it — override `run()` only — and set `entry:` to its
+   dotted path.
+5. Add known-bad and known-good fixtures under `tests/` (see *QC gates*).
+6. Mention the tool in the toolkit's `SKILL.md`.
+7. Pin the command: add the tool to `_build` in `tests/test_real_toolkits.py`, which gives it
+   the golden-argv test and the declared-parameters test.
+8. Teach `impress-a preflight` about any environment variable or executable it needs, then run
+   `impress-a validate-tasks` on hardware. Admission cannot tell you the binary is missing
+   ([`invocation.md`](invocation.md), finding 1).
 
 **If you find yourself editing the composer, validator or manager to add a tool, the layering is wrong.**
 
@@ -51,6 +84,22 @@ qc_gates:
   - {id: has_secondary_structure, params: {min_ss_fraction: 0.25}}
 cost_model: {unit: invocation, cost: {gpu_hours: 0.03}}
 ```
+
+### What a parameter is for
+
+A `parameters` entry is a promise in two directions. To a **planner** it is a knob: the `trades`
+sentence is how a planner decides whether it may move it (quality and diversity, yes; breadth and
+identity, no — [`resolution.md`](resolution.md) step 6), and the bounds are how far. To the
+**adapter** it is a key that will arrive in `params`, already validated. A parameter that reaches
+no command breaks the first promise silently — a planner can tune it forever with no effect — so
+the test suite refuses one unless it is exempted by name with a reason.
+
+Give a parameter a `null` default only when "unset" is a real state, as with `seed`. It is then
+*absent* from `params` unless something set it, so read it with `params.get(...)`.
+
+Inputs that identify the campaign's target — a ligand SMILES, an input-spec path, a params file —
+are ordinary parameters with an empty-string default. The campaign's `params:` block supplies
+them, so a reasoner never has to know a tool's parameter names to run a campaign correctly.
 
 ### `frozen_parameters` matters as much as `parameters`
 
@@ -145,8 +194,59 @@ class FoldAgent(TaskAgent):
     async def post_process(self, req, raw): ...  # usually inherited: metric extraction + gate execution
 ```
 
-`run()` returns a plain dict with `outputs`, `metrics`, and whatever keys the gates inspect. Do not
-override `execute()`.
+The driver is `TaskAgent.__call__`, which runs the four phases in order and times each. **Override
+`run()` and nothing else**: no shipped adapter overrides another phase, and the inherited
+`parameterize` and `post_process` are what make parameter checks and QC gates impossible to skip.
+`run()` returns a plain dict with `outputs`, `metrics`, and whatever keys the gates inspect.
+
+### The shape of an adapter
+
+```python
+def fold_command(params, *, input_fasta, out_dir, weights) -> list[str]:
+    """THE command `example_fold` runs. Pure: every path is an argument.
+
+    `fold` comes from PATH and `weights` from $FOLD_WEIGHTS; neither is in the spec.
+    """
+    cmd = ["fold", "predict", str(input_fasta), "--out", str(out_dir),
+           "--weights", str(weights), "--recycles", str(params["recycles"])]
+    if params.get("seed") is not None:
+        cmd += ["--seed", str(params["seed"])]
+    return cmd
+
+
+class FoldAgent(TaskAgent):
+    async def run(self, req, params):
+        weights = os.environ.get("FOLD_WEIGHTS")
+        if not weights:                                   # 1. fail loudly, before any work
+            raise RuntimeError("FOLD_WEIGHTS is not set - see scripts/delta_env_setup.sh")
+        sequences = input_path(req, "sequences")          # 2. inputs, by declared port
+        work = workdir_for(req, "fold")                   #    and a directory of its own
+        cmd = fold_command(params, input_fasta=sequences, out_dir=work, weights=weights)
+        await run_cmd(cmd, env=child_env(req),            # 3. the engine runs it, placed
+                      timeout_s=float(self.spec.resources.walltime_s))
+        return {"result": "complex",                      # 4. read the output back
+                "outputs": {"complex": work / "model_0.pdb"},
+                "metrics": _read_confidence(work)}
+```
+
+### The adapter's contract
+
+Each rule is here because breaking it failed quietly at least once.
+
+| rule | why |
+|---|---|
+| **Every command goes through `run_cmd`.** Never `subprocess`, never `os.system` | `run_cmd` submits the command to the engine, which places it on the node's GPU with its thread share and records its argv. A command started any other way runs on the campaign host, unplaced and unrecorded, and nothing says so |
+| **Build the argv in one pure function** | It is the only place a reader can learn what the tool runs, and the only form a test can pin without the binary |
+| **Every declared parameter reaches the command** — a flag, a config-file key or a positional argument | Otherwise it is a knob connected to nothing |
+| **Pass `timeout_s=spec.resources.walltime_s`** | The walltime bounds a command only because the adapter passes it. A call without it is unbounded |
+| **Never pin a GPU or cap threads yourself** | Placement is the engine's, and differs by backend: an environment variable under the concurrent backend, a `Policy` under Dragon. An adapter that set `CUDA_VISIBLE_DEVICES` under Dragon would name a device it was never given |
+| **Pass `env=child_env(req)`**, or a filtered copy of `os.environ` if the child must not see yours | The environment given to a child *replaces* its own, so pass a whole one. `child_env` carries no pinning; the engine adds that |
+| **Write under `workdir_for(req, prefix)`**, and pass absolute paths | `tempfile.mkdtemp()` is local to one node and unreachable from wherever the next task runs. Most commands run with no `cwd`, so a relative path resolves against the campaign's directory, not the tool's |
+| **Read inputs with `input_path(req, port)`** | It resolves by your own declared input port — the wiring the composer computed and gate 1 type-checked. Scanning the upstream payloads mis-wires a node with two typed inputs |
+| **Check environment variables first, and raise** | A missing variable should name itself, not surface as a tool's own confusing failure |
+| **Keep heavy imports inside `run()`** | The module is imported at registry load and in the dry run, on a login node, where `import pyrosetta` costs minutes or does not exist |
+| **Omit a metric you could not read** — never report `0.0` | A fabricated zero turns "the tool broke" into "the design is weak" |
+| **If the tool produces N candidates, select one and say how many** | Report `ensemble_size`; breadth across designs comes from `replicas`, never from a tool's internal N |
 
 ### Outputs are typed handles, not strings
 
@@ -173,12 +273,16 @@ To consume an upstream artifact, `_subprocess.input_path(req, port)` returns the
 resolved by **your own declared input port** — the wiring the composer computed and gate 1
 type-checked. It replaces a helper that scanned the dependency payloads for a matching output name,
 which is right only while a node has exactly one upstream: with two typed inputs it returned
-whichever dependency came first, and that type-checks at composition and mis-wires at runtime. If
-your tool launches a child process, pass `env=_subprocess.child_env(req)` so it inherits the GPU
-pinning for its lineage — the env a concurrent backend pins with, and empty under Dragon, where the
-placement policy does it instead. Write files under `_subprocess.workdir_for(req, prefix)` — which defaults to the process
-CWD, where the launcher has already put you — never `tempfile.mkdtemp()`, whose result is local to
-one node and unreachable from wherever the next task runs.
+whichever dependency came first, and that type-checks at composition and mis-wires at runtime.
+
+### Checking what your tool ran
+
+After a run, `provenance/tasks.jsonl` has one row per task, and its `commands` field lists each
+command as the backend was handed it — your builder's argv, with a `timeout` prefix where the
+engine added one, the GPU it was placed on and its exit code. `work/<prefix>_<node>/` holds what
+you staged and what the tool wrote. Compare the first against your builder and the second against
+what `run()` returned; a tool that exits 0 having written nothing is the failure these files are
+for.
 
 ## Skill documents
 

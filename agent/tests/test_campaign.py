@@ -1589,6 +1589,8 @@ async def test_a_task_reports_its_own_wall_clock(reg, tmp_path):
         "471s off HDD against a 300s budget, and a timeout names a budget, not a cause")
     assert all(r["host"] and r["pid"] for r in timed), \
         "recorded where the task ran, which is the only place that can know"
+    assert all(r["commands"] == [] for r in timed), \
+        "every row says what it executed; a mock shells out to nothing, and says that"
 
 
 async def test_declared_and_measured_cost_are_both_recorded_and_distinct(reg, tmp_path):

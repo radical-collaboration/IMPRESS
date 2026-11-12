@@ -1930,3 +1930,135 @@ def test_the_rfd3_sidecar_metrics_come_from_the_shape_rfd3_actually_writes(tmp_p
     assert got["sheet_fraction"] == 0.0
     # Every metric the spec declares, so the integrity gate that failed on hardware passes.
     assert {"ca_deviation", "ligand_clashes", "helix_fraction", "sheet_fraction"} <= set(got)
+
+
+# -- the command each tool runs, pinned ---------------------------------------------------
+#
+# Every real adapter builds its argv in ONE pure function, so the command can be read in one
+# place and checked without a binary. `docs/impress-a/reference/invocation.md` step 4 is the
+# prose form of the first test here; if a builder changes, that page changes with it.
+
+
+class _Reads(dict):
+    """A params dict that remembers which keys a command builder asked for."""
+
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__(*a, **kw)
+        self.read: set[str] = set()
+
+    def __getitem__(self, key: str) -> Any:
+        self.read.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self.read.add(key)
+        return super().get(key, default)
+
+
+def _defaults(reg, tool: str, **over: Any) -> _Reads:
+    """Every declared parameter at its spec default - `null` defaults included, so a builder
+    that indexes one it should `.get()` is caught here rather than on an allocation."""
+    return _Reads({**{k: p.default for k, p in reg.get(tool).parameters.items()}, **over})
+
+
+def _build(reg, tool: str, **over: Any) -> tuple[_Reads, list[str], Any]:
+    """Run `tool`'s command builder(s) on spec defaults: (params, argv, any config body)."""
+    from impress_a.tools import boltz_agents, ligandmpnn_agents, rfd3_agents, rosetta_agents
+
+    p = _defaults(reg, tool, **over)
+    if tool == "rfd3_design":
+        return p, rfd3_agents.rfd3_command(
+            p, image="/img/foundry.sif", inputs="/w/inputs.json", out_dir="/w",
+            binds=["--bind", "/w:/w"]), None
+    if tool == "ligandmpnn_design":
+        return p, ligandmpnn_agents.ligandmpnn_command(
+            p, python="/venv/bin/python", shim="/w/mpnn_run.py", mpnn_dir="/opt/LigandMPNN",
+            backbone="/in/backbone.pdb", out_dir="/w"), None
+    if tool == "boltz_predict":
+        body = boltz_agents.boltz_input(p, "MKV")
+        return p, boltz_agents.boltz_command(
+            p, input_yaml="/w/boltz_input.yaml", out_dir="/w/out", cache="/cache"), body
+    args = {
+        "packmin": lambda: rosetta_agents.packmin_args(p, structure="/in/s.pdb",
+                                                       out_pdb="/w/packmin.pdb"),
+        "fastrelax": lambda: rosetta_agents.fastrelax_args(p, structure="/in/s.pdb",
+                                                           out_pdb="/w/fastrelax.pdb"),
+        "filter_shape": lambda: rosetta_agents.filter_shape_args(p, structure="/in/s.pdb"),
+    }[tool]()
+    return p, rosetta_agents.worker_command("/venv/bin/python", "/w/worker.py", args,
+                                            "/w/result.json"), None
+
+
+def test_the_command_each_real_tool_runs_at_its_spec_defaults(reg):
+    """The golden argv, per tool. This is what the system drives, readable without a run."""
+    _, rfd3, _ = _build(reg, "rfd3_design")
+    assert rfd3 == [
+        "apptainer", "exec", "--nv", "--bind", "/w:/w", "/img/foundry.sif",
+        "rfd3", "design", "out_dir=/w", "inputs=/w/inputs.json", "skip_existing=False",
+        "dump_trajectories=False", "prevalidate_inputs=True", "diffusion_batch_size=1",
+        "inference_sampler.num_timesteps=50"]
+
+    _, mpnn, _ = _build(reg, "ligandmpnn_design")
+    assert mpnn == [
+        "/venv/bin/python", "/w/mpnn_run.py", "/opt/LigandMPNN",
+        "--model_type", "ligand_mpnn",
+        "--checkpoint_ligand_mpnn", "/opt/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt",
+        "--checkpoint_path_sc", "/opt/LigandMPNN/model_params/ligandmpnn_sc_v_32_002_16.pt",
+        "--pdb_path", "/in/backbone.pdb", "--out_folder", "/w",
+        "--temperature", "0.2", "--batch_size", "8", "--number_of_batches", "1",
+        "--pack_side_chains", "1", "--pack_with_ligand_context", "1",
+        "--number_of_packs_per_design", "1"]
+
+    _, boltz, body = _build(reg, "boltz_predict", ligand_smiles="CCO")
+    assert boltz == [
+        "boltz", "predict", "/w/boltz_input.yaml", "--out_dir", "/w/out", "--cache", "/cache",
+        "--devices", "1", "--accelerator", "gpu", "--diffusion_samples", "8",
+        "--output_format", "pdb", "--no_kernels"]
+    assert body == {"version": 1, "sequences": [
+        {"protein": {"id": ["A"], "sequence": "MKV", "msa": "empty"}},
+        {"ligand": {"id": ["B"], "smiles": "CCO"}}]}
+
+    worker = ["/venv/bin/python", "/w/worker.py"]
+    assert _build(reg, "packmin")[1] == [
+        *worker, "/in/s.pdb", "/w/packmin.pdb", "1", "none", "none", "/w/result.json"]
+    assert _build(reg, "fastrelax")[1] == [
+        *worker, "/in/s.pdb", "/w/fastrelax.pdb", "3", "1", "none", "none", "/w/result.json"]
+    assert _build(reg, "filter_shape")[1] == [
+        *worker, "/in/s.pdb", "none", "/w/result.json"]
+
+
+def test_a_seed_and_the_optional_flags_reach_each_command(reg):
+    assert "seed=7" in _build(reg, "rfd3_design", seed=7)[1]
+    mpnn = _build(reg, "ligandmpnn_design", seed=7, fixed_residues="A16",
+                  pack_side_chains=False)[1]
+    assert mpnn[-4:] == ["--seed", "7", "--fixed_residues", "A16"]
+    assert "--pack_side_chains" not in mpnn
+    _, boltz, body = _build(reg, "boltz_predict", seed=7, use_msa_server=True)
+    assert boltz[-3:] == ["--seed", "7", "--use_msa_server"]
+    assert body["sequences"][0]["protein"]["msa"] == "auto"
+    assert _build(reg, "packmin", seed=7, ligand_params_path="/d/ALR.params")[1][-3:-1] == [
+        "7", "/d/ALR.params"]
+
+
+#: Declared parameters that deliberately reach no command builder, each with its reason. An
+#: entry here is a decision somebody made; a parameter missing from here AND from its builder
+#: is one a planner can move with no effect, which is what this test exists to refuse.
+_NOT_IN_THE_COMMAND = {
+    ("rfd3_design", "input_spec_path"):
+        "reaches the command as `inputs=`, the staged copy `run()` rewrites with absolute paths",
+    ("ligandmpnn_design", "num_seqs"):
+        "retained so an old campaign still loads; `batch_size` x `number_of_batches` replaced it",
+}
+
+
+@pytest.mark.parametrize("tool", CHAIN)
+def test_every_declared_parameter_reaches_its_command(reg, tool):
+    """A parameter the spec declares and the adapter never reads validates, is offered to a
+    planner, lands in provenance - and changes nothing. `ligandmpnn_design.num_seqs` was
+    exactly that, unnoticed, because nothing compared the two lists."""
+    params, _, _ = _build(reg, tool)
+    unread = set(reg.get(tool).parameters) - params.read
+    exempt = {k for t, k in _NOT_IN_THE_COMMAND if t == tool}
+    assert unread == exempt, (
+        f"{tool}: declared but not read by its command builder: {sorted(unread - exempt)}; "
+        f"exempted but in fact read: {sorted(exempt - unread)}")
