@@ -103,6 +103,11 @@ class TaskUsage:
     host: str = ""
     pid: int = 0
     cuda_visible_devices: str = ""
+    #: The commands this task ran on the engine, as the backend was handed them: argv (with
+    #: the `timeout` wrapper where one was added), cwd, placement and exit code - see
+    #: `exec/launch.Launcher.records`. Empty for a tool that shells out to nothing (every
+    #: mock) and for a command run outside the engine.
+    commands: list[dict[str, Any]] = field(default_factory=list)
 
     def as_cost(self, gpus: int, cores: int) -> dict[str, float]:
         """Measured wall time projected onto the budget's own dimensions."""

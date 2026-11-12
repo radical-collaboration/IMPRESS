@@ -181,6 +181,16 @@ async def test_a_command_is_an_engine_task_placed_on_its_lineages_gpu(reg, tmp_p
     for payload in res.per_task.values():
         assert "queued" in payload.usage.phases, "command queue wait is measured apart"
         assert payload.usage.cuda_visible_devices in ("0", "1")
+        # And what ran is on the record, as the backend was handed it - not reconstructed
+        # from the adapter's source by whoever reads provenance later.
+        (cmd,) = payload.usage.commands
+        assert cmd["argv"][:2] == ["sh", "-c"], "no walltime was asked for, so no wrapper"
+        assert cmd["exit_code"] == 0 and cmd["backend"] == "concurrent"
+        assert cmd["placement_env"]["CUDA_VISIBLE_DEVICES"] == str(cmd["gpu_index"])
+        assert cmd["placement_env"]["OMP_NUM_THREADS"] == "3"
+        assert "PATH" not in cmd["placement_env"], \
+            "only what the placement added: the base environment is never recorded"
+        assert cmd["queued_s"] >= 0 and cmd["ran_s"] >= 0
 
 
 def _launch(flow, coro_fn):
@@ -199,6 +209,8 @@ async def test_a_failing_command_raises_the_subprocess_error_adapters_expect(tmp
     finally:
         await flow.shutdown()
     assert err.value.returncode == 3
+    assert [r["exit_code"] for r in launcher.records] == [3], \
+        "a failed command is recorded too, with the code it exited on"
     assert "broken" in err.value.stderr and "partial" in err.value.stdout
 
 
@@ -217,6 +229,10 @@ async def test_a_timed_out_command_is_killed_on_the_backend_and_says_so(tmp_path
         await flow.shutdown()
     assert err.value.returncode == -1 and "timed out after 1" in err.value.stderr
     assert "started" in err.value.stderr, "partial stderr survives the kill"
+    (rec,) = launcher.records
+    assert rec["argv"][:3] == ["timeout", "--kill-after=10", "1"], \
+        "the record is the argv the backend ran, wrapper included - not the adapter's"
+    assert rec["timeout_s"] == 1 and rec["exit_code"] in (124, 137)
     alive = subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True, text=True)
     assert not alive.stdout.strip(), "the command must not outlive its walltime"
 

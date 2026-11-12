@@ -1356,6 +1356,10 @@ class CampaignExecutor:
                 "wall_s": usage.get("wall_s"), "phases": usage.get("phases"),
                 "host": usage.get("host"), "pid": usage.get("pid"),
                 "cuda_visible_devices": usage.get("cuda_visible_devices"),
+                # What was actually executed: the argv each of this task's commands was
+                # submitted with. `stages` records the parameters a planner chose; this is
+                # what they became. Empty for a tool that runs no command.
+                "commands": usage.get("commands") or [],
             })
         for tid, err in outcome.failures.items():
             self._log("tasks", {"run": outcome.run_id, "task": tid, "failed": err,
