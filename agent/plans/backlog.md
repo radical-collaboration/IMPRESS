@@ -7,9 +7,12 @@ paragraph in place rather than being deleted - the evidence that forced them is 
 State it is measured against: local tier green, lint reporting nothing, the import contract clean **and
 now asserted** (`tests/test_layering.py`), all control models
 run, the real Delta chain composes, dry-runs, and passes `impress-a preflight` for the ALR target
-on Delta. **One campaign has completed:** job 22692304 ran all six stages to `6/6 tasks ok`
+on Delta. **Four campaigns have completed.** Job 22692304 ran all six stages to `6/6 tasks ok`
 in 2m53s, admitted on the first attempt, every gate passing, terminating with a one-node front and
-all four objectives valued. One lineage, one cycle, one draw - see A1 for what that does not cover.
+all four objectives valued (one lineage, one cycle, one draw - see A1 for what that does not
+cover). Jobs 22726105 and 22728140 reached and held the trusted path. The current baseline is job
+**23815248**: two lineages on the one-engine loop, `12/12 tasks ok`, one GPU per lineage under
+Dragon's placement policy, one telemetry block span per Stage - see **I1**.
 
 ---
 
@@ -95,6 +98,13 @@ minutes instead of consuming the whole allocation silently. What remains open: *
 rendezvous or OFI/libfabric negotiation under single-node `-s` Dragon mode) is still unknown - that
 needs a person on a real allocation, with the bounded timeout now giving a fast, clear failure to
 iterate against instead of another silent multi-hour loss.
+
+  Two clean data points against the current stack (asyncflow/rhapsody 0.7.0, dragonhpc 0.15.0):
+  jobs 23814643 and 23815248 both brought Dragon up in ~4.5 s, and 23815248 tore it down in 2 s.
+  That is evidence the stall is not routine, not that it is understood. Note the bound is now
+  shared: a locally hosted reasoner's backend is constructed under the same
+  `backend_startup_timeout_s`, and a model's first load is legitimately slower than a worker pool
+  (I4).
 
   **C11 provenance:** the evidence above is job 22318678, which ran the `/work/hdd` checkout
   rather than this one. The measurements stand as measurements; what they cannot be read as is
@@ -348,27 +358,31 @@ width, because the signature includes replica multiplicity and so width 1 does n
 width 4. That is this item's route (a) made available rather than impossible - earning trust at
 width 4 still cannot happen under a realistic budget, and now does not have to.
 
-*Pinning.* `exec/resources.to_backend_description` has a sibling with a caller:
-`Dispatcher._gpu_for(lineage)` assigns one device per lineage, round-robin across
-`SiteCaps.gpus_per_node`, and `TaskRequest.gpu_index` carries it to the adapter. `gpu_env`
-returns `CUDA_VISIBLE_DEVICES` for a concurrent backend and **nothing for Dragon**, because
-local services merges a template's env and applies the placement policy afterwards - so an env
-var there looks like pinning and does nothing, and Dragon needs
-`Policy(gpu_affinity=[gpu_index])` on the process template instead.
+*Pinning.* One device per lineage, round-robin across `SiteCaps.gpus_per_node`, decided at
+submission and rendered per command. Two mechanisms, because resource shapes are not portable:
+on the concurrent backend the child's environment carries `CUDA_VISIBLE_DEVICES`; under Dragon
+it must **not**, because local services merges a template's env and applies the placement policy
+afterwards - an env var there looks like pinning and does nothing. Dragon gets
+`Policy(host_name=…, gpu_affinity=[g])` instead.
 
-*Pinning, completed in phase 9.* The adapters now apply it, and two things changed on the way.
-The assignment is no longer the adapter's to interpret: `exec/dispatch.node_task` resolves it to
-an environment where the backend is known and puts the result on `TaskRequest.gpu_env`, which an
-adapter merges through `_subprocess.child_env(req)` without asking which case it is in. An adapter
-deciding for itself would have to know its backend, and setting `CUDA_VISIBLE_DEVICES=2` inside a
-process Dragon had already restricted to one device points it at a device it was never given. And
-the **Runner path had no pinning at all** - `StagePipeline` registered every task without a
-`gpu_index`, so this item was fixed on the Dispatcher and reintroduced by omission on the path a
-Delta campaign selects with `runner: impress`. `gpu_for` is now shared by both loops, for the same
-reason `node_task` is.
+*Pinning, completed in phase 9 and rebuilt on the one-engine branch.* The assignment was never
+the adapter's to interpret, and now it is not even the node's: `exec/stage.StageExecutor._gpu_for`
+picks the device, `exec/resources.placement_for` turns it into a `Placement`, and
+`Placement.describe` renders it per command - a Dragon process template with a `Policy`
+(`_dragon_policy`, `exec/resources.py:67-82`), or a child environment on concurrent
+(`exec/resources.py:113`). A GPU is assigned only to a tool that declares one, so a CPU stage is
+never pinned to a device it would hold idle. The earlier version of this paragraph described
+`to_backend_description`, `gpu_env`, `TaskRequest.gpu_env`, `Dispatcher._gpu_for` and
+`StagePipeline`, none of which exist now; `TaskRequest.gpu_index` survives.
 
-**Still open:** `replicas > 1` has still never executed on hardware. Nothing here has seen a GPU,
-so the pinning is asserted against the factory's own arguments and not against `nvidia-smi`.
+**CLOSED for width 2 by job 23815248.** `replicas: 2` ran `12/12 tasks ok` with lineage 0 on GPU 0
+and lineage 1 on GPU 1, confirmed by per-device sampling (`gpusample.csv` shows GPUs 2-3 idle
+throughout) rather than by the factory's own arguments, and the two lineages produced different
+metrics - which is the independence evidence this item was written for.
+
+**Still open:** the declared width of **4**, which has never completed a campaign (arm A of job
+23671024 reached four distinct lineages at `rfd3_design` only), and the budget/signature half -
+route (b) and `impress-a trust --assert --replicas`, neither exercised on hardware.
 
 **A11. Wall time varies 3.2x between identical runs, and the cost models are single samples.**
 `rfd3_design` took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
@@ -537,7 +551,8 @@ holds whatever the executor does around it.
 
 **The coverage gap behind it, which is the more useful finding.**
 `test_lying_tool_is_caught_by_qc` is the only test in the suite that produces a QC FAIL, and
-it drives `Dispatcher` directly - so `_log_task_telemetry` never runs for it. Every test that
+it drives the Stage executor directly rather than a campaign - so `_log_task_telemetry` never
+runs for it. Every test that
 DOES go through the executor uses tools that pass. So the expression was exercised on every
 task in the suite and never once on a non-empty list.
 
@@ -757,6 +772,15 @@ against a 0.75 bound, 0 of 3.
 running work is not, and the backend does not report which happened. Closing this needs cooperative
 cancellation inside task agents, or a backend that can kill a process.
 
+  **Narrowed on the one-engine branch.** Every command is its own engine task with a walltime, and
+  asyncflow 0.7.0 sends a cancel to the backend the task was routed to, so a block cancel now
+  reaches each unfinished member rather than a side-channel future (`exec/stage.py`, pinned by
+  `tests/test_stage_block.py`). What is left is exactly two things. On the **concurrent** backend
+  a cancel still leaves the child process alive - rhapsody's `cancel_task` cancels its own
+  coroutine only (`plans/upstream/rhapsody-concurrent-cancel-leaves-process-running.md`), and the
+  `timeout --kill-after` wrapper is the bound there. Under **Dragon**, a cancel reaching a running
+  command has never been exercised on hardware; see I6.
+
 **C5. The out-of-process reasoner has no entry points.** `RemoteSession` and the routes it needs
 exist and are covered end to end, but only `tests/` ever constructs a `ControlPlaneServer` — there is
 no `impress-a serve` (executor side, inside the allocation, holding the plane open) and no
@@ -765,7 +789,8 @@ from the test suite and not from a shell, which is the state `docs/impress-a/ref
 already describes as "implemented".
 
 **RESOLVED** (phase 7 of `control-plane-refactor.md`). `impress-a serve <spec>` runs the
-execution process - executor, Reviewer, Deployer, Runner, the one asyncflow engine - with no
+execution process - executor, Reviewer, Deployer, the Stage executor, the one asyncflow engine -
+with no
 reasoner at all, behind `ControlPlaneServer`, and prints the URL it bound. `impress-a control
 --connect <url> --campaign <id> --model X` runs the Spec and Planning loops in their own
 process against `RemoteSession`. The split is now reachable from a shell, which is what this
@@ -814,7 +839,7 @@ takes the campaign id from that file's own parent directory, which cannot disagr
 server because `InProcessControlPlane.register` keys on the same `spec.campaign_id`. It drives
 with `--model B`, not `--model C`: the caller **is** the reasoner, and C on that side would build
 the inbox halves a second time and stop after one `--caller-timeout` with nobody steering the
-steerer. The refusal message at `cli/__init__.py:742` still prints `--model C` for the control
+steerer. The refusal message at `cli/__init__.py:838` still prints `--model C` for the control
 line and is wrong about it; left alone here because amending the text would change nothing that
 runs, but it is the one place a reader is told the deadlocking thing.
 
@@ -995,12 +1020,18 @@ upstream; their fix holds `flock -x 200` across the whole check-and-repair and w
 (`run_small_molecule_binding.py:134-143`). We set none, with `replicas: 4` and three CPU-bound P2
 stages.
 
-  **RESOLVED.** `_thread_caps` (`cli/__init__.py`) applies upstream's sizing at campaign start.
-  Placed there rather than in an adapter because it is the only layer that knows both numbers: a
-  `TaskRequest` carries no concurrency information and an agent cannot see how many siblings it
-  has. Applied with `setdefault`, so an operator's own export wins - and the log reports the
-  *effective* value, not the computed one, so a run is never described as something it is not.
-  `run_cmd` passes `env=None`, so every child inherits these without any adapter change.
+  **RESOLVED**, and the mechanism changed on the one-engine branch. It was `_thread_caps` in
+  `cli/__init__.py`, applied with `setdefault` to the campaign process's own environment at
+  start-up, which every child then inherited. That is gone (`_thread_caps` has no occurrences in
+  the tree). Caps are **per command** now: `exec/resources.thread_caps` builds the five variables
+  plus `OMP_WAIT_POLICY=PASSIVE` into each command's environment (`exec/resources.py:35`,
+  `:111`), sized by `thread_share(cpu_share, concurrency, replicas)` - upstream's own arithmetic,
+  still from the cgroup rather than `os.cpu_count()`. An operator's export still wins, because
+  `thread_caps` reads `os.environ` for each key before supplying its own value.
+
+  The move is not cosmetic: a process-global cap set at start-up leaks into every sibling
+  campaign under an enclosing manager, where the first one to start would win for all of them.
+  Per command, a caller that passes its own grant gets its own sizing.
 
 **C10. `$HOME` leaks into the rfd3 container.** apptainer mounts `$HOME` by default; upstream does
 `unset PYTHONPATH PYTHONUSERBASE PYTHONDONTWRITEBYTECODE; export PYTHONNOUSERSITE=1` (set, not
@@ -1144,7 +1175,7 @@ graphs against them. Already concrete: the smoke campaign's original budget reje
 run. Early campaigns should record actual-vs-estimated per tool.
 
 **E3. The whole rate half of the budget ledger is inert.** `BudgetLedger` is constructed as
-`BudgetLedger(limits=dict(spec.budget))` (`runtime/executor.py:230`) and never given
+`BudgetLedger(limits=dict(spec.budget))` (`runtime/executor.py:232`) and never given
 `walltime=`, so `burn_rate()` returns an empty `BurnRate` on every call it will ever receive
 (`core/budget.py:166-167`) and `project()` with it. `Walltime` itself, and `Commitment` with
 `commit`/`release_commitment`/`committed`, are constructed nowhere outside `tests/test_core.py`
@@ -1157,13 +1188,32 @@ how `sites/*.yaml` stayed inert for a release. Found while writing
 
 ## F. Documentation debt
 
-**F1. No ADR records the decoupling** — the largest architectural change in the repo, including the
-`on_rejected` scope change (per-cycle → per-experiment, now enforced in two places) and the rebuttal
-to `planning/phase3-prior-art/04-patterns-for-phase4.md:41`. Now also owes the process boundary: that
-`CampaignSession` is the split, that a second `WorkflowEngine` or a second event loop is *not* (an
-engine is bound to its creating loop), and that `interpret` belongs to whoever collects the outcome —
-it moved from `CampaignExecutor._reap` to `SequentialPolicyDriver._collect`, which removed the
-executor's only call into the reasoner.
+**F1. No ADR records the decoupling — RESOLVED by ADR 0015** (`docs/impress-a/decisions/0015-one-engine-and-the-process-boundary.md`,
+commit `cacef46`). It was the largest architectural change in the repo and had no record at all.
+
+0015 carries the process half this row named: that `CampaignSession` is the split, that a second
+`WorkflowEngine` or a second event loop is **not** (an engine is bound to its creating loop), why
+there are two processes and not the three the outline asked for, and what the boundary does and
+does not buy - "mutually non-blocking" is three hazards, and a process boundary answers two of
+them. It carries the engine half alongside: named routes, Stage-as-block, per-command placement,
+and the dropped `impress` dependency.
+
+**Not covered, deliberately:** the `on_rejected` scope change (per-cycle → per-experiment, enforced
+in two places) and the rebuttal to `planning/phase3-prior-art/04-patterns-for-phase4.md:41`; and
+that `interpret` belongs to whoever collects the outcome - it moved from `CampaignExecutor._reap`
+to `SequentialPolicyDriver._collect`, which removed the executor's only call into the reasoner.
+Those are decisions about the reasoner contract rather than about either boundary, and belong in
+a record of their own. **F1a** carries them.
+
+**F1a. No record of the reasoner-contract rulings F1 carried and ADR 0015 did not.** Split out of
+F1 on 2026-11-11 so the ADR's scope stays honest. Three rulings, all live, none written down
+anywhere a reader would find them: the `on_rejected` scope change (per-cycle → per-experiment,
+enforced independently in `runtime/roles._deploy` and `runtime/executor.py` because a `conduct`
+reasoner is under no obligation to honour `max_attempts`); the rebuttal to
+`planning/phase3-prior-art/04-patterns-for-phase4.md:41`; and that `interpret` belongs to whoever
+collects the outcome, which is what removed the executor's only call into a reasoner. A short ADR,
+or a section in the control-models reference - but not nothing, because all three are the kind of
+rule a later change silently violates.
 
 **F2. ADRs 0003, 0005, 0007 unamended** — the interlock's per-signature concurrency rule; ADR 0005's
 "fixed at launch" now needing the reattach policy-identity check that `RunService` provides but
@@ -1175,9 +1225,18 @@ nothing enforces; ADR 0007's per-client cursor. ADR 0007 also now owes the five 
 it needs appear in `frontends.md` or `architecture.md`, and `limitations.md` does not mention that a
 `conduct` policy collecting for itself must now call `interpret` for itself.
 
+  **Narrowed (2026-11-11, commit `6ac3a3c`).** `frontends.md` now carries the operation table with
+  `infer`, what the two-process split is and is not for, and the liveness bound's two conditions;
+  `architecture.md` has a section on the one engine and both boundaries. Still missing: the
+  `RemoteSession` *class* and its route-by-route mapping, and the `interpret` note in
+  `limitations.md`.
+
 **F3. `planning/phase2-middleware/05-integration-map.md:60`** still claims there is no way to
-enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists in asyncflow 0.5.1,
-but no lookup API does.
+enumerate the tasks of a run. Softened, not false: `workflow_id` tagging exists, and on the
+installed asyncflow 0.7.0 no lookup API does either - re-checked, not carried over from the 0.5.1
+note this row used to cite. The engine's own telemetry is the nearest thing now: a block span per
+Stage with its members under it, which enumerates a run's tasks after the fact rather than during
+it.
 
 **F5. `docs/impress-a/reference/` documented the pre-phase-11 policy layer, and one page a test names did
 not exist — RESOLVED.** Opened and closed in the same commit, because the evidence is the useful
@@ -1376,9 +1435,15 @@ The LigandMPNN stderr, the actual failure, was lost with it.
   `test_real_toolkits.py::test_subprocess_error_survives_the_worker_boundary`. It is the only
   custom exception raised inside a worker. **Still open:** rhapsody should catch `Exception`
   around `get_stdout`/`get_stderr` and fail the one task instead of the sweep. That is an upstream
-  report, not a vendored patch. We have no per-run wall-clock bound that would catch the hang
-  either, so any third-party exception with the same shape (a required-arg `__init__` that does
-  not forward those args to `super()`) reproduces it.
+  report, not a vendored patch.
+
+  **Two halves have since moved.** The wall-clock gap is closed: every command carries a bound now
+  (`timeout --kill-after` on concurrent, Dragon's own task timeout under Dragon), so a dropped
+  completion can no longer sit until walltime unnoticed. And the exposure narrowed - adapters run
+  as `function_task(backend=LOCAL)` in the campaign process and only binaries go to Dragon, so
+  `SubprocessError` no longer crosses a Dragon pickle boundary at all. `__reduce__` and its test
+  therefore guard a path nothing takes; keep or retire is I9's call. A third-party exception of
+  the same shape raised inside a Dragon worker still reproduces the upstream half.
 
   **C11 provenance:** the evidence above is job 22536706, which ran the `/work/hdd` checkout
   rather than this one. The measurements stand as measurements; what they cannot be read as is
@@ -1451,9 +1516,14 @@ settling the measured figure instead would change what admission refuses for eve
 once. Their ratio is the number this item wanted, and above 1.0 it says a declared figure has
 fallen below measurement, at which point gate 5 refuses work that would in fact fit.
 
-**Still open:** the hardware-side half. `gpusample.csv`, `sacct` and `seff` are the launcher's
-to collect, and nothing yet measures GPU occupancy from inside the allocation - so "GPU-busy at
-most 17%" remains the last word until an arm runs with the sampler attached.
+**Still open:** the arm-scale half. The sampler has since run twice - job 23814643 (GPU 0 peak
+1659 MiB, GPU 1 peak 5415 MiB) and job 23815248 (GPUs 0-1 busy, 2-3 idle) - and the engine's own
+telemetry now gives a span per Stage with every command under it, so per-lineage placement is
+readable off a trace. What is still missing is an occupancy figure for a full multi-cycle arm, so
+"GPU-busy at most 17%" remains the last word there.
+
+  Read `cost_measured` from this branch onward with care: it no longer includes the time a command
+  spent queued, which is recorded separately as `usage.phases["queued"]`. See I8.
 
 **G9. The run export omitted `sacct.json`, so C3 could not be reproduced off-cluster — RESOLVED.**
 `performance_analysis` was written on Delta with sacct reachable, and
@@ -1630,7 +1700,7 @@ the same spec the first cycle's execute window came back 0.118, 0.114, **1.110**
 0.104, 0.117, 0.115, 0.113 s. It is not the knob setting and not the tools - the union of
 task spans is ~2ms in every one of those runs.
 
-`radical/asyncflow/workflow_manager.py` line ~1358: the run-component loop waits on its
+`radical/asyncflow/workflow_manager.py:1651` (0.7.0; it was ~1358 on 0.5.1): the run-component loop waits on its
 `_component_change_event` with `timeout=1.0`, so when the first batch of tasks is registered
 just after the loop enters `asyncio.wait`, nothing wakes it until the timeout expires. One
 second, once, at the head of a campaign.
@@ -1640,7 +1710,9 @@ noise; on the mock tier it is 90% of the first cycle, which is why every wall-cl
 the lab draws says so in its caption. It is also the kind of latency that would matter if the
 engine were ever used for many short tasks. Upstream, not ours: record it here so the next
 person measuring agent overhead on short tasks does not spend the afternoon looking for it in
-`exec/dispatch.py`.
+our own code. (The figures above were taken on asyncflow 0.5.1, when a dispatch loop of ours
+still existed; per-Stage scheduling is `exec/stage.py` now and per-command submission
+`exec/launch.py`, and the 1.0 s wait is still upstream's. Worth re-measuring before quoting.)
 
 **G17. A campaign cannot raise a quality knob that survives its own first refinement.** Found
 while checking `docs/impress-a/reference/resolution.md` step 6 against provenance rather than against the
@@ -1878,9 +1950,10 @@ locals, 3 `zip(strict=)`, 2 semicolons, 2 `N806`, 1 `E741`, 1 `B904`). `N818` is
 worked around — an `Error` suffix on `CampaignAborted`, `CampaignStopped`, `SubmissionRejected` and
 `BackendConstructionTimeout` would falsify every sentence in `docs/impress-a/decisions/`, `plans/done/` and
 `CLAUDE.md` that names them, for no runtime benefit; the reason sits beside the `ignore` entry.
-`.github/workflows/agent-tests.yml` runs `ruff check src tests` before the suite, and its path
-filter now includes `src/impress/**` and the root `pyproject.toml`, because this package now
-depends on the root one. **The ceiling is zero**, stated in `CLAUDE.md`, so a finding is a
+`.github/workflows/ci.yml` runs `ruff check src tests` before the suite. Its path filter used to
+include `src/impress/**` and the root `pyproject.toml` because this package depended on the root
+one; that dependency is gone (`d9420bc`), and so is the separate `agent-tests.yml` workflow this
+paragraph named. **The ceiling is zero**, stated in `CLAUDE.md`, so a finding is a
 regression rather than a budget — which is the only form in which a ceiling is worth anything.
 One measurement worth keeping: the 3.2× spread between the numbers quoted here came from *which
 config resolved*, not from drift, and that is why the table a tool reads must live next to the code
@@ -2086,8 +2159,8 @@ reproduction costs 3 LLM calls and no allocation:
 `impress-a mock-lab --only arms --reasoners A --model-profile <profile> --reasoner-repeats 1`.
 
 **G18. A campaign can be watched by exactly one listener, and a listener that raises kills it.**
-`executor._log:313-321` is the only hook out of a running campaign, and `prov_sink` is a single
-slot: `control/plane.py:104` and `cli/__init__.py:887` both assign it, so attaching the control
+`executor._log:356-378` is the only hook out of a running campaign, and `prov_sink` is a single
+slot: `control/plane.py:105` and `cli/__init__.py:884` both assign it, so attaching the control
 plane to a campaign **silently evicts the log heartbeat** and vice versa — whichever ran last
 wins, and nothing says so. The call is also unguarded, where the reasoner's equivalent sink
 catches (`policy/reasoning.py:175`), so a sink raising takes down the thing holding the
@@ -2097,7 +2170,7 @@ writing `docs/impress-a/reference/observation.md` (finding 3).
 
 **RESOLVED.** `_prov_listeners` is a list, `add_prov_listener` appends without displacing, and
 `prov_sink` survives as a property over the first listener so no existing caller had to move.
-Both competing assigners now append: `control/plane.py:104` and `cli/__init__.py:890`. Each
+Both competing assigners now append: `control/plane.py:105` and `cli/__init__.py:884`. Each
 call is wrapped, with `prov_dropped` counting failures so a subscriber that has gone deaf is
 discoverable rather than invisible - `_log` runs on every settlement and every absorption, so
 a listener that raised was aborting a campaign from inside the record of work already finished,
@@ -2107,9 +2180,9 @@ which is the most expensive place in the system to raise. Pinned by
 fail against the single unguarded slot.
 
 **G19. Watching a campaign disarms the protection against not watching it.** `observe()` calls
-`touch()` (`runtime/executor.py:489`), which sets the `_last_contact` that `_control_lost_for`
+`touch()` (`runtime/executor.py:504`), which sets the `_last_contact` that `_control_lost_for`
 reads to decide a caller has vanished and the campaign should drain and stop. The coupling is
-deliberate and documented at `:448-455` — the Listener polls `observe()` every cycle, so no
+deliberate and documented at `:505-511` — the Listener polls `observe()` every cycle, so no
 heartbeat operation was added, and inventing one would have put ADR 0007 in play. The
 consequence is not: **a caller that only observes holds the clock open indefinitely**, so the
 bound cannot distinguish a steering caller from a monitoring one, and a reasoner that died
@@ -2119,9 +2192,9 @@ need either a non-touching read or an explicit statement that liveness is the ca
 
 **G20. Spending reported out of a campaign is declared, not measured — so a caller cannot
 learn what we cost.** `_settle` charges `results.cost` (`runtime/executor.py:1127`), documented
-*"DECLARED, summed - unchanged on purpose"* (`exec/dispatch.py:34`), and declared figures sit
+*"DECLARED, summed - unchanged on purpose"* (`exec/dispatch.py:37`), and declared figures sit
 multiples above measurement deliberately because they feed gates that *refuse* graphs (E2,
-A11). `ExecutionResults.cost_measured` is **already summed per run** (`exec/dispatch.py:38`)
+A11). `ExecutionResults.cost_measured` is **already summed per run** (`exec/dispatch.py:41`)
 and folded into no ledger, so `BudgetLedger` has no measured dimension and neither does any
 observation. Inside one campaign that is harmless — the budget should reserve pessimistically.
 Across a boundary it is not: an enclosing manager told our spend is told the inflated figure,
@@ -2141,7 +2214,7 @@ are not equal - they differ even in the mock tier.
 
 **G21. The chain a campaign declared is not the chain admission enforces.** `_admit_once`
 composes against the whole `Registry` and reports `available: self.reg.ids()`
-(`runtime/executor.py:617-638`); nothing restricts a submitted Stage to `CampaignSpec.stages`.
+(`runtime/executor.py:673-694`); nothing restricts a submitted Stage to `CampaignSpec.stages`.
 The bound holds by construction for every shipped planner, because the `ToolkitView` they are
 shown is narrowed by `view_of(reg, spec.stages)` (`tools/view.py:55`) — but it is a property of
 the policies, not a gate, and an external caller under model C is shown the narrowed view and
@@ -2194,10 +2267,12 @@ time ~0.05 s each (the watcher's poll). Both nodes failed acceptance gates only 
 1 also shape complementarity 0.533 and complex pLDDT 0.504) - weak designs, not defects, as in
 every run so far - so the front is empty. Per-stage wall times are in line with job 22692304
 (rfd3 46 s, LigandMPNN 15 s, packmin 15 s, fastrelax 40 s, filter_shape 5 s, Boltz 92-94 s). Not
-exercised: a block cancel reaching a running Dragon command, and a Dragon task timeout.
+exercised: a block cancel reaching a running Dragon command, and a Dragon task timeout - **those
+two are I6 now**, because a closed row owns nothing.
 
 **I2. Upstream gaps, each worked around in code and marked for removal.** File them; none needs
-anything from us beyond the report.
+anything from us beyond the report. Four are listed here, two in I4 and one - the Dragon
+process-group leader - in I1, which is closed; **I10** owns the filing for all seven.
 
 - *rhapsody, concurrent backend:* `cancel_task` cancels its own coroutine and leaves the child
   process running (reproduced with a `sleep`). Workaround: on the concurrent backend every
@@ -2244,6 +2319,86 @@ Needs a model choice first.
 **I5. `TaskUsage.host`/`pid` changed meaning.** They name where the adapter ran - the campaign host,
 on the `local` route - not where the binary ran. The binary's host is in the engine's telemetry.
 Any analysis that grouped measured cost by `host` needs to read it from there instead.
+
+**I6. Two Dragon paths are built and have never been exercised there.** Recorded inside I1 and
+lifted out when I1 closed, because a closed row owns nothing.
+
+  *A cancel reaching a command that is already running.* Job 23815248 never cancelled anything. On
+  the concurrent backend a cancel demonstrably does not stop a running child (C4), and under
+  Dragon the behaviour is simply unknown.
+
+  *The task-timeout mapping.* `exec/launch.py:243-248` decides that a Dragon "cancelled" task was
+  really a timeout by comparing elapsed time against the walltime, because Dragon reports both the
+  same way. A genuine cancel arriving near walltime would therefore be reported as a timeout. The
+  classification is a guess that has never met the event it classifies.
+
+  Both fit in one short Delta job alongside whatever runs next; neither needs its own allocation.
+
+**I7. Command concurrency is bounded on the concurrent backend only.** `exec/stage.command_slots`
+returns `None` for any other backend kind (`exec/stage.py:44-54`), so under Dragon the number of
+simultaneous commands is whatever the graph plus `concurrency` produce, bounded by Dragon's own
+worker pool and nothing of ours. That is deliberate - the semaphore exists to work around
+rhapsody's concurrent backend bypassing its executor (I2) - but nothing records what the Dragon
+bound actually is, and width 2 is the widest that has run.
+
+**I8. `cost_measured` changed meaning, and nothing comparing runs knows it.** `exec/dispatch.py`
+now subtracts the Launcher's queue time from `usage.wall_s` and records it separately as
+`usage.phases["queued"]`. A measured figure from this branch is therefore not comparable with one
+recorded before it. This touches more than it looks: **A11** (the declared-vs-measured ratio),
+**G8**, the `cost_measured / cost_estimated <= 1.0` row that `impress-a validate-tasks` fails on,
+and the four-arm pre-registration, whose baselines were measured on the deleted dispatcher - so a
+pre/post comparison now crosses an execution-substrate change that `impress-a compare`'s
+one-variable guard cannot see. Decide whether the arms are re-baselined or the comparison is
+declared void, and say so in `arms-preregistration.md` before any arm is re-run.
+
+**I9. Two workarounds now guard paths nothing takes.** `SubprocessError.__reduce__`
+(`tools/_subprocess.py:40`) and its test exist for a Dragon worker-pickle boundary that tool work
+no longer crosses, since adapters run as `function_task(backend=LOCAL)` and only binaries go to
+Dragon (G6). And `tests/data/dispatcher_parity_campaign.json` freezes a recording of a deleted
+implementation: it is good evidence that the block executor reproduced the dispatcher, and there
+is no way to regenerate it. Keep both with a note saying why, or retire them - but not leave them
+unexplained, which is how a future reader concludes the old path still exists.
+
+**I10. Nobody owns filing the seven upstream reports.** `plans/upstream/` holds seven documents
+written to be filed; none has been. I2 lists four, I4 holds the two vLLM ones, and the Dragon
+process-group defect was inside I1, which is closed - so after that closure it had no owning row
+at all. It does now, here. Filing is outward-facing and is the user's call, not an agent's.
+
+**I11. `exec/dispatch.py` is named after something that no longer exists.** It holds `node_task`
+and `ExecutionResults`; the dispatch loop it was named for is `exec/stage.py` (per Stage) and
+`exec/launch.py` (per command). Cheap to rename, and the reason to bother is that four rows in
+this file and the Verification section cited it by that name while describing the deleted loop.
+
+**I12. The test that justifies the two-process split was never shipped.**
+`control-plane-refactor.md:580-582` specifies `test_a_blocking_specifier_does_not_stall_execution`
+- a Specifier that sleeps **synchronously**, with tasks required to keep completing - and
+`:1283` calls it "the test that justifies the split, and the one that fails without it". It does
+not exist under that name or that semantics. What shipped is
+`tests/test_split_process.py::test_the_pump_reaps_while_the_control_side_is_slow`, whose slow
+planner stalls with `await asyncio.sleep(0.25)` (`:160`).
+
+  That matters because an *async* stall is survived by one process too - `manager.run` races
+  `pump()` against `conduct()` - so the shipped test exercises a property the split does not
+  uniquely provide, and its own docstring says as much: "in one process that independence is a
+  property of the loop; across a socket it is a property of the process boundary". The one thing
+  the boundary uniquely buys is therefore untested. Either write the synchronous-stall test, or
+  record that we do not claim that property. ADR 0015 states the gap; it does not close it.
+
+**I13. Arm C has never run on Delta, so the only measurement of what the split costs is unmade.**
+`arms-preregistration.md:155-159` pins B and C to the same client and the same profile, differing
+only in process topology, so a B-vs-C gap is plane latency, directive round-trips and the
+`--caller-timeout` boundary - the one pre-registered question about the boundary that data could
+answer. It has never been run on hardware, and G12 records that the steering caller does not
+exist. Cheap relative to what it settles, and it should be scheduled before anything is concluded
+about whether the two-process topology is worth its complexity.
+
+**I14. ADR 0005 says the control model is fixed at launch; nothing says what a role is.**
+`control-plane-refactor.md:880-881` committed to amending 0005 to read "Specifier and Planner are
+**concurrent roles** with distinct scopes, both fixed at launch". The amendment was never written,
+and the code went the other way: `runtime/roles.conduct` awaits `_respecify` and then
+`planner.plan` **sequentially** in one coroutine, which is correct - a plan consumes the revision
+just made - but is not what the plan said. Amend 0005 to say sequential, or record the divergence.
+Leaving a planned amendment unwritten is how the next reader infers concurrency that is not there.
 
 ## Recommended order
 
@@ -2370,7 +2525,8 @@ because of it, and both stopped admitting anything the moment it went.
 ## Verification that applies to any item
 
 **`impress-a validate-tasks <spec>` on an allocation, before trusting a toolkit.** It executes
-each Task of the chain once, in dependency order, through the ordinary composer and dispatcher,
+each Task of the chain once, in dependency order, through the ordinary composer and Stage
+executor,
 and checks: it ran; it is not from the `mock` toolkit; the `[phase]` breakdown is there, so
 import time is separable from work; every declared output port produced, with its declared
 `ArtifactType`, on disk, above a size floor; every declared metric reported and **finite**;

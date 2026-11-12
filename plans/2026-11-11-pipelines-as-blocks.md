@@ -19,8 +19,15 @@ what a block now gives natively:
 IMPRESS-A (`agent/`) made this move on branch `agent/one-engine`: each Stage is a block
 (`agent/src/impress_a/exec/stage.py`). Its parity test replays a campaign recorded from the
 loop it replaced and gets the same result. A cancel test shows that a queued command never
-starts once its Stage is cancelled. That loop never ran on hardware, which is why the agent did
-not wait for this change.
+starts once its Stage is cancelled.
+
+**That loop has since run on hardware** (updated 2026-11-11): job **23815248** on Delta ran a
+two-lineage campaign on it to `12/12 tasks ok` in 3m45s, with one GPU per lineage under Dragon's
+placement policy, a single telemetry block span per Stage carrying every command, and a teardown
+that returned in 2 s. So the evidence this row was waiting for exists, in the sibling package: the
+block executor is not merely parity-tested against the loop it replaced, it has run the real
+six-tool chain under Dragon. What it has *not* exercised is a cancel reaching a running Dragon
+command, which is the half of the case most relevant to `kill_parent`.
 
 ## The mapping
 
