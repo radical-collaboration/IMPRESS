@@ -122,23 +122,20 @@ def workflow_config(spec_path: str | Path, *, name: str | None = None, model: st
     for warning in offer.warnings:
         log.warning("offer: %s", warning)
 
-    declared = {d: offer.cost[d].expected for d in _BILLED if d in offer.cost}
-    if "wall_hours" in offer.cost:
-        # AuCaM prorates an unreported spend against this, so too SMALL a figure makes the
-        # proration exceed 100% and cancel a campaign that is behaving normally. The offer
-        # reports the ceiling for exactly this reason.
-        declared["wall_hours"] = offer.cost["wall_hours"].expected
-
     config = {
         "name": name or offer.campaign_id,
         "block": make_impress_worker(spec_path, model=model, guard=guard,
                                      report_interval_s=report_interval_s),
-        "declared_spending": declared,
         # Our own budget, which the campaign already enforces from the inside: gate 5 and the
         # interlock refuse an unaffordable graph BEFORE a task runs. AuCaM's cancel is a
         # backstop, not the mechanism.
         "spending_limit": {d: offer.cost[d].ceiling for d in _BILLED
                            if d in offer.cost and offer.cost[d].bounded_by_budget},
+        # Minimum viable budget: the cost of one minimal cycle.  When AuCaM would pass a
+        # spending_limit below this, the launch is pointless — gate 5 would reject it
+        # immediately.  AuCaM drops it at the scheduler level (unfit_dropped++) instead.
+        "budget_floor": {d: offer.cost[d].floor for d in _BILLED
+                         if d in offer.cost and offer.cost[d].floor > 0},
         "resources": {"cpus": offer.resources.cores, "gpus": offer.resources.gpus},
         "supports_pause": True,
         # The offer declares the report interval so a caller's staleness bound can be a

@@ -1363,7 +1363,8 @@ class CampaignExecutor:
             })
         for tid, err in outcome.failures.items():
             self._log("tasks", {"run": outcome.run_id, "task": tid, "failed": err,
-                                "cycle": rec.turn})
+                                "cycle": rec.turn,
+                                "commands": getattr(err, "command_records", [])})
 
     def _settle_stage_tasks(self, rec: RunRecord, outcome: RunOutcome) -> None:
         """Move this run's TaskRecords out of DEPLOYED.

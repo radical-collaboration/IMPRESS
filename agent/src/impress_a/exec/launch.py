@@ -233,9 +233,11 @@ class Launcher:
         self.records.append(record)
 
         submitted = time.monotonic()
-        if self.slots is not None:
-            await self.slots.acquire()          # waiting for a slot is queueing too
+        _slot_acquired = False
         try:
+            if self.slots is not None:
+                await self.slots.acquire()      # waiting for a slot is queueing too
+                _slot_acquired = True
             if self.cancelled:
                 raise asyncio.CancelledError(f"{self.node}: its Stage was cancelled")
             fut = task(**kwargs)
@@ -251,7 +253,7 @@ class Launcher:
                 fut.cancel()
                 raise
         finally:
-            if self.slots is not None:
+            if self.slots is not None and _slot_acquired:
                 self.slots.release()
         finished = time.monotonic()
         started = started if started is not None else submitted

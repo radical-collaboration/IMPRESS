@@ -197,12 +197,19 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
                           input_ports={port: out for port, _, out in wiring})
         token = LAUNCHER.set(launcher)
         launcher.entered()
+        res = None
         try:
             res = await agent(req)
+        except Exception as _e:
+            # Attach command records to the exception so the executor can include
+            # them in the failure log — otherwise argv/exit_code are silently lost.
+            _e.command_records = list(launcher.records)  # type: ignore[attr-defined]
+            raise
         finally:
             LAUNCHER.reset(token)
             launcher.left()
         usage = res.usage
+        usage.commands = list(launcher.records)
         if launcher.commands:
             # Time a command spent waiting for the backend is the backend's, not the tool's:
             # counting it would read a saturated pool as a slow tool, and `cost_measured`
@@ -210,7 +217,6 @@ def node_task(flow: Any, reg: Registry, node_id: str, tool_id: str,
             usage.phases["queued"] = round(launcher.queued_s, 6)
             usage.wall_s = round(max(0.0, usage.wall_s - launcher.queued_s), 6)
             res.cost_measured = usage.as_cost(spec.resources.gpus, spec.resources.cores)
-        usage.commands = list(launcher.records)
         usage.cuda_visible_devices = ("" if placement.gpu_index is None
                                       else str(placement.gpu_index))
         return {"tool": res.tool, "outputs": res.outputs, "metrics": res.metrics,
