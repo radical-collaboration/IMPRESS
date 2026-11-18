@@ -291,24 +291,24 @@ in the package that imports AuCaM, which `tests/test_layering.py` asserts, so th
 stays optional and one file wide.
 
 ```python
-from impress_a.integrations.aucam import reward_fn, workflow_config
+from impress_a.integrations.aucam import impress_backends, reward_fn, workflow_config
 
-config = workflow_config("campaigns/delta-small-molecule.yaml", model="D")
+spec = "campaigns/delta-small-molecule.yaml"
+config = workflow_config(spec, model="D")
 # -> an AuCaM WorkflowConfig: spending_limit and budget_floor from the offer,
 #    resources from its resource shape, max_wall_time_s from its wall ceiling,
 #    supports_pause=True, stale_timeout_s at 4x the report interval the offer declares.
 policy = BanditSchedulingPolicy(reward_fn=reward_fn)
+cm = CampaignManager(backend=await impress_backends(spec))   # AuCaM's engine, our routes
 ```
 
 Four things in that adapter are decisions rather than plumbing, and each is a defect avoided:
 
-- **It does not declare `flow`.** AuCaM passes its shared engine to a block that asks for
-  one. Taking it would be wrong twice: `WorkflowEngine.__init__` captures the loop it is built
-  on, and the executor must build its own through `exec.backend.make_engine_bounded`, which
-  also bounds Dragon's synchronous startup. There is no "use this engine instead" seam, and
-  inventing one is how jobs 22328172 and 22328262 spent their allocations on an engine that
-  dispatched nothing. The price is that our tasks are invisible to the caller's per-task
-  telemetry — which is why spending travels in our own reports.
+- **It runs on the caller's engine.** The block declares `flow`, and the caller builds its
+  manager over `impress_backends(spec)`, so the one engine carries our `compute` and `local`
+  routes and our tasks are cancelled with the workflow (CON-1). It is built on the caller's
+  running loop, so the throwaway-loop hazard of jobs 22328172 and 22328262 does not arise;
+  a missing route fails at start, naming the fix.
 - **The caller's spending limit becomes the campaign's own budget**, narrowing it and never
   loosening it. A limit enforced from outside can only cancel a campaign after it has
   overspent; the same number as a budget is refused by `reserve` and gate 5 before a task
@@ -321,7 +321,7 @@ Four things in that adapter are decisions rather than plumbing, and each is a de
   them it charges the resources it gave us x run time, an estimate far above what a
   campaign uses (finding 8).
 
-The campaign is still ours throughout: it keeps the engine, the outer loop and the decision to
+The campaign is still ours throughout: it keeps the outer loop and the decision to
 stop, and the caller gets no privilege over campaign state that a policy would not have. That
 is [decision 0014](../decisions/0014-an-enclosing-campaign-manager-is-not-a-control-model.md),
 and `tests/test_aucam.py` runs a real AuCaM campaign over a real IMPRESS-A one to prove the

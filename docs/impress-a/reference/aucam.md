@@ -11,7 +11,8 @@ back through `reporter.emit()`. One IMPRESS-A campaign is one such workflow.
 ## The seam
 
 ```
-   AuCaM  ── launches the block ──►   impress_a_<spec>(reporter, context)
+   AuCaM  ── launches the block ──►   impress_a_<spec>(reporter, context, flow)
+     │       flow (AuCaM's engine) ───────┤  our tasks run on its compute/local routes
      │       spending_limit ──────────────┤  narrows CampaignSpec.budget
      │       resources ───────────────────┤  fits concurrency
      │                                    │
@@ -19,8 +20,8 @@ back through `reporter.emit()`. One IMPRESS-A campaign is one such workflow.
      │       metrics, iteration)          │
      └──── PAUSE / RESUME ───────────────►┘  gates admission only
                                           │
-                                   the campaign keeps its own engine,
-                                   its own cycle loop, and the decision to stop
+                                   the campaign keeps its own cycle loop
+                                   and the decision to stop
 ```
 
 Two modules, and the split is deliberate:
@@ -55,7 +56,8 @@ What `integrations/aucam.py` exposes:
 | Function | What it is for |
 |---|---|
 | `workflow_config(spec_path, …)` | An AuCaM `WorkflowConfig` for one whole campaign, built from the same `impress-a offer` a caller could read for itself |
-| `make_impress_worker(spec_path, …)` | The block function AuCaM launches. Builds the campaign *inside* the coroutine |
+| `impress_backends(spec_path)` | The backends to build AuCaM's engine over: `CampaignManager(backend=await impress_backends(spec))` |
+| `make_impress_worker(spec_path, …)` | The block function AuCaM launches. Builds the campaign *inside* the coroutine, on the `flow` AuCaM passes |
 | `reward_fn(result)` | A `WorkflowResult` as a reward in `[0, 1]`, for `BanditSchedulingPolicy(reward_fn=…)` |
 | `report_once(manager, reporter)` | One digest on demand, for a campaign somebody else is driving |
 
@@ -166,8 +168,7 @@ cannot express is *which* ref the commit came from:
 
 | Ref | Relationship to the pin |
 |---|---|
-| `aucam-v2` | the pinned commit is this branch's **tip** |
-| `devel` (upstream default) | a different, **older** commit — the pin is ahead of it |
+| `devel` (upstream default) | the pinned commit is the merge of `aucam-v2` into `devel` |
 | `main` / `master`, newest tag `v0.2.1` | the pre-v2 line |
 
 So the adapter is written against an in-progress branch that upstream has not merged or tagged,
@@ -177,14 +178,18 @@ And if that branch is rebased, force-pushed or deleted once it lands, a pinned S
 fetchable and `pip install -e ".[aucam]"` fails — a red CI run whose cause is in another
 repository. `aucam` is not on PyPI, which is why the extra is a git requirement at all.
 
-**The adapter does not take AuCaM's engine.** AuCaM passes its shared `WorkflowEngine` to a block
-that asks for one; this block does not declare `flow`. `WorkflowEngine.__init__` captures the loop
-it is built on, and the executor builds its own through the only sanctioned constructor,
-`exec.backend.make_engine_bounded`, which also bounds Dragon's synchronous startup. There is no
-"use this engine instead" seam, and inventing one is how two allocations were spent on an engine
-that dispatched nothing. The cost of not taking it is that our tasks are invisible to AuCaM's
-per-task telemetry, so its task-level charging never applies — which is why spending travels in our
-own reports.
+**The campaign runs on AuCaM's engine** (CON-1). AuCaM creates one `WorkflowEngine` per campaign
+and passes it to a block that declares `flow`; this one does. The caller builds its manager over
+`impress_backends(spec)` — the `compute` and `local` routes (and `ai` for a locally hosted
+reasoner), built and bounded exactly as a standalone campaign's own are — so the engine carries
+every route our tasks are sent to, and the executor checks that at start. Our tasks then run
+inside AuCaM's block for this workflow: cancelling the workflow cancels them, and they are in
+AuCaM's telemetry and load. The engine is built on AuCaM's running loop, which is the loop the
+block runs on, so the hazard behind jobs 22328172 and 22328262 (an engine built on a throwaway
+loop) does not arise. The executor neither starts the engine's telemetry nor shuts it down; AuCaM
+owns both, and leaves backends it was given to the caller to shut down. Run standalone, with no
+`flow`, the executor builds its own engine as before. Spending still travels in our own reports
+until AsyncFlow puts a task's requested resources on its events (AuCaM gap X1).
 
 **Liveness runs outward.** `control_liveness_timeout_s` cannot protect a campaign under an
 enclosing manager: the pump calls `observe()`, and `observe()` calls `touch()`, which refreshes the

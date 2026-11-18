@@ -197,19 +197,25 @@ async def make_ai_backend(inference: dict[str, Any]) -> Any:
     return await PromptResults(backend)
 
 
-async def _engine_over(compute, work_dir: str, ai: Any = None):
-    """The one engine: `compute` first, so it is the default route, then `local`, then `ai`
-    when the campaign's reasoner is a locally hosted model.
+async def _routes(compute, ai: Any = None) -> list[Any]:
+    """The engine's backends: `compute` first, so it is the default route, then `local`, then
+    `ai` when the campaign's reasoner is a locally hosted model.
 
-    Called on the caller's loop - the `local` backend's async init and the engine both bind
-    to it (module docstring). `local` is asyncflow's own thread backend rather than rhapsody's
-    concurrent one: it needs no rhapsody, and nothing routed there is ever pickled.
+    Called on the caller's loop - the `local` backend's async init binds to it, as the engine
+    built over these will (module docstring). `local` is asyncflow's own thread backend rather
+    than rhapsody's concurrent one: it needs no rhapsody, and nothing routed there is ever
+    pickled.
     """
-    from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+    from radical.asyncflow import LocalExecutionBackend
     local = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=LOCAL_WORKERS),
                                         name=LOCAL)
-    backends = [compute, local] + ([ai] if ai is not None else [])
-    return await WorkflowEngine.create(backend=backends, work_dir=work_dir)
+    return [compute, local] + ([ai] if ai is not None else [])
+
+
+async def _engine_over(compute, work_dir: str, ai: Any = None):
+    """The one engine, over `_routes(compute, ai)`."""
+    from radical.asyncflow import WorkflowEngine
+    return await WorkflowEngine.create(backend=await _routes(compute, ai), work_dir=work_dir)
 
 
 async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir: str = "",
@@ -218,6 +224,31 @@ async def make_engine(kind: str, config: dict[str, Any] | None = None, work_dir:
     `ai` when an inference backend is passed."""
     backend = await make_backend(kind, config)
     return await _engine_over(backend, work_dir, ai), backend
+
+
+async def make_routes(kind: str, config: dict[str, Any] | None = None,
+                      ai: Any = None) -> list[Any]:
+    """The backends `make_engine` would build its engine over, for a caller that owns the
+    engine instead - AuCaM's `CampaignManager(backend=[...])` (CON-1)."""
+    return await _routes(await make_backend(kind, config), ai)
+
+
+def routes_of(flow: Any, *names: str) -> dict[str, Any]:
+    """`{name: backend}` for an engine somebody else built, checked for the routes we need.
+
+    asyncflow keeps an engine's backends in `_backends`; there is no public accessor. A
+    missing route fails here, at start, rather than as asyncflow's decoration-time
+    `ValueError` the first time a task is routed to it.
+    """
+    have = dict(getattr(flow, "_backends", None) or {})
+    missing = [n for n in names if n not in have]
+    if missing:
+        raise RuntimeError(
+            f"the engine passed in has backend(s) {sorted(have) or '<none>'} but this campaign "
+            f"routes tasks to {list(names)}; missing {missing}. Build the caller's engine over "
+            f"`make_routes()` (under AuCaM: `CampaignManager(backend=await "
+            f"impress_backends(spec_path))`).")
+    return have
 
 
 async def probe_topology(backend: Any) -> list[dict[str, Any]]:
@@ -281,6 +312,28 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
     if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS:
         return await make_engine(kind, config, work_dir, ai=ai)
 
+    async def finish(backend):
+        return await _engine_over(backend, work_dir, ai), backend
+
+    return await _bounded(kind, config, timeout_s, heartbeat_s, finish)
+
+
+async def make_routes_bounded(kind: str, config: dict[str, Any] | None, timeout_s: float,
+                              heartbeat_s: float, ai: Any = None) -> list[Any]:
+    """`make_routes`, bounded exactly as `make_engine_bounded` bounds `make_engine`."""
+    if timeout_s <= 0 or kind.lower() in _CHEAP_KINDS:
+        return await make_routes(kind, config, ai=ai)
+
+    async def finish(backend):
+        return await _routes(backend, ai)
+
+    return await _bounded(kind, config, timeout_s, heartbeat_s, finish)
+
+
+async def _bounded(kind: str, config: dict[str, Any] | None, timeout_s: float,
+                   heartbeat_s: float, finish: Any) -> Any:
+    """Construct the compute backend on a daemon thread, then `finish(backend)` on our loop,
+    all within `timeout_s`."""
     fut: Future = Future()
     threading.Thread(target=_construct_backend_in_thread, args=(kind, config, fut),
                      daemon=True, name="backend-construct").start()
@@ -311,8 +364,7 @@ async def make_engine_bounded(kind: str, config: dict[str, Any] | None,
         remaining = timeout_s - (time.monotonic() - t0)
 
         async def _finish():
-            backend = await _init_backend(be)
-            return await _engine_over(backend, work_dir, ai), backend
+            return await finish(await _init_backend(be))
 
         try:
             if remaining <= 0:

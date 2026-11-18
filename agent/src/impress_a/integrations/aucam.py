@@ -5,8 +5,10 @@ workflow as an `async def` taking a reporter, gives it a spending limit and reso
 its spending, may pause or cancel it, and reads its progress back through `reporter.emit()`.
 Decision 0014 says what that makes it - a caller, and specifically NOT control model C, which
 is a reasoner over `CampaignSession` that publishes Specs and submits Stages. AuCaM steers no
-Spec and plans no Stage. It owns the process; IMPRESS-A keeps the engine, the outer loop and
-the decision to stop.
+Spec and plans no Stage. It owns the process and the engine (CON-1): the caller builds its
+`CampaignManager` over `impress_backends()`, so AuCaM's one engine has our `compute` and
+`local` routes, and our tasks run - and are cancelled - inside AuCaM's block for this
+workflow. IMPRESS-A keeps the outer loop and the decision to stop.
 
 **The only module in this package that imports AuCaM**, which `tests/test_layering.py`
 asserts, so the dependency stays optional and one file wide.
@@ -76,6 +78,25 @@ def _aucam() -> Any:
 # ---------------------------------------------------------------------------
 # What the caller needs before it launches anything
 # ---------------------------------------------------------------------------
+
+
+async def impress_backends(spec_path: str | Path) -> list[Any]:
+    """The backends to build AuCaM's engine over: `CampaignManager(backend=await
+    impress_backends(spec))`.
+
+    `[compute, local]`, plus `ai` when the campaign's reasoner is a locally hosted model -
+    the routes our tasks are sent to by name, `compute` first so it is the engine's default.
+    Built from the spec's `backend` and `backend_config`, bounded by its
+    `backend_startup_timeout_s` exactly as a standalone campaign's own engine is. Await it on
+    the loop AuCaM will run on: a backend binds to the loop its async init runs on.
+
+    AuCaM does not shut down backends it was given, so the caller shuts them down when it is
+    done with the manager (`await b.shutdown()` for each).
+    """
+    from ..cli import load_spec  # noqa: PLC0415 - see module docstring
+    from ..runtime.executor import engine_routes  # noqa: PLC0415
+
+    return await engine_routes(load_spec(str(spec_path)))
 
 
 def reward_fn(result: Any) -> float:
@@ -253,20 +274,25 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
     `get_running_loop().create_future()` when it dispatches, so a manager built in the closure
     would bind to whatever loop imported this module.
 
-    **It does not declare `flow`.** AuCaM passes its shared engine to a block that asks for
-    one, and taking it would be wrong twice over: `WorkflowEngine.__init__` captures the loop
-    it is built on, and the executor builds its own through the only sanctioned constructor,
-    `exec.backend.make_engine_bounded`, which also bounds Dragon's synchronous startup. There
-    is no "use this engine instead" seam, and inventing one here is how jobs 22328172 and
-    22328262 spent their full allocations on an engine that dispatched nothing. The cost of
-    not taking it is that our tasks are invisible to AuCaM's per-task telemetry, so its
-    task-level charging never applies - which is why spending travels in our own reports.
+    **It declares `flow`** (CON-1), so AuCaM passes its one engine and the campaign runs on
+    it: its tasks are inside AuCaM's block for this workflow, so cancelling the workflow
+    cancels them, and AuCaM sees them in its own telemetry and load. The engine must carry
+    our routes - build AuCaM's manager over `impress_backends()` - and the executor checks
+    that at start rather than at the first task. It was built on AuCaM's running loop, which
+    is the loop this coroutine runs on, so the loop hazard that jobs 22328172 and 22328262
+    hit (an engine built on a throwaway loop) does not arise. Called with no `flow`, the
+    campaign builds its own engine as it does standalone.
+
+    Spending still travels in our own reports: AuCaM charges per task only once AsyncFlow
+    puts a task's requested resources on its events (X1), and the measured figures are the
+    better ones meanwhile.
     """
     from ..cli import build_roles, load_spec  # noqa: PLC0415
     from ..manager import CampaignManager  # noqa: PLC0415
     from ..tools.registry import Registry  # noqa: PLC0415
 
-    async def impress_a_campaign(reporter: Any, context: dict | None = None) -> None:
+    async def impress_a_campaign(reporter: Any, context: dict | None = None,
+                                 flow: Any = None) -> None:
         ctx = context or {}
         spec = load_spec(str(spec_path))
         if narrowed := _narrow_budget(spec, ctx.get("spending_limit")):
@@ -280,7 +306,8 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
         # this process's environment, which every sibling workflow would also inherit.
         cpus = int((ctx.get("resources") or {}).get("cpus", 0) or 0)
 
-        mgr = CampaignManager(spec, build_roles(model, spec, guard), Registry().load())
+        mgr = CampaignManager(spec, build_roles(model, spec, guard), Registry().load(),
+                              flow=flow)
         mgr.executor.cpu_share = cpus or None
         sink = _ReporterSink(reporter)
         result = await run_with_sink(mgr, sink, period_s=report_interval_s)

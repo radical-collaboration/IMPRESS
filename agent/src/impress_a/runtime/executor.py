@@ -223,10 +223,27 @@ class RunRecord:
 log = logging.getLogger(__name__)
 
 
+async def engine_routes(spec: CampaignSpec) -> list[Any]:
+    """The backends this campaign's engine is built over, for a caller that owns the engine.
+
+    `[compute, local]`, plus `ai` when the reasoner is a locally hosted model - the same
+    routes, built the same bounded way, as `CampaignExecutor.start` uses for its own engine.
+    """
+    from ..exec.backend import make_ai_backend, make_routes_bounded
+    ai = await make_ai_backend(spec.inference) if spec.inference else None
+    return await make_routes_bounded(spec.backend, spec.backend_config,
+                                     spec.backend_startup_timeout_s,
+                                     spec.backend_startup_heartbeat_s, ai=ai)
+
+
 class CampaignExecutor:
     def __init__(self, spec: CampaignSpec, policy: Any = None,
-                 registry: Registry | None = None):
+                 registry: Registry | None = None, flow: Any = None):
         self.spec, self.policy = spec, policy
+        #: An engine somebody else built and owns - AuCaM's, when this campaign runs as one of
+        #: its workflows (CON-1). `start()` then uses it instead of building one, and neither
+        #: starts its telemetry nor shuts it down: those are the owner's.
+        self._injected_flow = flow
         self.reg = registry or Registry().load()
         self.tree = CampaignTree()
         self.budget = BudgetLedger(limits=dict(spec.budget))
@@ -1431,6 +1448,31 @@ class CampaignExecutor:
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self) -> None:
+        if self._injected_flow is not None:
+            await self._start_on_injected_engine()
+        else:
+            await self._start_own_engine()
+        threads = thread_share(self.cpu_share, self.spec.concurrency, self.spec.replicas)
+        log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
+                 f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
+        hosts = tuple(str(n["id"]) for n in self.topology if n.get("id"))
+        self.dispatcher = StageExecutor(self.flow, self.reg, self.spec.backend,
+                                        gpus_per_node=self.spec.site.gpus_per_node,
+                                        threads=threads, hosts=hosts,
+                                        command_slots=command_slots(self.spec.backend,
+                                                                    self.spec.backend_config),
+                                        gpu_offset=self._model_gpus())
+        self.jobs.record(event="campaign_started",
+                         campaign=self.spec.campaign_id,
+                         policy=getattr(self.policy, "name", "?"))
+        self._log("campaign", {"spec": self.spec.campaign_id, "goal": self.spec.goal,
+                               "seed_salt": self.spec.seed_salt,
+                               "policy": getattr(self.policy, "name", "?"),
+                               "objectives": [o.model_dump()
+                                              for o in self.spec.objectives],
+                               "budget": self.spec.budget})
+
+    async def _start_own_engine(self) -> None:
         from ..exec.backend import make_engine_bounded, probe_topology
         # Logged either side because this call is the only stretch of a campaign that
         # precedes its own provenance: rhapsody's Dragon backend builds `Batch()` - the
@@ -1453,26 +1495,20 @@ class CampaignExecutor:
         self.topology = await probe_topology(self._backend)
         self._check_site_against_topology()
         await self._start_telemetry()
-        threads = thread_share(self.cpu_share, self.spec.concurrency, self.spec.replicas)
-        log.info("placement: %d thread(s) per CPU-bound command (%s)", threads,
-                 f"{self.cpu_share} cores granted" if self.cpu_share else "from the cgroup")
-        hosts = tuple(str(n["id"]) for n in self.topology if n.get("id"))
-        self.dispatcher = StageExecutor(self.flow, self.reg, self.spec.backend,
-                                        gpus_per_node=self.spec.site.gpus_per_node,
-                                        threads=threads, hosts=hosts,
-                                        command_slots=command_slots(self.spec.backend,
-                                                                    self.spec.backend_config),
-                                        gpu_offset=self._model_gpus())
-        self.jobs.record(event="campaign_started",
-                         campaign=self.spec.campaign_id,
-                         policy=getattr(self.policy, "name", "?"))
-        self._log("campaign", {"spec": self.spec.campaign_id, "goal": self.spec.goal,
-                               "seed_salt": self.spec.seed_salt,
-                               "policy": getattr(self.policy, "name", "?"),
-                               "objectives": [o.model_dump()
-                                              for o in self.spec.objectives],
-                               "budget": self.spec.budget})
 
+    async def _start_on_injected_engine(self) -> None:
+        """Run on the caller's engine: check it has our routes, and probe its compute one."""
+        from ..exec.backend import AI, COMPUTE, LOCAL, probe_topology, routes_of
+        need = (COMPUTE, LOCAL) + ((AI,) if self.spec.inference else ())
+        self.flow = self._injected_flow
+        self._backend = routes_of(self.flow, *need)[COMPUTE]
+        log.info("engine: running on the caller's engine (routes %s)", ", ".join(need))
+        self.topology = await probe_topology(self._backend)
+        self._check_site_against_topology()
+        if self.spec.telemetry_checkpoint_s > 0:
+            log.warning("engine: telemetry_checkpoint_s=%s is ignored - the engine belongs to "
+                        "the caller, which starts and stops its telemetry",
+                        self.spec.telemetry_checkpoint_s)
     async def pump(self) -> None:
         """Reap runs as they finish, for as long as the campaign runs.
 
@@ -1560,7 +1596,7 @@ class CampaignExecutor:
             await self.drain()
         finally:
             self._fail_waiters(err or CampaignStopped(self.stop_reason))
-            if self.flow is not None:
+            if self.flow is not None and self._injected_flow is None:
                 await self._shutdown_engine()
 
     async def _start_telemetry(self) -> None:

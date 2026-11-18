@@ -49,9 +49,11 @@ _DELEGATED = ("tree", "budget", "prov", "jobs", "trust", "reg", "root", "cycle",
 
 
 class CampaignManager:
-    def __init__(self, spec: CampaignSpec, policy: Any, registry: Registry | None = None):
+    def __init__(self, spec: CampaignSpec, policy: Any, registry: Registry | None = None,
+                 flow: Any = None):
         self.spec, self.policy = spec, policy
-        self.executor = CampaignExecutor(spec, policy, registry)
+        #: `flow`: an engine the caller owns (AuCaM's, CON-1); see `CampaignExecutor`.
+        self.executor = CampaignExecutor(spec, policy, registry, flow=flow)
         self.session = InProcessSession(self.executor)
         self.runs = RunService(self.executor)
         #: The role driver, once `run()` has built one. See `_roles`.

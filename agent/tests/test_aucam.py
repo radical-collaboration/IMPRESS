@@ -23,6 +23,7 @@ from impress_a.cli import load_spec  # noqa: E402
 from impress_a.integrations.aucam import (  # noqa: E402
     _narrow_budget,
     _ReporterSink,
+    impress_backends,
     make_impress_worker,
     reward_fn,
     workflow_config,
@@ -188,17 +189,15 @@ async def test_a_pause_from_aucam_is_translated_into_the_bridges_own_vocabulary(
     assert await sink.poll() == RESUME
 
 
-async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_what_it_reported():
+async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_what_it_reported(
+        monkeypatch):
     """The whole integration, end to end, through AuCaM's own manager.
 
     Everything else in this file tests a seam. This runs the real thing: AuCaM builds its own
     spec from our `WorkflowConfig`, launches the workflow, runs its policy cycles, charges the
     spending we reported and terminates on its controller's goal - while IMPRESS-A runs its own
-    cycle loop on its own engine inside.
-
-    Two engines are live at once, which is the arrangement the adapter exists to make safe: we
-    do NOT accept AuCaM's `flow`, because `WorkflowEngine.__init__` captures the loop it is
-    built on and the executor must build its own through `make_engine_bounded`.
+    cycle loop inside, on AuCaM's engine (CON-1): the manager is built over
+    `impress_backends()`, the worker takes `flow`, and the campaign builds no engine of its own.
 
     The assertion that matters is the last one. AuCaM charges a workflow from `metrics[dim]`
     when the workflow reports it and resources x run time when it does not, and our limit
@@ -214,22 +213,34 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
         LaunchRule,
     )
 
+    from impress_a.exec import backend as backend_mod
+
     config = workflow_config(SPEC, name="impress", report_interval_s=0.1)
+    backends = await impress_backends(SPEC)
+    assert [b.name for b in backends] == ["compute", "local"]
+
+    async def no_second_engine(*a, **kw):
+        raise AssertionError("the campaign built its own engine instead of using AuCaM's")
+    monkeypatch.setattr(backend_mod, "make_engine_bounded", no_second_engine)
 
     class _OneRun(CampaignController):
         def __init__(self) -> None:
             super().__init__(rules=[LaunchRule("impress")], goal_type="impress", goal_n=1)
 
-    outcome = await CampaignManager().run(CampaignSpec(
-        name="impress-under-aucam",
-        budget=CampaignBudget(capacity={"cpus": 1024, "gpus": 64},
-                              max_concurrent_workflows=1, max_concurrency_per_workflow=1,
-                              spending={"gpu_hours": 5.0, "cpu_hours": 30.0}),
-        controller=_OneRun(),
-        workflows=[config],
-        scheduling_policy=BanditSchedulingPolicy(reward_fn=reward_fn),
-        policy_interval_s=0.1,
-        shutdown_timeout_s=20.0))
+    try:
+        outcome = await CampaignManager(backend=backends).run(CampaignSpec(
+            name="impress-under-aucam",
+            budget=CampaignBudget(capacity={"cpus": 1024, "gpus": 64},
+                                  max_concurrent_workflows=1, max_concurrency_per_workflow=1,
+                                  spending={"gpu_hours": 5.0, "cpu_hours": 30.0}),
+            controller=_OneRun(),
+            workflows=[config],
+            scheduling_policy=BanditSchedulingPolicy(reward_fn=reward_fn),
+            policy_interval_s=0.1,
+            shutdown_timeout_s=20.0))
+    finally:
+        for b in backends:
+            await b.shutdown()
 
     assert outcome.completed == {"impress": 1}, f"completed={outcome.completed}"
     assert not outcome.cancelled and not outcome.failed
@@ -244,3 +255,17 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
     assert 0.0 <= charged < limit, (
         f"AuCaM charged {charged} cpu_hours against a limit of {limit} - a figure at or "
         f"above the limit means it did not read our reported metrics")
+
+
+async def test_a_worker_given_an_engine_without_our_routes_says_so_at_start():
+    """AuCaM's default engine has one unnamed backend; ours routes tasks to `compute` and
+    `local`. That must fail at start naming the fix, not hang or fail at the first task."""
+    from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+
+    flow = await WorkflowEngine.create(backend=await LocalExecutionBackend(name="default"))
+    try:
+        with pytest.raises(RuntimeError, match="impress_backends"):
+            await make_impress_worker(SPEC, report_interval_s=0.05)(
+                _Recording(), context={}, flow=flow)
+    finally:
+        await flow.shutdown()
