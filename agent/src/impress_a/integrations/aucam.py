@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.decision import CampaignDigest
-from .reporting import PAUSE, RESUME, Bridge, run_with_sink
+from .reporting import PAUSE, RESUME, Bridge, deliver, run_with_sink
 
 log = logging.getLogger("impress_a.aucam")
 
@@ -125,7 +125,7 @@ def _spending_limit(offer: Any) -> dict[str, float]:
 
 def workflow_config(spec_path: str | Path, *, name: str | None = None, model: str = "D",
                     report_interval_s: float = 30.0, guard: bool = True,
-                    offer: Any = None, **overrides: Any) -> Any:
+                    offer: Any = None, on_message: Any = None, **overrides: Any) -> Any:
     """An AuCaM `WorkflowConfig` for one whole IMPRESS-A campaign.
 
     Built from the same `impress-a offer` a caller could read for itself, so the numbers
@@ -145,7 +145,8 @@ def workflow_config(spec_path: str | Path, *, name: str | None = None, model: st
     config = {
         "name": name or offer.campaign_id,
         "block": make_impress_worker(spec_path, model=model, guard=guard,
-                                     report_interval_s=report_interval_s),
+                                     report_interval_s=report_interval_s,
+                                     on_message=on_message),
         # Our own budget, which the campaign already enforces from the inside: gate 5 and the
         # interlock refuse an unaffordable graph BEFORE a task runs. AuCaM's cancel is a
         # backstop, not the mechanism.
@@ -225,6 +226,13 @@ class _ReporterSink:
         log.info("ignoring an AuCaM signal this adapter does not act on: %r", decision)
         return None
 
+    async def messages(self) -> list[tuple[str, Any]]:
+        """AuCaM's `PolicyResult.messages` to this workflow, as `(name, payload)`."""
+        take = getattr(self.reporter, "messages", None)
+        if take is None:
+            return []
+        return [(m.name, m.payload) for m in await take()]
+
 
 def _narrow_budget(spec: Any, limit: dict[str, float] | None) -> list[str]:
     """Make the caller's spending limit the campaign's own budget.
@@ -265,7 +273,7 @@ def _fit_resources(spec: Any, resources: dict[str, float] | None) -> None:
 
 
 def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool = True,
-                        report_interval_s: float = 30.0) -> Any:
+                        report_interval_s: float = 30.0, on_message: Any = None) -> Any:
     """An AuCaM block function running one whole IMPRESS-A campaign.
 
     The config is captured in this closure and the campaign is built inside the coroutine,
@@ -286,6 +294,12 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
     Spending still travels in our own reports: AuCaM charges per task only once AsyncFlow
     puts a task's requested resources on its events (X1), and the measured figures are the
     better ones meanwhile.
+
+    **Messages from AuCaM's controller** (`PolicyResult.messages`) go to
+    `on_message(manager, name, payload)` - e.g. `("model", {...})` when a fine-tuned model is
+    promoted. The type's sticky values arrive in `context["messages"]` and are applied before
+    the campaign starts; later ones while it runs, through the bridge (`Bridge`). What a
+    message means to the campaign - which model a role uses, say - is the handler's to decide.
     """
     from ..cli import build_roles, load_spec  # noqa: PLC0415
     from ..manager import CampaignManager  # noqa: PLC0415
@@ -309,8 +323,11 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
         mgr = CampaignManager(spec, build_roles(model, spec, guard), Registry().load(),
                               flow=flow)
         mgr.executor.cpu_share = cpus or None
+        for msg_name, payload in (ctx.get("messages") or {}).items():
+            deliver(mgr, on_message, msg_name, payload)
         sink = _ReporterSink(reporter)
-        result = await run_with_sink(mgr, sink, period_s=report_interval_s)
+        result = await run_with_sink(mgr, sink, period_s=report_interval_s,
+                                     on_message=on_message)
         log.info("campaign %s ended: %s (%d report(s) emitted)",
                  result.campaign_id, result.stop_reason, sink.emitted)
 

@@ -168,7 +168,8 @@ cannot express is *which* ref the commit came from:
 
 | Ref | Relationship to the pin |
 |---|---|
-| `devel` (upstream default) | the pinned commit is the merge of `aucam-v2` into `devel` |
+| `impress_a` | the pinned commit is this branch's **tip**: `devel` plus the fixes for IMPRESS-A (guarded policy cycle, backend list, workflow messages) |
+| `devel` (upstream default) | an **older** commit — the pin is ahead of it until `impress_a` is merged |
 | `main` / `master`, newest tag `v0.2.1` | the pre-v2 line |
 
 So the adapter is written against an in-progress branch that upstream has not merged or tagged,
@@ -190,6 +191,19 @@ loop) does not arise. The executor neither starts the engine's telemetry nor shu
 owns both, and leaves backends it was given to the caller to shut down. Run standalone, with no
 `flow`, the executor builds its own engine as before. Spending still travels in our own reports
 until AsyncFlow puts a task's requested resources on its events (AuCaM gap X1).
+
+**Messages from AuCaM's controller reach `on_message`.** AuCaM's controller can send running
+workflows data with `PolicyResult.messages` — for IMPRESS-A, typically `("model", {...})` when a
+fine-tuned model is promoted. `workflow_config(…, on_message=fn)` / `make_impress_worker(…,
+on_message=fn)` takes the handler, called as `fn(manager, name, payload)`. A *sticky* message
+(sent to the workflow type) is also given to every campaign AuCaM launches later, in
+`context["messages"]`; the worker applies those before the campaign starts. Messages sent while
+it runs come through the bridge's tick (`_ReporterSink.messages()` → `Bridge._messages`),
+between the executor's mutating blocks, like `observe()`. The handler therefore may change
+campaign state but must not block — loading weights belongs in a task it starts — and one that
+raises costs a log line, not the run. Without a handler, messages are logged and dropped. What a
+message means to the campaign (which role or tool uses which model) is the handler's decision;
+the adapter only delivers it.
 
 **Liveness runs outward.** `control_liveness_timeout_s` cannot protect a campaign under an
 enclosing manager: the pump calls `observe()`, and `observe()` calls `touch()`, which refreshes the

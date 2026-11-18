@@ -43,8 +43,9 @@ class _Recording(LocalDictReporter):
     sequence, and the one value AuCaM would actually read afterwards.
     """
 
-    def __init__(self, signals: dict | None = None) -> None:
-        super().__init__("wf-1", {}, signals if signals is not None else {})
+    def __init__(self, signals: dict | None = None, messages: dict | None = None) -> None:
+        super().__init__("wf-1", {}, signals if signals is not None else {},
+                         messages=messages if messages is not None else {})
         self.reports: list = []
 
     async def emit(self, **kw) -> None:
@@ -269,3 +270,42 @@ async def test_a_worker_given_an_engine_without_our_routes_says_so_at_start():
                 _Recording(), context={}, flow=flow)
     finally:
         await flow.shutdown()
+
+
+async def test_messages_from_aucam_reach_on_message_at_launch_and_while_running():
+    """A promoted model reaches the campaign two ways: the type's sticky value in
+    `context["messages"]` before it starts, and a message while it runs (`PolicyResult.messages`
+    -> `reporter.messages()` -> the bridge -> `on_message`)."""
+    got: list = []
+
+    def on_message(manager, name, payload):
+        assert manager.executor is not None
+        got.append((name, payload))
+
+    sent = {"seq": 1, "name": "model", "payload": {"path": "/m/v3"}, "sent_at": 0.0}
+    reporter = _Recording(messages={"wf-1": [sent]})
+    await make_impress_worker(SPEC, report_interval_s=0.05, on_message=on_message)(
+        reporter, context={"messages": {"model": {"path": "/m/v2"}}})
+    assert got == [("model", {"path": "/m/v2"}), ("model", {"path": "/m/v3"})]
+
+
+async def test_a_message_handler_that_raises_does_not_stop_the_campaign(caplog):
+    def broken(manager, name, payload):
+        raise RuntimeError("bad weights")
+
+    reporter = _Recording(messages={"wf-1": [
+        {"seq": 1, "name": "model", "payload": None, "sent_at": 0.0}]})
+    await make_impress_worker(SPEC, report_interval_s=0.05, on_message=broken)(
+        reporter, context={})
+    assert reporter.reports[-1].metrics["status"] == "stopped"
+    assert "on_message failed on 'model'" in caplog.text
+
+
+async def test_messages_without_a_handler_are_logged_and_dropped(caplog):
+    sink = _ReporterSink(_Recording(messages={"wf-1": [
+        {"seq": 1, "name": "model", "payload": 1, "sent_at": 0.0}]}))
+    assert await sink.messages() == [("model", 1)]
+    assert await sink.messages() == []
+    await make_impress_worker(SPEC, report_interval_s=0.05)(
+        _Recording(), context={"messages": {"model": 1}})
+    assert "message 'model' from the caller dropped - no on_message handler" in caplog.text

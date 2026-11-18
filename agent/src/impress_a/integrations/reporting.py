@@ -54,6 +54,11 @@ class CycleSink(Protocol):
         """`PAUSE`, `RESUME`, or None. Non-blocking."""
         ...
 
+    # Optional, and so not part of the protocol check: a sink whose caller can send data
+    # mid-run - a new model, say - also has `async def messages() -> list[tuple[str, Any]]`,
+    # returning what arrived since the last call as `(name, payload)`, non-blocking. The
+    # bridge hands each one to its `on_message` handler; see `Bridge`.
+
 
 class JsonlSink:
     """The default sink: one JSON line per digest, under the campaign's own root.
@@ -97,6 +102,13 @@ class _Fanout:
                 return signal
         return None
 
+    async def messages(self) -> list[tuple[str, Any]]:
+        out: list[tuple[str, Any]] = []
+        for sink in self.sinks:
+            if hasattr(sink, "messages"):
+                out += await _guarded(sink.messages(), sink, "messages", self) or []
+        return out
+
 
 async def _guarded(awaitable: Any, sink: Any, what: str, owner: Any) -> Any:
     """Run a sink call and swallow its failure.
@@ -128,16 +140,25 @@ class Bridge:
     `period_s` is a FLOOR, not the only trigger: a cycle of the real chain runs minutes of
     tasks with nothing absorbed, and a caller's staleness bound has to be satisfiable while
     that happens.
+
+    `on_message(manager, name, payload)` receives what the caller sends mid-run through a
+    sink that has `messages()` - e.g. `("model", {"path": ...})` when a fine-tuned model is
+    promoted. It is called on this loop between the executor's mutating blocks, like
+    `observe()`, so it may change campaign state but must not block: anything slow (loading
+    weights) belongs in a task it starts. It is the campaign's own code, so a handler that
+    raises costs a log line, never the run. Without one, messages are logged and dropped.
     """
 
     def __init__(self, manager: Any, sink: Any, *, period_s: float = 30.0,
-                 tick_s: float = 0.5) -> None:
+                 tick_s: float = 0.5, on_message: Any = None) -> None:
         self.mgr = manager
         self.sink = sink if not isinstance(sink, list) else _Fanout(sink)
         self.period_s = period_s
         self.tick_s = min(tick_s, period_s)
         self.reported = 0
         self.paused = False
+        self.on_message = on_message
+        self.received = 0
         self._last_seq = -1
         self._last_at = 0.0
 
@@ -160,6 +181,7 @@ class Bridge:
             if stop.is_set():
                 return
             await self._signals()
+            await self._messages()
             try:
                 seq = self.mgr.observe().seq
             except Exception as e:               # noqa: BLE001 - diagnostics only
@@ -192,7 +214,30 @@ class Bridge:
             await self.report_once(status="running")
 
 
-async def run_with_sink(manager: Any, sink: Any, *, period_s: float = 30.0) -> Any:
+    async def _messages(self) -> None:
+        """Hand what the caller sent to `on_message`, in the order it was sent."""
+        if not hasattr(self.sink, "messages"):
+            return
+        for name, payload in await _guarded(self.sink.messages(), self.sink, "messages",
+                                            self) or []:
+            self.received += 1
+            deliver(self.mgr, self.on_message, name, payload)
+
+
+def deliver(manager: Any, on_message: Any, name: str, payload: Any) -> None:
+    """Apply one message from the caller, never raising into the campaign."""
+    if on_message is None:
+        log.warning("bridge: message %r from the caller dropped - no on_message handler", name)
+        return
+    try:
+        on_message(manager, name, payload)
+        log.info("bridge: applied message %r from the caller", name)
+    except Exception as broken:                  # noqa: BLE001 - see Bridge
+        log.warning("bridge: on_message failed on %r: %r", name, broken, exc_info=True)
+
+
+async def run_with_sink(manager: Any, sink: Any, *, period_s: float = 30.0,
+                        on_message: Any = None) -> Any:
     """Run a campaign to completion with a bridge attached. Returns its `CampaignResult`.
 
     One report before the campaign starts, so a caller has a liveness anchor before any work
@@ -200,7 +245,7 @@ async def run_with_sink(manager: Any, sink: Any, *, period_s: float = 30.0) -> A
     a caller reads these through keep only the last value per workflow. Everything between is
     the bridge's own cadence.
     """
-    bridge = Bridge(manager, sink, period_s=period_s)
+    bridge = Bridge(manager, sink, period_s=period_s, on_message=on_message)
     await bridge.report_once(status="starting")
     stop = asyncio.Event()
     pump = asyncio.create_task(bridge.run(stop))
