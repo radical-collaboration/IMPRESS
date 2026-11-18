@@ -291,13 +291,12 @@ in the package that imports AuCaM, which `tests/test_layering.py` asserts, so th
 stays optional and one file wide.
 
 ```python
-from impress_a.integrations.aucam import launch_bounds, reward_fn, workflow_config
+from impress_a.integrations.aucam import reward_fn, workflow_config
 
 config = workflow_config("campaigns/delta-small-molecule.yaml", model="D")
-# -> an AuCaM WorkflowConfig: declared_spending and spending_limit from the offer,
-#    resources from its resource shape, supports_pause=True, stale_timeout_s at 4x
-#    the report interval the offer declares.
-bounds = launch_bounds(offer)          # for the caller's own LaunchRequest.bounds
+# -> an AuCaM WorkflowConfig: spending_limit and budget_floor from the offer,
+#    resources from its resource shape, max_wall_time_s from its wall ceiling,
+#    supports_pause=True, stale_timeout_s at 4x the report interval the offer declares.
 policy = BanditSchedulingPolicy(reward_fn=reward_fn)
 ```
 
@@ -319,8 +318,8 @@ Four things in that adapter are decisions rather than plumbing, and each is a de
   belong to the controller — so no shipped policy of theirs can rank a dict. The scalar is
   progress toward the asked-for front; `reward_fn` is what ranks arms by it.
 - **`metrics` carries the MEASURED spend** under the keys the caller charges from. Without
-  them it prorates our declared cost, and the declared figures are inflated on purpose
-  (finding 8).
+  them it charges the resources it gave us x run time, an estimate far above what a
+  campaign uses (finding 8).
 
 The campaign is still ours throughout: it keeps the engine, the outer loop and the decision to
 stop, and the caller gets no privilege over campaign state that a policy would not have. That

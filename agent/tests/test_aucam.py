@@ -23,7 +23,6 @@ from impress_a.cli import load_spec  # noqa: E402
 from impress_a.integrations.aucam import (  # noqa: E402
     _narrow_budget,
     _ReporterSink,
-    launch_bounds,
     make_impress_worker,
     reward_fn,
     workflow_config,
@@ -74,14 +73,12 @@ async def test_the_adapter_builds_a_workflow_config_aucam_accepts():
     assert config.stale_timeout_s == 20.0
 
     offer = offer_for_spec(load_spec(SPEC))
-    assert config.declared_spending["gpu_hours"] == offer.cost["gpu_hours"].expected
     assert config.spending_limit["gpu_hours"] == offer.cost["gpu_hours"].ceiling
     assert config.resources == {"cpus": offer.resources.cores,
                                 "gpus": offer.resources.gpus}
-    # `wall_hours` is declared but never limited: it is an input to AuCaM's proration, and a
-    # limit on it would cancel a campaign for taking the time it said it would take.
-    assert "wall_hours" in config.declared_spending
+    # Run time is bounded by max_wall_time_s; AuCaM refuses wall_hours in a spending limit.
     assert "wall_hours" not in config.spending_limit
+    assert config.max_wall_time_s == float(offer.resources.walltime_s_ceiling)
 
 
 async def test_a_campaign_runs_as_one_aucam_workflow_and_reports_through_its_reporter():
@@ -133,13 +130,13 @@ async def test_the_score_is_a_float_a_bandit_can_rank():
 
 
 async def test_the_metrics_carry_measured_spending_under_the_keys_aucam_charges():
-    """Without these keys AuCaM prorates our DECLARED cost, which is inflated on purpose.
+    """Without these keys AuCaM charges resources x run time, the least accurate estimate.
 
     `CampaignManager._spent_so_far` reads `metrics[dim]` for each dimension in the spending
-    limit before falling back to proration, and proration is the least accurate of its three
-    charging methods. The figures reported are the MEASURED ones, because the declared ones
-    feed gates that refuse graphs and sit above measurement deliberately - reporting those
-    would hand the caller our headroom as if it were consumption (backlog G20).
+    limit before falling back to the resources it gave us x elapsed time. The figures reported
+    are the MEASURED ones, because the declared ones feed gates that refuse graphs and sit
+    above measurement deliberately - reporting those would hand the caller our headroom as if
+    it were consumption (backlog G20).
     """
     reporter = _Recording()
     await make_impress_worker(SPEC, report_interval_s=0.05)(reporter, context={})
@@ -191,21 +188,6 @@ async def test_a_pause_from_aucam_is_translated_into_the_bridges_own_vocabulary(
     assert await sink.poll() == RESUME
 
 
-async def test_the_bounds_a_caller_attaches_are_not_on_the_workflow_config():
-    """`bounds` lives on `LaunchRequest`, so it cannot ride along with the config.
-
-    Worth its own test because getting this wrong is silent: a `bounds` key passed to
-    `WorkflowConfig` would be dropped by pydantic and the caller's scheduler would size every
-    run at the type default forever, with nothing saying so.
-    """
-    offer = offer_for_spec(load_spec(SPEC))
-    bounds = launch_bounds(offer)
-    assert set(bounds) == {"gpu_hours", "cpu_hours"}, "wall_hours is not a billed dimension"
-    for dim, (lo, hi) in bounds.items():
-        assert lo <= hi and lo == offer.cost[dim].floor and hi == offer.cost[dim].ceiling
-    assert "bounds" not in WorkflowConfig.model_fields
-
-
 async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_what_it_reported():
     """The whole integration, end to end, through AuCaM's own manager.
 
@@ -219,9 +201,9 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
     built on and the executor must build its own through `make_engine_bounded`.
 
     The assertion that matters is the last one. AuCaM charges a workflow from `metrics[dim]`
-    when the workflow reports it and prorates its declared cost when it does not, and our
-    declared figures sit multiples above measurement on purpose - so a campaign charged by
-    proration would be billed for headroom it never used (backlog G20).
+    when the workflow reports it and resources x run time when it does not, and our limit
+    sits multiples above measurement on purpose - so a charge near it would mean AuCaM
+    billed us for headroom we never used (backlog G20).
     """
     from src.aucam import (
         BanditSchedulingPolicy,
@@ -240,7 +222,8 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
 
     outcome = await CampaignManager().run(CampaignSpec(
         name="impress-under-aucam",
-        budget=CampaignBudget(max_concurrent_workflows=1, max_concurrency_per_workflow=1,
+        budget=CampaignBudget(capacity={"cpus": 1024, "gpus": 64},
+                              max_concurrent_workflows=1, max_concurrency_per_workflow=1,
                               spending={"gpu_hours": 5.0, "cpu_hours": 30.0}),
         controller=_OneRun(),
         workflows=[config],
@@ -251,12 +234,13 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
     assert outcome.completed == {"impress": 1}, f"completed={outcome.completed}"
     assert not outcome.cancelled and not outcome.failed
     assert outcome.goal_reached and outcome.budget_cancels == 0
-    assert outcome.exit_reason == "controller_terminate"
+    # The controller stopped because its goal was reached, which AuCaM reports as such.
+    assert outcome.exit_reason == "goals_satisfied"
 
-    # Charged from what we reported, not prorated from what we declared. The campaign's own
-    # declared spend is orders of magnitude larger, so proration would be unmistakable here.
+    # Charged from what we reported, not estimated from the limit we were given. The limit is
+    # orders of magnitude above what this run measures, so a charge near it would show.
     charged = outcome.spent.get("cpu_hours", 0.0)
-    declared = config.declared_spending["cpu_hours"]
-    assert 0.0 <= charged < declared, (
-        f"AuCaM charged {charged} cpu_hours against a declared {declared} - a figure at or "
-        f"above the declared one means it prorated instead of reading our reported metrics")
+    limit = config.spending_limit["cpu_hours"]
+    assert 0.0 <= charged < limit, (
+        f"AuCaM charged {charged} cpu_hours against a limit of {limit} - a figure at or "
+        f"above the limit means it did not read our reported metrics")

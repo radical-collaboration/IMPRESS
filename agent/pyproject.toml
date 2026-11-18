@@ -44,14 +44,14 @@ http = ["httpx"]          # the HTTP control-plane adapter
 # adapter's tests build a real `WorkflowConfig` and emit through AuCaM's own reporter when it
 # is present, and skip when it is not, which is only a useful guard if the dev venv has it.
 #
-# Pinned to a COMMIT, not to branch `aucam-v2` that currently points at it, for the reason
+# Pinned to a COMMIT, not to branch `devel` that currently points at it, for the reason
 # the agentbridge extra states: `aucam` has no PyPI release, and a branch pin reinstalls
 # something different next week. Its import path is `src.aucam`, not `aucam`: the
 # distribution is named `aucam` but its `[tool.setuptools.packages.find]` declares
 # `include = ["src*"]`, so the importable package is the generic name `src` - which
 # setuptools itself warns about on install, and which `tests/test_toolchain.py` pins,
 # because this repository has two `src/` directories of its own for it to be confused with.
-aucam = ["aucam @ git+https://github.com/radical-project/campaign_manager/@2c9c734e064b28dc8c31cfe4a990247dac22c6bf"]
+aucam = ["aucam @ git+https://github.com/radical-project/campaign_manager/@6842888700142d431ccf75ece400d68790bfffbd"]
 # Figures for the mock knob lab (`impress-a mock-lab`). An EXTRA, not a dependency: the lab's
 # sweep and collect stages write CSVs with the standard library and numpy, which this project
 # already has, and only `analysis/mock_figures.py` imports matplotlib. A campaign host has no

@@ -5,14 +5,13 @@ what that relationship is not.
 
 AuCaM (`radical-project/campaign_manager`) is the canonical superstrate: it orchestrates many
 heterogeneous workflows toward a higher goal, launches each as an `async def` taking a reporter,
-sizes it from a declared cost, bounds its spending, may pause or cancel it, and reads its progress
+gives it a spending limit and resources, bounds its spending, may pause or cancel it, and reads its progress
 back through `reporter.emit()`. One IMPRESS-A campaign is one such workflow.
 
 ## The seam
 
 ```
    AuCaM  ── launches the block ──►   impress_a_<spec>(reporter, context)
-     │       declared_spending            │
      │       spending_limit ──────────────┤  narrows CampaignSpec.budget
      │       resources ───────────────────┤  fits concurrency
      │                                    │
@@ -57,13 +56,14 @@ What `integrations/aucam.py` exposes:
 |---|---|
 | `workflow_config(spec_path, …)` | An AuCaM `WorkflowConfig` for one whole campaign, built from the same `impress-a offer` a caller could read for itself |
 | `make_impress_worker(spec_path, …)` | The block function AuCaM launches. Builds the campaign *inside* the coroutine |
-| `launch_bounds(offer)` | `{dimension: (floor, ceiling)}` for the caller's own `LaunchRequest.bounds` |
 | `reward_fn(result)` | A `WorkflowResult` as a reward in `[0, 1]`, for `BanditSchedulingPolicy(reward_fn=…)` |
 | `report_once(manager, reporter)` | One digest on demand, for a campaign somebody else is driving |
 
-`launch_bounds` is separate from `workflow_config` because `bounds` is a `LaunchRequest` field
-and not a `WorkflowConfig` one: the controller attaches it per launch, and `SchedulingPolicy.size()`
-then picks a point inside it using learned costs this side never sees.
+`workflow_config` sets `spending_limit` to the offer's ceiling for each billed dimension
+(`cpu_hours`, `gpu_hours`), `budget_floor` to the cost of one minimal cycle, `resources` from the
+offer's resource shape and `max_wall_time_s` from its wall ceiling. AuCaM uses that limit for the
+first launches and sizes later ones from what it has learned (learned cost + margin); a caller
+that wants a different amount for one launch sets `LaunchRequest.spending_limit`.
 
 `reward_fn` exists because AuCaM's default bandit reward is `1.0 if returncode == 0 else 0.0` —
 throughput — and no shipped AuCaM policy can rank a dict. A cancelled or failed campaign scores 0
@@ -116,7 +116,7 @@ impress-a offer campaigns/<spec>.yaml --validation validate_tasks.json
 ```
 
 The handshake is a **caller-side function call made before the caller's own spec exists**, not a
-plane operation — AuCaM's `declared_spending`, `spending_limit` and `resources` are static dicts
+plane operation — AuCaM's `spending_limit`, `budget_floor` and `resources` are static dicts
 fixed when the caller builds its spec, so there is nothing to negotiate at launch.
 
 A different question from `preflight`: that asks whether this machine can run the binaries, this
@@ -192,10 +192,9 @@ very clock that bound reads. A campaign with a pump attached therefore cannot de
 by silence, and liveness has to come from the enclosing manager's own staleness bound. Recorded as
 finding 7 of [Observation](observation.md).
 
-**`wall_hours` is declared but never offered as a limit.** It is an input to AuCaM's proration, not
-a dimension it bills, and offering it as a limit would cancel a campaign for taking the time it
-said it would take. It *is* reported in `declared_spending`, at the offer's ceiling, because too
-small a figure makes AuCaM's proration exceed 100% and cancel a campaign that is behaving normally.
+**`wall_hours` is never offered as a spending limit.** AuCaM refuses it there; run time is bounded
+by `max_wall_time_s`, set to the offer's wall ceiling, so a campaign is not cancelled for taking
+the time it said it would take.
 
 ## What is not built
 

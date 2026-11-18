@@ -1,8 +1,8 @@
 """One IMPRESS-A campaign as one AuCaM workflow.
 
 AuCaM (`radical-project/campaign_manager`) is the canonical superstrate: it launches a
-workflow as an `async def` taking a reporter, sizes it from a declared cost, bounds its
-spending, may pause or cancel it, and reads its progress back through `reporter.emit()`.
+workflow as an `async def` taking a reporter, gives it a spending limit and resources, bounds
+its spending, may pause or cancel it, and reads its progress back through `reporter.emit()`.
 Decision 0014 says what that makes it - a caller, and specifically NOT control model C, which
 is a reasoner over `CampaignSession` that publishes Specs and submits Stages. AuCaM steers no
 Spec and plans no Stage. It owns the process; IMPRESS-A keeps the engine, the outer loop and
@@ -13,10 +13,10 @@ asserts, so the dependency stays optional and one file wide.
 
 Two things the caller must do with what it gets back, and neither is this module's to do:
 
-* `workflow_config()` fills `declared_spending`, `spending_limit` and `resources`, because
-  those are `WorkflowConfig` fields. A cost RANGE is not: `bounds` lives on `LaunchRequest`,
-  so `launch_bounds()` hands it over separately for the caller's own controller to attach,
-  where `SchedulingPolicy.size()` resolves it against learned costs this side never sees.
+* `workflow_config()` fills `spending_limit` (the offer's ceiling per billed dimension),
+  `budget_floor`, `resources` and `max_wall_time_s`. AuCaM starts from that limit and, once
+  it has learned the type's cost, sizes later launches itself (learned cost + margin); a
+  caller that wants a different amount for one launch sets `LaunchRequest.spending_limit`.
 * `reward_fn()` exists because AuCaM's default bandit reward is `1.0 if returncode == 0 else
   0.0` - throughput, and its own comment says science scores belong to the controller. No
   shipped AuCaM policy can rank a dict, so the digest's scalar progress is what we report and
@@ -34,9 +34,8 @@ from .reporting import PAUSE, RESUME, Bridge, run_with_sink
 
 log = logging.getLogger("impress_a.aucam")
 
-#: Dimensions AuCaM charges against a spending limit. `wall_hours` is excluded on purpose: it
-#: is an input to AuCaM's proration, not a thing it bills, and offering it as a limit would
-#: cancel a campaign for taking the time it declared it would take.
+#: Dimensions AuCaM charges against a spending limit. `wall_hours` is not one: AuCaM refuses
+#: it in `spending_limit`, and run time is bounded by `max_wall_time_s` instead.
 _BILLED = ("gpu_hours", "cpu_hours")
 
 
@@ -79,17 +78,6 @@ def _aucam() -> Any:
 # ---------------------------------------------------------------------------
 
 
-def launch_bounds(offer: Any) -> dict[str, tuple[float, float]]:
-    """`{dimension: (floor, ceiling)}`, for the caller's own `LaunchRequest.bounds`.
-
-    Separate from `workflow_config` because `bounds` is a `LaunchRequest` field and not a
-    `WorkflowConfig` one - the controller attaches it per launch, and
-    `SchedulingPolicy.size()` then picks a point inside it using its own learned costs, which
-    after enough runs will be better than anything declared on this side.
-    """
-    return {dim: rng for dim, rng in offer.bounds().items() if dim in _BILLED}
-
-
 def reward_fn(result: Any) -> float:
     """A `WorkflowResult` as a reward in [0, 1], for `BanditSchedulingPolicy(reward_fn=...)`.
 
@@ -101,6 +89,17 @@ def reward_fn(result: Any) -> float:
         return 0.0
     score = getattr(result, "final_score", None)
     return float(score) if isinstance(score, (int, float)) else 0.0
+
+
+def _spending_limit(offer: Any) -> dict[str, float]:
+    """The offer's ceiling for each billed dimension it costs anything in."""
+    limit = {d: float(offer.cost[d].ceiling) for d in _BILLED
+             if d in offer.cost and offer.cost[d].ceiling > 0}
+    if not limit:
+        raise ValueError(
+            f"offer {offer.campaign_id!r} has no positive cost in {_BILLED}; AuCaM needs a "
+            f"spending_limit in at least one of them")
+    return limit
 
 
 def workflow_config(spec_path: str | Path, *, name: str | None = None, model: str = "D",
@@ -129,8 +128,10 @@ def workflow_config(spec_path: str | Path, *, name: str | None = None, model: st
         # Our own budget, which the campaign already enforces from the inside: gate 5 and the
         # interlock refuse an unaffordable graph BEFORE a task runs. AuCaM's cancel is a
         # backstop, not the mechanism.
-        "spending_limit": {d: offer.cost[d].ceiling for d in _BILLED
-                           if d in offer.cost and offer.cost[d].bounded_by_budget},
+        # AuCaM requires a spending limit for every workflow type: it is both the starting
+        # limit per launch and what it holds against the campaign while we run. The ceiling
+        # is our own budget where the spec sets one, else expected cost x max cycles.
+        "spending_limit": _spending_limit(offer),
         # Minimum viable budget: the cost of one minimal cycle.  When AuCaM would pass a
         # spending_limit below this, the launch is pointless — gate 5 would reject it
         # immediately.  AuCaM drops it at the scheduler level (unfit_dropped++) instead.
@@ -160,10 +161,10 @@ class _ReporterSink:
     `score` is a float, not a dict: AuCaM's default bandit reward is throughput, and no
     shipped policy of theirs can rank a dict. The rich payload travels in `metrics`, where
     `cpu_hours`/`gpu_hours` are the keys AuCaM's own `_spent_so_far` reads - without them it
-    falls back to prorating our declared cost by elapsed time, which is the least accurate of
-    its three charging methods. Those keys carry the MEASURED figures, because the declared
-    ones sit multiples above measurement on purpose and would hand the caller our headroom as
-    if it were consumption (backlog G20).
+    falls back to charging the resources we were given x elapsed time, which is the least
+    accurate of its three charging methods. Those keys carry the MEASURED figures, because the
+    declared ones sit multiples above measurement on purpose and would hand the caller our
+    headroom as if it were consumption (backlog G20).
     """
 
     def __init__(self, reporter: Any) -> None:
