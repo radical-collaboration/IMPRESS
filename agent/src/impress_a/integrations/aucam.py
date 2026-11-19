@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -189,16 +190,35 @@ class _ReporterSink:
     headroom as if it were consumption (backlog G20).
     """
 
-    def __init__(self, reporter: Any) -> None:
+    def __init__(self, reporter: Any, extras: Sequence[Mapping[str, Any]] = ()) -> None:
         self.reporter = reporter
         self.emitted = 0
+        #: Caller fields, merged into EVERY report, in order, after the billed keys. Read at
+        #: report time rather than copied here, so a caller that keeps the mapping can change
+        #: a value mid-campaign and the next report carries it.
+        self.extras = tuple(extras)
+        self._warned_clash = False
 
     async def report(self, digest: CampaignDigest) -> None:
         metrics = digest.model_dump(mode="json")
-        metrics.update(self._billed(digest))
+        for extra in self.extras:
+            metrics.update(extra)
+        # Billed LAST, so a caller's field can neither drop nor overwrite what AuCaM charges
+        # from. A collision is the caller's bug and silence would make it an accounting hole,
+        # so it is logged - once, because this runs every report.
+        billed = self._billed(digest)
+        if not self._warned_clash and (clash := set(billed) & self._extra_keys):
+            log.warning("ignoring caller metric(s) %s: these are the keys AuCaM charges from",
+                        sorted(clash))
+            self._warned_clash = True
+        metrics.update(billed)
         await self.reporter.emit(score=digest.progress, metrics=metrics,
                                  iteration=digest.cycle)
         self.emitted += 1
+
+    @property
+    def _extra_keys(self) -> set[str]:
+        return {key for extra in self.extras for key in extra}
 
     @staticmethod
     def _billed(digest: CampaignDigest) -> dict[str, float]:
@@ -273,7 +293,8 @@ def _fit_resources(spec: Any, resources: dict[str, float] | None) -> None:
 
 
 def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool = True,
-                        report_interval_s: float = 30.0, on_message: Any = None) -> Any:
+                        report_interval_s: float = 30.0, on_message: Any = None,
+                        spec_patch: Any = None, extra_metrics: Any = None) -> Any:
     """An AuCaM block function running one whole IMPRESS-A campaign.
 
     The config is captured in this closure and the campaign is built inside the coroutine,
@@ -300,6 +321,34 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
     promoted. The type's sticky values arrive in `context["messages"]` and are applied before
     the campaign starts; later ones while it runs, through the bridge (`Bridge`). What a
     message means to the campaign - which model a role uses, say - is the handler's to decide.
+
+    **Two seams for a caller running several campaigns from one spec file**, both optional and
+    both inert when unset. They exist because AuCaM's ASD prototype campaign rebuilt this
+    worker body by hand to get them, importing three private names from this module
+    (`campaigns/asd_campaign/README.md`, its gap 5).
+
+    * `spec_patch(spec, context)` runs after `load_spec` and **before** the budget and
+      resource fitting, which is where a per-launch identity goes: `spec.campaign_id` and
+      `spec.root`, because two launches from one YAML otherwise write into the same run
+      directory and the second clobbers the first. It may return a mapping, which is then
+      merged into every report of **that launch** - the way a caller gets a value it computed
+      while patching, such as the directory the run will write to, back out through telemetry.
+    * `extra_metrics` is a mapping, or a callable taking the context and returning one,
+      merged into every report. A callable is called once per launch, so use it for anything
+      per-launch; a bare mapping is shared by every launch of this worker, which is right for
+      a constant tag and wrong for anything else.
+
+    Both are merged **after** the billed keys and read at report time, not copied. Two
+    consequences worth stating, because each is a silent failure otherwise:
+
+    * **A caller's fields cannot touch AuCaM's accounting.** `cpu_hours`, `gpu_hours` and
+      `*_in_use` are written last, every report, so a caller can neither drop them by emitting
+      a report of its own instead nor overwrite them by naming one; a collision is logged
+      once and ignored. Merging here is what makes that impossible rather than discouraged.
+    * **A field changed mid-campaign is picked up.** The mapping is read at each report, so a
+      caller whose `on_message` handler records a newly promoted model version sees it on the
+      next report rather than at the next launch. A caller that wants a value frozen at launch
+      should pass a copy.
     """
     from ..cli import build_roles, load_spec  # noqa: PLC0415
     from ..manager import CampaignManager  # noqa: PLC0415
@@ -309,6 +358,15 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
                                  flow: Any = None) -> None:
         ctx = context or {}
         spec = load_spec(str(spec_path))
+
+        # Before the budget and the resources, so a patch that changes the campaign's
+        # identity cannot be undone by them, and a patch can read what they will act on.
+        extras: list[Mapping[str, Any]] = []
+        if extra_metrics is not None:
+            extras.append(extra_metrics(ctx) if callable(extra_metrics) else extra_metrics)
+        if spec_patch is not None and (patched := spec_patch(spec, ctx)) is not None:
+            extras.append(patched)
+
         if narrowed := _narrow_budget(spec, ctx.get("spending_limit")):
             log.info("the caller's spending limit is now this campaign's budget: %s",
                      "; ".join(narrowed))
@@ -325,7 +383,7 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
         mgr.executor.cpu_share = cpus or None
         for msg_name, payload in (ctx.get("messages") or {}).items():
             deliver(mgr, on_message, msg_name, payload)
-        sink = _ReporterSink(reporter)
+        sink = _ReporterSink(reporter, extras)
         result = await run_with_sink(mgr, sink, period_s=report_interval_s,
                                      on_message=on_message)
         log.info("campaign %s ended: %s (%d report(s) emitted)",

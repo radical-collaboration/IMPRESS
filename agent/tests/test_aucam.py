@@ -309,3 +309,130 @@ async def test_messages_without_a_handler_are_logged_and_dropped(caplog):
     await make_impress_worker(SPEC, report_interval_s=0.05)(
         _Recording(), context={"messages": {"model": 1}})
     assert "message 'model' from the caller dropped - no on_message handler" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# The two seams AuCaM's ASD prototype reached for by hand (its gap 5)
+# ---------------------------------------------------------------------------
+
+
+async def test_two_launches_from_one_yaml_write_to_two_directories(tmp_path):
+    """The seam's reason for existing, stated as the failure it prevents.
+
+    One worker, two launches, one spec file. Without a per-launch patch both campaigns take
+    the `campaign_id` written in the YAML, so both resolve the same run directory and the
+    second writes over the first - with no error, because each campaign is behaving
+    correctly on its own.
+    """
+    worker = make_impress_worker(
+        SPEC,
+        report_interval_s=0.05,
+        spec_patch=lambda spec, ctx: _per_launch(spec, ctx, str(tmp_path)),
+    )
+    first, second = _Recording(), _Recording()
+    await worker(first, context={"launch": "a"})
+    await worker(second, context={"launch": "b"})
+
+    ids = [r.metrics["campaign_id"] for r in (first.reports[-1], second.reports[-1])]
+    assert ids[0] != ids[1], "two launches from one YAML must not share a campaign id"
+    assert ids == ["mock-stabilize-a", "mock-stabilize-b"]
+    # And the value the patch computed while patching comes back out through telemetry.
+    assert first.reports[-1].metrics["run_dir"] == f"{tmp_path}/mock-stabilize-a"
+
+
+def _per_launch(spec, ctx, root):
+    """What the prototype's design block does, through the public seam."""
+    spec.campaign_id = f"{spec.campaign_id}-{ctx['launch']}"
+    spec.root = root
+    return {"run_dir": f"{root}/{spec.campaign_id}"}
+
+
+async def test_a_caller_field_rides_every_report_without_dropping_a_billed_key():
+    """Merged after the billed keys, so a caller cannot bill nothing by accident.
+
+    This is the whole reason the merge is here rather than in the caller: the prototype's
+    own comment says it emitted its own final report once, and AuCaM charges from
+    `cpu_hours`, `gpu_hours` and `*_in_use`. A final report of the caller's own would have
+    dropped all five and the campaign would have billed zero, with nothing to say so.
+    """
+    reporter = _Recording()
+    await make_impress_worker(SPEC, report_interval_s=0.05,
+                              extra_metrics={"tag": "collect"})(reporter, context={})
+
+    assert reporter.reports, "the campaign emitted no report at all"
+    for report in reporter.reports:
+        assert report.metrics["tag"] == "collect"
+        for billed in ("cpus_in_use", "gpus_in_use"):
+            assert billed in report.metrics, f"{billed} was dropped by the caller's fields"
+    # `cpu_hours`/`gpu_hours` appear once there is a measured figure to report, which the
+    # first report (status: starting, cycle 0) does not have - so the final one is where the
+    # charge actually lands and where their absence would be the accounting hole.
+    for billed in ("cpu_hours", "gpu_hours"):
+        assert billed in reporter.reports[-1].metrics
+
+
+async def test_a_caller_may_not_overwrite_a_billed_key(caplog):
+    """Naming a billed key is a caller bug, and silence would make it an accounting hole.
+
+    Merging the caller's fields BEFORE the billed ones is what makes this impossible rather
+    than discouraged: a caller that reported `cpu_hours: 999.0` would otherwise bill AuCaM
+    for time nobody spent, and the report would look entirely ordinary.
+    """
+    reporter = _Recording()
+    await make_impress_worker(SPEC, report_interval_s=0.05,
+                              extra_metrics={"cpu_hours": 999.0})(reporter, context={})
+
+    final = reporter.reports[-1].metrics
+    assert final["cpu_hours"] == final["spend_measured"]["cpu_hours"] != 999.0
+    assert "ignoring caller metric(s) ['cpu_hours']" in caplog.text
+
+
+async def test_a_field_changed_while_the_campaign_runs_reaches_a_later_report():
+    """The promoted-model case: the mapping is read at report time, not copied at launch.
+
+    A model promoted mid-campaign arrives through `on_message`, and the version it applied
+    has to appear in the reports after it - otherwise the corpus row that trains the next
+    model cannot say which model produced the design (CON-5 in the caller's project).
+    """
+    live = {"model_version": None}
+
+    def on_message(manager, name, payload):
+        live["model_version"] = payload["version"]
+
+    reporter = _Recording(messages={"wf-1": [
+        {"seq": 1, "name": "model", "payload": {"version": 7}, "sent_at": 0.0}]})
+    await make_impress_worker(SPEC, report_interval_s=0.05, on_message=on_message,
+                              extra_metrics=live)(reporter, context={})
+
+    assert reporter.reports[-1].metrics["model_version"] == 7
+
+
+async def test_a_per_launch_callable_is_called_once_per_launch():
+    """A mapping is shared by every launch; a callable is not. The docstring says so, and a
+    caller who needs per-launch state has to have a way to get it that is not a closure over
+    a dict two launches share."""
+    seen = []
+
+    def metrics_for(ctx):
+        seen.append(ctx.get("launch"))
+        return {"launch": ctx.get("launch")}
+
+    worker = make_impress_worker(SPEC, report_interval_s=0.05, extra_metrics=metrics_for)
+    first, second = _Recording(), _Recording()
+    await worker(first, context={"launch": "a"})
+    await worker(second, context={"launch": "b"})
+
+    assert seen == ["a", "b"]
+    assert first.reports[-1].metrics["launch"] == "a"
+    assert second.reports[-1].metrics["launch"] == "b"
+
+
+async def test_both_seams_are_inert_when_unset():
+    """The arguments are additive: a caller that passes neither sees exactly what it saw."""
+    plain, patched = _Recording(), _Recording()
+    await make_impress_worker(SPEC, report_interval_s=0.05)(plain, context={})
+    await make_impress_worker(SPEC, report_interval_s=0.05, spec_patch=None,
+                              extra_metrics=None)(patched, context={})
+
+    assert plain.reports[-1].metrics.keys() == patched.reports[-1].metrics.keys()
+    assert plain.reports[-1].metrics["campaign_id"] == patched.reports[-1].metrics["campaign_id"]
