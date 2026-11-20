@@ -1,0 +1,41 @@
+# TRACTABLE ARM — difficulty 0.25
+# The type that always pays: every run reaches the front in its single cycle (5/5 measured).
+# Each instance still draws its own lineage, so the designs differ run to run — only the
+# verdict is the same. The high-reward type the bandit should converge on.
+campaign_id: mock-binding-tractable
+goal: "Design one small-molecule binder meeting every declared threshold"
+backend: concurrent
+backend_config: {workers: 4}
+tool_delivery: mock
+max_cycles: 1
+stagnation_limit: 1
+target_front: 1
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 4.0
+  cpu_hours: 4.0
+stages: [mock_rfd3_design, mock_mpnn_design, mock_packmin, mock_fastrelax,
+         mock_filter_shape, mock_boltz_predict]
+params:
+  mock_rfd3_design:
+    num_designs: 1
+    diffusion_steps: 50
+    difficulty: 0.25        # ss_fraction ≈ 0.60; passes all acceptance gates reliably
+  mock_mpnn_design:
+    temperature: 0.2
+    batch_size: 8
+    number_of_batches: 1
+  mock_packmin:
+    cycles: 1
+  mock_fastrelax:
+    nstruct: 1
+    relax_cycles: 3
+  mock_boltz_predict:
+    diffusion_samples: 8
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

@@ -12,6 +12,8 @@ package imports it.
 """
 from __future__ import annotations
 
+import types
+
 import pytest
 
 pytest.importorskip("src.aucam", reason="the aucam extra is not installed")
@@ -21,6 +23,7 @@ from src.aucam.reporter import LocalDictReporter  # noqa: E402
 
 from impress_a.cli import load_spec  # noqa: E402
 from impress_a.integrations.aucam import (  # noqa: E402
+    _BILLED,
     _narrow_budget,
     _ReporterSink,
     impress_backends,
@@ -131,6 +134,15 @@ async def test_the_score_is_a_float_a_bandit_can_rank():
     assert reward_fn(_Result()) == 0.0, "a cancelled campaign is no evidence for its arm"
 
 
+def _digest(*, measured: dict, declared: dict):
+    """The three fields `_ReporterSink._billed` reads, and nothing else."""
+    return types.SimpleNamespace(spend_measured=measured, spend=declared, in_flight={})
+
+
+def _billed_gpu(*, measured: dict, declared: dict) -> float:
+    return _ReporterSink._billed(_digest(measured=measured, declared=declared))["gpu_hours"]
+
+
 async def test_the_metrics_carry_measured_spending_under_the_keys_aucam_charges():
     """Without these keys AuCaM charges resources x run time, the least accurate estimate.
 
@@ -144,11 +156,24 @@ async def test_the_metrics_carry_measured_spending_under_the_keys_aucam_charges(
     await make_impress_worker(SPEC, report_interval_s=0.05)(reporter, context={})
 
     final = reporter.reports[-1].metrics
-    assert final["cpu_hours"] == final["spend_measured"]["cpu_hours"]
-    assert final["cpu_hours"] != final["spend"]["cpu_hours"], (
-        "the measured figure must not be the declared one - declared cost is inflated to "
-        "make gate 5 refuse pessimistically, and a caller charging that is misinformed")
+    for dim in _BILLED:
+        assert dim in final, f"{dim} is billed but was not reported: {sorted(final)}"
+    # `cpu_hours` is deliberately NOT billed: the campaign's CPU figure covers the agent
+    # process rather than the tasks, so charging it would bill AuCaM for our own overhead.
+    assert "cpu_hours" not in final, "cpu_hours is excluded from billing"
     assert "cpus_in_use" in final and "gpus_in_use" in final
+
+    # Measured over declared, and declared only as the surrogate's fallback. Asserted on
+    # `_billed` itself because the mock chain returns in microseconds and measures no GPU
+    # time at all, so a run of it can only ever exercise the fallback branch.
+    assert _ReporterSink._billed(_digest(measured={"gpu_hours": 0.5},
+                                         declared={"gpu_hours": 9.0}))["gpu_hours"] == 0.5, (
+        "the measured figure must not lose to the declared one - declared cost is inflated "
+        "to make gate 5 refuse pessimistically, and a caller charging that is misinformed")
+    assert _billed_gpu(measured={"gpu_hours": 0.0}, declared={"gpu_hours": 9.0}) == 9.0, (
+        "a surrogate measures nothing, and a zero charge would decalibrate cost learning")
+    assert _billed_gpu(measured={"gpu_hours": 0.0}, declared={}) == 0.0, (
+        "a dimension that ran and cost nothing stays in the report")
 
 
 async def test_the_callers_spending_limit_becomes_the_campaigns_own_budget():
@@ -251,10 +276,11 @@ async def test_an_aucam_campaign_launches_a_whole_impress_campaign_and_charges_w
 
     # Charged from what we reported, not estimated from the limit we were given. The limit is
     # orders of magnitude above what this run measures, so a charge near it would show.
-    charged = outcome.spent.get("cpu_hours", 0.0)
-    limit = config.spending_limit["cpu_hours"]
+    dim = _BILLED[0]
+    charged = outcome.spent.get(dim, 0.0)
+    limit = config.spending_limit[dim]
     assert 0.0 <= charged < limit, (
-        f"AuCaM charged {charged} cpu_hours against a limit of {limit} - a figure at or "
+        f"AuCaM charged {charged} {dim} against a limit of {limit} - a figure at or "
         f"above the limit means it did not read our reported metrics")
 
 

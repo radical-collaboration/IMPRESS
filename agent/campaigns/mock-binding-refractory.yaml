@@ -1,0 +1,50 @@
+# REFRACTORY ARM — difficulty 0.70
+# The type that never pays: 0/6 runs reached the front, and none tripped an integrity gate,
+# measured with each instance drawing its own lineage. It is the type the scheduler should
+# learn to stop spending on, and the reason the campaign has a cost-cancel rule at all.
+#
+# 0.70 is chosen as the last safe value, not for its pass rate — anything from about 0.50
+# up never reaches the front. Above 0.70 `ss_fraction` falls under the 0.30
+# `has_secondary_structure` floor, which is an INTEGRITY failure rather than a weak design:
+# the run aborts and the pattern's trust is demoted, so the type stops being "expensive and
+# fruitless" and becomes "broken", which is a different demo.
+#
+# It also runs the longest (8 cycles, ~3s), so one of its instances is still in flight when
+# easy reaches `--goal-n`, which is what gives the summary a non-zero `cancelled` count.
+campaign_id: mock-binding-refractory
+goal: "Design one small-molecule binder meeting every declared threshold"
+backend: concurrent
+backend_config: {workers: 4}
+tool_delivery: mock
+max_cycles: 8
+stagnation_limit: 8
+target_front: 1
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 4.0
+  cpu_hours: 4.0
+stages: [mock_rfd3_design, mock_mpnn_design, mock_packmin, mock_fastrelax,
+         mock_filter_shape, mock_boltz_predict]
+params:
+  mock_rfd3_design:
+    num_designs: 1
+    diffusion_steps: 50
+    difficulty: 0.70        # ss_base=0.33 (never < 0.30 integrity floor); sc_mean≈0.483
+  mock_mpnn_design:
+    temperature: 0.2
+    batch_size: 8
+    number_of_batches: 1
+  mock_packmin:
+    cycles: 1
+  mock_fastrelax:
+    nstruct: 1
+    relax_cycles: 3
+  mock_boltz_predict:
+    diffusion_samples: 8
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

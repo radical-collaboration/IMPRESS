@@ -1,0 +1,61 @@
+# BORDERLINE ARM — difficulty 0.42, 2 cycles
+# The type that sometimes pays: roughly two runs in five reach the front (14/35 measured
+# under `--multi-arm`, and the rate wanders between campaigns because each instance draws
+# its own lineage). That is the point of it: tractable always pays and refractory never does,
+# neither tells the scheduler anything it could not have guessed before launching. Only an
+# so only a type whose mean is strictly between 0 and 1 makes the estimate worth collecting.
+#
+# Per-instance draws are what makes a fractional mean possible at all. AuCaM gives each
+# workflow instance its own `seed_salt` (its workflow id), so two instances of this type are
+# independent samples rather than the same design twice. Without that, every instance of a
+# type returned an identical front and every type's mean was exactly 0.0 or 1.0.
+#
+# MEASURE THIS TYPE UNDER `--multi-arm`, NOT WITH `--spec`. The two differ by budget, not
+# by difficulty: `--spec` takes the per-run limit from IMPRESS's own offer (0.0075
+# gpu_hours, about one cycle at the 0.006 a cycle costs), so a run here is cut off after
+# its first cycle and this type never gets the second one it needs. Under `--multi-arm`
+# the limit is the 0.5 gpu_hours this type declares, and difficulty is the only thing
+# deciding the outcome.
+#
+# In-campaign rates at 2 cycles: 0.38 → 14/14, 0.40 → 10/13, 0.42 → 11/24, 0.46 → 0/10,
+# and 0.50 and above never reach the front. The cliff is steep and close, so re-measure
+# rather than reason about it — the stage slopes in `tools/mock_smb_agents.py` multiply, and
+# the reasoner escalates parameters between cycles, so the chain's response is not the
+# product of its stage means.
+campaign_id: mock-binding-borderline
+goal: "Design one small-molecule binder meeting every declared threshold"
+backend: concurrent
+backend_config: {workers: 4}
+tool_delivery: mock
+max_cycles: 2
+stagnation_limit: 2
+target_front: 1
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 4.0
+  cpu_hours: 4.0
+stages: [mock_rfd3_design, mock_mpnn_design, mock_packmin, mock_fastrelax,
+         mock_filter_shape, mock_boltz_predict]
+params:
+  mock_rfd3_design:
+    num_designs: 1
+    diffusion_steps: 50
+    difficulty: 0.42        # with max_cycles 2, roughly 2 runs in 5 reach the front
+  mock_mpnn_design:
+    temperature: 0.2
+    batch_size: 8
+    number_of_batches: 1
+  mock_packmin:
+    cycles: 1
+  mock_fastrelax:
+    nstruct: 1
+    relax_cycles: 3
+  mock_boltz_predict:
+    diffusion_samples: 8
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}

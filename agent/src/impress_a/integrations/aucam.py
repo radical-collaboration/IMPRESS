@@ -322,6 +322,16 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
                                  flow: Any = None) -> None:
         ctx = context or {}
         spec = load_spec(str(spec_path))
+        # Two instances of one workflow type are two independent samples, not the same
+        # draw twice.  Run labels restart at `r0001` in every run, so the salt is the
+        # only thing distinguishing their lineages (backlog G7, `_replica_seed`) - and a
+        # salt from the spec file or the environment is ONE value for every instance the
+        # campaign launches.  AuCaM's own id for this instance is per-instance by
+        # construction, so an unsalted spec takes it; a spec that names a salt keeps it,
+        # because a caller that pinned a lineage meant to reproduce one.
+        if not spec.seed_salt and (wf_id := ctx.get("workflow_id")):
+            spec.seed_salt = str(wf_id)
+            log.info("seed_salt from the caller's workflow id: %s", spec.seed_salt)
         if narrowed := _narrow_budget(spec, ctx.get("spending_limit")):
             log.info("the caller's spending limit is now this campaign's budget: %s",
                      "; ".join(narrowed))
