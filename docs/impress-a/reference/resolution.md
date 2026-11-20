@@ -44,6 +44,12 @@ posture, Pitfalls) is a load-time error. And it is **all-or-nothing per toolkit*
 fails anywhere registers *nothing*, never a partial set, so a campaign can never plan against half
 a toolkit.
 
+Gate ids are resolved here, *before* anything is registered, so a gate defined outside the package
+has to be in the registry by now — which is why `load()` first imports the modules named by
+`IMPRESS_A_GATE_MODULES` (`tools/gates.py::load_modules`). Without that an out-of-tree gate took
+its whole toolkit down as one line in `Registry.errors`; a module named there that will not import
+raises, and is the only thing that stops `load()` instead of being collected per toolkit.
+
 What each `ToolSpec` carries that a later step reads:
 
 | declared | read by |

@@ -39,7 +39,8 @@ several tools in a toolkit share helpers and a subprocess worker.
 
 Toolkits are discovered from, in precedence order: an explicit path, `$IMPRESS_A_TOOLKITS`, installed
 `impress_a.toolkits` entry points, then the bundled `toolkits/` directory. A site or third party can add
-a toolkit without forking the package.
+a toolkit without forking the package — and if its specs declare QC gates this package does not ship,
+`$IMPRESS_A_GATE_MODULES` is what makes them resolvable (see *QC gates*).
 
 ## Adding a tool
 
@@ -111,7 +112,8 @@ graph that tries. Each entry carries its reason, which is surfaced in the reject
 
 A malformed spec, a default outside its own declared range, an unknown QC gate id, a `P1` tool declaring
 no GPU, or a `SKILL.md` missing a required section is a **load-time error**. A toolkit that fails anywhere
-registers **nothing** — never a partial set.
+registers **nothing** — never a partial set. A gate id is unknown unless the package ships it or
+`$IMPRESS_A_GATE_MODULES` names the module that registers it (see *QC gates*).
 
 ## QC gates
 
@@ -130,6 +132,15 @@ def _my_check(out: dict, params: dict) -> GateResult:
                       outcome=GateOutcome.PASS if ok else GateOutcome.FAIL,
                       observed=v, threshold=params.get("min"))
 ```
+
+**A gate defined outside this package must be named in `$IMPRESS_A_GATE_MODULES`** — a path-separated
+list of dotted module names, imported by `Registry.load()` before any gate id is resolved. `@gates.gate`
+registers at *import* time, so an out-of-tree gate exists only once its module has run, and the registry
+resolves every id a spec declares **before** it registers anything. Without the variable the result is
+not a gate error but a **missing toolkit** — the tools in it that declared nothing unusual included —
+reported as one line in `Registry.errors`. A module named there that cannot be imported raises
+`gates.GateModuleError`, the one thing that stops `Registry.load()` rather than being collected as a
+per-toolkit error, because the alternative is reading as a toolkit that quietly went missing.
 
 **Gates are mandatory for non-P6 tools** — gate 2 refuses a tool composed without them. They are the
 boundary at which a tool's output enters campaign state, and the only defence against silent failure.

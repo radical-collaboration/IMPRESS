@@ -7,7 +7,9 @@ the result passed its clash check.
 """
 from __future__ import annotations
 
+import importlib
 import math
+import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +21,16 @@ if TYPE_CHECKING:
 GateFn = Callable[[dict[str, Any], dict[str, Any]], GateResult]
 _REGISTRY: dict[str, GateFn] = {}
 
+#: Path-separated dotted module names, imported once before any gate id is resolved. The
+#: counterpart of `$IMPRESS_A_TOOLKITS`: that variable lets a site add a toolkit without
+#: forking the package, and this one lets that toolkit's specs declare gates the package
+#: does not ship. Both are read by `Registry.load()`.
+GATE_MODULES_ENV = "IMPRESS_A_GATE_MODULES"
+
+
+class GateModuleError(Exception):
+    """A module named in `$IMPRESS_A_GATE_MODULES` could not be imported."""
+
 
 def gate(name: str) -> Callable[[GateFn], GateFn]:
     def deco(fn: GateFn) -> GateFn:
@@ -27,9 +39,44 @@ def gate(name: str) -> Callable[[GateFn], GateFn]:
     return deco
 
 
+def load_modules(explicit: str | None = None) -> list[str]:
+    """Import the gate-registering modules named by `$IMPRESS_A_GATE_MODULES`.
+
+    `_REGISTRY` is filled by the `@gate` decorator at import time, so a gate defined outside
+    this package exists only once its module has run - and nothing in `impress-a run` gave a
+    caller the chance to make that happen. The consequence was not a missing gate but a
+    missing *toolkit*: `Registry._load_toolkit` resolves every declared gate id before it
+    registers anything and is all-or-nothing, so one unresolvable id disabled the whole
+    toolkit, with one line in `reg.errors` and no refusal. This hook is that chance.
+
+    **An unimportable module raises, where an unreadable `$IMPRESS_A_TOOLKITS` path is
+    skipped, and the asymmetry is deliberate.** A missing directory on a search path is
+    plausibly another site's entry in a shared profile; a dotted module name is something
+    this run explicitly asked for, and the only alternative to failing here is the silent
+    toolkit loss above. `Registry.load()` is otherwise non-fatal per toolkit - this is the
+    one thing that stops it, because it is a fault in the environment rather than in a
+    toolkit.
+
+    Importing is idempotent through `sys.modules`, so repeated `Registry().load()` calls in
+    one process re-run no module bodies and cannot double-register.
+    """
+    raw = os.environ.get(GATE_MODULES_ENV, "") if explicit is None else explicit
+    names = [n.strip() for n in raw.split(os.pathsep) if n.strip()]
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except Exception as exc:
+            raise GateModuleError(
+                f"${GATE_MODULES_ENV} names {name!r}, which could not be imported: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+    return names
+
+
 def get(name: str) -> GateFn:
     if name not in _REGISTRY:
-        raise KeyError(f"unknown QC gate {name!r}; known: {sorted(_REGISTRY)}")
+        raise KeyError(f"unknown QC gate {name!r}; known: {sorted(_REGISTRY)}; a gate "
+                       f"registered outside impress_a must be named in ${GATE_MODULES_ENV}")
     return _REGISTRY[name]
 
 

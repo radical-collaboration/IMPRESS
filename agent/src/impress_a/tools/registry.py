@@ -41,6 +41,12 @@ class Registry:
         return [p for p in out if p.is_dir()]
 
     def load(self, explicit: str | Path | None = None) -> Registry:
+        # Before anything resolves a gate id, because `_load_toolkit` resolves every id a
+        # spec declares and is all-or-nothing: a toolkit naming a gate this package does not
+        # ship registers NOTHING. `$IMPRESS_A_GATE_MODULES` is how such a gate gets into the
+        # registry in time, and an unimportable name there raises rather than reading as a
+        # toolkit that quietly went missing.
+        gates.load_modules()
         for root in self.search_paths(explicit):
             for tk_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                 try:

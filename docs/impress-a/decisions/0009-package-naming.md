@@ -13,7 +13,7 @@ The working name `impressa` sat one character from `impress`, while
 | Human-facing project name | **IMPRESS-A** |
 | Distribution | **`impress-a`** |
 | Import package | **`impress_a`** |
-| Environment variables | `IMPRESS_A_SHARED`, `IMPRESS_A_CAMPAIGNS`, `IMPRESS_A_TOOLKITS` |
+| Environment variables | `IMPRESS_A_SHARED`, `IMPRESS_A_CAMPAIGNS`, `IMPRESS_A_TOOLKITS`, `IMPRESS_A_GATE_MODULES` |
 
 ## Consequences
 - The underscore supplies the visual break `impressa` lacked. The hazard applied to human readers and more
