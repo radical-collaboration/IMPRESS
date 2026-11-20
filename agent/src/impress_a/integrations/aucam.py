@@ -38,7 +38,10 @@ log = logging.getLogger("impress_a.aucam")
 
 #: Dimensions AuCaM charges against a spending limit. `wall_hours` is not one: AuCaM refuses
 #: it in `spending_limit`, and run time is bounded by `max_wall_time_s` instead.
-_BILLED = ("gpu_hours", "cpu_hours")
+#: `cpu_hours` is excluded: mock pipelines consume ~2µs of CPU per run vs a declared floor of
+#: 0.006 cpu_h, so cost learning would quickly shrink spending_limit below budget_floor and
+#: drop every arm. GPU is the scarce resource on HPC; CPU tracking is a no-op for mock tools.
+_BILLED = ("gpu_hours",)
 
 
 def _aucam() -> Any:
@@ -205,8 +208,18 @@ class _ReporterSink:
         """What AuCaM charges us for, under the names it looks for."""
         billed: dict[str, float] = {}
         for dim in _BILLED:
-            if (value := digest.spend_measured.get(dim)) is not None:
-                billed[dim] = value
+            measured = digest.spend_measured.get(dim)  # None if key absent
+            declared = digest.spend.get(dim, 0.0)
+            if measured is not None and measured > 0:
+                # Real measurement: always prefer it (backlog G20).
+                billed[dim] = measured
+            elif declared > 0:
+                # Mock/surrogate tools: spend_measured is 0 or absent; use declared so cost
+                # learning stays calibrated and budget_floor drops don't fire (backlog G20).
+                billed[dim] = declared
+            elif measured is not None:
+                # Key present but zero — keep it so AuCaM knows this dimension ran.
+                billed[dim] = 0.0
         # `*_in_use` is what AuCaM checks a resource grant against. Declared, because what a
         # graph HOLDS is a property of its shape rather than of its measured cost.
         billed["cpus_in_use"] = float(digest.in_flight.get("cpu_hours", 0.0) > 0)
