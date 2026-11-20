@@ -72,6 +72,7 @@ nav:
     - Control Models: impress-a/reference/control-models.md
     - Compute Patterns: impress-a/reference/compute-patterns.md
     - Authoring Tools: impress-a/reference/authoring-tools.md
+    - Tool Coverage: impress-a/reference/tool-coverage.md
     - Middleware Integration: impress-a/reference/middleware-integration.md
     - AuCaM Integration: impress-a/reference/aucam.md
     - The Mock Knob Lab: impress-a/reference/mock-lab.md

@@ -2062,3 +2062,100 @@ def test_every_declared_parameter_reaches_its_command(reg, tool):
     assert unread == exempt, (
         f"{tool}: declared but not read by its command builder: {sorted(unread - exempt)}; "
         f"exempted but in fact read: {sorted(exempt - unread)}")
+
+
+# ---------------------------------------------------------------------------
+# the refusals every adapter makes and nothing asserted
+# ---------------------------------------------------------------------------
+#
+# Found by the tool-by-tool audit in `docs/impress-a/reference/tool-coverage.md`. Every
+# adapter in this package honours the authoring guide's own rule -- "Check environment
+# variables first, and raise: a missing variable should name itself, not surface as a tool's
+# own confusing failure" -- and **no test asserted a single one of those refusals**. The whole
+# suite set the variables and never removed one: before these tests there was exactly one
+# `monkeypatch.delenv` in 2,064 lines, and it was for `WORK_DIR` in a different test.
+#
+# Two reasons that is worth closing rather than noting. A refusal nobody exercises is a
+# refusal that can be deleted or weakened by a refactor with every test still green -- and the
+# message is the deliverable here, not the exception: these fire on a login node during a dry
+# run, where "FOUNDRY_SIF_PATH is not set" ends the investigation and a bare FileNotFoundError
+# three frames into a container starts one.
+
+#: tool -> the environment variable its adapter requires, and the text it must name.
+_REQUIRED_ENV = [
+    ("rfd3_design", "FOUNDRY_SIF_PATH"),
+    ("ligandmpnn_design", "MPNN_DIR"),
+    ("boltz_predict", "BOLTZ_CACHE"),
+]
+
+#: tool -> the input port whose absence its adapter refuses. `rosetta` holds three of them,
+#: and all three refuse by the same rule with their own tool id in the message.
+_REQUIRED_PORT = [
+    ("ligandmpnn_design", "backbone"),
+    ("packmin", "structure"),
+    ("fastrelax", "structure"),
+    ("filter_shape", "structure"),
+    ("boltz_predict", "structure"),
+]
+
+
+@pytest.mark.parametrize("tool,var", _REQUIRED_ENV)
+async def test_a_missing_environment_variable_names_itself(reg, tmp_path, monkeypatch,
+                                                           tool, var):
+    """The adapter contract's rule, asserted for the first time.
+
+    The message matters more than the exception: this fires on a login node in a dry run, and
+    naming the variable is what makes it a one-line fix rather than an investigation.
+    """
+    from impress_a.tools.agent import TaskRequest
+
+    monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
+    agent = reg.agent_for(tool)(reg.get(tool))
+    req = TaskRequest(tool=tool, node_id=f"r0001:r0_s0_{tool}")
+    with pytest.raises(RuntimeError, match=var):
+        await agent.run(req, agent.parameterize(req))
+
+
+@pytest.mark.parametrize("tool,port", _REQUIRED_PORT)
+async def test_an_unwired_required_input_refuses_and_names_the_port(reg, tmp_path,
+                                                                    monkeypatch, tool, port):
+    """A required input that never arrived must not be read as an empty one.
+
+    `compose/validate.py` waves an unsatisfied required input through for a node with no
+    dependencies ("roots may be satisfied from campaign inputs"), so the adapter is the only
+    layer that can catch it -- and until now nothing checked that any of the five do.
+    """
+    from impress_a.tools.agent import TaskRequest
+
+    for var in ("FOUNDRY_SIF_PATH", "MPNN_DIR", "BOLTZ_CACHE"):
+        monkeypatch.setenv(var, str(tmp_path / "fake"))
+    (tmp_path / "fake").mkdir(exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+
+    agent = reg.agent_for(tool)(reg.get(tool))
+    req = TaskRequest(tool=tool, node_id=f"r0001:r0_s0_{tool}")
+    with pytest.raises(RuntimeError, match=port):
+        await agent.run(req, agent.parameterize(req))
+
+
+def test_every_adapter_refusal_in_the_package_is_exercised_by_one_of_the_above():
+    """The check that keeps the two tests above honest as adapters gain refusals.
+
+    Greps the four adapter modules for `is not set` and `no upstream` refusals and asserts the
+    count matches what the parametrised lists cover. A new refusal added without a case here
+    fails this rather than sitting unexercised -- which is how the eight above came to exist.
+    """
+    import pathlib
+    import re
+
+    total = 0
+    for name in ("rfd3_agents", "ligandmpnn_agents", "boltz_agents", "rosetta_agents"):
+        text = pathlib.Path(f"src/impress_a/tools/{name}.py").read_text()
+        total += len(re.findall(r'"[^"]*is not set', text))
+        total += len(re.findall(r"no upstream '", text))
+    assert total == len(_REQUIRED_ENV) + len(_REQUIRED_PORT), (
+        f"{total} adapter refusals in the package against "
+        f"{len(_REQUIRED_ENV) + len(_REQUIRED_PORT)} covered above: a refusal was added or "
+        "removed without a case here. Add it to _REQUIRED_ENV or _REQUIRED_PORT."
+    )
