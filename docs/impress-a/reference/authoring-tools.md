@@ -86,6 +86,25 @@ qc_gates:
 cost_model: {unit: invocation, cost: {gpu_hours: 0.03}}
 ```
 
+### The `toolkit` field is read by gate 6, and it is not the directory name
+
+`toolkit:` looks like a label and is a **classification**. `compose/validate.py::_g6_delivery`
+decides whether a tool is a surrogate by matching this field against `"mock"` **exactly** — never
+the directory the spec sits in, never a prefix — and a campaign declaring `tool_delivery: real`
+refuses a graph containing one, while `tool_delivery: mock` refuses a graph containing a real
+tool. Two consequences, and the second is the one that bites:
+
+* **A surrogate must declare `toolkit: mock`**, whatever directory it lives in. A stand-in in a
+  toolkit of its own name — `toolkit: my_mocks` — is classified **real** and is *admitted* by a
+  campaign asking for real tools. The run completes and reports seeded draws as science, which is
+  the failure gate 6 exists to prevent.
+* **A tool id is one flat global namespace**, not per toolkit. So a surrogate cannot take its real
+  tool's id, and the convention is a `mock_` prefix on the id while the field stays `mock`. See
+  *Loading is validating* for what a collision actually does.
+
+`toolkits/mock/SKILL.md` and `campaigns/README.md` both state the first rule correctly, and an
+author of a *new* toolkit reads neither.
+
 ### What a parameter is for
 
 A `parameters` entry is a promise in two directions. To a **planner** it is a knob: the `trades`
@@ -110,10 +129,24 @@ graph that tries. Each entry carries its reason, which is surfaced in the reject
 
 ### Loading is validating
 
-A malformed spec, a default outside its own declared range, an unknown QC gate id, a `P1` tool declaring
-no GPU, or a `SKILL.md` missing a required section is a **load-time error**. A toolkit that fails anywhere
-registers **nothing** — never a partial set. A gate id is unknown unless the package ships it or
-`$IMPRESS_A_GATE_MODULES` names the module that registers it (see *QC gates*).
+A malformed spec, a default outside its own declared range, an unknown QC gate id, **a duplicate tool
+id**, a `P1` tool declaring no GPU, or a `SKILL.md` missing a required section is a **load-time error**.
+A toolkit that fails anywhere registers **nothing** — never a partial set. A gate id is unknown unless
+the package ships it or `$IMPRESS_A_GATE_MODULES` names the module that registers it (see *QC gates*).
+
+**The duplicate-id case is worth spelling out, because the toolkit that dies is not the one you
+edited.** Ids are one flat namespace across every search path, and `_load_toolkit` stages a
+toolkit's specs and registers them only if all of them resolve. So adding a tool whose id already
+exists makes **the toolkit being loaded second register nothing at all** — every other tool in it
+disappears too — and the only evidence is one line in `Registry.errors`:
+
+```
+errors: ["mytoolkit: duplicate tool id 'rfd3_design'"]
+```
+
+Nothing refuses, nothing raises, and `impress-a run` proceeds with a vocabulary quietly missing a
+toolkit. Check `reg.errors` after a load; `impress-a tools` listing fewer tools than you expect is
+the symptom.
 
 ## QC gates
 
@@ -276,6 +309,16 @@ Returning a `Path` is how an adapter *declares* a file; returning `str(path)` ma
 value instead. Files get their size and a content digest recorded, which is what lets a reasoner in
 another process tell whether the bytes behind a path are still the ones the campaign reasoned about.
 
+**`ArtifactType` is a closed enum** (`core/types.py`), so the vocabulary of artifact types is fixed
+and gate 1 validates every declared port against it. A genuinely new kind of artifact is therefore a
+**code change to this package**, not a spec change — a spec naming an unknown type fails to load,
+with a pydantic `input_value='MyType'` error that reads as a typo rather than as a closed
+vocabulary. Before adding a member, check whether an existing one is the honest answer:
+`Parameterized`, for instance, covers a parameterisation handed to a sampler, and the enum's own
+docstring draws the `SmallMolecule`/`Parameterized` line exactly there. The members are few on
+purpose — the type is what gate 1 uses to refuse a mis-wired chain, and a vocabulary that grows per
+tool stops being able to.
+
 An output your spec does not declare is a **load-bearing error**, not something to drop quietly:
 nothing downstream could consume it and the composer never type-checked it, so `post_process` raises
 rather than let a spec bug surface later as a missing input.
@@ -302,3 +345,12 @@ for.
 
 Every tool in the toolkit must be mentioned, and every tool mentioned must exist; the registry checks
 both. Co-location is what keeps docs and specs in step: one pull request touches both.
+
+**That check attributes a spec to a toolkit by the spec's `toolkit` field, not by the directory it
+sits in** — so a tool whose field and directory differ is checked against the *field's* `SKILL.md`.
+This matters for exactly one case, and gate 6 creates it: a surrogate must declare `toolkit: mock`
+(above), so a surrogate living outside `toolkits/mock/` is attributed to `toolkits/mock/SKILL.md`,
+which is then told it must mention a tool in a directory it has never heard of. The result is a
+line in `Registry.errors` and nothing else — the toolkit still loads, since this check appends
+rather than raising — but the error is unactionable: satisfying it would mean editing another
+toolkit's documentation to name yours.
