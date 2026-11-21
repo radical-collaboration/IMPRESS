@@ -34,6 +34,7 @@ from .runtime.executor import (
     CampaignResult,
     CampaignSpec,
     RunRecord,
+    ToolVocabularyRefused,
 )
 from .runtime.roles import RolesDriver, goal_from_spec
 from .runtime.runservice import RunService
@@ -41,7 +42,7 @@ from .runtime.session import InProcessSession
 from .tools.registry import Registry
 
 __all__ = ["CampaignAborted", "CampaignManager", "CampaignResult", "CampaignSpec",
-           "RunRecord"]
+           "RunRecord", "ToolVocabularyRefused"]
 
 _DELEGATED = ("tree", "budget", "prov", "jobs", "trust", "reg", "root", "cycle",
               "run_seq", "dispatched", "observe", "composer", "validator",

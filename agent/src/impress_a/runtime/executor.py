@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -128,6 +129,22 @@ def why_run_failed(graph: Any, results: ExecutionResults) -> str:
 
     return ("no task failure and no failed integrity gate were recorded, which should be "
             "unreachable: _record_evidence counts a run as failed on one or the other")
+
+
+class ToolVocabularyRefused(RuntimeError):
+    """The campaign cannot reach its goal with the tools it can see, so it never starts.
+
+    **Both shapes of this were measured, and both reported success.** With
+    `Registry.search_paths()` returning `[]`, the downstream ASD prototype ran to
+    `exit=goals_satisfied`, published a model and promoted it on a corpus of `score: 0.0,
+    best: {}` rows; the only signal anywhere was `planned nothing at cycle 0` at INFO, and
+    every workflow still exited `rc=0`. A campaign naming a stage no toolkit provides fared no
+    better: three cycles, then `CampaignAborted`, naming neither the stage nor the tool.
+
+    Raised from `start()` **before the engine is constructed**, which is the whole point.
+    Discovering this at cycle 0 costs a Dragon runtime and a worker pool; discovering it at
+    cycle 3 costs an allocation. Nothing is published, because nothing ran.
+    """
 
 
 class CampaignAborted(RuntimeError):
@@ -1050,6 +1067,25 @@ class CampaignExecutor:
                                  "attempt": stage.attempt, "graph": graph.id,
                                  "rejected": failure.model_dump()})
             return None, failure
+        # ITEM 42. Recorded and said out loud, NOT refused -- and the refusal was written
+        # first, then measured, then withdrawn. See `_declared_stages_not_planned`.
+        if dropped := self._declared_stages_not_planned(stage):
+            # DISTINCT tools, which is not what the first version counted: `stage.tools` has
+            # one entry per TASK, so two lineages over three tools reported "plans 6 of the 4
+            # stages" -- a message that reads as a different defect than the one it describes.
+            planned = sorted(set(stage.tools))
+            self._log("stages", {
+                "event": "stages_not_planned", "stage": stage.id, "attempt": stage.attempt,
+                "graph": graph.id,
+                "detail": {"declared": list(self.spec.stages), "planned": planned,
+                           "not_planned": dropped}})
+            log.warning(
+                "stage %s plans %d of the %d stages campaign %s declares; NOT PLANNED: %s. "
+                "A planner selecting by output type is expected to choose a sub-chain -- but "
+                "a mistyped stage id looks identical, so check that every one of these "
+                "produces no metric any objective names",
+                stage.id, len(planned), len(self.spec.stages), self.spec.campaign_id,
+                dropped)
         # Coverage is checked against the APPLIED Spec, never the Stage's claim about what is
         # open: not trusting that claim is the Reviewer's purpose.
         failure = await self.reviewer.review(stage, graph, self.spec_state)
@@ -1059,6 +1095,39 @@ class CampaignExecutor:
                                  "rejected": failure.model_dump()})
             return None, failure
         return await self._admit_graph(graph, run_label, stage=stage, reviewed=True)
+
+    def _declared_stages_not_planned(self, stage: Stage) -> list[str]:
+        """Stages this campaign declared that this Stage does not plan. Item 42.
+
+        **Measured where it happens, because the first guess was wrong.** With two objectives
+        removed from a nine-stage campaign, the PLANNER emitted a Stage naming 2 of the 9
+        declared tools and the composer built exactly those 2 -- so the composer is faithful,
+        and `spec.stages` is the only surviving record of what the campaign asked for. Hence
+        the comparison is against the Stage's own tool list.
+
+        **This warns and records; it does not refuse, and the refusal was written first.**
+        Under the explicit policy it looked safe: `ThresholdPlanner` prunes strictly by which
+        objectives are open, so a declared stage no objective reaches reads like a campaign
+        file contradicting itself. Running the suite with that refusal in place broke five
+        tests in `tests/test_planner.py`, and one of them is named
+        `test_the_chain_is_the_subset_the_objectives_need` -- *"Selection by output type, not
+        by position in a declared list. `mock_score` is the only producer of `ddg`/
+        `clashscore`; with neither declared, nothing in the chain needs it and planning it
+        would be work nobody asked for."* The stage list is a **vocabulary**, not a manifest,
+        and that was decided here before this check existed. A refusal would have been this
+        package changing its own documented behaviour to fix a diagnostic gap.
+
+        So what is wrong is only the silence, which is what item 42 said: *"An objective-driven
+        planner choosing a sub-chain is correct behaviour. Being unable to tell that from a
+        typo in `stages:` is not."* A nine-stage campaign could submit two tasks, report
+        `2/2 tasks ok`, `qc=pass` and `every spec objective satisfied`, and mention the other
+        seven nowhere. Now it says so, and `stages.jsonl` carries it -- which a log line
+        during an allocation does not.
+        """
+        if not self.spec.stages:
+            return []
+        planned = set(stage.tools)
+        return [s for s in self.spec.stages if s not in planned]
 
     def _apply_cancels(self, stage: Stage) -> None:
         """Cancel the pending tasks this Stage names, and record what could not be reclaimed.
@@ -1512,7 +1581,58 @@ class CampaignExecutor:
                                   "reason": self.stop_reason})
 
     # -- lifecycle -----------------------------------------------------------
+    def _refuse_a_vocabulary_that_cannot_reach_the_goal(self) -> None:
+        """Items 30 and 42's first half: a tool vocabulary that cannot serve this campaign.
+
+        Two conditions, one rule. **No tools at all** is unplannable forever, and the useful
+        diagnosis is where the loader looked -- a root that does not exist and a root that
+        exists and held nothing are different mistakes, and the default root is relative to
+        `tools/registry.py`, so it is present in a source checkout and absent from a wheel.
+        **A declared stage no spec provides** is the same condition narrowed to one name,
+        which is how a mistyped stage id spends three cycles before `CampaignAborted`.
+
+        `reg.errors` is included because a toolkit is disabled all-or-nothing: one duplicate
+        id, or one gate this package does not ship, and every tool in that directory is
+        missing with a single line in `errors` and no refusal. An empty registry whose
+        `errors` are empty and one whose `errors` explain themselves are not the same
+        problem, and the message should not make a reader guess which they have.
+        """
+        def _where() -> str:
+            searched = {str(p) for p in self.reg.searched}
+            roots = ", ".join(
+                f"{p}{'' if str(p) in searched else ' (does not exist)'}"
+                for p in self.reg.attempted) or "nowhere: no root was resolved at all"
+            env = os.environ.get("IMPRESS_A_TOOLKITS")
+            parts = [f"looked in: {roots}",
+                     f"$IMPRESS_A_TOOLKITS={env!r}" if env else
+                     "$IMPRESS_A_TOOLKITS is unset"]
+            # A root listed twice is its own diagnosis, and a confusing one unless it is
+            # named: the second pass over it raises `duplicate tool id` for every spec, which
+            # disables that toolkit all-or-nothing. It happens when an explicit root is also
+            # in `$IMPRESS_A_TOOLKITS`, which is easy to do and leaves no other trace.
+            seen = [str(p) for p in self.reg.attempted]
+            if repeats := sorted({r for r in seen if seen.count(r) > 1}):
+                parts.append(f"searched more than once, which disables the toolkits in it "
+                             f"with `duplicate tool id`: {repeats}")
+            if self.reg.errors:
+                parts.append("toolkits disabled by a load error (all-or-nothing, so every "
+                             f"tool in each is missing): {self.reg.errors}")
+            return "; ".join(parts)
+
+        if not self.reg.specs:
+            raise ToolVocabularyRefused(
+                f"campaign {self.spec.campaign_id!r} has no tools: the registry resolved none, "
+                "so nothing can ever be planned and every cycle would report success having "
+                f"done nothing. {_where()}")
+        if missing := [s for s in self.spec.stages if s not in self.reg.specs]:
+            raise ToolVocabularyRefused(
+                f"campaign {self.spec.campaign_id!r} names {len(missing)} stage(s) no toolkit "
+                f"provides: {missing}. Refused here rather than after three cycles of "
+                f"all-failed runs, which is what this used to cost. {_where()}")
+
     async def start(self) -> None:
+        # FIRST, and before any engine exists. See `ToolVocabularyRefused`.
+        self._refuse_a_vocabulary_that_cannot_reach_the_goal()
         if self._injected_flow is not None:
             await self._start_on_injected_engine()
         else:

@@ -28,17 +28,33 @@ class Registry:
         self.specs: dict[str, ToolSpec] = {}
         self.skills: dict[str, str] = {}
         self.errors: list[str] = []
+        #: Where `load()` looked, and where it would have looked. Both, because an empty
+        #: registry's only useful diagnosis is the difference between them: a root that does
+        #: not exist and a root that exists and held nothing are different mistakes.
+        self.attempted: list[Path] = []
+        self.searched: list[Path] = []
 
     # -- discovery ---------------------------------------------------------
     @staticmethod
-    def search_paths(explicit: str | Path | None = None) -> list[Path]:
+    def candidate_paths(explicit: str | Path | None = None) -> list[Path]:
+        """Every root `load()` would look in, **whether or not it exists**.
+
+        Kept beside `search_paths` because the filtered list cannot answer the one question an
+        empty registry raises: *where did you look?* The last entry is relative to this file,
+        so it exists only in a source checkout and is absent from a wheel install -- which is
+        exactly how a deployment ends up with no tools and no idea why.
+        """
         out: list[Path] = []
         if explicit:
             out.append(Path(explicit))
         if env := os.environ.get("IMPRESS_A_TOOLKITS"):
             out += [Path(p) for p in env.split(os.pathsep) if p]
         out.append(Path(__file__).resolve().parents[3] / "toolkits")
-        return [p for p in out if p.is_dir()]
+        return out
+
+    @staticmethod
+    def search_paths(explicit: str | Path | None = None) -> list[Path]:
+        return [p for p in Registry.candidate_paths(explicit) if p.is_dir()]
 
     def load(self, explicit: str | Path | None = None) -> Registry:
         # Before anything resolves a gate id, because `_load_toolkit` resolves every id a
@@ -47,7 +63,12 @@ class Registry:
         # registry in time, and an unimportable name there raises rather than reading as a
         # toolkit that quietly went missing.
         gates.load_modules()
-        for root in self.search_paths(explicit):
+        # Recorded rather than recomputed: `$IMPRESS_A_TOOLKITS` can change under a long-lived
+        # process, and a refusal that re-reads the environment would name roots other than the
+        # ones it actually searched.
+        self.attempted = self.candidate_paths(explicit)
+        self.searched = [p for p in self.attempted if p.is_dir()]
+        for root in self.searched:
             for tk_dir in sorted(p for p in root.iterdir() if p.is_dir()):
                 try:
                     self._load_toolkit(tk_dir)
