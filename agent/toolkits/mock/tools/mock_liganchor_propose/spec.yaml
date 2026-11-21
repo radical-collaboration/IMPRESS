@@ -24,7 +24,7 @@ version: "0.1"
 # forced `gpus: 1`. A twin whose pattern disagrees with its tool's is testing a different
 # dispatch path from the one the campaign will take.
 pattern: P2
-entry: asteer.impress.mock_asd.MockLigAnchorProposeAgent
+entry: impress_a.tools.mock_asd_agents.MockLigAnchorProposeAgent
 # 30s because the agent hashes its parameters and returns. A bound copied from hardware would
 # hide a twin that hung; a bound that can never bind teaches nothing.
 resources: {cores: 2, walltime_s: 30}

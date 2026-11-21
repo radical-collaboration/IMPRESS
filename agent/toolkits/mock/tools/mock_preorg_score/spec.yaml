@@ -12,7 +12,7 @@ id: mock_preorg_score
 toolkit: mock
 version: "0.1"
 pattern: P2
-entry: asteer.impress.mock_asd.MockPreorgScoreAgent
+entry: impress_a.tools.mock_asd_agents.MockPreorgScoreAgent
 resources: {cores: 2, walltime_s: 30}
 inputs:
   structure: {type: Complex}

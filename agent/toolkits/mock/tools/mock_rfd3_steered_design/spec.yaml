@@ -11,7 +11,7 @@ version: "0.1"
 # GPU-less node the task is accepted and never placed. The difference is recorded here rather
 # than discovered in a run, and `tests/test_tier1_loop.py` asserts it is the only divergence.
 pattern: P2
-entry: asteer.impress.mock_asd.MockRFD3SteeredDesignAgent
+entry: impress_a.tools.mock_asd_agents.MockRFD3SteeredDesignAgent
 resources: {cores: 2, walltime_s: 60}
 inputs:
   anchor_spec: {type: Parameterized}

@@ -13,7 +13,7 @@ id: mock_md_label
 toolkit: mock
 version: "0.1"
 pattern: P1
-entry: asteer.impress.mock_asd.MockMDLabelAgent
+entry: impress_a.tools.mock_asd_agents.MockMDLabelAgent
 # 30s because the agent hashes its parameters and returns. `gpus: 1` stays: a P1 tool declaring no
 # GPU is a load-time error, and the concurrent backend never looks for a device.
 resources: {gpus: 1, cores: 8, walltime_s: 30}

@@ -13,8 +13,8 @@ apptainer container -- where `impress_a` is not installed -- or on both sides of
 imports `asteer` at module scope, and that direction is the intended one: `asteer` declares no
 dependencies, three repos import its contracts inside Dragon tasks, and none of them imports this.
 
-The only importer left outside impress-a is `asteer.impress.mock_asd`, the six mock twins, which
-follows in H9.
+H9 brought the six mock twins over too (`mock_asd_agents.py`), so nothing outside impress-a
+imports this module at all.
 
 The three sections below carry their original module headers verbatim. Read them as three modules
 sharing a file, not as one subject.

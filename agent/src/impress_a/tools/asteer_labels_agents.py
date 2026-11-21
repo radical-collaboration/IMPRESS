@@ -16,7 +16,7 @@ worse:
   label's output *supersedes a prediction* and is never recomputed, so an invented `dg_abfe` does
   not merely report a wrong number once — it writes itself into the design tree as the measured
   truth, trains Model C against itself, and leaves no `__superseded` trail saying where the real
-  measurement should have been. `toolkits/mock_asd/` is where a stand-in belongs, under
+  measurement should have been. `toolkits/mock/` is where a stand-in belongs, under
   `toolkit: mock`, where gate 6 refuses it from a campaign declaring `tool_delivery: real`.
 
 **The refusal happens at parameterize time, which is the only layer that can catch the root
@@ -112,7 +112,7 @@ def _require_structure(spec_id: str, req: Any, params: dict[str, Any]) -> str:
 def _refuse(spec_id: str, needs: str, owner: str) -> LabelAdapterNotImplemented:
     return LabelAdapterNotImplemented(
         f"{spec_id}: the ToolSpec is complete but the protocol body is not implemented. "
-        f"It needs {needs}. The twin for laptop runs is `mock_{spec_id}` in toolkits/mock_asd "
+        f"It needs {needs}. The twin for laptop runs is `mock_{spec_id}` in toolkits/mock "
         f"(toolkit: mock, so tool_delivery: real refuses it). Implementation is {owner}. "
         "This refuses rather than returning numbers because a label's output supersedes a "
         "prediction and is never recomputed."

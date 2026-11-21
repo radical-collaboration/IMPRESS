@@ -39,11 +39,11 @@ import yaml
 pytest.importorskip("impress_a", reason="impress-a is not installed in this environment")
 
 from asteer.contracts import FKConfig, PotentialKind  # noqa: E402
-from asteer.impress import mock_asd  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
 from impress_a.tools import asteer_design_agents as rs  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
+from impress_a.tools import mock_asd_agents as mock_asd  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
 from impress_a.tools.asteer_design_agents import (  # noqa: E402
     ANCHOR_SPEC_SCHEMA,
@@ -53,7 +53,7 @@ from impress_a.tools.spec import ToolSpec  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 DESIGN = REPO / "toolkits" / "asteer_design"
-MOCK = REPO / "toolkits" / "mock_asd"
+MOCK = REPO / "toolkits" / "mock"
 
 #: The project's own committed RFD3 input, from the sibling IMPRESS checkout. Used rather than
 #: a fixture because its two awkward properties are the ones under test: it carries
@@ -777,7 +777,7 @@ def test_the_backbone_read_keeps_every_heavy_import_inside_its_function():
     for `_pdbtools`. Run in a cold interpreter because an earlier test in this file may already
     have imported Biopython for its own reasons.
     """
-    code = ("import sys, impress_a.tools.asteer_design_agents, asteer.impress.mock_asd; "
+    code = ("import sys, impress_a.tools.asteer_design_agents, impress_a.tools.mock_asd_agents; "
             "print(sorted({m.split('.')[0] for m in sys.modules} "
             "& {'Bio', 'gemmi', 'torch', 'numpy'}))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

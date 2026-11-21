@@ -38,7 +38,7 @@ Either runs alone against one structure; neither is a root — `structure` is a 
 required input, so the composer wires it and gate 1 type-checks it.
 
 The laptop counterparts are `mock_preorg_score` and `mock_affdelta_score` in
-`toolkits/mock_asd/`, which declare `toolkit: mock` and are therefore refused by a campaign
+`toolkits/mock/`, which declare `toolkit: mock` and are therefore refused by a campaign
 declaring `tool_delivery: real` (gate 6).
 
 ## Cost posture

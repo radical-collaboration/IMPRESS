@@ -29,17 +29,17 @@ import yaml
 
 pytest.importorskip("impress_a", reason="impress-a is not installed in this environment")
 
-from asteer.impress import mock_asd  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
 from impress_a.tools import asteer_design_agents as liganchor  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
+from impress_a.tools import mock_asd_agents as mock_asd  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
 from impress_a.tools.spec import ToolSpec  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 DESIGN = REPO / "toolkits" / "asteer_design"
-MOCK = REPO / "toolkits" / "mock_asd"
+MOCK = REPO / "toolkits" / "mock"
 
 #: The project's own ligand, from the IMPRESS checkout beside this one. Used rather than a
 #: fixture of our own on purpose: a fixture would carry the same assumptions as the parser, and
@@ -83,10 +83,9 @@ def test_no_code_path_emits_select_hotspots():
     # Read through the IMPORTED module rather than a repo-relative path: the source that
     # matters is the one that actually runs, and a path guess stops being true the moment the
     # module moves repos (H4, and again in H7, which is when this line last changed).
-    import asteer.impress.mock_asd
-
     import impress_a.tools.asteer_design_agents
-    for mod in (impress_a.tools.asteer_design_agents, asteer.impress.mock_asd):
+    import impress_a.tools.mock_asd_agents
+    for mod in (impress_a.tools.asteer_design_agents, impress_a.tools.mock_asd_agents):
         module = Path(mod.__file__).name
         source = Path(mod.__file__).read_text()
         emitted = [line for line in source.splitlines()

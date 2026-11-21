@@ -180,11 +180,20 @@ def test_five_of_the_nine_twins_are_impress_as_and_this_episode_wrote_none(run):
 
     The steered designer emits `backbone: Backbone` and both scorers take
     `structure: Complex`, so the bridge looked like work. impress-a already ships every stage
-    of it. Asserted by where each spec was staged from, because the claim is about authorship
-    rather than about resolution: a twin of ours quietly added to `toolkits/mock_asd/` would
-    satisfy the chain and silently falsify this episode's reason for being cheap.
+    of it. Asserted by WHICH MODULE implements each twin, because the claim is about authorship
+    rather than about resolution: a twin of ours quietly added to the chain would satisfy it and
+    silently falsify this episode's reason for being cheap.
+
+    This read the staging DIRECTORY until H9 (2026-11-21), when `toolkits/mock_asd/` merged into
+    `toolkits/mock/` and the filesystem stopped carrying the distinction. The `entry:` module is
+    the better signal anyway: it names what implements a twin rather than where its spec was
+    filed, and it is what a reader checks when they want to know whose code runs.
     """
-    ours = {path.parent.name for path in (TOOLKITS / "mock_asd" / "tools").glob("*/spec.yaml")}
+    ours = {
+        path.parent.name
+        for path in (TOOLKITS / "mock" / "tools").glob("*/spec.yaml")
+        if "mock_asd_agents" in yaml.safe_load(path.read_text())["entry"]
+    }
     for tool, origin in CHAIN:
         if origin == "ours":
             assert tool in ours, f"{tool} is not in this repo's toolkit"
@@ -449,7 +458,7 @@ def test_the_campaigns_model_version_is_what_the_attribution_reports(tmp_path):
     `model_versions` does not reach the design tree -- it is in the raw payload, which is where
     `surrogate_version_present` looks -- so this reads the payload directly.
     """
-    from asteer.impress.mock_asd import MockAffDeltaScoreAgent, MockPreorgScoreAgent
+    from impress_a.tools.mock_asd_agents import MockAffDeltaScoreAgent, MockPreorgScoreAgent
 
     doc = yaml.safe_load(CAMPAIGN.read_text())
     for tool, agent_cls, model in (("mock_preorg_score", MockPreorgScoreAgent, "pocket_preorg"),

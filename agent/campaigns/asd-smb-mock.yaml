@@ -37,10 +37,12 @@ backend_config: {workers: 4}
 # `tests/test_gate6_pair.py` makes it on purpose: the campaign must be rejected at validation
 # rather than quietly reporting drawn numbers as science.
 #
-# What makes that work is in every twin's spec and is worth repeating here, because it looks
-# like a mistake: each one declares `toolkit: mock`, NOT `toolkit: mock_asd`. Gate 6 matches
-# that field against "mock" exactly, so a twin in a toolkit of its own name would be
-# classified real and admitted here. See `toolkits/mock_asd/SKILL.md`, Pitfalls.
+# What makes that work is in every twin's spec: each one declares `toolkit: mock`. Gate 6
+# matches that field against "mock" exactly -- never the directory name, never the `mock_` id
+# prefix -- so a twin in a toolkit of its own name would be classified real and admitted here.
+# The twins lived in a `toolkits/mock_asd/` directory until 2026-11-21 and that split is what
+# made the rule look like a mistake; they are in `toolkits/mock/` now, with the other twelve.
+# See `toolkits/mock/SKILL.md`, Pitfalls.
 tool_delivery: mock
 
 max_cycles: 4

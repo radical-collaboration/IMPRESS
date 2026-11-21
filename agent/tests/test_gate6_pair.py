@@ -4,19 +4,25 @@
 structure that nothing checks is how a delivery-honesty gate stops working without anyone
 noticing. Two runs of the same campaign differing only in one line is the assertion.
 
-It also pins the thing the plan for this episode got wrong. The plan said naming the dev
-toolkit `mock_asd` "keeps it runnable under `mock` and refused under `real`". It is the other
-way round: `_g6_delivery` evaluates `(spec.toolkit == "mock") is want_real`, so a toolkit
-named `mock_asd` is refused under `mock` and **admitted** under `real` — the dangerous
-direction, and the one IMPRESS's own `toolkits/mock/SKILL.md` warns about in those words. The
-fix is that the directory is `mock_asd` while every spec's `toolkit` field says `mock`, and
-`test_a_twin_declares_the_toolkit_the_gate_reads` is what keeps anyone from "tidying" that up.
+It also pins the thing the plan for the original episode got wrong. That plan said naming the
+dev toolkit `mock_asd` "keeps it runnable under `mock` and refused under `real`". It is the
+other way round: `_g6_delivery` evaluates `(spec.toolkit == "mock") is want_real`, so a toolkit
+named `mock_asd` would be refused under `mock` and **admitted** under `real` — the dangerous
+direction, and the one `toolkits/mock/SKILL.md` warns about in those words. The fix was that
+the directory said `mock_asd` while every spec's `toolkit` field said `mock`.
+
+**H9 (2026-11-21) removed the split rather than guarding it.** The six twins merged into
+`toolkits/mock/`, so the directory and the field now say the same thing and there is nothing
+left to "tidy". `test_a_twin_declares_the_toolkit_the_gate_reads` is kept, because the rule it
+asserts is about the FIELD and outlives the directory that made it look odd: the next twin
+added here can still declare the wrong one.
 
 Skipped, not failed, when impress-a is absent: it is a sibling checkout, not a dependency of
 this package, and every other test here runs without it.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -38,15 +44,22 @@ CAMPAIGN = REPO / "campaigns" / "asd-smb-mock.yaml"
 
 
 def our_tool_ids() -> list[str]:
-    """The ids declared in THIS toolkit, read from its spec files.
+    """The six ASD twins, by the module that implements them.
 
-    Not `registry.ids()`: the registry searches the IMPRESS checkout too, so after a load it
-    holds that whole catalogue - boltz, ligandmpnn, rfd3, rosetta and IMPRESS's own mock
-    chain. A test that asserted over `ids()` would be asserting about their tools.
+    Not `registry.ids()`: the registry holds the whole catalogue - boltz, ligandmpnn, rfd3,
+    rosetta and all eighteen twins - and a test asserting over `ids()` would be asserting
+    about tools this file is not about.
+
+    Keyed on `entry:` since H9 (2026-11-21). It used to glob `toolkits/mock_asd/tools/`, and
+    when those six merged into `toolkits/mock/` the directory stopped carrying the
+    distinction. The entry module is the better key regardless: it names what implements a
+    twin, not where its spec happens to be filed.
     """
     return sorted(
-        yaml.safe_load(f.read_text())["id"]
-        for f in (TOOLKITS / "mock_asd" / "tools").glob("*/spec.yaml")
+        spec["id"]
+        for spec in (yaml.safe_load(f.read_text())
+                     for f in (TOOLKITS / "mock" / "tools").glob("*/spec.yaml"))
+        if "mock_asd_agents" in spec["entry"]
     )
 
 
@@ -85,17 +98,22 @@ def _validator(reg: Registry, delivery: str) -> Validator:
                      tool_delivery=delivery)
 
 
-def test_the_toolkit_loads_from_outside_the_impress_checkout(registry):
-    """The property the whole integration rests on (`registry.py:34`, `:97`).
+def test_a_twin_resolves_from_the_default_root_with_nothing_set(registry):
+    """The property the whole integration rests on, inverted by the re-homing and kept.
 
-    If this fails, nothing else in the project works the way it is planned: the toolkits, the
-    task agents, the gates and the roles all live here and load into IMPRESS by path and by
-    dotted import. It is asserted first because it is the cheapest thing to get wrong and the
-    most expensive to discover later.
+    It read `spec.entry.startswith("asteer.")` with the comment *"a twin must load from this
+    package, not IMPRESS"* -- true while the twins were a sibling checkout loaded through
+    `$IMPRESS_A_TOOLKITS`, and the exact opposite of what must hold now. After H4 moved the
+    toolkits and H9 the module, a stock `impress-a run` with no environment variable set has
+    to resolve every twin from this checkout alone. Asserted first because it is the cheapest
+    thing to get wrong and the most expensive to discover later.
     """
     assert "mock_liganchor_propose" in registry.ids()
     spec = registry.get("mock_liganchor_propose")
-    assert spec.entry.startswith("asteer."), "a twin must load from this package, not IMPRESS"
+    assert spec.entry.startswith("impress_a.tools.mock_asd_agents"), (
+        f"the twin resolves through {spec.entry!r}; after H9 it must load from this package, "
+        "and an `asteer.` entry here means the re-homing was partly reverted"
+    )
     assert registry.agent_for("mock_liganchor_propose").__name__ \
         == "MockLigAnchorProposeAgent"
 
@@ -122,12 +140,17 @@ def test_a_twin_id_is_prefixed_so_it_cannot_shadow_its_real_tool(registry):
 
 
 def test_a_twin_declares_the_toolkit_the_gate_reads(registry):
-    """`toolkit: mock`, not `mock_asd`, and this is the test that stops the "fix".
+    """`toolkit: mock`, on the field the gate actually reads.
 
-    `_g6_delivery` is `(spec.toolkit == "mock") is want_real`. A twin declaring `mock_asd`
+    `_g6_delivery` is `(spec.toolkit == "mock") is want_real`. A twin declaring anything else
     would be classified REAL and admitted by a campaign declaring `tool_delivery: real`:
     seeded draws reported as science, which is the documented failure gate 6 exists to
-    prevent. The directory name is ours; the field is the gate's.
+    prevent.
+
+    This existed to stop a "tidy-up" that would have renamed the field to match a
+    `mock_asd` directory. H9 removed the directory instead, so that particular mistake is no
+    longer available -- but the rule is about the field, and the next twin added here can
+    still get it wrong on its own.
     """
     for tool_id in our_tool_ids():
         spec = registry.get(tool_id)
@@ -196,19 +219,24 @@ def test_dropping_a_required_section_disables_the_toolkit_rather_than_crashing(t
     # Prefixing makes the copy's ids exist nowhere else, which is what the assertions need.
     ids = sorted((yaml.safe_load(f.read_text())["id"] for f in root.glob("*/tools/*/spec.yaml")),
                  key=len, reverse=True)  # longest first: one id is a suffix of another
+    # ONE PASS, not one replace() per id. Successive replaces re-enter their own output:
+    # `mock_abfe_label` becomes `probe_mock_abfe_label`, and the shorter real id `abfe_label`
+    # then matches INSIDE it, giving `probe_mock_probe_abfe_label`. The copy's SKILL.md then
+    # fails upstream's referential check for ids the fixture itself mangled. It was invisible
+    # while the broken toolkit was `mock_asd` -- that one raised before the check ran, and the
+    # assertion below only asks that the missing-sections error is present, not that it is
+    # alone. H9 made the broken toolkit `mock`, which surfaced it.
+    pattern = re.compile("|".join(re.escape(i) for i in ids))
     for tk in sorted(root.iterdir()):
         sk = tk / "SKILL.md"
         if sk.exists():
-            text = sk.read_text()
-            for i in ids:
-                text = text.replace(i, PROBE + i)
-            sk.write_text(text)
+            sk.write_text(pattern.sub(lambda m: PROBE + m.group(0), sk.read_text()))
     for f in sorted(root.glob("*/tools/*/spec.yaml")):
         f.write_text(f.read_text().replace(f"id: {yaml.safe_load(f.read_text())['id']}",
                                            f"id: {PROBE}{yaml.safe_load(f.read_text())['id']}", 1))
         f.parent.rename(f.parent.with_name(PROBE + f.parent.name))
 
-    skill = root / "mock_asd" / "SKILL.md"
+    skill = root / "mock" / "SKILL.md"
     skill.write_text(skill.read_text().replace("## Pitfalls", "## Gotchas"))
 
     reg = Registry().load(root)
@@ -265,19 +293,29 @@ def test_the_registry_now_loads_with_no_errors_at_all(registry):
 def test_every_tool_in_the_toolkit_is_mentioned_in_its_skill_md(registry):
     """Written as a replacement for a check that could not see this toolkit, and kept.
 
-    Upstream's referential check matched on the spec's `toolkit` FIELD, and ours say `mock`
-    while the directory is `mock_asd` - so it matched this directory for no spec at all and
-    our SKILL.md was never checked by anything. **EI.28 fixed that too**: iterating `staged`
-    means each directory is checked against its own SKILL.md whatever its specs' field says,
-    so upstream now covers this.
+    Upstream's referential check matched on the spec's `toolkit` FIELD, and ours said `mock`
+    while the directory said `mock_asd` - so it matched that directory for no spec at all and
+    our SKILL.md was never checked by anything. **EI.28 fixed that**: iterating `staged` means
+    each directory is checked against its own SKILL.md whatever its specs' field says.
 
     Kept anyway, for one reason: it fails with the missing tool's NAME, where upstream's
     appends a line to `reg.errors` that the fixture above turns into one aggregate failure.
     The redundancy is cheap and the message is better.
+
+    **Over all eighteen since H9, not just our six.** The merge made `toolkits/mock/` one
+    directory with one SKILL.md, and a check that covered a third of it would leave the
+    better message exactly where it is least likely to be needed.
     """
-    text = (TOOLKITS / "mock_asd" / "SKILL.md").read_text()
+    text = (TOOLKITS / "mock" / "SKILL.md").read_text()
+    staged = sorted(yaml.safe_load(f.read_text())["id"]
+                    for f in (TOOLKITS / "mock" / "tools").glob("*/spec.yaml"))
     assert our_tool_ids(), "a toolkit with no tools proves nothing about gate 6"
-    for tool_id in our_tool_ids():
+    assert len(staged) == 18, (
+        f"{len(staged)} specs staged in toolkits/mock/, not 18. H9 merged our six into "
+        "impress-a's twelve; a change to that count is a toolkit arriving or leaving, which "
+        "is worth noticing here rather than in a SKILL.md diff"
+    )
+    for tool_id in staged:
         assert tool_id in text, f"SKILL.md does not mention {tool_id!r}"
 
 

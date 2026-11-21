@@ -6,7 +6,7 @@ id: mock_abfe_label
 toolkit: mock
 version: "0.1"
 pattern: P1
-entry: asteer.impress.mock_asd.MockABFELabelAgent
+entry: impress_a.tools.mock_asd_agents.MockABFELabelAgent
 resources: {gpus: 1, cores: 8, walltime_s: 30}
 gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
 inputs:

@@ -8,7 +8,15 @@ tools report is a seeded random draw. They model no chemistry, and their outputs
 evidence about any molecule.** Use them to exercise the manager, policies, composer,
 validator and QC layer without an allocation. Do NOT use them to draw scientific conclusions.
 
-Both families are `toolkit: mock` and that is load-bearing rather than tidy. Gate 6
+**Three families live here**: the self-consistency loop, the six-stage small-molecule binding
+surrogate, and -- since 2026-11-21 -- the six ASD twins that were `toolkits/mock_asd/`. The
+merge is not tidying. That directory existed only because its twins lived in a sibling
+checkout, and a directory named `mock_asd` staging specs that declare `toolkit: mock` is a
+split that invites exactly one "fix": renaming the field to match the directory, which is the
+dangerous direction (see the gate-6 note below). One directory, one name, nothing left to
+reconcile.
+
+All three families are `toolkit: mock` and that is load-bearing rather than tidy. Gate 6
 (`compose/validate.py::_g6_delivery`) classifies a tool by `ToolSpec.toolkit == "mock"`
 exactly, so a surrogate sitting in a toolkit of its own would be classified **real** and
 admitted by a campaign declaring `tool_delivery: real` - a chain of random number generators
@@ -64,6 +72,45 @@ catch a dispatcher that keyed inputs positionally - a node with two typed inputs
 composition and mis-wires at runtime, silently, because a positional scan returns whichever
 dependency comes first. Use it whenever a test needs a real branch rather than a chain.
 
+The ASD design chain, stage for stage as the real one will be:
+
+    mock_liganchor_propose -> mock_rfd3_steered_design -> mock_preorg_score ->
+    mock_affdelta_score
+
+`mock_liganchor_propose` is Model A: a ligand graph becomes the sampler's anchoring
+instruction. The `AnchorSpec` it emits declares the **classifier-free-guidance** channel
+(`active_donor`, `active_acceptor`, `ref_atomwise_rasa`) plus `unindex`-style motif placement.
+What `rfd3_steered_design` then *renders* is the burial pair `select_buried` / `select_exposed`,
+with the CFG trio opt-in and off by default -- a correction made on evidence in the real
+renderer, whose own header carries the argument. Neither path emits `select_hotspots`: M0
+measured that RFD3 resolves a ligand `select_hotspots` and then drops the annotation in
+`build()`, so the model is conditioned on zeros while the run reports success (backlog items
+26, 29).
+
+`mock_rfd3_steered_design` runs the FK Tier-1 loop over seeded draws -- K particles, score,
+resample, re-noise -- so the resampling arithmetic and the `n_resamples` metric are exercised
+without a sampler. `mock_preorg_score` and `mock_affdelta_score` stand in for the two ROME
+stream clients, and emit the model id and version the `surrogate_version_present` gate reads.
+
+The ASD label chain, which is a second campaign rather than stages of the design chain,
+because a measured value may not arrive from a task (CON-14):
+
+    mock_md_label -> mock_abfe_label
+
+**The two label twins check their root input, which is the one way a twin can be worse than
+nothing.** `mock_md_label` refuses an empty `design_dir` exactly as the real adapter does,
+because `compose/validate.py:79`-`:81` is a literal `pass` for an unsatisfied root input. A twin
+that accepted it would make the mock chain pass where the real chain refuses - certifying a
+campaign that cannot run, which is worse than having no twin at all.
+
+**`mock_md_label` carries a surrogate dial and `mock_abfe_label` does not**, and the asymmetry
+is deliberate. `instability` has no MD counterpart and exists so a reader can push
+`rmsd_plateau_frac` under its integrity floor and watch a *pattern's trust* be demoted rather
+than a design be failed - the label-side shape of decision 0013. ATM needs no invented knob,
+because `n_lambda_windows` is a real parameter that already moves the verdict: drop it toward 8
+and the overlap diagnostic fails. The honest lab condition is the mistake an operator actually
+makes.
+
 ## Cost posture
 `mock_generate` and `mock_fold` dominate GPU cost; `mock_score` dominates CPU cost.
 Cheap-screen-then-confirm applies: raise `nstruct` on `mock_score` only for candidates that
@@ -89,3 +136,21 @@ already cleared the fold gate.
   threshold, which fails the node and leaves trust alone (decision 0013). Reaching for the
   dial to "make the campaign fail" without noticing which kind of failure you bought is the
   mistake it exists to make visible.
+
+**A twin's id carries the `mock_` prefix, and that is a correctness matter, not a label.** Tool
+ids are one flat global namespace, and `_load_toolkit` raises `duplicate tool id` on a
+collision - all-or-nothing, so the *other* toolkit registers nothing. A twin named for its real
+tool would silently disable the whole real toolkit the day that tool lands, leaving one line in
+`reg.errors` that nothing gates on. So: `mock_` on the **id**, `mock` in the **field**. The
+prefix is the convention gate 6 declines to trust; the field is the fact it reads.
+
+**A twin must populate every metric its real `ToolSpec` declares**, or a missing metric fails at
+M2 on hardware instead of at M1 on a laptop - which is the one thing this toolkit is for.
+
+**The ASD twins' `cost_model` figures are thousandths of a GPU-hour**, declared and non-zero,
+sized so gate 5 and the untrusted-pattern cap stay out of the way while the ledger still has
+something to count. The real ASD tools declare at >=2.25x their worst observed wall time, which
+is a different number for a different purpose and is not derived from these.
+
+**`analysis/validate_tasks.py` keys `real_toolkit` on the same exact `mock` string**, so a
+provenance record from any twin here is marked not-real with no further wiring.

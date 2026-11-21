@@ -29,18 +29,18 @@ pytest.importorskip("impress_a", reason="impress-a is not installed in this envi
 # imports because it cannot know that. The blank-line grouping below is ruff's, not a
 # statement about where these come from.
 from asteer.contracts.surrogate import SurrogateRequest, SurrogateResponse  # noqa: E402
-from asteer.impress import mock_asd  # noqa: E402
 from fake_stream import DownStream, FakeStream, ImpostorStream, WrongShapeStream  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
 from impress_a.tools import asteer_design_agents as sc  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
+from impress_a.tools import mock_asd_agents as mock_asd  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
 from impress_a.tools.spec import ToolSpec  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 DESIGN = REPO / "toolkits" / "asteer_design"
-MOCK = REPO / "toolkits" / "mock_asd"
+MOCK = REPO / "toolkits" / "mock"
 
 B_VALUES = {"preorg_rmsd": 1.21, "rotamer_entropy": 2.33,
             "ligand_rmsf": 0.84, "induced_fit_risk": 0.37}
