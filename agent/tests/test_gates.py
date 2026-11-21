@@ -1,11 +1,14 @@
-"""Six QC gates registered into impress-a from outside its checkout (item 15, EI.7).
+"""Six QC gates, built in to impress-a since 2026-11-21 (item 15, EI.7, moved by H6).
 
-**`test_the_registration_survives_a_cold_interpreter` is the one that matters.** Everything else
-here is arithmetic over synthetic payloads; the registration is the only thing that can be wrong
-in a way the rest of the suite would hide, because by the time any other test runs this module has
-already imported `asteer.impress`. The guarantee is asserted in a fresh interpreter, twice: once
-that importing the package registers all six, and once that *not* importing it leaves them absent
-— the second being what makes the first mean something.
+**They were registered from OUTSIDE this checkout until H6**, by importing
+`asteer.impress.gates` for its decorator side effects — and the test that mattered most in
+this file was the one asserting that import happened in a fresh interpreter, because the
+registration was the only thing that could fail in a way the rest of the suite would hide.
+That whole class of failure is gone: the six are defined in `impress_a/tools/gates.py` beside
+the other five, so there is nothing to import for effect, nothing to set
+`$IMPRESS_A_GATE_MODULES` to, and nothing a stock `impress-a run` can forget. The three
+registration tests are rewritten below rather than deleted, because what they were protecting
+against is worth a reader knowing about.
 
 Each gate's test is written from the failure it exists for rather than from its code, which is
 also why the payloads are the shapes real tools produce.
@@ -20,11 +23,11 @@ import pytest
 
 pytest.importorskip("impress_a", reason="impress-a is not installed in this environment")
 
-import asteer.impress  # noqa: E402,F401  -- the registration under test
-from asteer.impress.gates import GATE_IDS, check_from_pipeline  # noqa: E402
+from asteer.conditioning import check_from_pipeline  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
+from impress_a.tools.gates import ASD_GATE_IDS  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -43,56 +46,48 @@ def passed(result) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def test_the_registration_survives_a_cold_interpreter():
-    """A gate exists only once the module defining it has been imported.
+def test_the_six_are_known_to_a_cold_interpreter_that_imports_nothing_else():
+    """What H6 bought, asserted the same way the thing it replaced was.
 
-    And two things resolve ids without forgiving a miss: `Registry._load_toolkit` calls
-    `gates.get()` per declared gate and a `KeyError` disables the **whole toolkit**
-    (all-or-nothing, one line in `errors`, no refusal); and `compose/validate.py` never consults
-    the registry at all, so an unknown id is not caught at compose time and fails in
-    `post_process` — after the task has run and been billed.
+    Before H6 this test imported `asteer.impress` first and checked the six appeared; its
+    companion checked they were *absent* without that import, which is what made the first
+    one mean anything. Both are now one test: importing `impress_a.tools.gates` alone is
+    enough, from a fresh interpreter, with no `$IMPRESS_A_GATE_MODULES` and no `asteer` on
+    the path at all.
+
+    Why it is still worth a subprocess: a gate exists only once the module defining it has
+    run, and two things resolve ids without forgiving a miss. `Registry._load_toolkit` calls
+    `gates.get()` per declared gate and a `KeyError` disables the **whole toolkit** —
+    all-or-nothing, one line in `errors`, no refusal anywhere. And `compose/validate.py`
+    never consults the registry, so an unknown id is not caught at compose time and fails in
+    `post_process`, after the task has run and been billed. Being built in is what makes
+    both unreachable for these six; nothing else does.
     """
-    code = (
-        "import asteer.impress;"
-        "from impress_a.tools import gates;"
-        f"print(all(g in gates.known() for g in {list(GATE_IDS)!r}))"
-    )
+    code = ("from impress_a.tools import gates;"
+            f"print(all(g in gates.known() for g in {list(ASD_GATE_IDS)!r}))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          cwd=REPO, env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"})
     assert out.returncode == 0, out.stderr[-1500:]
-    assert out.stdout.strip() == "True", "importing asteer.impress did not register the gates"
-
-
-def test_without_that_import_the_gates_are_absent():
-    """What makes the test above mean something.
-
-    If the gates were somehow registered by importing `impress_a` alone, the guarantee would be
-    vacuous and nobody would notice when it stopped holding.
-    """
-    code = (
-        "from impress_a.tools import gates;"
-        f"print(any(g in gates.known() for g in {list(GATE_IDS)!r}))"
-    )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         cwd=REPO, env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin"})
-    assert out.returncode == 0, out.stderr[-1500:]
-    assert out.stdout.strip() == "False", (
-        "impress-a already knows these ids, so this project's registration proves nothing"
+    assert out.stdout.strip() == "True", (
+        "the six are not built in: H6 moved them here precisely so that importing "
+        "impress_a.tools.gates is sufficient"
     )
 
 
-def test_all_six_are_registered_and_none_collides_with_a_built_in():
-    """Six ids, and a name clash would silently replace someone else's gate.
+def test_all_six_are_registered_and_none_collides_with_one_that_was_here_first():
+    """Six ids, and a name clash would silently replace another gate.
 
-    `@gate` assigns into a dict, so registering an existing id overwrites it with no warning —
-    a built-in `metrics_reported` quietly becoming ours is the kind of thing that would be found
-    by a confused bug report months later.
+    `@gate` assigns into a dict, so registering an existing id overwrites it with no warning.
+    That hazard did not go away when these moved in — it got closer, because the five they
+    now sit beside are in the same file. A built-in `metrics_reported` quietly becoming ours
+    is the kind of thing found by a confused bug report months later.
     """
-    assert len(GATE_IDS) == 6
-    builtin = {"output_present", "count_matches_request", "metrics_reported",
-               "metric_in_range", "has_secondary_structure"}
-    assert not set(GATE_IDS) & builtin, "a gate id collides with a built-in and replaced it"
-    for gate_id in GATE_IDS:
+    assert len(ASD_GATE_IDS) == 6
+    older = {"output_present", "count_matches_request", "metrics_reported",
+             "metric_in_range", "has_secondary_structure"}
+    assert not set(ASD_GATE_IDS) & older, "a gate id collides with one that was here first"
+    assert older <= set(impress_gates.known()), "H6 displaced a gate that was here first"
+    for gate_id in ASD_GATE_IDS:
         assert impress_gates.get(gate_id) is not None
 
 
@@ -237,133 +232,57 @@ def test_every_gate_defaults_to_integrity_when_a_spec_omits_the_role():
     stamps the spec's role over it. So a spec that wants `acceptance` has to say so — which is
     the right default, because the expensive mistake is a tool failure counted as a weak
     design."""
-    for gate_id in GATE_IDS:
+    for gate_id in ASD_GATE_IDS:
         result = run(gate_id, {"metrics": {}}, {"requested": 1, "metrics": ["x"]})
         assert result.role == "integrity", f"{gate_id} defaults to {result.role}"
 
 
 # ---------------------------------------------------------------------------
-# The constraint is tighter than the plan said, and it is measured here
+# Retired at H6, 2026-11-21: two tests of a constraint these gates no longer have
+#
+# `test_a_spec_declaring_one_of_these_gates_still_loses_its_whole_toolkit_with_no_hook` and
+# `test_the_gate_modules_hook_makes_that_same_spec_load` measured the two arms of
+# `$IMPRESS_A_GATE_MODULES` against a copy of these toolkits: without the hook a spec
+# declaring `conditioning_applied` lost its whole toolkit, with it the toolkit loaded. Both
+# premises are false now that the six are built in -- the spec loads either way.
+#
+# They are not replaced here. The hook is still impress-a's feature and still matters for a
+# gate that really does live outside this package; `tests/test_gate_modules.py` covers it on
+# a synthetic tree that does not depend on who ships which gate, which is where a test of an
+# extension point belongs. These two covered it by accident of being its only user.
+#
+# What the retired pair found is worth keeping in writing, because it corrected the plan that
+# predicted it: external registration was said to work "provided the gate module is imported
+# before evaluate() runs", and the real condition was **before Registry.load() runs**, which
+# is much earlier -- and the cost of missing it was not one gate failing but the whole
+# toolkit registering nothing, all-or-nothing, with one line in `reg.errors` and no refusal.
+# That is the hazard H6 removes for these six by making them unremarkable.
 # ---------------------------------------------------------------------------
 
 
-#: The renamed probe tool, which exists only inside the copied toolkit tree.
-PROBE_ID = "probe_liganchor_propose"
+def test_a_shipped_spec_declares_only_gates_the_registry_can_resolve():
+    """**Relaxed twice and replaced rather than deleted both times.**
 
+    It began by asserting that every gate id we ship is one the *stock* registry knows,
+    because the alternative was a toolkit that silently disappeared. Item 39's hook removed
+    the reason for that ban but not the obligation, since the hook is opt-in, so the rule
+    became two-part: a gate id is stock or one of ours, and a toolkit declaring one of ours
+    must name `IMPRESS_A_GATE_MODULES` in its `SKILL.md` Pitfalls.
 
-def _cold_load(root: Path, **env: str) -> list[str]:
-    """`(tools matching PROBE_ID, whether an unknown-gate error was reported)`.
-
-    A fresh interpreter with only `PYTHONPATH=src`, so nothing this process imported can be
-    mistaken for something the stock registry resolves on its own.
-
-    **The probe tool is renamed in the copy (2026-11-21).** `load(root)` also searches the
-    DEFAULT root, which since H4 is this checkout's own `toolkits/` -- so counting a shipped id
-    would count the shipped copy and never reach zero, whatever the tmp toolkit did. The id
-    below exists only in the copy.
-    """
-    code = (
-        "from impress_a.tools.registry import Registry;"
-        f"r = Registry().load({str(root)!r});"
-        f"print(sum(1 for t in r.ids() if t.startswith({PROBE_ID!r})),"
-        "      any('unknown QC gate' in e for e in r.errors))"
-    )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         cwd=REPO,
-                         env={"PYTHONPATH": "src", "PATH": "/usr/bin:/bin", **env})
-    assert out.returncode == 0, out.stderr[-1200:]
-    return out.stdout.split()
-
-
-@pytest.fixture
-def toolkits_declaring_a_gate_of_ours(tmp_path) -> Path:
-    """A copy of our toolkits with `conditioning_applied` declared on one real spec.
-
-    A copy and not the shipped tree, because the shipped tree is what
-    `test_a_shipped_spec_declares_only_gates_its_launch_path_can_resolve` governs.
-    """
-    import shutil
-
-    root = tmp_path / "toolkits"
-    shutil.copytree(REPO / "toolkits", root)
-    # Renamed so the id cannot collide with the shipped one at the default root (see _cold_load).
-    tool = root / "mock_asd" / "tools" / "mock_liganchor_propose"
-    tool.rename(tool.with_name(PROBE_ID))
-    spec = tool.with_name(PROBE_ID) / "spec.yaml"
-    spec.write_text(spec.read_text().replace(
-        "id: mock_liganchor_propose", f"id: {PROBE_ID}").replace(
-        "qc_gates:\n  - {id: output_present, params: {key: result}}",
-        "qc_gates:\n  - {id: output_present, params: {key: result}}\n"
-        "  - {id: conditioning_applied, role: integrity, params: {}}",
-    ))
-    return root
-
-
-def test_a_spec_declaring_one_of_these_gates_still_loses_its_whole_toolkit_with_no_hook(
-        toolkits_declaring_a_gate_of_ours: Path):
-    """The finding, and it corrects item 15's own statement of the risk.
-
-    The plan said external registration works *"provided the `asteer` gate module is imported
-    before `evaluate()` runs"*. The real condition is **before `Registry.load()` runs**, which is
-    much earlier — and the consequence is not one gate failing but the **whole toolkit
-    registering nothing**, because `_load_toolkit` resolves every declared gate id up front and
-    is all-or-nothing. One line in `reg.errors`, no refusal anywhere.
-
-    This half is unchanged by item 39's hook and has to stay measured: the hook is opt-in, so a
-    stock `impress-a run` that does not set the variable still loses the toolkit exactly like
-    this. It is the reason the variable's absence must be loud in whatever launches us.
-    """
-    assert _cold_load(toolkits_declaring_a_gate_of_ours) == ["0", "True"]
-
-
-def test_the_gate_modules_hook_makes_that_same_spec_load(
-        toolkits_declaring_a_gate_of_ours: Path):
-    """Item 39, from this side: the same cold load, one environment variable different.
-
-    `IMPRESS_A_GATE_MODULES` landed upstream in IMPRESS `6fc103b` — a path-separated list of
-    dotted module names imported by `Registry.load()` before any gate id is resolved. This is
-    the acceptance test for it measured against *our* six gates and *our* toolkit, which is the
-    thing the hook was asked for; upstream's own tests use a fixture toolkit of their own.
-    """
-    if not hasattr(impress_gates, "GATE_MODULES_ENV"):
-        pytest.skip("this impress-a predates the IMPRESS_A_GATE_MODULES hook (item 39)")
-    got = _cold_load(toolkits_declaring_a_gate_of_ours,
-                     IMPRESS_A_GATE_MODULES="asteer.impress.gates")
-    assert got == ["1", "False"], (
-        "the hook is present but a spec declaring one of our gates still did not load"
-    )
-
-
-def test_a_shipped_spec_declares_only_gates_its_launch_path_can_resolve():
-    """**Relaxed deliberately when item 39 landed, and replaced rather than deleted.**
-
-    It used to assert that every gate id we ship is one the *stock* registry knows, because the
-    alternative was a toolkit that silently disappeared. The hook removes the reason for that
-    ban: a spec may now declare one of our six. What it does not remove is the obligation, since
-    the hook is opt-in — a run that forgets the variable gets the vanished toolkit above.
-
-    So the rule is now two-part: a gate id is either stock or one of ours, and a toolkit that
-    declares one of ours must say so in the `Pitfalls` section of its `SKILL.md` — the section
-    `REQUIRED_SKILL_SECTIONS` already forces to exist, and the text an operator or an agent
-    reads before running the toolkit. Nothing shipped declares one yet, so the second half is
-    waiting rather than idle; it fires on the commit that adds the first.
+    **H6 removed the obligation as well (2026-11-21).** The six are built in, so there is no
+    variable for a launch to forget and the second half has no subject -- it was waiting on
+    "the commit that adds the first such spec", and that commit will never come. What is left
+    is the original check, which is the one that was always doing the work: every gate id a
+    shipped spec declares must be one the registry can resolve, or its whole toolkit
+    registers nothing.
     """
     import yaml
 
-    stock = {"output_present", "count_matches_request", "metrics_reported",
-             "metric_in_range", "has_secondary_structure"}
-    allowed = stock | set(GATE_IDS)
+    known = set(impress_gates.known())
+    assert set(ASD_GATE_IDS) <= known, "the six are no longer built in; H6 has been undone"
     for spec_path in sorted((REPO / "toolkits").glob("*/tools/*/spec.yaml")):
         declared = {g["id"] for g in yaml.safe_load(spec_path.read_text())["qc_gates"]}
-        assert declared <= allowed, (
-            f"{spec_path.relative_to(REPO)} declares {sorted(declared - allowed)}, which no "
+        assert declared <= known, (
+            f"{spec_path.relative_to(REPO)} declares {sorted(declared - known)}, which no "
             "registry can resolve -- its whole toolkit would register nothing"
         )
-        if declared & set(GATE_IDS):
-            skill = (spec_path.parents[2] / "SKILL.md").read_text()
-            pitfalls = skill.partition("## Pitfalls")[2]
-            assert "IMPRESS_A_GATE_MODULES" in pitfalls, (
-                f"{spec_path.relative_to(REPO)} declares {sorted(declared & set(GATE_IDS))}, so "
-                "every launch of this toolkit needs IMPRESS_A_GATE_MODULES=asteer.impress.gates; "
-                "its SKILL.md Pitfalls section must say so"
-            )
