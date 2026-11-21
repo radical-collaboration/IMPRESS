@@ -1,0 +1,288 @@
+# THE CHAIN M1 DRIVES, END TO END. A laptop surrogate of this project's own design campaign:
+# seven stages, anchor set to corrected binding free energy.
+#
+#   impress-a run campaigns/asd-smb-mock.yaml --model D
+#
+# Finishes in seconds, needs no allocation, and reports NOTHING about any molecule: every
+# stage is a `toolkit: mock` twin whose metrics are seeded draws. What is real is everything
+# around them — the chain's shape, its typed ports, its parameter and metric names, and its
+# thresholds, which are the ones `asd-smb-delta.yaml` will carry.
+#
+# IT DECLARES TWO GPU STAGES AND USES NO GPU, which is not a contradiction and is worth saying
+# because it looks like one. `mock_mpnn_design` and `mock_boltz_predict` are **P1** and ask for
+# `gpus: 1`; gate 4 checks that ask against this file's declared `site:`, not against the
+# machine. On a laptop reporting `4 cores/0 GPUs` both tasks run anyway, because a twin's
+# adapter draws numbers and never opens a device. The declared ask is what `asd-smb-delta.yaml`
+# will need and what gate 4 must keep checking; the absence of a real device is what makes this
+# file free to run. A test asserts no GPU library is ever imported.
+#
+# **THE TOOLKITS ARE IN THIS CHECKOUT, SINCE 2026-11-21.** This file and its twins were moved
+# here from the `asteer` repo (episode H4 of the re-homing): low-level protein workflows live
+# with impress-a, so the ASD design chain is an example that belongs beside the tools it stands
+# in for. Until then the twins lived outside the checkout and `$IMPRESS_A_TOOLKITS` is how a
+# campaign reached them -- which is why the launch line above used to set it and no longer
+# does. **Do not set it to `$PWD/toolkits` now:** that root is already the default, and naming
+# it again puts it in `search_paths()` twice, which makes every spec in it report
+# `duplicate tool id` on the second pass. The ids survive (the first pass registered them) but
+# `reg.errors` does not come back empty, and a caller that gates on that -- the careful thing
+# -- refuses a registry whose tools are all present.
+campaign_id: asd-smb-mock
+goal: "Exercise this project's design chain end to end on a laptop, as the M1 interface gate"
+
+backend: concurrent
+backend_config: {workers: 4}
+
+# KNOB, AND THE CON-10 ASSERTION. `mock` refuses a graph containing a real tool, and `real`
+# refuses one containing a twin. Setting this to `real` is the interesting mistake, and
+# `tests/test_gate6_pair.py` makes it on purpose: the campaign must be rejected at validation
+# rather than quietly reporting drawn numbers as science.
+#
+# What makes that work is in every twin's spec and is worth repeating here, because it looks
+# like a mistake: each one declares `toolkit: mock`, NOT `toolkit: mock_asd`. Gate 6 matches
+# that field against "mock" exactly, so a twin in a toolkit of its own name would be
+# classified real and admitted here. See `toolkits/mock_asd/SKILL.md`, Pitfalls.
+tool_delivery: mock
+
+max_cycles: 4
+stagnation_limit: 4
+target_front: 1
+
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+
+# Sized not to bind: one pass declares 0.002 gpu-h, so even the interlock's 10%-of-available
+# cap on an untrusted pattern is far above one pass. A laptop run must never stop for money,
+# because then the thing under test is the ledger rather than the chain.
+budget:
+  gpu_hours: 2.0
+  cpu_hours: 2.0
+
+# The chain, stated rather than left to a reasoner's default — which is the four-stage
+# self-consistency mock loop, not this.
+#
+# A twin's id carries the `mock_` prefix because ids are one flat namespace: a twin sharing
+# its real tool's id makes the real toolkit fail to load ENTIRELY, all-or-nothing, with one
+# line in `reg.errors` and no refusal. The chain is therefore mock_<tool> here and <tool> in
+# `asd-smb-delta.yaml`, which is also why gate 6 can tell the two files apart.
+#
+# NINE STAGES SINCE EI.25, and the reason it was two until then is worth keeping: the
+# convention is that no tool is implemented before its twin exists, so the chain grew as the
+# twins landed. It then stopped growing. Item 7 has said since it was written that it closes
+# "at M1, when the whole chain runs on twins", M1 went green with the chain at two of nine,
+# and the two scoring twins EI.10 shipped had never been in a campaign at all.
+#
+# THE FIVE MIDDLE STAGES ARE IMPRESS-A'S OWN TWINS, and that was the surprise: this episode
+# wrote no new twin. The steered designer emits `backbone: Backbone`; both scorers take
+# `structure: Complex`, and impress-a already ships every stage of the bridge --
+# `mock_mpnn_design` (Backbone -> Complex), then `mock_packmin`, `mock_fastrelax`,
+# `mock_filter_shape` and `mock_boltz_predict` (Complex -> Complex), all `toolkit: mock`.
+# Without them the composer wires `structure` to nothing and `mock_preorg_score` refuses with
+# "the `structure` input is wired but empty, so there is nothing to score" -- the right
+# refusal against an incomplete chain, measured 2026-11-20.
+#
+# THE MIDDLE IS COPIED FROM `delta-small-molecule.yaml`, STAGE FOR STAGE, AND THE FIRST DRAFT
+# OF THIS FILE WAS NOT. That draft went mpnn -> packmin -> boltz, skipping `fastrelax` and
+# `filter_shape` because three stages looked like enough bridge, and it produced a chain whose
+# every stage passed and whose front was EMPTY: `complex_plddt` came out 0.749 against
+# `mock_boltz_predict`'s own 0.75 acceptance bar. The cause is that `filter_shape` is what
+# reports `shape_complementarity`, and the boltz twin inherits it -- absent, it falls back to
+# a 0.65 default and the plDDT lands a thousandth under the bar. **A chain shortened for
+# convenience changed a quality metric, not just the runtime.** Upstream's own ordering is
+# load-bearing and its comment says why: *"Boltz is LAST on purpose: an independent prediction
+# run AFTER the Rosetta physics gates, so agreement between the two is the campaign's
+# strongest signal. Running Rosetta on a Boltz output inverts that logic."*
+#
+# WHY A MULTI-STAGE CHAIN IS THE THING WORTH RUNNING. `inputs[port]` is the upstream task's
+# whole payload, not the artifact, and EI.9 found BOTH of its agents reading it wrongly --
+# with a unit test that passed the artifact directly agreeing with both. Only a campaign
+# finds that, and until EI.25 nothing had exercised it on the half of the chain that reads a
+# structure.
+#
+# IT NEEDS NO TOOLKIT VARIABLE AT ALL, AND THE REASON IS WORTH KNOWING BEFORE IT BITES.
+# `Registry.search_paths()` appends `parents[3]/toolkits` relative to `registry.py` itself, so
+# every toolkit this campaign names -- impress-a's own `mock` and the three that arrived with
+# this file -- is found from the package's location without being named. But that holds ONLY
+# when impress-a is installed from a source checkout. Installed as a wheel, that path lands
+# inside `site-packages` and does not exist, and since the move it is the ONLY root, so the
+# campaign loses every stage rather than three. **That is exactly item 30's measured failure**
+# (EI.4 installed `IMPRESS/agent` non-editable and `search_paths(None)` returned `[]`), and it
+# now ends in `ToolVocabularyRefused` before an engine is built rather than in a campaign that
+# reports `goals_satisfied` having done nothing. A wheel deployment must name the root:
+#   IMPRESS_A_TOOLKITS=<IMPRESS>/agent/toolkits
+#
+# AND AN UNRESOLVABLE STAGE IS NOT REFUSED AT LOAD -- measured 2026-11-20, because this file's
+# first draft of this comment claimed it was. A campaign naming a stage no toolkit provides
+# runs three cycles and dies with `CampaignAborted`. It used to add nothing else: not the
+# stage, not the tool. **That was backlog item 41 a second time, from a different cause** --
+# the first was a mistyped path, this a mistyped stage id, same message either way -- and
+# EI.27 fixed it upstream in `d8d1e80`: the abort now names the first failing task, its tool
+# and its message. The stage is still not refused at LOAD, which is EI.26's half.
+stages: [mock_liganchor_propose, mock_rfd3_steered_design,
+         mock_mpnn_design, mock_packmin, mock_fastrelax, mock_filter_shape, mock_boltz_predict,
+         mock_preorg_score, mock_affdelta_score]
+
+params:
+  mock_liganchor_propose:
+    # KNOB: how many ligand atoms the anchor set may engage. A CEILING, not a target -- a
+    # ligand may have fewer donors and acceptors than this, and on the project's own ligand
+    # (`ALR.params`) it has exactly ten.
+    max_anchor_atoms: 6
+    # `cfg_channel: true` used to be here and is gone with EI.8. It selected between the CFG
+    # channel and "motif placement alone", and that was never a choice item 2 offered: the
+    # answer is the CFG channel PLUS motif placement. Motif placement is EI.9's, because EI.9
+    # is the layer that can verify how it reaches RFD3. `select_hotspots` is not an option at
+    # all -- RFD3 resolves it and then drops the annotation, so the model is conditioned on
+    # zeros while the run reports success (backlog items 26, 29).
+
+  mock_rfd3_steered_design:
+    # TARGET IDENTITY, and a copy. `campaigns/data/alr/ALR_binder_design.json` is vendored from
+    # `IMPRESS/agent/campaigns/data/alr/` because a committed campaign cannot portably reach a
+    # sibling checkout, and because the rendering this twin performs is REAL code -- it needs
+    # the real file's two awkward properties: a `partial` block carrying both `input` and
+    # `length` (which RFD3 rejects together, backlog C8) and the literal `A:R` ligand. Re-copy
+    # it if the upstream target changes; nothing here edits it, and a test asserts that.
+    # RELATIVE TO THIS FILE'S OWN DIRECTORY, not to the launch directory. impress-a resolves
+    # `input_spec_path` against the campaign file's folder, which is why every upstream
+    # campaign spells it `data/alr/...` too. Writing `campaigns/data/...` here produced
+    # `campaigns/campaigns/data/...` and a campaign that aborted with "3 consecutive
+    # all-failed runs" and no mention of a file, a tool or an exception -- backlog item 41,
+    # four runs to find one character. Since EI.27 (`d8d1e80`) the same mistake prints
+    # `first failing task l0_s1_mock_rfd3_steered_design (mock_rfd3_steered_design):
+    # FileNotFoundError: ... '<cwd>/data/alr/ALR_binder_design.json'`, which is one run.
+    input_spec_path: data/alr/ALR_binder_design.json
+    # A small population and few restarts: this is the interface gate, not a search. Eight and
+    # three are the real defaults and would make a laptop run four denoising passes of seeded
+    # draws for nothing.
+    n_particles: 4
+    n_restarts: 2
+    # MOCK-ONLY, and it is the dial that makes the gate meaningful: unequal rewards sharpen the
+    # FK weights through the REAL arithmetic, so ESS falls and `n_resamples` reaches its
+    # acceptance floor of 1. At the default spread a laptop run can resample zero times and
+    # fail acceptance for a reason that says nothing about the chain.
+    reward_spread: 1.5
+
+  # THE BRIDGE, impress-a's own twins, EVERY ONE AT ITS OWN DEFAULTS. That is the rule this
+  # block learned the hard way: the twins' defaults are *calibrated together* -- their module
+  # docstring says "the defaults pass every acceptance gate, so a first run succeeds and the
+  # knobs have somewhere to move", and the chain is a product of slopes, so a coefficient
+  # trimmed at one stage multiplies out at the last. A first draft set `batch_size: 2` and
+  # `diffusion_samples: 2` reasoning that this is an interface gate rather than a search; both
+  # are ensemble widths that buy quality, not speed dials, and together they emptied the front.
+  # **If a value here is not a default, it needs a reason that is about the interface.**
+  mock_mpnn_design:
+    # `temperature` at 0.2 (the default) is the one worth naming rather than inheriting: it is
+    # the knob the twins' own calibration uses to show quality reaching the binding objective
+    # four stages later, so a campaign that moved it would be moving the thing under test.
+    temperature: 0.2
+
+  mock_packmin:
+    cycles: 1
+
+  mock_fastrelax:
+    # Both at their defaults. This twin carries the chain's only INTEGRITY range gates
+    # (`total_score <= 0`, `fa_rep <= 500`) beside its acceptance ones (`total_score <= -250`,
+    # `fa_rep <= 100`, `interaction_energy <= -8`) -- two gates on one metric with different
+    # roles, which is what decision 0013 is for: +1500 means the tool broke and costs the
+    # pattern its trust, -12 means the design fell short and does not.
+    nstruct: 1
+    relax_cycles: 3
+
+  mock_filter_shape:
+    # Nothing to set, and it is here for what it REPORTS rather than what it takes:
+    # `shape_complementarity`, which `mock_boltz_predict` inherits. Dropping this stage is what
+    # put the chain's plDDT under its bar on the first draft.
+    ligand_params_path: ""
+
+  mock_boltz_predict:
+    # LEFT AT THE DEFAULT 8, deliberately, after a first draft set it to 2 "because this is the
+    # interface gate, not a search". The twin's draw is
+    # `0.20 + 0.80 * shape_complementarity + 0.05 * (sqrt(samples) - 1)`, so samples is not a
+    # speed dial -- it moves plDDT, and 2 costs about 0.07 of it. Together with the missing
+    # `filter_shape` that was enough to empty the front.
+    #
+    # `complex_plddt >= 0.75` is this twin's own ACCEPTANCE gate and the tightest bar in the
+    # chain -- upstream's calibrated PROD `fold_min_plddt: 75.0` rescaled, copied rather than
+    # softened. Nothing here relaxes it: a surrogate with an easier bar than the real campaign
+    # teaches the wrong thing about when a design passes.
+    diffusion_samples: 8
+
+  # THE TWO SCORING CLIENTS. Their real counterparts talk to a ROME stream and raise when it
+  # is absent (EI.10: all four absence modes raise, none returns a default score). The twins
+  # draw instead, so the campaign exercises the ports, the metric names and the attribution
+  # without item 9's streams existing.
+  mock_preorg_score:
+    # Model B's own dial, and it moves all three quantities together because that is what a
+    # badly preorganised pocket does -- which is what makes `induced_fit_risk` worth deriving
+    # rather than reading. 0.3 is the twin's default and is kept: a campaign that chose its own
+    # strain would be choosing its own answer.
+    strain: 0.3
+    # NOT 0. Both scorers carry a mock-only `model_version` so a campaign can move the version
+    # and watch CON-5 attribution follow it, which is M1's attribution row exercised with no
+    # real stream. 7 is arbitrary and non-default on purpose: a test asserting attribution
+    # against a default of 0 cannot tell a carried version from a missing one.
+    model_version: 7
+
+  mock_affdelta_score:
+    # `dg_lcb = dg_corrected + k * sigma_dg`, which is EI.11's rule and the objective below.
+    # k=1.0 is the real spec's default.
+    lcb_k: 1.0
+    # NOT 0.0, which is a collapsed posterior -- the dangerous direction this dial exists to
+    # make reachable, and what EI.7's `calibration_in_range` gate refuses. A chain run at 0.0
+    # would rank on a mean while reporting a bound.
+    sigma_floor: 0.6
+    model_version: 7
+
+replicas: 1
+concurrency: 1
+
+# THE OBJECTIVES ARE THE LOAD-BEARING EDIT OF EI.25, NOT THE STAGE LIST, and that is the
+# finding this file now carries. Under `--model D` the explicit specifier transcribes these
+# objectives and the planner plans toward them, so **a stage whose metrics no objective names
+# is never planned** -- and nothing says so. Measured 2026-11-20: appending the two scoring
+# twins to `stages:` with these objectives unchanged submitted
+# `{mock_liganchor_propose, mock_rfd3_steered_design}` -- two tasks, not four -- reported
+# `2/2 tasks ok`, `qc=pass` and `every spec objective satisfied`, and left the node's
+# properties unchanged. Adding two stages to a campaign changed nothing and the campaign
+# reported success. That is backlog item 42, offered upstream as EI.26; here it is the reason
+# `induced_fit_risk` and `dg_lcb` below are what make the last five stages run at all.
+#
+# An earlier version of this comment said the real thresholds "cannot be written here in
+# advance", because an objective naming a metric no enabled tool declares is a load-time
+# error. That was true and is no longer: the twins that declare them exist.
+# `min: 2` matches the spec's acceptance gate rather than undercutting it: a one-atom anchor
+# set is refused by `metric_in_range[n_engaged_atoms]` and can never reach the front, so a
+# looser bound here would only mislead a reader about what the campaign admits.
+#
+# `anchor_entropy` is INERT AT M1 AND THAT IS WORTH KNOWING. It measures how evenly the
+# anchoring weight is spread over the engaged atoms, and the placeholder emitter weights every
+# acceptor equally -- so on ALR's six sulfonate oxygens it is exactly 1.0, pinned at its
+# maximum, carrying no signal. Minimising it is the direction a differentiated anchor set
+# wants: an anchor set whose atoms are interchangeable acceptors gives the sampler no H-bond
+# structure to build around. The objective becomes informative when Model A differentiates the
+# atoms (ROME item 8), and M2 is where the direction should be revisited against real designs.
+objectives:
+  - {name: n_engaged_atoms, direction: maximize, min: 2}
+  - {name: anchor_entropy,  direction: minimize}
+  # The steered stage's own two. `ess_mean` is NOT an objective: it is a diagnostic of whether
+  # steering happened, and maximising it would ask the campaign to resample as little as
+  # possible, which is the inert arm. `n_resamples` is the honest one to want more of, and
+  # `reward_terminal` is what the pass is handing downstream.
+  - {name: n_resamples,     direction: maximize, min: 1}
+  - {name: reward_terminal, direction: maximize}
+  # THE TWO THAT REACH THE SCORERS, and the only reason the last five stages are planned.
+  # `induced_fit_risk` is Model B's, `dg_lcb` is Model C's, and `dg_lcb` is the deepest metric
+  # in the chain -- so naming it is what pulls every stage up to `mock_affdelta_score` into the
+  # plan. Drop this one line and the chain silently becomes six stages; drop both and it
+  # becomes two.
+  #
+  # NO `min`/`max` ON EITHER, deliberately, and this is not laziness. Both are seeded draws
+  # from a twin: a bound here would be a number this project invented, and a campaign that
+  # stopped because a drawn `dg_lcb` crossed an invented line would be reporting something
+  # about the draw. The real thresholds arrive at M2 from `asd-smb-delta.yaml`, against real
+  # scores. What these two assert here is only that the stages RAN and reported.
+  #
+  # Minimising both is the right direction and is worth stating: `induced_fit_risk` is a
+  # penalty (a pocket that must reorganise to bind), and `dg_lcb` is the lower confidence bound
+  # on corrected binding free energy, where more negative is tighter binding -- EI.11's rule
+  # ranks on it precisely so that an uncertain prediction cannot win on its mean alone.
+  - {name: induced_fit_risk, direction: minimize}
+  - {name: dg_lcb,           direction: minimize}

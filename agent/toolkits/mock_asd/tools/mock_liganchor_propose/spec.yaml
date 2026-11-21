@@ -1,0 +1,73 @@
+# Twin of `liganchor_propose` (item 12a, EI.8). Model A: ligand graph -> the sampler's
+# anchoring instruction.
+#
+# `mock_` ON THE ID, and that is not decoration either. Tool ids are one flat global namespace
+# and `_load_toolkit` raises `duplicate tool id` on a collision - all-or-nothing, so the
+# OTHER toolkit then registers NOTHING. A twin sharing its real tool's id would therefore
+# silently disable the whole real toolkit the day item 12 lands, leaving one line in
+# `reg.errors` that nothing gates on. Measured, not feared: loading this twin beside a real
+# `liganchor_propose` reports `asteer_design: duplicate tool id 'liganchor_propose'` and
+# registers none of that toolkit. IMPRESS's own mock chain is named `mock_rfd3_design` for
+# exactly this reason.
+#
+# `toolkit: mock` is NOT a copy-paste slip and must not be "corrected" to mock_asd. Gate 6
+# (`compose/validate.py::_g6_delivery`) classifies a tool as mock by this field matching
+# "mock" EXACTLY. A twin declaring `toolkit: mock_asd` is classified real and admitted by a
+# campaign declaring `tool_delivery: real` - seeded draws reported as science, the documented
+# failure that gate exists to prevent. The directory name is this project's; the field is the
+# gate's. See SKILL.md, Pitfalls.
+id: mock_liganchor_propose
+toolkit: mock
+version: "0.1"
+# P2 since EI.8, matching the real tool. It was P1 here because the plan said the real emitter
+# would be P1; the real emitter parses a text file and asks for no device, and `P1` would have
+# forced `gpus: 1`. A twin whose pattern disagrees with its tool's is testing a different
+# dispatch path from the one the campaign will take.
+pattern: P2
+entry: asteer.impress.mock_asd.MockLigAnchorProposeAgent
+# 30s because the agent hashes its parameters and returns. A bound copied from hardware would
+# hide a twin that hung; a bound that can never bind teaches nothing.
+resources: {cores: 2, walltime_s: 30}
+# `Parameterized`, NOT a new `AnchorSpec` type. `ArtifactType` is a closed enum upstream
+# (`core/types.py:35`) and gate 1 validates against it, so a new member is an upstream change
+# and cannot live in this repo - which is what the plan for item 12 assumed. Backlog item 31.
+# `Parameterized` is the honest existing member: an anchor set is a parameterisation handed to
+# the sampler, and the enum's own docstring draws the SmallMolecule/Parameterized line exactly
+# there - an unparameterised ligand reaching a force field is a composition-time type error.
+outputs:
+  anchor_spec: {type: Parameterized}
+parameters:
+  # The real spec's parameters, name for name. The twin reads none of the file -- it draws --
+  # but a twin with different parameter names would let a campaign YAML pass against the twin
+  # and fail against the tool.
+  ligand_params_path: {type: str, default: "", trades: "the real spec's parameter"}
+  max_anchor_atoms: {type: int, default: 6, min: 1, max: 32,
+                     trades: "anchor coverage vs how much of the pocket is constrained"}
+  cfg_feature_keys: {type: str, default: "active_donor,active_acceptor,ref_atomwise_rasa",
+                     trades: "the real spec's parameter: the CFG channel's key spelling"}
+  buried_target_rasa: {type: float, default: 0.15, min: 0.0, max: 1.0,
+                       trades: "the real spec's parameter"}
+  exposed_target_rasa: {type: float, default: 0.45, min: 0.0, max: 1.0,
+                        trades: "the real spec's parameter"}
+  cfg_scale: {type: float, default: 1.5, min: 0.0, max: 10.0,
+              trades: "the real spec's parameter"}
+  cfg_t_max: {type: float, default: 1.0, min: 0.0, max: 1.0,
+              trades: "the real spec's parameter"}
+  # MOCK-ONLY. The resname the drawn spec carries, so a test can check the colon survives
+  # without a params file on disk.
+  ligand_resname: {type: str, default: "A:R",
+                   trades: "mock only: the resname the drawn anchor spec reports"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+metrics: [n_engaged_atoms, anchor_entropy]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [n_engaged_atoms, anchor_entropy]}}
+  # The real spec's acceptance gate, so the twin exercises it too.
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: n_engaged_atoms, min: 2}}
+# CPU-hours since EI.8, because this tool no longer declares a GPU: a gpu_hours figure on a
+# tool that asks for no device bills the ledger for a resource the task never held.
+# Thousandths of an hour -- non-zero so the ledger counts something, small enough that gate 5
+# and the untrusted-pattern cap stay out of the way on a laptop. Not a measurement.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.002}}

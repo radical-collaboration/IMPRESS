@@ -1,0 +1,38 @@
+# Twin of `abfe_label` (item 20, EI.12). ATM alchemical transfer -> the measured dG.
+#
+# `mock_` on the id and `toolkit: mock` in the field, for the two different reasons in
+# toolkits/mock_asd/SKILL.md. Ports and metric names are the real spec's; cost and walltime are not.
+id: mock_abfe_label
+toolkit: mock
+version: "0.1"
+pattern: P1
+entry: asteer.impress.mock_asd.MockABFELabelAgent
+resources: {gpus: 1, cores: 8, walltime_s: 30}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  # The typed edge that only exists because mock_md_label declares a second output. Under L1 this
+  # tool runs as its own campaign, where the port is unwired and gate 1 waves it through -- so the
+  # twin takes `structure_path` too and refuses when it has neither, exactly as the real one does.
+  structure: {type: Complex}
+outputs:
+  measurements: {type: MetricSet}
+parameters:
+  structure_path: {type: str, default: "",
+                   trades: "the holo frame; required when this runs as its own campaign"}
+  ligand_params_path: {type: str, default: "", trades: "the ligand's own .params"}
+  n_lambda_windows: {type: int, default: 22, min: 8, max: 64,
+                     trades: "window overlap vs GPU-hours; too few is how ATM converges to a
+                              confident wrong number"}
+  ns_per_window: {type: float, default: 2.0, min: 0.25, max: 20.0,
+                  trades: "per-window sampling vs GPU-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647, trades: "per-run draw"}
+# NO `instability` dial here. The overlap diagnostic is driven by `n_lambda_windows`, which is a
+# REAL parameter: drop it toward 8 and `min_window_overlap` falls under the 0.1 floor. A surrogate
+# knob would be redundant where a real one already moves the verdict, and the real one is the more
+# honest lab condition because it is the mistake an operator actually makes.
+metrics: [dg_abfe, dg_sem, n_lambda, min_window_overlap, cycle_closure_kcal]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [dg_abfe, dg_sem]}}
+  - {id: metric_in_range, role: integrity, params: {metric: min_window_overlap, min: 0.1}}
+cost_model: {unit: invocation, cost: {gpu_hours: 0.002}}

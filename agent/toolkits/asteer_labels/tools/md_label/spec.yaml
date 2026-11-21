@@ -1,0 +1,69 @@
+# Apo + holo MD, 30 ns total, producing the measured counterparts of Model B's predictions.
+#
+# Ports, parameters, metrics and gates are COPIED from the settled table in the impress-a plan,
+# item 36 (EI.21), not derived here. If this file disagrees with that table, the table is right
+# and the disagreement is a finding about EI.21 rather than a local fix.
+id: md_label
+toolkit: asteer_labels
+version: "0.1"
+pattern: P1
+entry: asteer.impress.labels.MDLabelAgent
+# ~2-3.6 GPU-h per design at 30 ns total (item 20). The walltime bound is the declared ceiling
+# with the same 2.25x margin item 21 requires of the cost model, because a bound tighter than the
+# declaration would kill a run the budget had already paid for.
+resources: {gpus: 1, cores: 16, walltime_s: 32400}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+# NO `inputs:`. This tool is a ROOT: the complex arrives as a path PARAMETER, exactly as
+# `rfd3_design` takes `input_spec_path`. That is deliberate and it is also this chain's silent
+# failure -- `compose/validate.py:79`-`:81` is a literal `pass` for an unsatisfied root input, so
+# nothing upstream checks that the path arrived. The agent refuses at parameterize time instead;
+# see item 36's root-input section and the agent's own docstring.
+outputs:
+  trajectory: {type: Trajectory}
+  # THE SECOND PORT IS NOT TIDINESS. Without it gate 1 refuses the chain: `unifies_with` admits
+  # identity, COMPLEX->BACKBONE and METRIC_SET->METRIC and nothing else (`core/types.py:58`-`:67`),
+  # so a Trajectory cannot satisfy abfe_label's `structure: {type: Complex}` requirement. This is
+  # the equilibrated representative frame of the holo leg, which is also the structure ATM should
+  # start from -- the type constraint and the science agree, which is why it is the right fix
+  # rather than a workaround.
+  structure: {type: Complex}
+parameters:
+  # The design this run measures. A path parameter rather than a port, per the root note above.
+  design_dir: {type: str, default: "", trades: "which design is being measured"}
+  ligand_params_path: {type: str, default: "",
+                       trades: "the ligand's own .params; the resname inside it may be the
+                                literal A:R rather than ALR -- never 'clean up' the colon"}
+  apo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0,
+           trades: "apo sampling vs GPU-hours; the apo leg is what preorganisation is measured against"}
+  holo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0,
+            trades: "holo sampling vs GPU-hours"}
+  # `md_replicates`, NOT `replicas`. The campaign's `replicas` is a cap on independent design
+  # lineages (`runtime/executor.py:861`); this is the number of MD seeds for one measurement. Two
+  # fields one letter apart with different owners is how a label batch silently becomes four.
+  md_replicates: {type: int, default: 1, min: 1, max: 8,
+                  trades: "measurement precision vs GPU-hours; NOT the campaign's replicas"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-run draw; two replicates are only independent if this is honoured"}
+metrics:
+  # The three measured quantities, named to match what they supersede (item 36's naming table).
+  - preorg_rmsd
+  - rotamer_entropy
+  - ligand_rmsf
+  # Convergence telemetry, which the integrity gate below reads. Reported separately from the
+  # measurements on purpose: these say whether the instrument worked, not what it found.
+  - rmsd_plateau_frac
+  - energy_drift_kcal_per_ns
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [preorg_rmsd, rotamer_entropy, ligand_rmsf]}}
+  # INTEGRITY, not acceptance, and the distinction is decision 0013: only integrity failures demote
+  # a pattern in the trust ledger. An MD run that did not equilibrate is a BROKEN INSTRUMENT, not a
+  # weak design -- filing it as acceptance would count a tool failure against the molecule.
+  - {id: metric_in_range, role: integrity,
+     params: {metric: rmsd_plateau_frac, min: 0.5}}
+# 2.25x the worst observed (item 21). 3.6 GPU-h worst observed x 2.25 = 8.1, which is the figure
+# item 36's budget arithmetic uses: md_label alone needs 81 GPU-h available to clear the
+# interlock's 10% cap, which fits a 96-192 per-round envelope -- so this tool promotes the ordinary
+# three-clean-runs way and does not need item 21's trust assertion. That is most of why decision L1
+# split the chain.
+cost_model: {unit: invocation, cost: {gpu_hours: 8.1}}

@@ -1,0 +1,74 @@
+# ATM alchemical transfer, producing the measured ΔG that supersedes Model C's prediction.
+#
+# Ports, parameters, metrics and gates are COPIED from item 36's settled table (EI.21). A
+# disagreement between this file and that table is a finding about the table, not a local fix.
+id: abfe_label
+toolkit: asteer_labels
+version: "0.1"
+pattern: P1
+entry: asteer.impress.labels.ABFELabelAgent
+# ~3-8 GPU-h per ligand (item 20), so 18 declared at item 21's 2.25x. The walltime ceiling carries
+# the same margin.
+resources: {gpus: 1, cores: 16, walltime_s: 72000}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  # From md_label's `structure` output -- the equilibrated holo frame. The typed port is what makes
+  # gate 1 check the chain when the two tools are composed as one graph, which is item 36's
+  # gate-1 argument and is tested.
+  #
+  # BUT UNDER DECISION L1 THIS TOOL IS A ROOT. The chain was split into two campaigns on
+  # 2026-11-19, so at runtime there is no upstream stage in this graph to depend on -- and
+  # `compose/validate.py:79`-`:81` is a literal `pass` for an unsatisfied required input on a node
+  # with no dependencies. Measured: `mock_abfe_label` alone passes gate 1 and every other gate with
+  # this port unwired. So the structure also arrives as `structure_path` below, and the agent
+  # refuses when it has neither. Keeping the port is not redundant: it is what types the chain in
+  # the composed case and what documents the dependency in the split one.
+  structure: {type: Complex}
+outputs:
+  measurements: {type: MetricSet}
+parameters:
+  # The cross-campaign route for the holo frame, used when this runs as its own campaign (L1).
+  # A path rather than a port for the same reason `md_label` takes `design_dir`: across two
+  # campaigns there is no typed edge to carry it.
+  structure_path: {type: str, default: "",
+                   trades: "the equilibrated holo frame md_label produced; required when this
+                            runs as its own campaign rather than as a second stage"}
+  ligand_params_path: {type: str, default: "",
+                       trades: "the ligand's own .params; read the resname from it, never hardcode"}
+  n_lambda_windows: {type: int, default: 22, min: 8, max: 64,
+                     trades: "overlap between neighbouring windows vs GPU-hours; too few windows
+                              is the classic way an ATM run converges to a confident wrong number"}
+  ns_per_window: {type: float, default: 2.0, min: 0.25, max: 20.0,
+                  trades: "per-window sampling vs GPU-hours"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-run draw"}
+metrics:
+  # `dg_abfe` is this tool's own metric NAME; the bridge ingests it as the PROPERTY `dg_corrected`,
+  # which is the name C's prediction carries and therefore the name supersession matches on. The
+  # two differ on purpose and item 36's naming table is the contract: a measurement ingested under
+  # a name nothing predicted is accepted silently, writes no `__superseded` key, and the pair that
+  # is ROME's training corpus never forms (`core/tree.py:91`, `:97`, `:98`).
+  - dg_abfe
+  - dg_sem
+  - n_lambda
+  # Convergence diagnostics, read by the integrity gate below.
+  - min_window_overlap
+  - cycle_closure_kcal
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [dg_abfe, dg_sem]}}
+  # INTEGRITY (decision 0013). An ATM run whose neighbouring windows do not overlap has not
+  # measured a free energy; that is an instrument failure and must demote the pattern. Filing it as
+  # acceptance would read a broken run as a weak binder.
+  #
+  # And note what is NOT here: no bound on `dg_abfe` itself. A ΔG is the measurement; a bar on it
+  # would be the campaign's objective leaking into the instrument. `rosetta/SKILL.md`'s rule is the
+  # warning -- a metric that cannot be read is OMITTED, never defaulted -- because 0.0 passes most
+  # bounds, and a `dg_abfe` of 0.0 would read as a 0 kcal/mol binder.
+  - {id: metric_in_range, role: integrity,
+     params: {metric: min_window_overlap, min: 0.1}}
+# 8 GPU-h worst observed x 2.25 = 18 (item 21). This one is why the trust assertion still exists:
+# 18 declared needs 180 GPU-h available to clear the interlock's 10% cap, against a 96-192
+# per-round envelope -- so abfe_label alone is admitted by `impress-a trust --assert`, with the M2
+# stubbed run as its named evidence, and never by under-declaring (item 21).
+cost_model: {unit: invocation, cost: {gpu_hours: 18.0}}

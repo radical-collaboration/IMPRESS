@@ -1,0 +1,18 @@
+{
+  "why": "An ATM run with too few lambda windows: neighbouring windows barely overlap (`min_window_overlap` 0.02), so the free energy is a confident number with no statistical basis behind it. `dg_abfe` -9.8 and `dg_sem` 0.4 look like a good measurement of a good binder; the cycle closure of 2.9 kcal/mol says the thermodynamic cycle does not close. Only the integrity bound on overlap catches it. Integrity rather than acceptance on purpose: this is the instrument failing, not the molecule being weak, and filing it as acceptance would leave the pattern's trust intact.",
+  "failing_gates": [
+    "metric_in_range[min_window_overlap]"
+  ],
+  "output": {
+    "result": "abfe_label",
+    "count": 1,
+    "outputs": {},
+    "metrics": {
+      "dg_abfe": -9.8,
+      "dg_sem": 0.4,
+      "n_lambda": 8,
+      "min_window_overlap": 0.02,
+      "cycle_closure_kcal": 2.9
+    }
+  }
+}

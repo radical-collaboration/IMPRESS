@@ -1,0 +1,40 @@
+# Twin of `preorg_score` (item 13, EI.10). Model B's client: the FK potential's score.
+#
+# `mock_` ON THE ID: tool ids are one flat global namespace and `_load_toolkit` raises
+# `duplicate tool id` on a collision, all-or-nothing, so the OTHER toolkit then registers
+# NOTHING. Measured on 2026-11-19 with `mock_liganchor_propose`.
+#
+# `toolkit: mock` is the FIELD gate 6 reads (`compose/validate.py::_g6_delivery` matches
+# "mock" exactly), never the directory name. A twin declaring `toolkit: mock_asd` would be
+# classified REAL and admitted under `tool_delivery: real` -- seeded draws reported as
+# science.
+id: mock_preorg_score
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: asteer.impress.mock_asd.MockPreorgScoreAgent
+resources: {cores: 2, walltime_s: 30}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  pocket_selection: {type: str, default: "", trades: "the real spec's parameter"}
+  design_campaign_id: {type: str, default: "", trades: "the real spec's parameter"}
+  # MOCK-ONLY DIALS, below, labelled so nobody looks for them on the real tool.
+  # `strain` moves all three quantities together, because that is what a badly preorganised
+  # pocket does -- and it is what makes `induced_fit_risk` worth deriving rather than reading.
+  strain: {type: float, default: 0.3, min: 0.0, max: 1.0,
+           trades: "mock only: how badly preorganised the pocket is"}
+  # Lets a mock campaign move the version and watch attribution follow, which is M1's CON-5
+  # row exercised without a real stream.
+  model_version: {type: int, default: 0, min: 0, max: 1000,
+                  trades: "mock only: the version the fake response is attributed to"}
+metrics: [preorg_rmsd, rotamer_entropy, ligand_rmsf, induced_fit_risk, sigma_preorg]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported,
+     params: {metrics: [preorg_rmsd, rotamer_entropy, ligand_rmsf, induced_fit_risk]}}
+# Thousandths of an hour: non-zero so the ledger counts something, small enough that gate 5
+# and the untrusted-pattern cap stay out of the way on a laptop. Not a measurement.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.001}}

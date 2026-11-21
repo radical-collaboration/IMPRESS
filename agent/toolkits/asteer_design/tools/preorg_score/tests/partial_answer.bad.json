@@ -1,0 +1,21 @@
+{
+  "why": "B answered with two of its four metrics. `preorg_rmsd` and `ligand_rmsf` are there and look fine; `rotamer_entropy` came back null and `induced_fit_risk` is absent entirely, which is what a stream serving a half-initialised checkpoint does -- the weights load, the forward pass runs, and some heads are not there. Nothing about the exit status or the `result` says so, and a consumer reading `metrics.get('induced_fit_risk', 0.0)` would read the riskiest possible design as the safest, since 0.15 is this metric's floor and 0.0 is below it. `metrics_reported` requires each named metric to be a FINITE NUMBER, so it catches the null as well as the absence -- which is why the gate reads the three raw quantities plus the derived scalar rather than trusting the payload's key set.",
+  "failing_gates": ["metrics_reported"],
+  "output": {
+    "result": "preorg_score",
+    "count": 1,
+    "outputs": {"structure": "/designs/n0041/complex.cif"},
+    "metrics": {
+      "preorg_rmsd": 1.21,
+      "rotamer_entropy": null,
+      "ligand_rmsf": 0.84,
+      "sigma_preorg": 0.26
+    },
+    "model_versions": {
+      "preorg_rmsd": "pocket_preorg@v3",
+      "rotamer_entropy": "pocket_preorg@v3",
+      "ligand_rmsf": "pocket_preorg@v3",
+      "sigma_preorg": "pocket_preorg@v3"
+    }
+  }
+}

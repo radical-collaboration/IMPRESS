@@ -1,0 +1,30 @@
+# Twin of `affdelta_score` (item 13, EI.10). Model C's client: the corrected ΔG and the bound.
+# `mock_` on the id and `toolkit: mock` in the field, for the reasons mock_preorg_score gives.
+id: mock_affdelta_score
+toolkit: mock
+version: "0.1"
+pattern: P2
+entry: asteer.impress.mock_asd.MockAffDeltaScoreAgent
+resources: {cores: 2, walltime_s: 30}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  embedding_source: {type: str, default: "", trades: "the real spec's parameter"}
+  lcb_k: {type: float, default: 1.0, min: 0.0, max: 4.0,
+          trades: "the real spec's parameter: how much uncertainty the ranking charges for"}
+  design_campaign_id: {type: str, default: "", trades: "the real spec's parameter"}
+  # MOCK-ONLY DIAL, and it is the dangerous direction on purpose: driving `sigma_floor` to
+  # zero is a collapsed posterior, which turns the bound item 14 ranks on into a mean. EI.7's
+  # `calibration_in_range` is the gate for that, and this is how it gets a payload to refuse
+  # without an allocation.
+  sigma_floor: {type: float, default: 0.6, min: 0.0, max: 5.0,
+                trades: "mock only: C's reported uncertainty; 0.0 is a collapsed posterior"}
+  model_version: {type: int, default: 0, min: 0, max: 1000,
+                  trades: "mock only: the version the fake response is attributed to"}
+metrics: [dg_corrected, sigma_dg, dg_lcb]
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [dg_corrected, sigma_dg, dg_lcb]}}
+cost_model: {unit: invocation, cost: {cpu_hours: 0.001}}

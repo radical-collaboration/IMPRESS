@@ -1,0 +1,75 @@
+# Model A's emitter: a ligand's Rosetta params file -> the CFG anchoring channel (item 12a).
+#
+# `select_hotspots` IS NOT HERE AND MUST NOT BE ADDED. M0 measured it (job 24155612): the key
+# resolves, all six atoms are annotated on `atom_array_input`, and then `build()` drops the
+# annotation -- so the network sees zeros while the run completes and reports success.
+# `infer_ori_strategy: "hotspots"` cannot build at all. Items 26 and 29; a test asserts the
+# emitter never produces it.
+id: liganchor_propose
+toolkit: asteer_design
+version: "0.1"
+# P2, NOT the P1 the plan assumed. This tool parses a text file: it asks the scheduler for
+# nothing but a core, and `P1` would have forced `gpus: 1` (a P1 tool declaring no GPU is a
+# load-time error, `tools/spec.py:148`). When Model A is a trained head it becomes a ROME
+# stream client -- still CPU, because residency lives in ROME (backlog H4). The second time
+# this phase's plan guessed a pattern from what a tool DOES rather than from what it asks for;
+# see EI.10's Result for the first.
+pattern: P2
+entry: asteer.impress.liganchor.LigAnchorProposeAgent
+resources: {cores: 2, walltime_s: 120}
+# NO `inputs:`. A ROOT: the ligand arrives as a path PARAMETER, exactly as `rfd3_design` takes
+# `input_spec_path`. Nothing upstream checks it -- `compose/validate.py:79`-`:81` is a literal
+# `pass` for an unsatisfied root input -- so the agent refuses at run time instead.
+outputs:
+  # `Parameterized`, NOT a new `AnchorSpec` member. `ArtifactType` is a closed enum upstream
+  # (`core/types.py:35`) and gate 1 validates against it, so a member is an upstream change
+  # (item 31). It is also the honest member: an anchor set IS a parameterisation handed to the
+  # sampler, which is where the enum's own docstring draws the SmallMolecule/Parameterized line.
+  anchor_spec: {type: Parameterized}
+parameters:
+  ligand_params_path: {type: str, default: "",
+                       trades: "which ligand is anchored; the resname inside may be the literal
+                                A:R rather than ALR -- never 'clean up' the colon"}
+  max_anchor_atoms: {type: int, default: 6, min: 1, max: 32,
+                     trades: "anchor coverage vs how much of the pocket is constrained"}
+  # THE FEATURE NAMES ARE DATA, DELIBERATELY. The source spec writes this channel two ways --
+  # `active donor` with a space at §129 and §323, `active_donor` with an underscore elsewhere --
+  # and neither spelling is verifiable off-cluster, because checking it needs the Foundry
+  # container. A wrong key is item 26's failure exactly: the run completes conditioned on
+  # nothing. Carrying the names as a parameter makes the correction a campaign edit at M2
+  # rather than a code change, and the agent refuses anything but three of them, because two
+  # would drop a channel silently.
+  cfg_feature_keys: {type: str, default: "active_donor,active_acceptor,ref_atomwise_rasa",
+                     trades: "the CFG channel's key spelling, unverified against the container"}
+  # The burial target Model A predicts, interpolated between these two over |partial charge|.
+  # Both ends are parameters because neither is derived from anything: this is a PLACEHOLDER for
+  # the trained LigAnchor head (ROME item 8, disabled until round 2, resident from M4).
+  buried_target_rasa: {type: float, default: 0.15, min: 0.0, max: 1.0,
+                       trades: "how buried the most-charged anchor atom is asked to be"}
+  exposed_target_rasa: {type: float, default: 0.45, min: 0.0, max: 1.0,
+                        trades: "how exposed the least-charged anchor atom is left"}
+  cfg_scale: {type: float, default: 1.5, min: 0.0, max: 10.0,
+              trades: "guidance strength vs sample diversity; 1.5 is the documented default"}
+  cfg_t_max: {type: float, default: 1.0, min: 0.0, max: 1.0,
+              trades: "how late in the trajectory guidance is still applied"}
+metrics:
+  # How many atoms the anchor set engages: <= max_anchor_atoms, because a ligand may not have
+  # that many donors or acceptors.
+  - n_engaged_atoms
+  # Normalised Shannon entropy of the anchoring weights, in [0, 1]: 1.0 evenly spread, lower
+  # concentrated on a few atoms, 0.0 for a single atom. This is the number Model A's trained
+  # selection is compared against, which is why it is a metric and not a log line.
+  - anchor_entropy
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported, params: {metrics: [n_engaged_atoms, anchor_entropy]}}
+  # ACCEPTANCE, and the only acceptance gate in this toolkit. An anchor set of one atom is a
+  # well-formed instruction that constrains almost nothing -- the run worked and the design is
+  # not worth generating. Decision 0013: that is acceptance, not integrity, because nothing
+  # broke. The floor is 2 rather than a fraction of what was asked: asking for six and
+  # engaging five is a property of the molecule, while engaging one is a property of the ask.
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: n_engaged_atoms, min: 2}}
+# Unverified, like the scoring clients': parsing a text file is milliseconds, and item 21 wants
+# 2.25x the worst OBSERVED. Re-derive from M2's cost_measured.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.01}}

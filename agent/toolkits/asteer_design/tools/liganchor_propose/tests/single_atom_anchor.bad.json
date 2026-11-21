@@ -1,0 +1,38 @@
+{
+  "why": "The emitter ran, parsed the ligand, and found exactly one anchorable atom -- so it emitted a well-formed anchor spec that constrains almost nothing. `n_engaged_atoms` is 1 and `anchor_entropy` is 0.0, which is the defined value for a single atom rather than a missing one, so `metrics_reported` passes and nothing about the payload is malformed. This is an ACCEPTANCE failure and not an integrity one (decision 0013): the tool worked, the molecule is the problem, and the pattern's trust must not take the hit for it. The floor is 2 rather than a fraction of `max_anchor_atoms`, because asking for six and engaging five is a property of the ligand while engaging one is a property of the ask. A real case: a ligand whose only polar atom is a single hydroxyl, or a params file whose polar hydrogens were stripped -- on ALR.params the bond graph finds one donor where the atom-type table alone would claim two.",
+  "failing_gates": [
+    "metric_in_range[n_engaged_atoms]"
+  ],
+  "acceptance_only": true,
+  "output": {
+    "result": "liganchor_propose",
+    "count": 1,
+    "outputs": {
+      "anchor_spec": {
+        "schema": "asteer.anchor_spec/1",
+        "ligand_resname": "A:R",
+        "engaged_atoms": [
+          "O4"
+        ],
+        "use_classifier_free_guidance": true,
+        "cfg_features": {
+          "active_donor": {
+            "O4": 1.0
+          },
+          "active_acceptor": {
+            "O4": 1.0
+          },
+          "ref_atomwise_rasa": {
+            "O4": 0.15
+          }
+        },
+        "cfg_scale": 1.5,
+        "cfg_t_max": 1.0
+      }
+    },
+    "metrics": {
+      "n_engaged_atoms": 1.0,
+      "anchor_entropy": 0.0
+    }
+  }
+}

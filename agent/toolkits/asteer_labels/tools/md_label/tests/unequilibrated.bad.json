@@ -1,0 +1,18 @@
+{
+  "why": "An MD run that completed, reported all three measurements with confident-looking values, and never equilibrated: `rmsd_plateau_frac` 0.18 means the backbone RMSD was still climbing for 82% of the trajectory. Nothing about the exit status, the `result`, or the three headline metrics says so -- a preorg_rmsd of 1.42 A is an entirely ordinary number. Only the integrity-role bound on `rmsd_plateau_frac` catches it, and it has to be INTEGRITY rather than acceptance (decision 0013): a measurement that did not converge is a broken instrument, so the pattern's trust must take the hit, or the next batch runs the same broken instrument. This is the label-side version of the failure the whole QC layer exists for -- and worse than the design-side version, because this number would have superseded a prediction and never been recomputed.",
+  "failing_gates": [
+    "metric_in_range[rmsd_plateau_frac]"
+  ],
+  "output": {
+    "result": "md_label",
+    "count": 1,
+    "outputs": {},
+    "metrics": {
+      "preorg_rmsd": 1.42,
+      "rotamer_entropy": 2.07,
+      "ligand_rmsf": 0.91,
+      "rmsd_plateau_frac": 0.18,
+      "energy_drift_kcal_per_ns": 4.6
+    }
+  }
+}

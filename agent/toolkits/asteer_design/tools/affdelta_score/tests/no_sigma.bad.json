@@ -1,0 +1,15 @@
+{
+  "why": "C answered, the round trip succeeded, and the posterior came back with no sigma -- an uncalibrated or collapsed GP. The payload is otherwise perfect: `result` is set, `dg_corrected` is -9.4, an entirely ordinary binding free energy. What is missing is `sigma_dg`, and therefore `dg_lcb`, because the adapter OMITS the bound rather than computing it from a sigma it does not have. That omission is the whole point: item 14 ranks on the lower confidence bound, so an LCB defaulted to the mean would rank this design as if the model were certain about it, and nothing downstream could tell. `metrics_reported` is what catches it, which makes it an integrity failure -- a broken instrument -- rather than a low score against the molecule. The other direction, a sigma reported as 0.0, is EI.7's `calibration_in_range` and is not declarable here until the launch path sets IMPRESS_A_GATE_MODULES (item 39).",
+  "failing_gates": ["metrics_reported"],
+  "output": {
+    "result": "affdelta_score",
+    "count": 1,
+    "outputs": {"structure": "/designs/n0041/complex.cif"},
+    "metrics": {
+      "dg_corrected": -9.4
+    },
+    "model_versions": {
+      "dg_corrected": "aff_delta@v3"
+    }
+  }
+}

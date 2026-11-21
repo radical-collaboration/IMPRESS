@@ -1,0 +1,68 @@
+# THE MD LABEL CAMPAIGN. Apo + holo MD -> the measured counterparts of Model B's predictions.
+#
+#   impress-a run campaigns/asd-labels-md.yaml --model B
+#
+# **`tool_delivery: real`, and it means different things at M2 and M3.** From M2 this runs the
+# real tools with their protocol bodies STUBBED behind the real interfaces -- `toolkit:
+# asteer_labels`, so gate 6 is satisfied and the composition, the gates, the cost accounting and
+# the measurement bridge are all exercised at negligible cost. From M3 the same file runs the
+# physics. The mock counterpart is `asd-labels-md-mock.yaml` and is a different file on purpose: its stages are
+# `mock_` ids, which this file must never name (CON-10).
+#
+# **`--model B`, not `D`** -- see the mock file's header. D steps the quality knobs a quarter of
+# their headroom per refinement and on a label chain the quality knobs are the protocol. B's
+# `RehearsalOracle` returns the declared chain with empty params, and `replicas: 1` below caps its
+# own 2-or-3 request (`runtime/executor.py:861`, clamped at `:866`).
+campaign_id: asd-labels-md
+goal: "Measure preorganisation for the batch the acquisition decision selected"
+
+# Dragon from M2, because these are the long multi-GPU-hour tasks CON-3's slot ceiling is sized
+# against: each one holds a concurrent-task slot for hours, which is the longest-held transient in
+# the whole system and the reason item 18 measured with a long hold in the probe.
+backend: dragon
+backend_config: {}
+
+tool_delivery: real
+
+max_cycles: 1
+stagnation_limit: 1
+target_front: 1
+
+site: {gpu_api: cuda, gpus_per_node: 4, nodes: 1, allow_external: false}
+
+# ITS OWN BUDGET, which is the whole reason this is a separate campaign (CON-9). The interlock cap
+# is `available(dim) * 0.10` where `available = remaining - reserved` (`core/budget.py:113`-`:115`,
+# read at `runtime/executor.py:738`), so a label batch drawing on the design campaign's declared
+# 40 GPU-h would shrink the DESIGN chain's own cap mid-run -- and that failure is `transient=True`
+# (`:741`), so the symptom is a campaign that quietly produces less rather than one that stops.
+#
+# Sized from source spec 5.5's per-round envelope of 60-150 label GPU-hours, at the
+# MD end of decision L1's split: 96 admits a batch of roughly 11 designs at the 8.1
+# declared each, and 81 available is what md_label needs to clear the 10% cap -- so
+# this tool promotes the ordinary three-clean-runs way and needs no trust assertion.
+budget:
+  gpu_hours: 96.0
+  cpu_hours: 64.0
+
+stages: [md_label]
+
+params:
+  md_label:
+    # Set per launch by the dispatcher, through `LaunchRequest.context` -- the value here is
+    # a placeholder that the agent's own root-input check refuses if it ever survives to a run.
+    design_dir: ""
+    apo_ns: 15.0
+    holo_ns: 15.0
+    md_replicates: 1
+
+replicas: 1
+concurrency: 2
+
+# Objectives REPORT, they do not bound (decision 0013). Convergence is an integrity gate on the
+# tool: a run that did not converge is the instrument failing, not the design being weak, and a
+# bounded objective here would file it under the wrong heading and leave the pattern's trust
+# intact so the next batch runs the same broken instrument.
+objectives:
+  - {name: preorg_rmsd,     direction: minimize}
+  - {name: rotamer_entropy, direction: minimize}
+  - {name: ligand_rmsf,     direction: minimize}

@@ -1,0 +1,58 @@
+# Model B's client: the FK potential's score, plus the three quantities md_label measures.
+#
+# Metric names are COPIED from item 36's naming table (EI.21), because they are what a
+# measurement supersedes: `core/tree.py:91` matches a measured Property to a prediction BY
+# NAME, and a mismatch is accepted silently with no `__superseded` key written.
+id: preorg_score
+toolkit: asteer_design
+version: "0.1"
+# P2, not P5 and not P6. P6 is REFUSED at load (`tools/spec.py:150` -- the composer drops P6
+# tools from graphs, so one would vanish from a campaign without a word) and its own error
+# message says to declare P2. P5 means "network service over HTTPS"; a ROME stream is an
+# in-allocation resident service reached through ROME, not an HTTPS endpoint, and no shipped
+# tool declares P5 so nothing exercises whatever that would imply. P2 is what every CPU-side
+# tool in this project declares and it is the honest one: an ordinary task that does a round
+# trip. See the episode's Result for the correction to EI.10's own plan.
+pattern: P2
+entry: asteer.impress.stream_clients.PreorgScoreAgent
+# NO GPUS. The GPU belongs to the stream, which is ROME's resident service holding its own
+# concurrent-task slot (item 18); this task only asks it a question. Declaring a GPU here
+# would double-count the device and make CON-3's slot arithmetic wrong.
+resources: {cores: 2, walltime_s: 120}
+inputs:
+  structure: {type: Complex}
+outputs:
+  # Passthrough, exactly as `filter_shape` and `packmin` do: a scoring stage annotates a
+  # design rather than producing a new artifact. Keeping the port is what lets the chain be
+  # reordered or extended without retyping it.
+  structure: {type: Complex}
+parameters:
+  pocket_selection: {type: str, default: "",
+                     trades: "which residues B is asked about; empty means the whole pocket"}
+  design_campaign_id: {type: str, default: "",
+                       trades: "carried into the request so a score can be traced to the
+                                campaign that asked for it"}
+metrics:
+  # The three raw quantities md_label measures and supersedes.
+  - preorg_rmsd
+  - rotamer_entropy
+  - ligand_rmsf
+  # DERIVED, never measured -- decision L2. B reports the judgement; the measurement
+  # supersedes the three above.
+  - induced_fit_risk
+  # Reported when B is calibrated, omitted when it is not. NOT in `metrics_reported` below:
+  # the FK potential uses the mean, so an uncalibrated B is usable here. See Pitfalls.
+  - sigma_preorg
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  # `sigma_preorg` is deliberately absent from this list, and `calibration_in_range` (EI.7)
+  # is the gate that should watch it -- resolvable only where
+  # IMPRESS_A_GATE_MODULES=asteer.impress.gates is set (item 39). Declaring it before the
+  # launch path sets that variable would make this whole toolkit register nothing.
+  - {id: metrics_reported,
+     params: {metrics: [preorg_rmsd, rotamer_entropy, ligand_rmsf, induced_fit_risk]}}
+# CPU-hours, and UNVERIFIED: item 21 wants 2.25x the worst observed and nothing has been
+# observed. Deliberately not padded -- the round trip is milliseconds of local work plus
+# however long the stream takes, and the stream's cost is not this task's to declare.
+# Re-derive from M2's cost_measured.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.01}}

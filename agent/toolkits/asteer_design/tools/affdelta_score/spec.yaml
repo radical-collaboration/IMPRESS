@@ -1,0 +1,38 @@
+# Model C's client: the corrected ΔG that abfe_label supersedes, and the bound item 14 ranks on.
+id: affdelta_score
+toolkit: asteer_design
+version: "0.1"
+# P2 for the reasons preorg_score's spec gives: P6 is refused at load and P5 means HTTPS.
+pattern: P2
+entry: asteer.impress.stream_clients.AffDeltaScoreAgent
+resources: {cores: 2, walltime_s: 120}
+inputs:
+  structure: {type: Complex}
+outputs:
+  structure: {type: Complex}
+parameters:
+  embedding_source: {type: str, default: "",
+                     trades: "which frozen embedding C scores against"}
+  # The width of the bound item 14 ranks on. 1.0 is one standard deviation; raising it ranks
+  # more conservatively and will reorder the batch, which is why it is a declared parameter
+  # with a stated trade rather than a constant in the adapter.
+  lcb_k: {type: float, default: 1.0, min: 0.0, max: 4.0,
+          trades: "how much uncertainty the ranking charges for; 0.0 ranks on the mean"}
+  design_campaign_id: {type: str, default: "",
+                       trades: "carried into the request for provenance"}
+metrics:
+  # `dg_corrected` is the name C's PREDICTION carries, and therefore the name abfe_label's
+  # measured `dg_abfe` is ingested under so supersession matches (item 36's naming table).
+  - dg_corrected
+  - sigma_dg
+  - dg_lcb
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  # ALL THREE GATED, unlike preorg_score's sigma. Item 14 ranks on the bound, so a C that
+  # reports no sigma cannot be ranked at all -- the omission is an instrument failure, not a
+  # weak design. And `dg_lcb` is OMITTED rather than defaulted when sigma is missing, so this
+  # gate is what catches it: an LCB with no sigma is the posterior mean under another name,
+  # and 0.0 would pass any bound anyone put on it.
+  - {id: metrics_reported, params: {metrics: [dg_corrected, sigma_dg, dg_lcb]}}
+# Unverified, as preorg_score's. Re-derive from M2's cost_measured.
+cost_model: {unit: invocation, cost: {cpu_hours: 0.01}}

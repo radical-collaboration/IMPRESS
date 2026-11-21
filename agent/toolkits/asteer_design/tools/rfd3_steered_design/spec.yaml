@@ -1,0 +1,153 @@
+# FK Tier 1 over `partial_t` restarts (item 12b). A NEW TOOL, not a change to `rfd3_design`:
+# that keeps the unsteered control arm intact so M2 runs both at the same N. A control arm that
+# exists only as a preserved capability is not a control.
+id: rfd3_steered_design
+toolkit: asteer_design
+version: "0.1"
+# P1 and it means it: every restart runs RFD3's denoiser on a GPU inside the Foundry container.
+pattern: P1
+entry: asteer.impress.rfd3_steered.RFD3SteeredDesignAgent
+# K particles x (1 + n_restarts) denoising passes. 1800s against rfd3_design's 900s for one
+# pass, which is the right order for 8 particles over 3 restarts only because each pass is a
+# batch -- `diffusion_batch_size`, not a loop over single designs. Re-derive from M2.
+resources: {gpus: 1, cores: 8, walltime_s: 1800}
+gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
+inputs:
+  # Model A's anchor set, from `liganchor_propose`. `Parameterized`, per item 31's decision.
+  #
+  # NOTHING UPSTREAM CHECKS THAT THIS ARRIVED. `compose/validate.py:79`-`:81` is a literal
+  # `pass` for an unsatisfied required input on a node with no dependencies, so a graph that
+  # forgot the edge composes cleanly and would diffuse unconditioned while reporting success.
+  # The agent refuses instead, and EI.9's test is what verifies the wiring.
+  anchor_spec: {type: Parameterized}
+outputs:
+  backbone: {type: Backbone}
+parameters:
+  # Target identity, campaign-supplied. RFD3 has no scaffold or guidance CLI override --
+  # guided versus unguided is selected entirely by WHICH file this points at -- so this is
+  # never composer-tuned. The committed `campaigns/data/alr/ALR_binder_design.json` is the
+  # shape: a `partial` block with `input`, `ligand`, `length` and the select_* atom lists.
+  input_spec_path: {type: str, default: "",
+                    trades: "which target and which diffusion mode; not a tunable"}
+  n_particles: {type: int, default: 8, min: 2, max: 50,
+                trades: "SMC population vs GPU-hours; below 2 there is nothing to resample"}
+  n_restarts: {type: int, default: 3, min: 1, max: 12,
+               trades: "how many resampling events the pass gets vs wall-clock"}
+  # How far back up the trajectory a survivor is re-noised before being re-denoised. The
+  # steering knob: near 0 barely perturbs a survivor, near 1 discards what it had.
+  partial_t: {type: float, default: 0.4, min: 0.05, max: 0.95,
+              trades: "exploration per restart vs keeping what a survivor earned"}
+  fk_potential: {type: str, default: "immediate",
+                 trades: "which reward difference the potential acts on; difference/max/sum are
+                          folds over the trajectory and are NOT interchangeable with immediate"}
+  fk_tau: {type: float, default: 1.0, min: 0.01, max: 100.0,
+           trades: "inverse temperature (lambda = 1/tau): low tau sharpens onto the best
+                    particle, high tau flattens toward uniform resampling"}
+  ess_collapse_threshold: {type: float, default: 2.0, min: 0.01, max: 50.0,
+                           trades: "an ABSOLUTE particle count, so one number means the same
+                                    thing here and in the outer loop"}
+  # Above this RASA target an atom goes to `select_exposed`, at or below it to `select_buried`.
+  buried_threshold: {type: float, default: 0.3, min: 0.0, max: 1.0,
+                     trades: "how much of Model A's anchor set is asked to be buried"}
+  # OFF BY DEFAULT AND THAT IS THE POINT. The CFG trio's key spelling is unverified -- the
+  # source spec writes `active donor` with a space in two places and `active_donor` elsewhere,
+  # and settling it needs the Foundry container. A wrong key is item 26 exactly: the run
+  # completes conditioned on nothing and reports success. The burial channel reaches RFD3
+  # through `select_buried`/`select_exposed` instead, which are in the documented key list and
+  # in this project's own committed input. Turn this on when the container confirms the names.
+  emit_cfg_features: {type: bool, default: false,
+                      trades: "the unverified CFG channel beside the verified burial one"}
+  # WHICH FK TIER. 1 resamples between whole denoising passes over `partial_t` restarts and is
+  # CLI-only; 2 resamples the diffusion batch axis per timestep inside one process, which needs
+  # `asteer.fk_sampler` registered and RFD3 importable (item 3 measured the seam on job
+  # 24155612). Tier 2 is selected by writing `inference_sampler.kind` into the input spec --
+  # NOT by a CLI flag -- and the registry falls back silently on an unknown key, so the key is
+  # written from one constant and `register()` returns it for a caller to assert.
+  tier: {type: int, default: 1, min: 1, max: 2,
+         trades: "resampling granularity: whole passes (1) vs per timestep (2); tier 2 needs a
+                  resident process and is an M2 decision"}
+  seed: {type: int, default: null, min: 0, max: 2147483647,
+         trades: "per-lineage draw; replicas are only independent if this is honoured"}
+# `step_scale` is NOT a parameter here, deliberately: hold `noise_scale` and `gamma_0` at
+# defaults and buy designability with `inference_sampler.step_scale` (documented binder
+# recommendation: 3), which lives in the input spec rather than on the CLI. RFdiffusion's
+# zero-noise binder convention does not carry over to RFD3, and SMC resampling depends on the
+# stochastic churn that convention removes.
+metrics:
+  # The four item 12 declares. ess_mean and particle_diversity are the inertness check at M2:
+  # if ESS stays at N and diversity never drops, the steered arm is reported as INERT rather
+  # than as a result.
+  - ess_mean
+  - n_resamples
+  - reward_terminal
+  - particle_diversity
+  # Item 29's two counts, over THE JSON THIS TOOL RENDERS -- how many atoms Model A asked for
+  # and how many reached the file. That is the half we control. Whether the annotation then
+  # survives `build()` needs the container and is M2's; passing the gate here does not mean
+  # the model was conditioned.
+  - conditioning_requested
+  - conditioning_applied
+  # Provenance, not quality, and both are edits this tool made to TARGET IDENTITY -- so a
+  # run's own record has to show them rather than a log line somewhere.
+  # `length_dropped`: 1.0 when `length` was removed because partial diffusion was requested.
+  # `template_lists_overridden`: how many of the template's own hand-written
+  # select_buried/select_exposed lists Model A's anchor set replaced. The committed input
+  # carries both, so 2.0 is the expected value and 0.0 would mean the template was not the
+  # one anybody thought it was.
+  - length_dropped
+  - template_lists_overridden
+  # RFD3'S OWN OUTPUT QUALITY, ADDED BY EI.31 (item 43). The same six `rfd3_design` declares,
+  # because it is the same model: steering changes which samples survive resampling, it does
+  # not change what a backbone is or how you tell a noodle from a fold. Omitting them made the
+  # steered arm the only arm in the campaign that reports nothing about its own structures --
+  # and at M2 the unsteered control arm is REFUSED by a floor this tool did not have, which
+  # filters the two arms differently and confounds the comparison M2 exists to make.
+  #
+  # ONLY THE FIRST TWO ARE GATED, AND THE SPLIT IS THE TIER. `ss_fraction` is computed from a
+  # written structure (`_pdbtools.secondary_structure_fraction`, a Ramachandran approximation,
+  # no DSSP binary), so BOTH tiers can report it; `num_models` is a count of what the pass
+  # produced. The other four are read from the `*_model_*.json` sidecar RFD3's CLI writes --
+  # Tier 1 shells out and gets one, Tier 2 drives the denoiser in-process and may see tensors
+  # and no sidecar at all. Declaring them ungated follows upstream's own stated precedent: "a
+  # gate on a key name that turns out to be wrong would fail every real run as an INTEGRITY
+  # failure" (`rfd3_agents.py`), and whether a STEERED invocation writes the same sidecar is
+  # M2's measurement rather than this spec's guess.
+  - ss_fraction
+  - num_models
+  - ca_deviation
+  - ligand_clashes
+  - helix_fraction
+  - sheet_fraction
+qc_gates:
+  - {id: output_present, params: {key: result}}
+  - {id: metrics_reported,
+     params: {metrics: [ess_mean, n_resamples, reward_terminal, particle_diversity]}}
+  # INTEGRITY. A pass that requested conditioning and applied none diffused unconditioned
+  # while reporting success -- the exact failure M0 measured. Not acceptance: nothing about the
+  # molecule is weak, the instruction was lost (decision 0013, item 29).
+  - {id: metrics_reported, params: {metrics: [conditioning_requested, conditioning_applied]}}
+  - {id: metric_in_range, role: integrity,
+     params: {metric: conditioning_applied, min: 1}}
+  # ACCEPTANCE. Every parent surviving exactly once at every event is a pass where steering
+  # did nothing, which is a result about the configuration rather than a broken tool.
+  - {id: metric_in_range, role: acceptance,
+     params: {metric: n_resamples, min: 1}}
+  # THE CONTROL ARM'S THREE GATES, AT THE CONTROL ARM'S NUMBERS (EI.31, item 43). Copied from
+  # `rfd3_design` deliberately, and `tests/test_tier1_loop.py` reads both specs so that the
+  # control arm moving one of these is a test failure rather than a silent divergence.
+  #
+  # INTEGRITY, and the role is the default rather than written out because upstream's own
+  # comment is the argument: it is "a 'the tool produced nothing usable' check, not a quality
+  # threshold". A steered pass can emit a backbone with no secondary structure, report every
+  # FK metric it declares and pass every gate above.
+  - {id: has_secondary_structure, params: {min_ss_fraction: 0.3}}
+  - {id: metrics_reported, params: {metrics: [ss_fraction, num_models]}}
+  # ACCEPTANCE at the control arm's own floor for a backbone it will spend an MPNN pass on.
+  # It must be the same number: M2 reads steered against unsteered on exactly these designs,
+  # and two arms with different acceptance bars are two populations, not a comparison.
+  - {id: metric_in_range, role: acceptance, params: {metric: ss_fraction, min: 0.5}}
+# 8 particles x 4 passes against rfd3_design's measured 0.0405 h per pass = ~1.3 GPU-h, declared
+# at 2.25x per item 21 would be ~2.9. Declared 1.5 and flagged UNVERIFIED: this tool has never
+# run, the batch is one invocation rather than 32, and item 21 wants 2.25x the worst OBSERVED.
+# Re-derive from M2's cost_measured before any real budget is sized on it.
+cost_model: {unit: invocation, cost: {gpu_hours: 1.5}}

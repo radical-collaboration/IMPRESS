@@ -303,6 +303,17 @@ def test_the_real_toolkits_classify_exactly_the_quality_thresholds_as_acceptance
                           # Backlog G4: upstream's own calibrated PROD values, verified
                           # against `run_small_molecule_binding.py`'s PROD instance -
                           # fa_rep 100.0, score -250.0, interact -8.0, ss_fraction 0.5.
+                          # The ASD design chain, which arrived in this checkout on 2026-11-21.
+                          # `n_engaged_atoms` is Model A's anchor set being too small to steer
+                          # with; `ss_fraction` is `rfd3_design`'s own floor at its own number,
+                          # because M2 reads steered against unsteered and two arms with
+                          # different acceptance bars are two populations; `n_resamples` is the
+                          # INERTNESS check - every parent surviving once at every resampling
+                          # event is a pass where steering did nothing, which is a result about
+                          # the configuration rather than a broken tool (decision 0013).
+                          ("liganchor_propose", "n_engaged_atoms"),
+                          ("rfd3_steered_design", "ss_fraction"),
+                          ("rfd3_steered_design", "n_resamples"),
                           ("fastrelax", "total_score"),
                           ("fastrelax", "fa_rep"),
                           ("fastrelax", "interaction_energy"),

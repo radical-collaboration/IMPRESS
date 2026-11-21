@@ -1,0 +1,74 @@
+# THE ABFE LABEL CAMPAIGN, on a laptop. ATM alchemical transfer -> the measured dG.
+#
+#   impress-a run campaigns/asd-labels-abfe-mock.yaml --model B
+#
+# **`--model B`, not `D`, and not by accident.** D's `ThresholdPlanner` steps the quality knobs
+# "a quarter of their declared headroom per refinement" (`policy/registry.py:300`), and on a label
+# chain the quality knobs ARE the protocol: a planner that lengthens the sampling between cycles
+# produces measurements that cannot be compared with each other. `--model B` with no profile is
+# `RehearsalOracle`, which returns the declared chain with `"params": {}` (`policy/oracle.py:94`).
+# Its own `replicas: 2 if refining else 3` (`:95`) is harmless here because `replicas` is a CAP,
+# not a default (`runtime/executor.py:861`, clamped at `:866`), and this file caps it at 1.
+#
+# Finishes in seconds and reports NOTHING about any molecule: the stage is a `toolkit: mock` twin
+# whose metrics are seeded draws. What is real is the chain's shape, its ports, its metric names,
+# its gate roles and its budget separation. Item 36 (impress-a plan) is the specification.
+campaign_id: asd-labels-abfe-mock
+goal: "Measure binding free energy for the subset Model B's risk score admits"
+
+backend: concurrent
+backend_config: {workers: 4}
+
+# KNOB, AND THE CON-10 ASSERTION on the label half. `tests/test_gate6_pair.py` changes this one
+# line to `real` and asserts the refusal: the twins declare `toolkit: mock`, so a campaign
+# declaring real tools must not run them. The real file names `abfe_label` and is refused here
+# for the mirror-image reason.
+tool_delivery: mock
+
+# ONE CYCLE. A label campaign measures a fixed set of points that the acquisition decision
+# (item 14) already chose; there is nothing to reason about between cycles, and a second cycle
+# would re-measure what the first measured. The dispatcher launches again for the next batch.
+max_cycles: 1
+stagnation_limit: 1
+target_front: 1
+
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+
+# ITS OWN BUDGET BLOCK, which is the row with real money behind it (CON-9). The interlock's cap is
+# `available(dim) * 0.10` where `available = remaining - reserved` (`core/budget.py:113`-`:115`,
+# read at `runtime/executor.py:738`), so a label batch drawing on the design campaign's declared
+# 40 GPU-h would shrink the DESIGN chain's own cap mid-run -- and that interlock failure is
+# `transient=True` (`:741`), so the symptom is a campaign that quietly produces less.
+#
+# Sized not to bind on a laptop: the twin declares 0.002 GPU-h, not the real tool's 18.
+budget:
+  gpu_hours: 2.0
+  cpu_hours: 2.0
+
+stages: [mock_abfe_label]
+
+params:
+  mock_abfe_label:
+    # The holo frame md_label produced. A path rather than a port because this is its own
+    # campaign (L1), and the agent refuses an empty value -- nothing upstream checks it.
+    structure_path: "_asd/runs/example-design/holo_frame.cif"
+    # 22 windows is the default that overlaps; drop it toward 8 and `min_window_overlap`
+    # falls under its 0.1 integrity floor. A REAL parameter doing what a surrogate dial would
+    # otherwise have to -- which is why this twin has no `instability` knob.
+    n_lambda_windows: 22
+    ns_per_window: 2.0
+
+# `replicas: 1`, and it is the cap that makes `--model B` safe (see the header). A replicate of a
+# 18 GPU-h measurement costs 18 GPU-h and answers a question nobody asked --
+# `md_replicates` inside the tool is where measurement precision lives.
+replicas: 1
+concurrency: 1
+
+# OBJECTIVES REPORT, THEY DO NOT BOUND, and that is the design rather than laziness. A label whose
+# run did not converge is *the tool broke*, not *the design is weak* -- so it belongs in an
+# INTEGRITY QC gate (decision 0013: only integrity failures demote a pattern), which both twins
+# declare. A bounded objective here would file an instrument failure under the other heading, leave
+# the pattern's trust intact, and the next batch would run the same broken instrument.
+objectives:
+  - {name: dg_abfe, direction: minimize}
+  - {name: dg_sem,  direction: minimize}

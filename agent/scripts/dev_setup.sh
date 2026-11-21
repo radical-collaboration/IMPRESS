@@ -51,6 +51,27 @@ echo "== installing the oracle extra (control model B's live client)"
 echo "== installing the aucam extra (the enclosing campaign manager)"
 .venv/bin/pip install --quiet -e ".[aucam]"
 
+# asteer, the contracts the three repos agree on, installed from a sibling CHECKOUT rather
+# than from pyproject.toml. This is a hard requirement of the ASD toolkits, not an extra:
+# every `entry:` in toolkits/asteer_design, toolkits/asteer_labels and toolkits/mock_asd names
+# an `asteer.impress.*` adapter, and tools/registry.py imports every adapter an entry names.
+# Without it those three toolkits fail to register all-or-nothing, with one line each in
+# reg.errors and no refusal anywhere - so a campaign loses its stages quietly rather than
+# loudly, which is the failure that put ToolVocabularyRefused in start().
+#
+# A path and not a pinned commit, deliberately and for now: asteer's remote is a personal
+# account while this repo is a lab organisation, so a git URL in pyproject.toml would make CI
+# depend on a repo it may not be able to resolve and could not be merged to main as it stands.
+# When that is settled this becomes a commit-pinned URL like the aucam extra above.
+echo "== installing asteer (the shared contracts; path install, see the comment)"
+ASTEER_DIR="${ASTEER_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/autoagent_steered_diffusion}"
+if [ -d "${ASTEER_DIR}" ]; then
+    .venv/bin/pip install --quiet -e "${ASTEER_DIR}"
+else
+    echo "   WARNING: ${ASTEER_DIR} not found - the three ASD toolkits will not register."
+    echo "   Clone it beside IMPRESS, or set ASTEER_DIR, and re-run."
+fi
+
 # Figures for the mock knob lab. An extra rather than a dependency - only
 # analysis/mock_figures.py imports matplotlib - but installed here for the same reason as the
 # two above: four tests in test_mock_lab.py sit behind `importorskip("matplotlib")` and are

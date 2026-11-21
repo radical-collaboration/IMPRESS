@@ -1,0 +1,28 @@
+{
+  "why": "The pass ran, resampled three times, and conditioned on NOTHING. `conditioning_requested` is 6 and `conditioning_applied` is 0: Model A named six atoms and none of them reached the input spec. Every other number is ordinary -- ESS 5.9 of 8, three resamples, a terminal reward of 0.71 -- so nothing about this payload looks wrong, and that is the point. It is the failure M0 measured on job 24155612 in the one form this tool can still produce: there, `select_hotspots` resolved and `build()` dropped it; here the atoms never made it into the file. INTEGRITY, not acceptance (decision 0013): nothing about the molecule is weak, the instruction was lost, so the pattern's trust must take the hit or the next batch runs the same broken wiring. Note what the accompanying `metrics_reported` row buys: a payload that OMITTED the two counts rather than reporting zero would fail that instead, which is why both gates are declared. The six backbone metrics are present and healthy on purpose (EI.31, item 43): a fixture that omitted them would fail `has_secondary_structure` and `metrics_reported` as well, and then it would no longer demonstrate the one role split it exists to demonstrate.",
+  "failing_gates": [
+    "metric_in_range[conditioning_applied]"
+  ],
+  "output": {
+    "result": "rfd3_steered_design",
+    "count": 8,
+    "outputs": {
+      "backbone": "steered[8p]"
+    },
+    "metrics": {
+      "ess_mean": 5.9134,
+      "n_resamples": 3.0,
+      "reward_terminal": 0.7102,
+      "particle_diversity": 0.7083,
+      "conditioning_requested": 6.0,
+      "conditioning_applied": 0.0,
+      "length_dropped": 1.0,
+      "ss_fraction": 0.612,
+      "num_models": 8.0,
+      "ca_deviation": 0.683,
+      "ligand_clashes": 0.0,
+      "helix_fraction": 0.397,
+      "sheet_fraction": 0.215
+    }
+  }
+}

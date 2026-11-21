@@ -1,0 +1,29 @@
+{
+  "why": "The pass was conditioned correctly and the steering did nothing. `n_resamples` is 0 -- at every event every parent survived exactly once -- `ess_mean` sits at 8.0, the full population, and `particle_diversity` is 1.0. So this ran the steered arm's whole cost and produced what the unsteered arm would have: the governing plan calls that INERT, and M2 reports it as inert rather than as a result. ACCEPTANCE and not integrity, which is the distinction that matters here: the tool worked exactly as asked and the configuration is what is wrong -- most likely `fk_tau` so high that the weights are near-uniform, or rewards too close together to separate. Filing it as integrity would demote the pattern's trust for a tuning mistake and would then refuse the retune. The six backbone metrics are present and healthy on purpose (EI.31, item 43): this fixture must fail in the ACCEPTANCE role only, and an absent `ss_fraction` would fail the integrity floor too.",
+  "failing_gates": [
+    "metric_in_range[n_resamples]"
+  ],
+  "acceptance_only": true,
+  "output": {
+    "result": "rfd3_steered_design",
+    "count": 8,
+    "outputs": {
+      "backbone": "steered[8p]"
+    },
+    "metrics": {
+      "ess_mean": 8.0,
+      "n_resamples": 0.0,
+      "reward_terminal": 0.5038,
+      "particle_diversity": 1.0,
+      "conditioning_requested": 6.0,
+      "conditioning_applied": 6.0,
+      "length_dropped": 1.0,
+      "ss_fraction": 0.612,
+      "num_models": 8.0,
+      "ca_deviation": 0.683,
+      "ligand_clashes": 0.0,
+      "helix_fraction": 0.397,
+      "sheet_fraction": 0.215
+    }
+  }
+}
