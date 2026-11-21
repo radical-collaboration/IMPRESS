@@ -140,6 +140,65 @@ def _sidecar_metrics(cif: Path) -> dict[str, float]:
     return found
 
 
+#: `DesignInputSpecification` keys rfd3 HONOURS, as confirmed from a real run and from this
+#: project's own committed input. Enumerated here and not only in `toolkits/rfd3/SKILL.md`,
+#: because a reader is not the layer that needs telling: the wrapper is.
+SUPPORTED_SPEC_KEYS = ("input", "contig", "unindex", "length", "ligand",
+                       "select_fixed_atoms", "select_buried", "select_exposed", "partial_t",
+                       "inference_sampler")
+
+#: Keys rfd3 ACCEPTS AND DISCARDS, mapped to why that is worse than rejecting them. A key here
+#: is refused by the wrapper, which is the only layer that can: rfd3 is a fixed binary inside
+#: `foundry.sif` and the toolkit `entry` is a wrapper around it.
+DISCARDED_SPEC_KEYS = {
+    "select_hotspots":
+        "measured on job 24155612 inside the Foundry container: a LIGAND "
+        "`select_hotspots` resolves the residue code and annotates every requested atom "
+        "`is_atom_level_hotspot` on `atom_array_input`, and then "
+        "`DesignInputSpecification.build()` drops the annotation entirely -- it is not among "
+        "the built array's categories -- so `constants.py` supplies the zero default and "
+        "`feats.is_atom_level_hotspot` reaches the network as ALL ZEROS. With "
+        "`infer_ori_strategy: 'hotspots'` the run asserts at build time; with any other "
+        "strategy it RUNS TO COMPLETION, writes its outputs and exits 0, conditioned on no "
+        "hotspots at all, and nothing in the run says so. Use `select_buried`/`select_exposed` "
+        "for atom-level conditioning: they are honoured, and "
+        "`campaigns/data/alr/ALR_binder_design.json` uses them",
+}
+
+
+def refuse_discarded_spec_keys(spec: Any, spec_path: str) -> None:
+    """Refuse a staged input carrying a key rfd3 accepts and then throws away.
+
+    **Refuse, not warn, and that is the one judgement in this change.** A warning on a key the
+    model silently ignores produces exactly the run that was measured: a design conditioned on
+    nothing, reported as a success, indistinguishable downstream from a conditioned one. Any
+    campaign comparing a steered arm against an unsteered one is then comparing two unsteered
+    arms and cannot tell.
+
+    **Only the LIGAND form is refused.** Only atom-level hotspots are dropped by `build()`; a
+    protein `select_hotspots`, keyed by a chain rather than by the ligand residue code, reaches
+    the model and must keep working. The discriminator is the spec's own `ligand` field -- the
+    committed input declares `ligand: "A:R"` and keys `select_buried`/`select_exposed` by that
+    same literal -- so this compares against what the entry declares rather than guessing at
+    the shape of a residue code. (`A:R` is ALR's real value, deliberately not the bare `ALR`,
+    so a heuristic on the string would have been wrong twice over.)
+    """
+    for name, entry in (spec.items() if isinstance(spec, dict) else ()):
+        if not isinstance(entry, dict):
+            continue
+        ligand = entry.get("ligand")
+        ligands = {ligand} if isinstance(ligand, str) else set(ligand or ())
+        for key, why in DISCARDED_SPEC_KEYS.items():
+            selection = entry.get(key)
+            if not isinstance(selection, dict):
+                continue
+            if hit := sorted(set(selection) & ligands):
+                raise RuntimeError(
+                    f"rfd3_design: {spec_path} entry {name!r} sets {key!r} on the ligand "
+                    f"{', '.join(repr(h) for h in hit)}, which rfd3 accepts and discards. "
+                    f"{why}. Supported keys: {', '.join(SUPPORTED_SPEC_KEYS)}")
+
+
 def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
     """The design spec's `input` structures may be relative to the spec file itself.
 
@@ -147,6 +206,10 @@ def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
     there. Rather than make the checked-in spec carry one machine's absolute path, write a
     resolved copy into the task's workdir (already bound) and hand rfd3 that. A spec with
     no relative `input` is passed through untouched.
+
+    It is also where the staged spec is checked for keys rfd3 discards, because this is the
+    only place the file is parsed -- reading it a second time to keep this function's name
+    tidy would be the worse trade.
     """
     import json
 
@@ -155,6 +218,7 @@ def _inputs_with_absolute_paths(spec_path: str, work: Path) -> str:
         spec = json.loads(src.read_text())
     except (OSError, ValueError):
         return spec_path        # let rfd3's own prevalidation report it
+    refuse_discarded_spec_keys(spec, spec_path)
     base = src.resolve().parent
     changed = False
     for entry in spec.values() if isinstance(spec, dict) else ():

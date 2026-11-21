@@ -45,9 +45,11 @@ later stage that would have consumed them.
   `scripts/rfd3.sh`).
 - `input_spec_path` points at a real `DesignInputSpecification` JSON (`input`, `contig`,
   `unindex`, `length`, `ligand`, `select_fixed_atoms`, `select_buried`, `select_exposed`,
-  `partial_t`) - RFD3 has no scaffold/guidance CLI override, so guided vs. unguided
-  diffusion is selected entirely by WHICH file this points at, never by a flag. See
-  `campaigns/data/alr/ALR_binder_design.json` for a real example.
+  `partial_t`, `inference_sampler`) - RFD3 has no scaffold/guidance CLI override, so guided
+  vs. unguided diffusion is selected entirely by WHICH file this points at, never by a flag.
+  See `campaigns/data/alr/ALR_binder_design.json` for a real example. **The list is also in
+  code**, as `rfd3_agents.SUPPORTED_SPEC_KEYS` beside `DISCARDED_SPEC_KEYS`, because a reader
+  is not the layer that needs telling - the wrapper is, and it now refuses the discarded ones.
 - **`select_hotspots` resolves and is then DROPPED, and the run reports success.** It is absent
   from the key list above on purpose. Measured on job `24155612` inside the Foundry container:
   `select_hotspots={"A:R": "S1,O5,O7,O8,S2,O6"}` resolves the ligand code and annotates all six
@@ -61,6 +63,13 @@ later stage that would have consumed them.
   having been conditioned on no hotspots at all. Nothing in the run says so. If you want
   atom-level conditioning, use `select_buried`/`select_exposed`, which are in the key list and are
   what `campaigns/data/alr/ALR_binder_design.json` uses.
+
+  **The wrapper now refuses it rather than leaving this paragraph to do the work.** A Pitfall
+  tells a reader; a refusal tells the run, and the run is what spends the allocation. RFD3 is a
+  fixed binary in `foundry.sif` so the wrapper is the only layer that can act. Only the
+  **ligand** form is refused - keyed by the entry's own declared `ligand` value - because only
+  atom-level hotspots are dropped; a protein `select_hotspots` keyed by a chain reaches the
+  model and still works.
 - The `.params` file's `NAME`/`IO_STRING` record for a ligand may not match its bare
   3-letter code: ALR's real value is the literal `A:R`, not `ALR` (a deliberate,
   verified workaround for RFD3 misresolving the bare `"ALR"` literal). Always read this
