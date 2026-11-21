@@ -20,17 +20,16 @@ import pytest
 yaml = pytest.importorskip("yaml")
 pytest.importorskip("impress_a", reason="impress-a is not installed in this environment")
 
-from asteer.impress.labels import (  # noqa: E402
+from impress_a.compose.graph import TaskGraph, TaskNode  # noqa: E402
+from impress_a.compose.validate import SiteCaps, Validator  # noqa: E402
+from impress_a.core.budget import BudgetLedger  # noqa: E402
+from impress_a.core.types import ArtifactType  # noqa: E402
+from impress_a.tools.asteer_labels_agents import (  # noqa: E402
     ABFELabelAgent,
     LabelAdapterNotImplemented,
     MDLabelAgent,
     MissingRootInput,
 )
-
-from impress_a.compose.graph import TaskGraph, TaskNode  # noqa: E402
-from impress_a.compose.validate import SiteCaps, Validator  # noqa: E402
-from impress_a.core.budget import BudgetLedger  # noqa: E402
-from impress_a.core.types import ArtifactType  # noqa: E402
 from impress_a.tools.registry import Registry  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]

@@ -7,7 +7,7 @@ id: md_label
 toolkit: asteer_labels
 version: "0.1"
 pattern: P1
-entry: asteer.impress.labels.MDLabelAgent
+entry: impress_a.tools.asteer_labels_agents.MDLabelAgent
 # ~2-3.6 GPU-h per design at 30 ns total (item 20). The walltime bound is the declared ceiling
 # with the same 2.25x margin item 21 requires of the cost model, because a bound tighter than the
 # declaration would kill a run the budget had already paid for.

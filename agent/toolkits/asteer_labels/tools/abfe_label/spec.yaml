@@ -6,7 +6,7 @@ id: abfe_label
 toolkit: asteer_labels
 version: "0.1"
 pattern: P1
-entry: asteer.impress.labels.ABFELabelAgent
+entry: impress_a.tools.asteer_labels_agents.ABFELabelAgent
 # ~3-8 GPU-h per ligand (item 20), so 18 declared at item 21's 2.25x. The walltime ceiling carries
 # the same margin.
 resources: {gpus: 1, cores: 16, walltime_s: 72000}
