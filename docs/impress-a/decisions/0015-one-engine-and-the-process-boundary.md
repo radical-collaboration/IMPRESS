@@ -1,6 +1,6 @@
 # 0015 — One engine, two processes, and where each boundary falls
 
-**Date:** 2026-11-11 · **Status:** accepted · **Amends:** nothing; records what
+**Date:** 2026-11-11 · **Status:** accepted, one consequence amended 2026-11-21 (see Consequences) · **Amends:** nothing; records what
 [0010](0010-single-package-with-import-contract.md) and
 [0014](0014-an-enclosing-campaign-manager-is-not-a-control-model.md) assumed but never stated
 
@@ -94,9 +94,25 @@ and `tests/test_toolchain.py::test_impress_is_not_a_dependency` keep it that way
 - **The `local` route brought its own coupling.** asyncflow's `LocalExecutionBackend.shutdown` joins
   its pool synchronously on the engine loop, so an adapter thread still waiting on a command
   deadlocks teardown; `exec/stage._settle` and `Launcher.idle` drain first. Filed upstream.
-- **An enclosing campaign manager gets two surfaces, not one.** AuCaM builds a single-backend engine
-  and asyncflow fixes backends at creation, so an in-process AuCaM run cannot share its engine and
-  IMPRESS-A's tasks stay invisible to AuCaM's per-task telemetry.
+- **An enclosing campaign manager gets two surfaces, not one** — *unless it builds its engine for
+  both.* AuCaM builds a single-backend engine and asyncflow fixes backends at creation, so an
+  in-process AuCaM run cannot share **that** engine, and IMPRESS-A's tasks then stay invisible to
+  AuCaM's per-task telemetry.
+
+  **Amended 2026-11-21**, and this bullet was the stronger of two overstatements — it read as an
+  impossibility where the real constraint was a property of one engine. Both halves have since
+  been removed: `811cd84` added engine injection (`CampaignManager(..., flow=)`), and a caller
+  whose engine is built over `make_routes()` carries the routes a campaign asks for. Measured
+  off-cluster: `exit=goals_satisfied`, `run=11 ok=11 failed=0`, every workflow logging
+  `engine: running on the caller's engine (routes compute, local)`.
+
+  The seam checks the routes at **start**, not at decoration time, and the refusal is worth
+  quoting because it is what makes the amended claim usable rather than merely true: *"the engine
+  passed in has backend(s) ['default'] but this campaign routes tasks to ['compute', 'local'] …
+  Build the caller's engine over `make_routes()`"*. A bare single-backend engine is still
+  refused — which is this bullet's original observation, now enforced at the one moment it is
+  cheap to act on rather than mid-campaign after the budget is committed. See
+  [0014](0014-an-enclosing-campaign-manager-is-not-a-control-model.md)'s matching amendment.
 - **Cancellation stays advisory for running work on the concurrent backend**, where rhapsody's
   `cancel_task` leaves the child process alive. A run's terminal state always comes from collecting
   it.

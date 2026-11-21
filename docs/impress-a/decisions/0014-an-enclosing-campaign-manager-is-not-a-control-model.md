@@ -1,6 +1,6 @@
 # 0014 — An enclosing campaign manager is a caller, not a control model
 
-**Date:** 2026-11-10 · **Status:** accepted · **Relates to:** [0001](0001-impress-is-a-tool-not-the-control-plane.md), [0002](0002-model-c-is-control-mode-2.md), [0007](0007-transport-agnostic-control-plane.md)
+**Date:** 2026-11-10 · **Status:** accepted, one consequence amended 2026-11-21 (see Consequences) · **Relates to:** [0001](0001-impress-is-a-tool-not-the-control-plane.md), [0002](0002-model-c-is-control-mode-2.md), [0007](0007-transport-agnostic-control-plane.md)
 
 ## Context
 IMPRESS-A is meant to be invoked by an agentic caller, and an important class of caller is
@@ -62,11 +62,26 @@ Concretely:
   it upward would misinform the caller by the full headroom and leave its own learned-cost
   estimate permanently wrong. `ExecutionResults.cost_measured` is already summed per run and
   folded into no ledger; this decision makes aggregating it part of the integration.
-- **Our tasks are invisible to the caller's per-task telemetry.** We build our own engine
-  through the only sanctioned constructor, and the loop that owns an engine must be the loop
-  that uses it — two allocations were lost to learning that (jobs 22328172, 22328262). So
-  spending must travel in our own reports. Sharing an engine with an enclosing manager is a
-  separate question and is not answered here.
+- **Our tasks are invisible to the caller's per-task telemetry** *when we build the engine.*
+  We build our own through the only sanctioned constructor, and the loop that owns an engine
+  must be the loop that uses it — two allocations were lost to learning that (jobs 22328172,
+  22328262). So spending must travel in our own reports.
+
+  **Amended 2026-11-21.** This bullet closed with *"Sharing an engine with an enclosing manager
+  is a separate question and is not answered here."* It has since been answered, here, in the
+  affirmative: `811cd84` added engine injection — `CampaignManager(..., flow=)`, stored on
+  `CampaignExecutor` — so a caller may hand us the engine it already owns. A closed
+  design→label→train→promote loop has been run through it end to end off-cluster:
+  `exit=goals_satisfied`, `run=11 ok=11 failed=0`, `controller_errors=0`, 38 policy cycles, one
+  promotion, every workflow logging `engine: running on the caller's engine (routes compute,
+  local)`. **When the caller supplies the engine, its per-task telemetry sees our tasks**, and
+  the first sentence above is conditional rather than general.
+
+  Two things the amendment does **not** change. The bounded constructor stays, for standalone
+  use, and the ownership rule with it — *the loop that owns an engine must be the loop that
+  bounds it* — which is why who tears down a caller-supplied engine is left to the caller
+  rather than assumed here. And this decision's thesis is untouched: an enclosing manager that
+  lends us an engine is lending a resource, not planning a graph, and is still a caller.
 - **Liveness runs outward, not inward.** `control_liveness_timeout_s` cannot protect a
   campaign under an enclosing manager, because `observe()` refreshes the clock it reads
   (`runtime/executor.py:489`) and a pump that polls `observe()` holds it open forever. The
