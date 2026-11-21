@@ -15,7 +15,7 @@ version: "0.1"
 # this phase's plan guessed a pattern from what a tool DOES rather than from what it asks for;
 # see EI.10's Result for the first.
 pattern: P2
-entry: asteer.impress.liganchor.LigAnchorProposeAgent
+entry: impress_a.tools.asteer_design_agents.LigAnchorProposeAgent
 resources: {cores: 2, walltime_s: 120}
 # NO `inputs:`. A ROOT: the ligand arrives as a path PARAMETER, exactly as `rfd3_design` takes
 # `input_spec_path`. Nothing upstream checks it -- `compose/validate.py:79`-`:81` is a literal

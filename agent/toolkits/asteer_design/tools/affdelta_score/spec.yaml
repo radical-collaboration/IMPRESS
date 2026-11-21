@@ -4,7 +4,7 @@ toolkit: asteer_design
 version: "0.1"
 # P2 for the reasons preorg_score's spec gives: P6 is refused at load and P5 means HTTPS.
 pattern: P2
-entry: asteer.impress.stream_clients.AffDeltaScoreAgent
+entry: impress_a.tools.asteer_design_agents.AffDeltaScoreAgent
 resources: {cores: 2, walltime_s: 120}
 inputs:
   structure: {type: Complex}

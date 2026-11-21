@@ -14,7 +14,7 @@ version: "0.1"
 # tool in this project declares and it is the honest one: an ordinary task that does a round
 # trip. See the episode's Result for the correction to EI.10's own plan.
 pattern: P2
-entry: asteer.impress.stream_clients.PreorgScoreAgent
+entry: impress_a.tools.asteer_design_agents.PreorgScoreAgent
 # NO GPUS. The GPU belongs to the stream, which is ROME's resident service holding its own
 # concurrent-task slot (item 18); this task only asks it a question. Declaring a GPU here
 # would double-count the device and make CON-3's slot arithmetic wrong.

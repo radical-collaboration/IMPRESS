@@ -6,7 +6,7 @@ toolkit: asteer_design
 version: "0.1"
 # P1 and it means it: every restart runs RFD3's denoiser on a GPU inside the Foundry container.
 pattern: P1
-entry: asteer.impress.rfd3_steered.RFD3SteeredDesignAgent
+entry: impress_a.tools.asteer_design_agents.RFD3SteeredDesignAgent
 # K particles x (1 + n_restarts) denoising passes. 1800s against rfd3_design's 900s for one
 # pass, which is the right order for 8 particles over 3 restarts only because each pass is a
 # batch -- `diffusion_batch_size`, not a loop over single designs. Re-derive from M2.

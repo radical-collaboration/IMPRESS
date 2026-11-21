@@ -28,13 +28,12 @@ pytest.importorskip("impress_a", reason="impress-a is not installed in this envi
 # `fake_stream` is this directory's own module, which ruff groups with the third-party
 # imports because it cannot know that. The blank-line grouping below is ruff's, not a
 # statement about where these come from.
-import asteer.impress  # noqa: E402,F401  -- registers EI.7's gates for the fixture check
 from asteer.contracts.surrogate import SurrogateRequest, SurrogateResponse  # noqa: E402
 from asteer.impress import mock_asd  # noqa: E402
-from asteer.impress import stream_clients as sc  # noqa: E402
 from fake_stream import DownStream, FakeStream, ImpostorStream, WrongShapeStream  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
+from impress_a.tools import asteer_design_agents as sc  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
 from impress_a.tools.spec import ToolSpec  # noqa: E402
@@ -127,13 +126,22 @@ def test_no_default_score_path_exists_in_the_module():
     four tests above do not cover.
     """
     # Through the imported module, not a repo-relative path -- the source that matters is the
-    # one that runs, and the path stops being true when the module moves repos (H4).
-    import asteer.impress.stream_clients
-    source = Path(asteer.impress.stream_clients.__file__).read_text()
+    # one that runs, and the path stops being true when the module moves repos (H4). H7 then
+    # merged three modules into that file, so slice back to this one's section before the
+    # grep: liganchor's burial interpolation carries a `= 0.0` that is not a defaulted score,
+    # and a grep over all three would fail on it for a reason this test is not about.
+    import impress_a.tools.asteer_design_agents as mod
+    whole = Path(mod.__file__).read_text()
+    marker = "# (was `asteer/impress/stream_clients.py`, moved in H7)"
+    assert marker in whole, (
+        "the section banner this test slices on is gone. Re-anchor it rather than letting the "
+        "grep below run over sections it was never written for, or silently over nothing"
+    )
+    source = whole[whole.index(marker):]
     for forbidden in ("values.get(", ".get(name, 0", "or 0.0", "= 0.0"):
         assert forbidden not in source, (
-            f"{forbidden!r} in stream_clients.py: a defaulted score is the one failure this "
-            "module exists to prevent"
+            f"{forbidden!r} in the stream-client section of {Path(mod.__file__).name}: a "
+            "defaulted score is the one failure these two agents exist to prevent"
         )
 
 

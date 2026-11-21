@@ -73,7 +73,7 @@ design tree, gets ranked on, and trains the next round of the model that was sup
 it — and no QC gate can catch it, because nothing about the payload is malformed. So an unbound
 model, a stream that raises or times out, a stream answering the wrong shape, and a stream
 answering for a different model are all `StreamUnavailable`. The campaign body binds a stream
-with `asteer.impress.stream_clients.bind_stream(model_id, stream)` before the first scoring
+with `impress_a.tools.asteer_design_agents.bind_stream(model_id, stream)` before the first scoring
 stage runs.
 
 **`dg_lcb` is omitted when `sigma_dg` is missing, never defaulted — and it is `mean + k·sigma`.**

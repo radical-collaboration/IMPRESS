@@ -40,12 +40,15 @@ pytest.importorskip("impress_a", reason="impress-a is not installed in this envi
 
 from asteer.contracts import FKConfig, PotentialKind  # noqa: E402
 from asteer.impress import mock_asd  # noqa: E402
-from asteer.impress import rfd3_steered as rs  # noqa: E402
-from asteer.impress.liganchor import ANCHOR_SPEC_SCHEMA, anchor_spec_from_params  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
+from impress_a.tools import asteer_design_agents as rs  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
+from impress_a.tools.asteer_design_agents import (  # noqa: E402
+    ANCHOR_SPEC_SCHEMA,
+    anchor_spec_from_params,
+)
 from impress_a.tools.spec import ToolSpec  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
@@ -774,7 +777,7 @@ def test_the_backbone_read_keeps_every_heavy_import_inside_its_function():
     for `_pdbtools`. Run in a cold interpreter because an earlier test in this file may already
     have imported Biopython for its own reasons.
     """
-    code = ("import sys, asteer.impress.rfd3_steered, asteer.impress.mock_asd; "
+    code = ("import sys, impress_a.tools.asteer_design_agents, asteer.impress.mock_asd; "
             "print(sorted({m.split('.')[0] for m in sys.modules} "
             "& {'Bio', 'gemmi', 'torch', 'numpy'}))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
@@ -787,8 +790,9 @@ def test_the_backbone_read_keeps_every_heavy_import_inside_its_function():
 def test_what_this_renderer_emits_is_accepted_by_upstreams_own_refusal():
     """Our rendered input spec, checked against upstream's discarded-key refusal (EI.29).
 
-    `src/asteer/impress/liganchor.py` says it in its first line: **`select_hotspots` is never
-    emitted, and that is the whole reason this module reads the way it does.** Item 26 is why —
+    `impress_a/tools/asteer_design_agents.py` says it in its first section header:
+    **`select_hotspots` is never emitted, and that is the whole reason this module reads the way
+    it does.** Item 26 is why —
     rfd3 resolves a ligand `select_hotspots`, `build()` drops the annotation, and the design
     runs to completion conditioned on nothing. So this renderer uses `select_buried` and
     `select_exposed`, which are honoured.

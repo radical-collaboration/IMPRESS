@@ -29,9 +29,10 @@ import yaml
 
 pytest.importorskip("impress_a", reason="impress-a is not installed in this environment")
 
-from asteer.impress import liganchor, mock_asd  # noqa: E402
+from asteer.impress import mock_asd  # noqa: E402
 
 from impress_a.core.qc import GateOutcome  # noqa: E402
+from impress_a.tools import asteer_design_agents as liganchor  # noqa: E402
 from impress_a.tools import gates as impress_gates  # noqa: E402
 from impress_a.tools.agent import TaskRequest  # noqa: E402
 from impress_a.tools.spec import ToolSpec  # noqa: E402
@@ -81,10 +82,11 @@ def test_no_code_path_emits_select_hotspots():
     """
     # Read through the IMPORTED module rather than a repo-relative path: the source that
     # matters is the one that actually runs, and a path guess stops being true the moment the
-    # module moves repos (H4, 2026-11-21).
-    import asteer.impress.liganchor
+    # module moves repos (H4, and again in H7, which is when this line last changed).
     import asteer.impress.mock_asd
-    for mod in (asteer.impress.liganchor, asteer.impress.mock_asd):
+
+    import impress_a.tools.asteer_design_agents
+    for mod in (impress_a.tools.asteer_design_agents, asteer.impress.mock_asd):
         module = Path(mod.__file__).name
         source = Path(mod.__file__).read_text()
         emitted = [line for line in source.splitlines()
