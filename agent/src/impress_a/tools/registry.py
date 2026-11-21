@@ -95,9 +95,27 @@ class Registry:
             staged[spec.id] = spec
         # all-or-nothing: a toolkit that fails anywhere registers nothing
         self.specs.update(staged)
-        # referential integrity: every tool mentioned in SKILL.md must exist
+        # Referential integrity: every tool THIS DIRECTORY staged must be mentioned in its
+        # own SKILL.md.
+        #
+        # Over `staged`, not over `self.specs` filtered by the spec's `toolkit` FIELD, which
+        # is what this did. The field is not the directory, and gate 6 requires that it not
+        # be: a surrogate twin must declare `toolkit: mock` to be classified mock
+        # (`compose/validate.py:_g6_delivery` matches that string exactly), while living in
+        # its own directory so its ids do not collide. The old filter therefore demanded that
+        # `toolkits/mock/SKILL.md` mention every twin anywhere in the world declaring
+        # `toolkit: mock` -- jointly unsatisfiable with gate 6 for any toolkit outside this
+        # one, and measured: six such lines in `errors` on every load of one downstream
+        # project. It was also order-dependent, since a foreign twin only appears in
+        # `self.specs` if its root was searched first.
+        #
+        # Cosmetic, in that it appends to `errors` and never refuses -- which is the argument
+        # for fixing it rather than against. `errors` was permanently non-empty for anyone
+        # using the documented extension mechanism, and a signal that is always on is not a
+        # signal. The narrower loop also means a toolkit whose ids are foreign is now checked
+        # against its OWN SKILL.md for the first time, which the field filter never did.
         if d.name in self.skills:
-            for tid in [s.id for s in self.specs.values() if s.toolkit == d.name]:
+            for tid in sorted(staged):
                 if tid not in self.skills[d.name]:
                     self.errors.append(f"{d.name}: SKILL.md does not mention tool {tid!r}")
 
