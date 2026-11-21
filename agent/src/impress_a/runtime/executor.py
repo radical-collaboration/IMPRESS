@@ -66,6 +66,69 @@ from ..tools.registry import Registry
 from ..tools.view import view_of
 from .reviewer import StageReviewer
 
+#: Failures that are CONSEQUENCES of another task's failure rather than causes of their own.
+#: asyncflow fails a dependent task with one of these as soon as its upstream raises, so a
+#: four-stage graph whose second stage raises reports two failures and only one of them says
+#: anything. Named rather than inferred, because "the first entry in `failures`" is the right
+#: answer only while the dict happens to be in topological order.
+CONSEQUENTIAL_FAILURES = ("DependencyFailureError",)
+
+
+def why_run_failed(graph: Any, results: ExecutionResults) -> str:
+    """One line naming the task, the tool and the reason a run counted as failed.
+
+    **Written because the abort message named none of them.** `CampaignAborted: 3 consecutive
+    all-failed runs` was the whole diagnosis a campaign offered, and a downstream report ran it
+    through a regex and printed it verbatim. The information was never missing — `_record_evidence`
+    has `results` in hand and `results.failures` already carries `"{type}: {message}"` per task —
+    it simply was not carried the last four lines to where anyone reads it.
+
+    Three things this says that the old message did not:
+
+    * **Which task and which tool.** `failures` is keyed by node id; the node knows its tool.
+    * **The cause rather than its consequences.** A dependent task is failed by asyncflow the
+      moment its upstream raises, so the first failing task is the one worth naming and the
+      `DependencyFailureError` entries beside it are noise.
+    * **The integrity-gate case, which has no exception at all.** A run counts as failed when any
+      task raised *or* any integrity gate failed (`_record_evidence`), and in the second case
+      `failures` is empty — so a campaign aborting on `has_secondary_structure` used to report a
+      count and nothing else. That is the shape of this project's own `hopeless` lab arm.
+
+    "all-failed" also had to go: the measured case that prompted this had **2 of 4 tasks succeed**
+    in every one of its runs. The rule is "any failure", not "every task", and a message that
+    overstates what failed sends a reader looking at the wrong stage.
+
+    The reason is collapsed to one line and truncated: a task's own message may be multi-line, and
+    `analysis/mock_lab.py`'s `ABORT_RE` matches per line, so a newline here would silently throw
+    away everything after it in the one report that reads this string.
+    """
+    def _one_line(text: str, limit: int = 400) -> str:
+        flat = " ".join(str(text).split())
+        return flat if len(flat) <= limit else flat[: limit - 1] + "\u2026"
+
+    def _tool(tid: str) -> str:
+        return getattr(getattr(graph, "nodes", {}).get(tid, None), "tool", "?")
+
+    causes = {tid: msg for tid, msg in results.failures.items()
+              if not str(msg).startswith(CONSEQUENTIAL_FAILURES)}
+    chosen = causes or results.failures
+    if chosen:
+        tid, msg = next(iter(chosen.items()))
+        tail = ("" if causes else " (every failure was a dependency failure, so the cause is "
+                                 "upstream of this run)")
+        return f"first failing task {tid} ({_tool(tid)}): {_one_line(msg)}{tail}"
+
+    for tid, res in results.per_task.items():
+        failed = [g for g in res.qc.failed() if g.get("role") == "integrity"]
+        if failed:
+            g = failed[0]
+            return (f"no task raised; integrity gate failed on {tid} ({_tool(tid)}): "
+                    f"{g.get('gate')} observed={g.get('observed')!r} "
+                    f"threshold={g.get('threshold')!r} {_one_line(g.get('detail') or '')}")
+
+    return ("no task failure and no failed integrity gate were recorded, which should be "
+            "unreachable: _record_evidence counts a run as failed on one or the other")
+
 
 class CampaignAborted(RuntimeError):
     """Transient infrastructure failure, not a goal or a programming error.
@@ -1310,7 +1373,9 @@ class CampaignExecutor:
             if self._failed_runs >= self.spec.max_failed_cycles:
                 self._resolve(run_id, outcome)
                 raise CampaignAborted(
-                    f"{self._failed_runs} consecutive all-failed runs")
+                    f"{self._failed_runs} consecutive failed runs "
+                    f"(max_failed_cycles={self.spec.max_failed_cycles}); "
+                    f"{why_run_failed(rec.graph, results)}")
         else:
             self._failed_runs = 0
 

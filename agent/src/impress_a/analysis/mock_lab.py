@@ -494,7 +494,9 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-#: `CampaignAborted: 3 consecutive all-failed runs` in a captured traceback.
+#: `CampaignAborted: 3 consecutive failed runs (...); ...` in a captured traceback. The
+#: message is one line by construction (`executor.why_run_failed`) because this is anchored
+#: with `$`: a newline in a task's own error would throw away the diagnosis after it.
 ABORT_RE = re.compile(r"(CampaignAborted|CampaignStopped|Error|Exception):\s*(.+)$")
 
 
@@ -796,8 +798,10 @@ def collect(out: Path) -> dict[str, Path]:
         # An ABORTED campaign leaves no `terminated` record, and its `campaign_ended` record
         # says `reason: completed` - `Executor.stop_reason` was never set, so it reports its
         # default. So provenance ALONE cannot tell an aborted campaign from a finished one,
-        # and the `hopeless` arm is the cell that proves it: `CampaignAborted: 3 consecutive
-        # all-failed runs` appears nowhere but the process's stderr. Recorded in the backlog
+        # and the `hopeless` arm is the cell that proves it: `CampaignAborted` appears nowhere
+        # but the process's stderr. Its message now names the task, the tool and the failed
+        # integrity gate rather than only a count, which is what `_abort_reason` below carries
+        # into this report -- but it is still only on stderr. Recorded in the backlog
         # as G15; until it is fixed the reason is recovered from the log this lab captured,
         # and the `aborted` column is derived from the EXIT CODE rather than from any record
         # the campaign wrote about itself.

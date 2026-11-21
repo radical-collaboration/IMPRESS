@@ -83,7 +83,8 @@ class RunStyle:
 #   hopeless   difficulty 0.85: integrity failure, campaign aborted
 #
 # `hopeless` takes the magenta slot because it is the run that DID NOT COMPLETE:
-# `CampaignAborted` after three consecutive all-failed runs. The slot's rule
+# `CampaignAborted` after three consecutive failed runs -- failed on the integrity
+# gate, with no task raising, which is the case its message now names. The slot's rule
 # applies unchanged - it is evidence, and it is never drawn as a rate.
 RUN_STYLES: dict[str, RunStyle] = {
     "baseline": RunStyle(
