@@ -190,27 +190,37 @@ class _ReporterSink:
     accurate of its three charging methods. Those keys carry the MEASURED figures, because the
     declared ones sit multiples above measurement on purpose and would hand the caller our
     headroom as if it were consumption (backlog G20).
+
+    `mock` (a spec with `tool_delivery: mock`) bills the declared figures instead: a mock
+    tool's "measurement" is its wall time x the GPUs it holds, a millisecond of Python that
+    says nothing about the cost it simulates. Rounded, it is usually 0 and the declared
+    figure is billed anyway - but on a slower or busier machine it rounds to 1e-6 instead,
+    and a run is then billed nothing at all.
     """
 
-    def __init__(self, reporter: Any) -> None:
+    def __init__(self, reporter: Any, *, mock: bool = False) -> None:
         self.reporter = reporter
+        self.mock = mock
         self.emitted = 0
 
     async def report(self, digest: CampaignDigest) -> None:
         metrics = digest.model_dump(mode="json")
-        metrics.update(self._billed(digest))
+        metrics.update(self._billed(digest, mock=self.mock))
         await self.reporter.emit(score=digest.progress, metrics=metrics,
                                  iteration=digest.cycle)
         self.emitted += 1
 
     @staticmethod
-    def _billed(digest: CampaignDigest) -> dict[str, float]:
+    def _billed(digest: CampaignDigest, *, mock: bool = False) -> dict[str, float]:
         """What AuCaM charges us for, under the names it looks for."""
         billed: dict[str, float] = {}
         for dim in _BILLED:
             measured = digest.spend_measured.get(dim)  # None if key absent
             declared = digest.spend.get(dim, 0.0)
-            if measured is not None and measured > 0:
+            if mock and declared > 0:
+                # Mock tools: the declared cost IS the cost being simulated.
+                billed[dim] = declared
+            elif measured is not None and measured > 0:
                 # Real measurement: always prefer it (backlog G20).
                 billed[dim] = measured
             elif declared > 0:
@@ -348,7 +358,7 @@ def make_impress_worker(spec_path: str | Path, *, model: str = "D", guard: bool 
         mgr.executor.cpu_share = cpus or None
         for msg_name, payload in (ctx.get("messages") or {}).items():
             deliver(mgr, on_message, msg_name, payload)
-        sink = _ReporterSink(reporter)
+        sink = _ReporterSink(reporter, mock=spec.tool_delivery == "mock")
         result = await run_with_sink(mgr, sink, period_s=report_interval_s,
                                      on_message=on_message)
         log.info("campaign %s ended: %s (%d report(s) emitted)",

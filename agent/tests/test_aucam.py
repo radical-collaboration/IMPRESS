@@ -176,6 +176,20 @@ async def test_the_metrics_carry_measured_spending_under_the_keys_aucam_charges(
         "a dimension that ran and cost nothing stays in the report")
 
 
+def test_mock_tools_are_billed_their_declared_cost():
+    """A mock tool's measurement is milliseconds of Python, not the cost it simulates.
+
+    Wall time x GPUs, rounded to 6 decimals, is 0 on a fast machine - so the declared figure
+    was billed - but 1e-6 on a slower one, which then billed a whole run as free and made
+    every comparison of spending between machines meaningless.
+    """
+    digest = _digest(measured={"gpu_hours": 1e-06}, declared={"gpu_hours": 0.006})
+    assert _ReporterSink._billed(digest, mock=True)["gpu_hours"] == 0.006
+    assert _ReporterSink._billed(digest)["gpu_hours"] == 1e-06, "real tools: measured wins"
+    assert _ReporterSink._billed(_digest(measured={"gpu_hours": 0.0}, declared={}),
+                                 mock=True)["gpu_hours"] == 0.0
+
+
 async def test_the_callers_spending_limit_becomes_the_campaigns_own_budget():
     """Narrowed from the inside, not enforced from the outside.
 

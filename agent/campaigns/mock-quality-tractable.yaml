@@ -1,0 +1,46 @@
+# QUALITY EXPERIMENT, TRACTABLE TYPE — difficulty 0.25
+# Its first design appears in cycle 2 and design quality then climbs in steps, every other
+# cycle, with shrinking gains. Measured (4 runs, quality = lowest normalised margin above the
+# objectives' `min`): about 0.35 at cycle 2, 0.6 at 3, 0.7 at 5, 0.78 by 10. The type that
+# reaches a 0.7 bar cheapest.
+#
+# Differs from mock-binding-<type>.yaml only in letting a run keep improving: `target_front`
+# is out of reach and `stagnation_limit` equals `max_cycles`, so IMPRESS does not stop a run
+# at its first passing design. Deciding when a run has improved enough is left to the caller.
+campaign_id: mock-quality-tractable
+goal: "Design small-molecule binders, improving each beyond the declared thresholds"
+backend: concurrent
+backend_config: {workers: 4}
+tool_delivery: mock
+max_cycles: 10
+stagnation_limit: 10
+target_front: 99
+site: {gpu_api: cuda, gpus_per_node: 1, nodes: 1, allow_external: false}
+budget:
+  gpu_hours: 4.0
+  cpu_hours: 4.0
+stages: [mock_rfd3_design, mock_mpnn_design, mock_packmin, mock_fastrelax,
+         mock_filter_shape, mock_boltz_predict]
+params:
+  mock_rfd3_design:
+    num_designs: 1
+    diffusion_steps: 50
+    difficulty: 0.25
+  mock_mpnn_design:
+    temperature: 0.2
+    batch_size: 8
+    number_of_batches: 1
+  mock_packmin:
+    cycles: 1
+  mock_fastrelax:
+    nstruct: 1
+    relax_cycles: 3
+  mock_boltz_predict:
+    diffusion_samples: 8
+replicas: 1
+concurrency: 1
+objectives:
+  - {name: total_score,            direction: minimize}
+  - {name: shape_complementarity,  direction: maximize, min: 0.55}
+  - {name: complex_plddt,          direction: maximize, min: 0.75}
+  - {name: ligand_iptm,            direction: maximize, min: 0.4}
