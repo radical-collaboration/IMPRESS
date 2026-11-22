@@ -834,3 +834,70 @@ def test_what_this_renderer_emits_is_accepted_by_upstreams_own_refusal():
         f"the two appears depends on `buried_threshold`, so either will do. Got: {sorted(entry)}"
     )
 
+
+
+# ---------------------------------------------------------------------------
+# item 44: where the FK seed comes from, and what happens when it does not
+# ---------------------------------------------------------------------------
+
+
+def test_both_steered_specs_declare_a_seed_so_the_composer_can_reach_the_fk_loop():
+    """The property that keeps `asteer.fk`'s unseeded refusal from ever firing in a campaign.
+
+    `TaskAgent.parameterize` injects the composer's per-lineage `_replica_seed` into
+    `params['seed']` **only if the spec declares a `seed` parameter** (`tools/agent.py:167`).
+    `default_fk_config` then reads `params['seed']`, so the whole chain from
+    `composer._replica_seed` to `fk.step` hangs on one word in two YAML files. Delete it from
+    either and every campaign starts refusing -- which is the right failure, and a confusing
+    one to meet without this test naming the cause.
+    """
+    for toolkit, tool in ((DESIGN, "rfd3_steered_design"), (MOCK, "mock_rfd3_steered_design")):
+        spec = _spec(toolkit, tool)
+        assert "seed" in spec.parameters, (
+            f"{tool} no longer declares a `seed` parameter, so `parameterize` will not inject "
+            "the lineage draw and `fk.step` will refuse every run (backlog item 44)"
+        )
+
+
+@needs_alr
+def test_the_lineage_seed_reaches_the_fk_config_through_parameterize():
+    """End to end on the twin: `req.seed` in, a seeded `FKConfig` out.
+
+    Measured rather than assumed -- a live `impress-a run` of `asd-smb-mock.yaml` was what
+    settled item 44's scope, showing `params['seed']=1402486940` on the steered node. The
+    row read as though production were unseeded; it is not, and the unseeded path is
+    reachable only from a hand-built `TaskRequest`, which is how EI.31 met it.
+    """
+    agent = mock_asd.MockRFD3SteeredDesignAgent(spec=_spec(MOCK, "mock_rfd3_steered_design"))
+    req = TaskRequest(tool="mock_rfd3_steered_design",
+                      params={"input_spec_path": str(ALR_JSON)},
+                      inputs=_upstream(_anchor()),
+                      input_ports={"anchor_spec": "anchor_spec"},
+                      node_id="r0001:l0_s1", seed=1402486940)
+    params = agent.parameterize(req)
+    assert params["seed"] == 1402486940
+    assert rs.default_fk_config(params).seed == 1402486940
+
+    # And an explicit campaign parameter still wins over the lineage draw, which is what
+    # makes a replayed single run pinnable without disabling `replicas: N` independence.
+    req.params["seed"] = 4
+    assert rs.default_fk_config(agent.parameterize(req)).seed == 4
+
+
+@needs_alr
+def test_a_hand_built_request_with_no_seed_is_refused_rather_than_drawn():
+    """The other half: no lineage seed, no campaign seed, and the loop refuses.
+
+    This is the path EI.31 hit as an intermittent failure and worked around with `seed: 4`.
+    It now raises from `asteer.fk` instead of returning a verdict off an unrepeatable draw.
+    """
+    from asteer.fk import UnseededResampling  # noqa: PLC0415
+
+    agent = mock_asd.MockRFD3SteeredDesignAgent(spec=_spec(MOCK, "mock_rfd3_steered_design"))
+    req = TaskRequest(tool="mock_rfd3_steered_design",
+                      params={"input_spec_path": str(ALR_JSON)},
+                      inputs=_upstream(_anchor()),
+                      input_ports={"anchor_spec": "anchor_spec"},
+                      node_id="n1", seed=None)
+    with pytest.raises(UnseededResampling):
+        asyncio.run(agent.run(req, agent.parameterize(req)))
