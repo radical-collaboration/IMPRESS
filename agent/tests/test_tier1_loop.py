@@ -55,15 +55,19 @@ REPO = Path(__file__).resolve().parents[1]
 DESIGN = REPO / "toolkits" / "asteer_design"
 MOCK = REPO / "toolkits" / "mock"
 
-#: The project's own committed RFD3 input, from the sibling IMPRESS checkout. Used rather than
-#: a fixture because its two awkward properties are the ones under test: it carries
-#: `partial.input` **and** `length`, which RFD3 rejects together, and its ligand is the literal
-#: `A:R`. A fixture would have been written without either.
-ALR_JSON = (REPO.parent / "IMPRESS" / "agent" / "campaigns" / "data" / "alr"
-            / "ALR_binder_design.json")
-ALR_PARAMS = (REPO.parent / "IMPRESS" / "agent" / "campaigns" / "data" / "alr" / "ALR.params")
+#: This repo's own committed RFD3 input. Used rather than a fixture because its two awkward
+#: properties are the ones under test: it carries `partial.input` **and** `length`, which RFD3
+#: rejects together, and its ligand is the literal `A:R`. A fixture would have been written
+#: without either.
+#:
+#: **These paths were `REPO.parent / "IMPRESS" / "agent" / ...` until 2026-11-21**, which was
+#: true while this file lived in the asteer checkout and became `IMPRESS/IMPRESS/agent/...`
+#: when H4 moved it here. Nothing failed: the guard below turned it into a skip, and 23 tests
+#: in this file plus 9 in `test_liganchor.py` stopped running while the suite stayed green.
+ALR_JSON = REPO / "campaigns" / "data" / "alr" / "ALR_binder_design.json"
+ALR_PARAMS = REPO / "campaigns" / "data" / "alr" / "ALR.params"
 needs_alr = pytest.mark.skipif(not (ALR_JSON.exists() and ALR_PARAMS.exists()),
-                               reason="the IMPRESS checkout is not beside us")
+                               reason="this repo's committed ALR inputs are missing")
 
 
 def _spec(toolkit: Path, tool: str) -> ToolSpec:
@@ -386,10 +390,14 @@ def test_the_twin_runs_the_real_loop_and_the_real_rendering():
     arithmetic, which is what `asteer.fk` exists to prevent.
     """
     agent = mock_asd.MockRFD3SteeredDesignAgent(spec=_spec(MOCK, "mock_rfd3_steered_design"))
+    # `seed=` stands in for the composer's per-lineage `_replica_seed`, which is what a real
+    # campaign supplies (`tools/agent.py:167`). Without it `asteer.fk` refuses, and rightly:
+    # `n_resamples` is an acceptance gate and an unseeded draw is not a measurement (item 44).
     req = TaskRequest(tool="mock_rfd3_steered_design",
                       params={"input_spec_path": str(ALR_JSON), "reward_spread": 0.8},
                       inputs=_upstream(_anchor()),
-                      input_ports={"anchor_spec": "anchor_spec"}, node_id="n1")
+                      input_ports={"anchor_spec": "anchor_spec"}, node_id="n1",
+                      seed=1402486940)
     out = asyncio.run(agent.run(req, agent.parameterize(req)))
     assert out["metrics"]["conditioning_applied"] == out["metrics"]["conditioning_requested"]
     assert out["metrics"]["length_dropped"] == 1.0
@@ -544,15 +552,15 @@ def test_both_specs_declare_the_tier_knob_with_the_same_bounds():
 #: The unsteered control arm's spec, in the sibling checkout. Read rather than transcribed:
 #: the whole claim of item 43 is that the two arms are gated *the same*, and a transcribed
 #: copy of upstream's numbers would keep agreeing after upstream changed them.
-CONTROL_SPEC = (REPO.parent / "IMPRESS" / "agent" / "toolkits" / "rfd3" / "tools"
+CONTROL_SPEC = (REPO / "toolkits" / "rfd3" / "tools"
                 / "rfd3_design" / "spec.yaml")
 #: The project's own committed target scaffold — a real structure, which is what makes it
 #: usable here. There is no synthetic PDB in this repo and a hand-written ideal helix would
 #: test the fixture's geometry rather than the metric.
-SCAFFOLD = (REPO.parent / "IMPRESS" / "agent" / "campaigns" / "data" / "alr" / "input_pdbs"
+SCAFFOLD = (REPO / "campaigns" / "data" / "alr" / "input_pdbs"
             / "scaffold-with-ALR.pdb")
 needs_control = pytest.mark.skipif(not CONTROL_SPEC.exists(),
-                                   reason="the IMPRESS checkout is not beside us")
+                                   reason="this repo's rfd3 toolkit is missing")
 
 #: The six `rfd3_design` declares about its own output, and the two of them that are gated.
 #: Gated/ungated is the TIER split, not a confidence ranking — see the spec's own comment:
@@ -607,7 +615,7 @@ def test_the_twin_reports_the_six_at_the_control_twins_own_calibration():
     )
 
     control_spec = ToolSpec(**yaml.safe_load(
-        (REPO.parent / "IMPRESS" / "agent" / "toolkits" / "mock" / "tools"
+        (REPO / "toolkits" / "mock" / "tools"
          / "mock_rfd3_design" / "spec.yaml").read_text()))
     control = MockRFD3DesignAgent(spec=control_spec)
     creq = TaskRequest(tool="mock_rfd3_design", params={}, node_id="n1")
@@ -825,3 +833,4 @@ def test_what_this_renderer_emits_is_accepted_by_upstreams_own_refusal():
         "the honoured atom-level channel is what makes the refusal above affordable; which of "
         f"the two appears depends on `buried_threshold`, so either will do. Got: {sorted(entry)}"
     )
+

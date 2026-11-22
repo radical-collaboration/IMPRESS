@@ -46,10 +46,13 @@ MOCK = REPO / "toolkits" / "mock"
 #: the interesting properties of this file (the `A:R` resname, one polar hydrogen for two
 #: hydroxyls) are exactly the ones nobody would think to write into a fixture.
 #:
-#: Located relative to this repo rather than absolutely, so the path carries no username and
-#: the tests skip rather than fail wherever the sibling checkout is not there.
-ALR = REPO.parent / "IMPRESS" / "agent" / "campaigns" / "data" / "alr" / "ALR.params"
-alr_only = pytest.mark.skipif(not ALR.exists(), reason="the IMPRESS checkout is not beside us")
+#: Relative to this repo, so the path carries no username. It read
+#: `REPO.parent / "IMPRESS" / "agent" / ...` until 2026-11-21 -- correct while this file lived
+#: in the asteer checkout, and `IMPRESS/IMPRESS/agent/...` once H4 moved it here. The guard
+#: below turned that into a skip, so 9 tests stopped running without the suite noticing.
+ALR = REPO / "campaigns" / "data" / "alr" / "ALR.params"
+alr_only = pytest.mark.skipif(not ALR.exists(),
+                              reason="this repo's committed ALR params are missing")
 
 
 def _spec(toolkit: Path, tool: str) -> ToolSpec:
