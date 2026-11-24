@@ -1,0 +1,54 @@
+{
+  "atom_types": [
+    "c3",
+    "ca",
+    "h1",
+    "ha",
+    "hc",
+    "ho",
+    "ne",
+    "nf",
+    "o",
+    "oh",
+    "os",
+    "s6"
+  ],
+  "charge_method": "am1bcc",
+  "charge_residual": 0.004003,
+  "charge_sum": -2.004003,
+  "counterions": {
+    "NA": 2
+  },
+  "digests": {
+    "ligand.frcmod": "c90a11e1d36ea0cfd5b32960906552c5acd85783f024142038355685aaf56e58",
+    "ligand.mol2": "435a58de5ae59ce2e37fb0461d068434db7e09db4b076df528acb266ab55b5c4"
+  },
+  "files": {
+    "frcmod": "ligand.frcmod",
+    "mol2": "ligand.mol2"
+  },
+  "force_field": "gaff2",
+  "max_penalty": 6.0,
+  "n_atoms": 44,
+  "n_heavy_atoms": 30,
+  "net_charge": -2,
+  "notes": "ALR, the one ligand in this project's campaign history (audit finding 4).",
+  "penalties": [
+    "ca-ca-ca-ca 1.1 180.0 2.0 Using the default value",
+    "ca-ca-ca-ne 1.1 180.0 2.0 Using the default value",
+    "ca-ca-ca-s6 1.1 180.0 2.0 Using the default value",
+    "ca-ca-ca-ha 1.1 180.0 2.0 Using general improper torsional angle X- X-ca-ha, penalty score= 6.0)",
+    "ca-ca-ca-nf 1.1 180.0 2.0 Using the default value",
+    "ca-ca-ca-oh 1.1 180.0 2.0 Using the default value",
+    "ca-ca-ca-os 1.1 180.0 2.0 Using the default value"
+  ],
+  "protein_force_field": "charmm36m",
+  "resname": "ALR",
+  "smiles": "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12",
+  "template_match_ambiguous": true,
+  "tools": {
+    "ambertools": "AMBERHOME=/home/mason/amber22",
+    "rdkit": "2026.09.2"
+  },
+  "water_model": "tip3p"
+}
