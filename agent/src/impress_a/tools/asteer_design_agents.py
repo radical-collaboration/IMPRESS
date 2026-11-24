@@ -1115,7 +1115,8 @@ class _ScoreAgent(TaskAgent):
 
     model_id: str = ""
 
-    def _features(self, structure: Any, params: dict[str, Any]) -> dict[str, Any]:
+    def _features(self, structure: Any, params: dict[str, Any],
+                  req: TaskRequest) -> dict[str, Any]:
         raise NotImplementedError
 
     def _metrics(self, response: SurrogateResponse,
@@ -1136,7 +1137,7 @@ class _ScoreAgent(TaskAgent):
             )
         response = _ask(
             self.model_id,
-            self._features(structure, params),
+            self._features(structure, params, req),
             req,
             params.get("design_campaign_id") or None,
         )
@@ -1156,7 +1157,11 @@ class PreorgScoreAgent(_ScoreAgent):
 
     model_id = MODEL_B
 
-    def _features(self, structure: Any, params: dict[str, Any]) -> dict[str, Any]:
+    def _features(self, structure: Any, params: dict[str, Any],
+                  req: TaskRequest) -> dict[str, Any]:
+        # B's featuriser (`pocket-geom-1`, asteer J9) reads the structure. Nothing else is
+        # sent: a backbone-stage reward computed from a chain metric would be computed from a
+        # number that does not exist yet when the FK loop calls it.
         return {"structure": str(structure),
                 "pocket_selection": params.get("pocket_selection", "")}
 
@@ -1168,6 +1173,33 @@ class PreorgScoreAgent(_ScoreAgent):
         return out
 
 
+def _chain_metrics(req: TaskRequest) -> dict[str, dict[str, float]]:
+    """Every upstream payload's metrics, keyed by the tool that produced them.
+
+    `_payload` writes `result` as the producing tool id on every payload this module makes,
+    and the toolkit's other agents do the same, so the key is read rather than inferred from
+    the port name -- a port is named for what it carries, not for what made it.
+
+    Ordering-only dependencies are included (`dep0`, `dep1`, ...), because an edge with no
+    typed port behind it still ran a stage and still produced metrics, and the day a campaign
+    adds one to reach a metric this is what must see it.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for payload in (req.inputs or {}).values():
+        if not isinstance(payload, Mapping):
+            continue
+        tool = payload.get("result")
+        metrics = payload.get("metrics")
+        if not isinstance(tool, str) or not isinstance(metrics, Mapping):
+            continue
+        numeric = {k: float(v) for k, v in metrics.items()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        if numeric:
+            # Merged rather than replaced: two wired ports can resolve to the same producer.
+            out.setdefault(tool, {}).update(numeric)
+    return out
+
+
 class AffDeltaScoreAgent(_ScoreAgent):
     """Model C's client: the corrected ΔG and the bound item 14 ranks on.
 
@@ -1177,9 +1209,36 @@ class AffDeltaScoreAgent(_ScoreAgent):
 
     model_id = MODEL_C
 
-    def _features(self, structure: Any, params: dict[str, Any]) -> dict[str, Any]:
+    def _features(self, structure: Any, params: dict[str, Any],
+                  req: TaskRequest) -> dict[str, Any]:
+        """`structure`, and **the chain's own metrics keyed by the stage that produced them**.
+
+        Model C's featuriser is `chain-metrics-1` (asteer J10): ten named floats the design
+        chain already computed, stdlib, so it is reachable from inside a Dragon task. It
+        refuses a metric it cannot find **by the name of the column that metric would have
+        filled**, and the refusal is the point. `boltz_agents.py:44-49` is why: a
+        `ligand_iptm` fallback there turned *"the ligand was never modelled"* into *"the
+        ligand binds badly"* -- the same number, two opposite meanings, and nothing in
+        between to tell them apart. A zero in a column Model C fitted on is that failure with
+        a GP posterior reporting a confident number on top of it.
+
+        **Keyed by tool id, because one metric name is not unique.** `packmin` and
+        `fastrelax` both emit `total_score`, and on job 22726105 r0004 those were +1064.5 and
+        -336.0 on the same structure. The column list names both, and this assembles the
+        payload it names them in. The refusal itself lives in asteer rather than here: a
+        second copy of the column list in this file is a second thing to keep in step.
+
+        **What this reaches is what the graph wired.** `TaskRequest.inputs` holds the payload
+        of each task wired directly to this one, and `compose/composer.py` wires a linear
+        stage to the one before it -- so today `affdelta_score` sees `preorg_score`'s metrics
+        and no others, and `chain-metrics-1` refuses the rest by name. That is backlog item
+        79 and not something to paper over here: assembling from what arrived is correct and
+        will keep being correct when the campaign declares the extra dependencies, whereas
+        guessing a value for a stage this task never saw would not be.
+        """
         return {"structure": str(structure),
-                "embedding_source": params.get("embedding_source", "")}
+                "embedding_source": params.get("embedding_source", ""),
+                "chain_metrics": _chain_metrics(req)}
 
     def _metrics(self, response: SurrogateResponse,
                  params: dict[str, Any]) -> dict[str, float]:

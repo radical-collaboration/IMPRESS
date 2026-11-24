@@ -432,3 +432,94 @@ def test_each_twin_takes_a_distinct_id_and_declares_the_mock_toolkit_field(real,
 def test_the_request_contract_refuses_an_unaddressed_question():
     with pytest.raises(ValueError, match="model_id is required"):
         SurrogateRequest(request_id="r", model_id="")
+
+
+# ---------------------------------------------------------------------------
+# J10: the features Model C is asked on, assembled from what the graph wired
+
+
+def _upstream(tool: str, metrics: dict) -> dict:
+    """One upstream task's payload, in the shape `_payload` writes."""
+    return {"result": tool, "count": 1, "outputs": {"structure": STRUCTURE},
+            "metrics": dict(metrics), "model_versions": {}}
+
+
+def _features_of(agent, inputs: dict) -> dict:
+    req = TaskRequest(tool=agent.spec.id, params={}, inputs=inputs, node_id="n0041")
+    return agent._features(STRUCTURE, agent.parameterize(req), req)
+
+
+def test_model_cs_features_carry_the_chain_metrics_keyed_by_the_tool_that_made_them():
+    """Keyed by tool id and not by port, because a port is named for what it carries.
+
+    `packmin` and `fastrelax` both emit `total_score` and they are not the same number -- on
+    job 22726105 r0004, +1064.5 and -336.0 on the same structure. asteer's `chain-metrics-1`
+    declares both as separate columns; this is what fills them apart.
+    """
+    features = _features_of(_affdelta(), {
+        "structure": _upstream("fastrelax", {"total_score": -336.0, "fa_rep": 119.1,
+                                             "interaction_energy": -26.4}),
+        "dep0": _upstream("packmin", {"total_score": 1064.5}),
+    })
+    assert features["chain_metrics"]["fastrelax"]["total_score"] == -336.0
+    assert features["chain_metrics"]["packmin"]["total_score"] == 1064.5
+    assert features["structure"] == STRUCTURE
+
+
+def test_an_ordering_only_dependency_still_contributes_its_metrics():
+    """`dep0` is a real edge that ran a real stage, and the day a campaign adds one to reach
+    a metric, this is what has to see it."""
+    features = _features_of(_affdelta(), {
+        "dep0": _upstream("boltz_predict", {"complex_plddt": 0.751, "ligand_iptm": 0.42}),
+    })
+    assert features["chain_metrics"]["boltz_predict"]["complex_plddt"] == 0.751
+
+
+def test_a_non_numeric_metric_is_left_out_rather_than_coerced():
+    """A string metric is not a feature; the featuriser then refuses it by name, which is
+    where that refusal belongs -- a second copy of the column list here would be a second
+    thing to keep in step."""
+    features = _features_of(_affdelta(), {
+        "structure": _upstream("filter_shape", {"shape_complementarity": 0.69,
+                                                "sc_selector_mode": "two_sided"}),
+    })
+    assert features["chain_metrics"]["filter_shape"] == {"shape_complementarity": 0.69}
+
+
+def test_a_boolean_is_not_a_metric_even_though_python_says_it_is_a_number():
+    features = _features_of(_affdelta(), {
+        "structure": _upstream("rfd3_steered_design",
+                               {"ss_fraction": 0.63, "conditioning_applied": True}),
+    })
+    assert features["chain_metrics"]["rfd3_steered_design"] == {"ss_fraction": 0.63}
+
+
+def test_model_bs_features_carry_no_chain_metric():
+    """B is the FK potential, called on backbone x-hat-0. A reward computed from a chain
+    metric would be computed from a number that does not exist yet when B is called."""
+    features = _features_of(_preorg(), {
+        "structure": _upstream("fastrelax", {"interaction_energy": -26.4}),
+    })
+    assert set(features) == {"structure", "pocket_selection"}
+
+
+def test_the_chain_metrics_the_graph_wires_today_are_one_stages_worth():
+    """**Backlog item 79, asserted rather than described.**
+
+    `compose/composer.py` wires a linear stage to the one before it, so `affdelta_score`
+    reaches `preorg_score` and nothing else. Assembling from what arrived is correct and
+    keeps being correct when the campaign declares more; what it cannot do today is fill
+    `chain-metrics-1`, which is why `FEATURISER_FOR_MODEL["aff_delta"]` is still the
+    stand-in. If this test starts failing because more stages arrive, that is the item
+    closing.
+    """
+    from asteer.features import FEATURISER_FOR_MODEL
+
+    features = _features_of(_affdelta(), {
+        "structure": _upstream("preorg_score", {"preorg_rmsd": 1.21, "rotamer_entropy": 2.33}),
+    })
+    assert sorted(features["chain_metrics"]) == ["preorg_score"]
+    assert FEATURISER_FOR_MODEL["aff_delta"] == "standin-1", (
+        "item 79: Model C cannot be switched to chain-metrics-1 until the graph wires the "
+        "stages whose metrics it names"
+    )
