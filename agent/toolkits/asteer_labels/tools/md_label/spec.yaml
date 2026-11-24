@@ -38,9 +38,11 @@ parameters:
   design_dir: {type: str, default: "", trades: "which design is being measured",
                operator_only: "which molecule is measured, set per launch by the dispatcher -
                                a reasoner moving it files one design's label against another"}
-  # `A:R` and not `ALR`: foundry.sif carries an internal confound on the label `ALR` from
-  # an unrelated data source, so RFD3 inside that container misresolves the bare literal and the
-  # colon form sidesteps it. toolkits/rfd3/SKILL.md is the canonical note. Both names are real --
+  # `A:R` and not `ALR`: the colon is chosen upstream to DEFEAT CCD LOOKUP. `ALR` is an
+  # unrelated compound's code in the Chemical Component Dictionary, which foundry.sif resolves
+  # ligand codes against, so RFD3 inside that container resolves the bare literal to that entry
+  # instead of to this ligand -- and a colon cannot appear in a CCD code.
+  # toolkits/rfd3/SKILL.md is the canonical note. Both names are real --
   # the structures say `A:R`, the MD parameterisation says `ALR` because mol2 and tleap cannot
   # carry a colon -- and K1's artifact records both.
   ligand_params_path: {type: str, default: "",

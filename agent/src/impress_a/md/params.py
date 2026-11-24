@@ -127,10 +127,11 @@ class LigandParameters:
     smiles: str
     force_field: str
     #: The name as it appears in the PDB, **byte for byte**. For this project's ligand that is
-    #: `A:R`, and the colon is a workaround rather than a quirk: `foundry.sif` carries an
-    #: internal confound on the label `ALR` from an unrelated data source, so RFD3 inside that
-    #: container misresolves the bare `"ALR"` literal, and a name no such source can hold
-    #: sidesteps it (`toolkits/rfd3/SKILL.md` is the canonical note).
+    #: `A:R`, and the colon is a workaround rather than a quirk: it is **chosen upstream to
+    #: defeat CCD lookup.** `ALR` is an unrelated compound's code in the Chemical Component
+    #: Dictionary, which `foundry.sif` resolves ligand codes against, so RFD3 inside that
+    #: container resolves a bare `"ALR"` to that entry instead of to this ligand -- and a colon
+    #: cannot appear in a CCD code (`toolkits/rfd3/SKILL.md` is the canonical note).
     #:
     #: **The two names being different is the whole reason this field exists, and neither is
     #: wrong.** The design chain's structures say `A:R`; this parameterisation says `ALR`,

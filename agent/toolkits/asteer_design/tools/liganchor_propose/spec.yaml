@@ -27,6 +27,10 @@ outputs:
   # sampler, which is where the enum's own docstring draws the SmallMolecule/Parameterized line.
   anchor_spec: {type: Parameterized}
 parameters:
+  # The colon is chosen upstream to DEFEAT CCD LOOKUP: `ALR` is an unrelated compound's code in
+  # the Chemical Component Dictionary, which foundry.sif resolves ligand codes against, so RFD3
+  # inside it resolves a bare "ALR" to that entry instead of to this ligand -- and a colon
+  # cannot appear in a CCD code. See toolkits/rfd3/SKILL.md.
   ligand_params_path: {type: str, default: "",
                        trades: "which ligand is anchored; the resname inside may be the literal
                                 A:R rather than ALR -- never 'clean up' the colon"}

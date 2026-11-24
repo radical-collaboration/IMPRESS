@@ -74,12 +74,14 @@ later stage that would have consumed them.
   workaround.** The `.params` file's `NAME`/`IO_STRING` record for a ligand may not match its
   bare 3-letter code: ALR's real value is the literal `A:R`, not `ALR`.
 
-  **The mechanism, recorded here because this is the layer that needs it.** `foundry.sif`
-  carries an **internal confound on the label `ALR` from an unrelated data source**, so RFD3
-  running inside that container misresolves the bare `"ALR"` literal to something that is not
-  this ligand. A name no such source can hold — one containing a colon — sidesteps the
-  collision, and `A:R` is that name. It is **a deliberate, verified workaround for a container
-  this project does not build**, not a style choice and not a typo.
+  **The mechanism, recorded here because this is the layer that needs it.** `ALR` is a real code
+  in the **Chemical Component Dictionary** — the PDB's CCD — belonging to an **unrelated
+  compound**, and `foundry.sif` carries a CCD it resolves ligand codes against. So RFD3 running
+  inside that container resolves a bare `"ALR"` literal to **that** entry rather than to this
+  project's ligand: the confound is internal to the container, and the CCD is what it is a
+  confound *from*. **A name containing a colon cannot be a CCD code, so it defeats the lookup**
+  — which is the whole of the workaround, and `A:R` is that name. It is **a deliberate, verified
+  workaround for a container this project does not build**, not a style choice and not a typo.
 
   Two consequences, and both have already cost time:
 

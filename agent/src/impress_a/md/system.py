@@ -298,9 +298,10 @@ def _split_complex(complex_pdb: str, out_dir: str, resname: str, leg: str) -> tu
 
     The ligand's own coordinates come from K1's committed `mol2`, not from here -- tleap loads
     the parameterised unit and superimposes nothing -- so the holo leg keeps the HETATM records
-    only to place it. **The resname is matched exactly**: `A:R` is the name chosen to sidestep
-    `foundry.sif`'s internal confound on the label `ALR` (`toolkits/rfd3/SKILL.md`), and
-    stripping the colon is how a selection stops matching.
+    only to place it. **The resname is matched exactly**: `A:R` is chosen upstream to defeat CCD
+    lookup -- `ALR` is an unrelated compound's code in the Chemical Component Dictionary that
+    `foundry.sif` resolves against, and a colon cannot appear in a CCD code
+    (`toolkits/rfd3/SKILL.md`) -- and stripping the colon is how a selection stops matching.
     """
     protein: List[str] = []
     ligand: List[str] = []
