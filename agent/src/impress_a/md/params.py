@@ -80,6 +80,11 @@ WATER_MODEL = "tip3p"
 #: offset in a topology should be able to find out that it was put there on purpose.
 MAX_CHARGE_RESIDUAL = 0.01
 
+#: What a file name in this artifact may contain. Deliberately narrow: these names are
+#: interpolated into a tleap script and executed, so the set is "what a parameter file is
+#: actually called" and not "what a filesystem permits".
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 #: parmchk2 writes its guesses in prose, one per line, in whichever section needed them. These
 #: are the three phrasings it uses; a line matching none of them is a parameter it had exactly.
 _PENALTY_MARKERS = ("penalty score", "Using the default value", "ATTN, need revision")
@@ -147,7 +152,36 @@ class LigandParameters:
                 "produce a different charge set whenever a tool version moved"
             )
         with open(path) as handle:
-            return cls(**json.load(handle))
+            artifact = cls(**json.load(handle))
+        artifact._check_names(directory)
+        return artifact
+
+    def _check_names(self, directory: str) -> None:
+        """Every file this artifact names must be a plain basename. **Checked on load.**
+
+        Two reasons, and the second is why this is a refusal rather than a convention.
+
+        The names in `files` are written **into a tleap script that is then executed**
+        (`system._tleap_script`, `freeenergy._dry_tleap_script`), so a name carrying a newline
+        is a leap command of somebody else's choosing, and one carrying `..` reads a file from
+        outside the artifact. `verify` joins the keys of `digests` to the same directory, so
+        both sets are checked.
+
+        The digests do not cover this. They are in the same JSON as the names, so they prove a
+        file has not changed since the artifact was written -- not that the artifact is one this
+        project wrote. The names are the part that reaches a subprocess, so the names are
+        checked by shape.
+        """
+        for where, names in (("files", list(self.files.values())),
+                             ("digests", list(self.digests))):
+            for name in names:
+                if not name or os.path.basename(name) != name or not _SAFE_NAME.match(name):
+                    raise ParameterisationFailed(
+                        f"{ARTIFACT_NAME} in {directory} names {name!r} under {where}, which is "
+                        "not a plain file name. These names are written into a tleap script "
+                        "that is then run, so a separator, a newline or a character outside "
+                        "[A-Za-z0-9._-] is refused rather than quoted"
+                    )
 
     def verify(self, directory: str) -> None:
         """Refuse an artifact whose files have changed since it was written.

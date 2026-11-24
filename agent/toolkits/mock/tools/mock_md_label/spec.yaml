@@ -24,8 +24,12 @@ outputs:
   # The second port, for the same reason as the real spec: without it gate 1 refuses the chain.
   structure: {type: Complex}
 parameters:
-  design_dir: {type: str, default: "", trades: "which design is being measured"}
-  ligand_params_path: {type: str, default: "", trades: "the ligand's own .params"}
+  # `operator_only`, mirroring the real spec: a card that differs between a tool and its twin
+  # is a card the mock campaign cannot exercise.
+  design_dir: {type: str, default: "", trades: "which design is being measured",
+               operator_only: "which molecule is measured, set per launch by the dispatcher"}
+  ligand_params_path: {type: str, default: "", trades: "the ligand's own .params",
+                       operator_only: "a path to the design's own params file, not a knob"}
   apo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0, trades: "apo sampling vs GPU-hours"}
   holo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0, trades: "holo sampling vs GPU-hours"}
   md_replicates: {type: int, default: 1, min: 1, max: 8,
@@ -36,8 +40,14 @@ parameters:
   mmgbsa: {type: bool, default: true, trades: "an endpoint free-energy sample per frame"}
   # Mirrored so one campaign parameter block drives both twins. The mock ignores both values,
   # as it ignores what is inside design_dir: it hashes its parameters and returns.
-  md_params_dir: {type: str, default: "", trades: "which parameterisation this measurement is OF"}
-  amberhome: {type: str, default: "", trades: "which AmberTools builds the system"}
+  # `operator_only` on both, mirroring the real spec -- and here the reason is the twin's own:
+  # a reasoner that may propose a parameter against the mock and not against the real tool
+  # learns a card that does not exist, and the mock campaign stops being the real one's shape.
+  md_params_dir: {type: str, default: "", trades: "which parameterisation this measurement is OF",
+                  operator_only: "the measurement's own force field, and a path the real tool
+                                  reads an artifact out of"}
+  amberhome: {type: str, default: "", trades: "which AmberTools builds the system",
+              operator_only: "the real tool joins it to bin/tleap and executes it"}
   mmgbsa_stride: {type: int, default: 1, min: 1, max: 100, trades: "frames evaluated vs CPU time"}
   # THE SURROGATE'S OWN DIAL, with no real counterpart: how well the run equilibrates. At the 0.0
   # default `rmsd_plateau_frac` lands near 0.85 and the integrity gate passes. Above ~0.6 it falls

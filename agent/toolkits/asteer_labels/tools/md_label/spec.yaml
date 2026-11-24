@@ -29,22 +29,49 @@ outputs:
   structure: {type: Complex}
 parameters:
   # The design this run measures. A path parameter rather than a port, per the root note above.
-  design_dir: {type: str, default: "", trades: "which design is being measured"}
+  # Both `operator_only`, for the reason the two below are: they are filesystem paths and not
+  # design knobs. `design_dir` decides WHICH MOLECULE is measured, and a label supersedes a
+  # prediction on a specific node -- a reasoner that could move it would file one design's
+  # measurement against another's node, with nothing anywhere disagreeing. Neither was
+  # proposable by any planner in practice (the labels campaign runs model B, whose
+  # `RehearsalOracle` returns the declared chain with empty params); marking them says so.
+  design_dir: {type: str, default: "", trades: "which design is being measured",
+               operator_only: "which molecule is measured, set per launch by the dispatcher -
+                               a reasoner moving it files one design's label against another"}
   ligand_params_path: {type: str, default: "",
                        trades: "the ligand's own .params; the resname inside it may be the
-                                literal A:R rather than ALR -- never 'clean up' the colon"}
+                                literal A:R rather than ALR -- never 'clean up' the colon",
+                       operator_only: "a path to the design's own params file, not a knob"}
   # K1's artifact, and NOT the line above. `ligand_params_path` is a Rosetta .params -- atom
   # types and charges for Rosetta's scoring function, from which nothing transfers to an MD
   # force field. This is the directory holding ligand_parameters.json, ligand.mol2 and
   # ligand.frcmod. No default, and the agent refuses an empty one by name: that artifact is
   # what records the force field, and a force field is part of what a measured number means.
+  #
+  # `operator_only`, which `tools/view.py` enforces by reporting it under `frozen` so it never
+  # appears on the card a reasoner proposes against. Two reasons, and the second is the one a
+  # security review would name first: this path decides WHICH FORCE FIELD a measurement is in,
+  # so a reasoner moving it would silently change what every number from this tool means; and
+  # it is a filesystem path this tool reads an artifact out of, which is not a design knob in
+  # any sense. The campaign sets it, as it sets `design_dir`.
   md_params_dir: {type: str, default: "",
                   trades: "which parameterisation of the ligand this measurement is OF;
-                           campaigns/data/alr/md is the committed GAFF2/AM1-BCC one"}
+                           campaigns/data/alr/md is the committed GAFF2/AM1-BCC one",
+                  operator_only: "the measurement's own force field, and a path this tool reads
+                                  - a reasoner that could move it would be choosing what its
+                                  own numbers mean"}
   # Where AmberTools is, when it is not on PATH. tleap is the one dependency pip cannot
   # supply; empty means "look on PATH", and the agent refuses by name if neither answers.
+  #
+  # `operator_only`, and here it is squarely a security boundary rather than a provenance one:
+  # the value is joined to `bin/tleap` and EXECUTED (`md/system.py::_run_tleap`). A proposable
+  # parameter that selects an executable path is arbitrary command execution by a reasoner that
+  # has been talked into it. The campaign and the environment are the only two places this may
+  # come from, and both are the operator's.
   amberhome: {type: str, default: "",
-              trades: "which AmberTools builds the system; empty means whatever is on PATH"}
+              trades: "which AmberTools builds the system; empty means whatever is on PATH",
+              operator_only: "joined to bin/tleap and executed - an executable path is never a
+                              knob a reasoner may turn"}
   apo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0,
            trades: "apo sampling vs GPU-hours; the apo leg is what preorganisation is measured against"}
   holo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0,

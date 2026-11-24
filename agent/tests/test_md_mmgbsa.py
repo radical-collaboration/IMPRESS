@@ -278,3 +278,65 @@ def test_the_cpu_smoke_gives_a_distribution_with_both_spreads(tmp_path):
     assert -200.0 < samples.value < 0.0, samples.value
     assert samples.provenance["ligand_force_field"] == "gaff2"
     assert samples.frames_dropped == 0, "no frame should have a broken receptor"
+
+
+# -- what reaches a subprocess (security review, 2026-11-24) -----------------------------
+
+
+def test_an_artifact_whose_file_name_is_not_a_plain_name_is_refused(tmp_path):
+    """**The names in K1's artifact are written into a tleap script and then executed.**
+
+    So a name carrying a newline is a leap command of somebody else's choosing, and one
+    carrying a separator reads a file from outside the artifact. The digests do not cover this:
+    they live in the same JSON as the names, so they prove a file has not changed since the
+    artifact was written, not that the artifact is one this project wrote.
+    """
+    import json
+    import shutil as sh
+
+    from impress_a.md.params import ARTIFACT_NAME, ParameterisationFailed
+
+    for bad in ("../ligand.mol2", "ligand.mol2\nquit", "sub/ligand.mol2", "lig and.mol2"):
+        directory = tmp_path / f"case{abs(hash(bad))}"
+        directory.mkdir()
+        for name in os.listdir(PARAMS):
+            sh.copy(PARAMS / name, directory / name)
+        payload = json.loads((directory / ARTIFACT_NAME).read_text())
+        payload["files"]["mol2"] = bad
+        (directory / ARTIFACT_NAME).write_text(json.dumps(payload))
+        with pytest.raises(ParameterisationFailed, match="not a plain file name"):
+            LigandParameters.load(str(directory))
+
+
+def test_the_committed_artifact_passes_the_same_check():
+    """The check has to admit the real one, or it is a check on nothing."""
+    artifact = LigandParameters.load(str(PARAMS))
+    assert set(artifact.files) >= {"mol2", "frcmod"}
+    for name in list(artifact.files.values()) + list(artifact.digests):
+        assert os.path.basename(name) == name
+
+
+def test_no_proposable_parameter_of_md_label_is_a_path():
+    """A reasoner's card for this tool is numbers and one bool. **No paths at all.**
+
+    Four of them are `operator_only`: `amberhome` is joined to `bin/tleap` and EXECUTED, so an
+    executable path chosen by a reasoner is arbitrary command execution; `md_params_dir`
+    decides which force field the measurement is in; `design_dir` decides which molecule is
+    measured, and a label supersedes a prediction on a specific node; `ligand_params_path` is
+    a file the tool reads. `tools/view.py` is the one seam that enforces it, by reporting them
+    under `frozen` so they never reach the card a reasoner proposes against.
+    """
+    pytest.importorskip("yaml")
+    from impress_a.tools.registry import Registry
+    from impress_a.tools.view import card_for
+
+    registry = Registry().load()
+    for tool in ("md_label", "mock_md_label"):
+        card = card_for(registry.get(tool))
+        assert {"amberhome", "md_params_dir", "design_dir", "ligand_params_path"} <= set(
+            card.frozen), f"{tool} would let a reasoner propose a path"
+        for name, param in card.parameters.items():
+            assert param.type in ("int", "float", "bool"), (
+                f"{tool} offers {name!r} ({param.type}) to a reasoner; every path parameter "
+                "here is operator_only, and a new one must say why it is not"
+            )
