@@ -50,7 +50,11 @@ def test_the_committed_alr_artifact_says_what_it_is():
     art = LigandParameters.load(str(COMMITTED))
     assert art.resname == "ALR"
     assert art.force_field == "gaff2", "not CGenFF, and the artifact says so"
-    assert art.protein_force_field == "charmm36m" and art.water_model == "tip3p"
+    assert art.water_model == "tip3p"
+    # The determination: one force-field family, not two. CHARMM36m was available -- OpenMM
+    # ships charmm36.xml -- and is not used, because GAFF2 is Amber's small-molecule force
+    # field and mixing families is a combination nobody validated.
+    assert art.protein_force_field == "ff14sb"
     assert art.net_charge == -2, "two sulfonates"
     assert art.n_heavy_atoms == 30, "which is the HETATM count in the complex"
     assert art.n_atoms == 44

@@ -54,7 +54,21 @@ FRCMOD_NAME = "ligand.frcmod"
 #: The protein and water force fields the ligand parameters are mixed with. Named here because
 #: the artifact records the whole combination: the ligand's parameters alone do not say what a
 #: number measured with them means.
-PROTEIN_FORCE_FIELD = "charmm36m"
+#:
+#: **ff14SB and not CHARMM36m, and that is a determination rather than a default.** The plan
+#: named CHARMM36m for the protein, and OpenMM 8.6 does ship `charmm36.xml`, so it was
+#: available. It is not used, for one reason: **the ligand is GAFF2** (see this module's
+#: docstring -- CGenFF needs ParamChem), and GAFF2 is the Amber family's small-molecule force
+#: field, parameterised and validated against Amber protein force fields. Pairing GAFF2 with
+#: ff14SB keeps one family and one set of combining rules; pairing it with CHARMM36m mixes two
+#: that were never validated against each other, and needs ParmEd to stitch the topologies
+#: together.
+#:
+#: The cost is stated rather than discovered: **this is not the protocol the plan named**, so a
+#: CGenFF + CHARMM36m run later is a *different measurement* and not a refinement of this one,
+#: and `force_field` plus `protein_force_field` travel into every label's provenance so a
+#: corpus cannot mix them silently.
+PROTEIN_FORCE_FIELD = "ff14sb"
 WATER_MODEL = "tip3p"
 
 #: AM1-BCC charges are computed per atom and do not sum to the formal charge exactly. Above
@@ -85,9 +99,17 @@ class ParameterisationFailed(RuntimeError):
 class LigandParameters:
     """One ligand, typed once. **Every field is provenance; none is a tuning knob.**"""
 
+    #: The unit name inside the parameter files: at most three characters, no colon, because
+    #: mol2 and tleap cannot carry one. This is **not** the name in the structure.
     resname: str
     smiles: str
     force_field: str
+    #: The name as it appears in the PDB, **byte for byte**. For this project's ligand that is
+    #: `A:R`, chosen upstream to defeat CCD lookup -- and the two names being different is the
+    #: whole reason this field exists. A build that matched the parameter unit's name against a
+    #: structure would find no ligand, and a holo build that found no ligand would be an apo
+    #: build wearing a holo label.
+    pdb_resname: str = ""
     protein_force_field: str = PROTEIN_FORCE_FIELD
     water_model: str = WATER_MODEL
     charge_method: str = "am1bcc"
@@ -162,6 +184,7 @@ def parameterise(
     out_dir: str,
     resname: str,
     net_charge: int,
+    pdb_resname: str = "",
     force_field: str = "gaff2",
     amberhome: str = "",
     notes: str = "",
@@ -202,6 +225,7 @@ def parameterise(
     penalties = _penalties(frcmod)
     artifact = LigandParameters(
         resname=resname,
+        pdb_resname=pdb_resname or resname,
         smiles=smiles,
         force_field=force_field,
         net_charge=int(net_charge),

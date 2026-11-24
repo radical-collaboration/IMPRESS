@@ -18,7 +18,7 @@ moves.
 
 ## The force field, and why it is not CGenFF
 
-**GAFF2 with AM1-BCC charges, mixed with a CHARMM36m protein and TIP3P water.** The stated
+**GAFF2 with AM1-BCC charges, mixed with an ff14SB protein and TIP3P water.** The stated
 pairing is CGenFF for the ligand, and `par_all36_cgenff.prm` and `top_all36_cgenff.rtf` are on
 disk — but there is no CGenFF binary on this machine, and typing needs ParamChem, a web service
 wanting network access and an account. That is the same operational shape as PLINDER and not
@@ -26,7 +26,15 @@ something a protocol body can assume, so the offline route is taken and **named 
 artifact**: a force field is part of what a measured number means, and a `preorg_rmsd` measured
 under GAFF2 and one measured under CGenFF are two measurements.
 
-`force_field` travels into every label's provenance. The artifact is built to take CGenFF
+`force_field` travels into every label's provenance.
+
+**And the protein force field is ff14SB, not the CHARMM36m the plan named.** OpenMM 8.6 does
+ship `charmm36.xml`, so CHARMM36m was available; it is not used because the ligand is GAFF2,
+and GAFF2 is the Amber family's small-molecule force field, parameterised and validated
+*against* Amber protein force fields. Pairing GAFF2 with ff14SB keeps one family and one set of
+combining rules; pairing it with CHARMM36m mixes two that were never validated against each
+other and needs ParmEd to stitch the topologies. The cost is stated rather than discovered: a
+CGenFF + CHARMM36m run later is a **different measurement**, not a refinement of this one. The artifact is built to take CGenFF
 parameters whenever somebody has an account; nothing else has to change.
 
 ## What the run found, 2026-11-23

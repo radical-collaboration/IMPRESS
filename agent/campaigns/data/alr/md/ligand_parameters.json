@@ -32,7 +32,8 @@
   "n_atoms": 44,
   "n_heavy_atoms": 30,
   "net_charge": -2,
-  "notes": "ALR, the one ligand in this project's campaign history (audit finding 4).",
+  "notes": "ALR, the one ligand in this project's campaign history (audit finding 4). Protein force field is ff14SB and not CHARMM36m: the ligand is GAFF2, which is the Amber family's small-molecule force field, and mixing families is a combination nobody validated.",
+  "pdb_resname": "A:R",
   "penalties": [
     "ca-ca-ca-ca 1.1 180.0 2.0 Using the default value",
     "ca-ca-ca-ne 1.1 180.0 2.0 Using the default value",
@@ -42,7 +43,7 @@
     "ca-ca-ca-oh 1.1 180.0 2.0 Using the default value",
     "ca-ca-ca-os 1.1 180.0 2.0 Using the default value"
   ],
-  "protein_force_field": "charmm36m",
+  "protein_force_field": "ff14sb",
   "resname": "ALR",
   "smiles": "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc(S(=O)(=O)[O-])ccc12",
   "template_match_ambiguous": true,
