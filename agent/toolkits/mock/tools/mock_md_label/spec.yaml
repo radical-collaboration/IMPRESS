@@ -32,9 +32,14 @@ parameters:
                        operator_only: "a path to the design's own params file, not a knob"}
   apo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0, trades: "apo sampling vs GPU-hours"}
   holo_ns: {type: float, default: 15.0, min: 1.0, max: 100.0, trades: "holo sampling vs GPU-hours"}
-  md_replicates: {type: int, default: 1, min: 1, max: 8,
+  # 3, mirroring the real spec and md.ensemble.DEFAULT_REPLICATES. A twin whose default
+  # ensemble is a different size exercises a different shape.
+  md_replicates: {type: int, default: 3, min: 1, max: 8,
                   trades: "measurement precision vs GPU-hours; NOT the campaign's replicas"}
   seed: {type: int, default: null, min: 0, max: 2147483647, trades: "per-run draw"}
+  # Mirrored: 4 fs with hydrogen-mass repartitioning, on by default, 1.83x measured on the real
+  # protocol. The mock integrates nothing and ignores it.
+  hmr: {type: bool, default: true, trades: "4 fs with repartitioned hydrogen mass vs 2 fs"}
   # K5's pair, mirrored so a mock campaign exercises the same shape. Default true, as the real
   # spec's is: the sample costs no GPU time there and nothing here.
   mmgbsa: {type: bool, default: true, trades: "an endpoint free-energy sample per frame"}

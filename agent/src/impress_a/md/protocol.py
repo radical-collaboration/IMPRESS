@@ -152,7 +152,7 @@ def measure(
     heat_ps: float = 0.0,
     npt_ps: float = 0.0,
     frames_per_ns: int = 0,
-    hmr: bool = False,
+    hmr: Optional[bool] = None,
 ) -> Measured:
     """Both legs, the ensemble, the metrics, and -- when asked -- the free-energy samples.
 
@@ -163,7 +163,14 @@ def measure(
     from .analysis import measure_all  # noqa: PLC0415
     from .ensemble import DEFAULT_REPLICATES, MAX_REPLICATES, run_replicate  # noqa: PLC0415
     from .params import LigandParameters  # noqa: PLC0415
-    from .system import HEAT_PS, NPT_PS, SOLVENT_PADDING_NM, build_leg, equilibrate  # noqa: PLC0415,E501
+    from .system import (  # noqa: PLC0415
+        DEFAULT_HMR,
+        HEAT_PS,
+        NPT_PS,
+        SOLVENT_PADDING_NM,
+        build_leg,
+        equilibrate,
+    )
 
     if not params_dir:
         raise ProtocolFailed(
@@ -173,6 +180,8 @@ def measure(
             "campaigns/data/alr/md"
         )
     md_replicates = int(md_replicates or DEFAULT_REPLICATES)
+    # `None`, not `False`, so "nothing said" is distinguishable from "2 fs was asked for".
+    hmr = DEFAULT_HMR if hmr is None else bool(hmr)
     if not 1 <= md_replicates <= MAX_REPLICATES:
         raise ProtocolFailed(
             f"md_replicates={md_replicates} is outside the spec's own 1-{MAX_REPLICATES}")

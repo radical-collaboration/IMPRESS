@@ -79,10 +79,33 @@ parameters:
   # `md_replicates`, NOT `replicas`. The campaign's `replicas` is a cap on independent design
   # lineages (`runtime/executor.py:861`); this is the number of MD seeds for one measurement. Two
   # fields one letter apart with different owners is how a label batch silently becomes four.
-  md_replicates: {type: int, default: 1, min: 1, max: 8,
+  # **3, not 1, since 2026-11-24**, and the change is a defect fix rather than a preference:
+  # `md.ensemble.DEFAULT_REPLICATES` has been 3 since K3 with the comment "how many replicas a
+  # measurement uses when nothing says otherwise", so there were two defaults for one meaning
+  # and this one won. A test asserts the two agree.
+  #
+  # One replica is the single setting under which the ensemble produces NOTHING: the spread is
+  # the label's sigma, and `acquisition.rank` refuses a candidate that has none. Three is the
+  # smallest ensemble whose spread is a standard deviation rather than a difference. See the
+  # baseline determination's sizing table (plans/2026-11-23-md-labels.md#sizing): at the same
+  # walltime and the same required rate, 3 x 5 ns buys a sigma where 1 x 15 ns buys none.
+  md_replicates: {type: int, default: 3, min: 1, max: 8,
                   trades: "measurement precision vs GPU-hours; NOT the campaign's replicas"}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-run draw; two replicates are only independent if this is honoured"}
+  # 4 fs with hydrogen-mass repartitioning, default ON since 2026-11-24, and the default is
+  # MEASURED: the same 20 ps of this system took 283 s at 2 fs and 154 s at 4 fs + HMR on eight
+  # CPU threads, so 1.83x against a theoretical 2x.
+  #
+  # It is free for THESE THREE LABELS specifically, which is the part worth writing down. HMR
+  # moves mass between a heavy atom and its hydrogens; it does not touch the potential, so the
+  # Boltzmann distribution is unchanged and only kinetics shift. preorg_rmsd, ligand_rmsf and
+  # rotamer_entropy are all configurational averages. A label that was a RATE -- an exchange
+  # time, a transition frequency -- would have to turn this off, and none of the three is.
+  # `energy_drift_kcal_per_ns` is the standing check either way.
+  hmr: {type: bool, default: true,
+        trades: "4 fs with repartitioned hydrogen mass vs 2 fs; 1.83x measured, and free for
+                 configurational averages"}
   # K5. Default TRUE, unlike boltz_predict's `predict_affinity`, and the asymmetry is the cost:
   # the affinity head is a second sampling pass on a GPU, this is single-point energies over
   # frames that already exist. It buys a candidate prior for Model C for no GPU time at all.
@@ -134,7 +157,9 @@ qc_gates:
 # split the chain.
 #
 # K6 (2026-11-24): THE 8.1 STILL IS NOT A MEASUREMENT, and it is left alone rather than
-# refreshed. The 3.6 it derives from was declared, never measured; the protocol now exists and
+# refreshed. It is a BASELINE figure in the sense the baseline determination sets out
+# (plans/2026-11-23-md-labels.md#baseline in the integration repo): a real, defensible, small
+# starting point that bounds nothing until a run measures the rate. The 3.6 it derives from was declared, never measured; the protocol now exists and
 # has run on a CPU, and a CPU figure extrapolated to an A100 would be the same defect with a
 # newer date on it. What the protocol now emits is the thing that replaces it: every run reports
 # `ns_per_day` and `gpu_hours_observed` beside its platform (md.protocol.Measured), so the first

@@ -57,19 +57,22 @@ params:
     # defaulted in the spec because this artifact records the force field -- GAFF2/AM1-BCC, not
     # CGenFF -- and a force field is part of what a measured number means (K1).
     md_params_dir: campaigns/data/alr/md
-    apo_ns: 15.0
-    holo_ns: 15.0
-    # ONE REPLICA MEANS NO SIGMA, and that is a budget decision rather than an oversight.
-    # `md.ensemble.DEFAULT_REPLICATES` is 3, because three is the smallest ensemble whose
-    # spread is a standard deviation rather than a difference, and the spread is the whole
-    # point of the ensemble: it is what `LabelRecord.sigma` carries, what Model B's
-    # heteroscedastic NLL consumes and what Model C's GP takes as `train_Yvar`. Three also
-    # triples the cost per design, which turns the 96 GPU-h above into roughly four designs
-    # rather than eleven. That trade belongs to the label spend
-    # (plans/2026-11-23-surrogate-quality.md, the GATE section) and the spend is the user's,
-    # so this stays at 1 until it is taken -- and a round at 1 reports labels with no sigma,
-    # which `acquisition.rank` then refuses to rank on.
-    md_replicates: 1
+    # THE BASELINE ENSEMBLE (the baseline determination, 2026-11-24:
+    # plans/2026-11-23-md-labels.md#sizing). Three replicas at 5 ns a leg rather than one at
+    # 15: 30 ns per design either way, the same required sampling rate, the same walltime --
+    # and a sigma instead of none. The spread is what LabelRecord.sigma carries, what Model
+    # B's heteroscedastic NLL consumes and what Model C's GP takes as train_Yvar, and
+    # acquisition.rank refuses a candidate that has none, so one replica is the single setting
+    # under which this whole campaign produces nothing the stack can use.
+    #
+    # 5 ns is a FLOOR and is the weakest part of the baseline. Pocket Ca RMSD and ligand RMSF
+    # are fine at 5 ns; rotamer entropy over chi1/chi2 populates three bins thinly, so its
+    # value is the least trustworthy of the three and its sigma should be the largest. The
+    # sizing table says what each longer row costs; `ns_per_day` from the first real run is
+    # the one measurement that decides which to use, and nothing here is frozen until then.
+    apo_ns: 5.0
+    holo_ns: 5.0
+    md_replicates: 3
 
 replicas: 1
 concurrency: 2

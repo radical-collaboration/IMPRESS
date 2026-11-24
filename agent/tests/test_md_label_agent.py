@@ -254,3 +254,83 @@ def test_the_artifact_is_written_where_the_measurement_ran(tmp_path):
     payload = json.loads(Path(path).read_text())
     assert payload["complex_name"] == "fastrelax.pdb"
     assert payload["free_energy"]["metric"] == "dg_mmgbsa"
+
+
+# -- one default, not three (the baseline determination, 2026-11-24) ---------------------
+
+
+def test_the_replicate_default_is_spelled_once_and_the_spec_agrees_with_it():
+    """Both specs, the code constant and the agent must say the same thing.
+
+    They did not until 2026-11-24: `md.ensemble.DEFAULT_REPLICATES` had been 3 since K3 with
+    the comment *"how many replicas a measurement uses when nothing says otherwise"*, while
+    both specs declared 1 and the agent wrote `or 1` of its own. Three defaults for one
+    meaning, and the smallest of them won — which is the setting under which the ensemble
+    produces no σ at all.
+    """
+    yaml = pytest.importorskip("yaml")
+    from impress_a.md.ensemble import DEFAULT_REPLICATES, MAX_REPLICATES
+
+    assert DEFAULT_REPLICATES == 3
+    for path in (SPEC, REPO / "toolkits" / "mock" / "tools" / "mock_md_label" / "spec.yaml"):
+        spec = yaml.safe_load(path.read_text())
+        param = spec["parameters"]["md_replicates"]
+        assert param["default"] == DEFAULT_REPLICATES, (
+            f"{path.name} declares {param['default']} and the code defaults to "
+            f"{DEFAULT_REPLICATES}; two defaults for one meaning is how a label batch "
+            "silently becomes a different experiment"
+        )
+        assert param["max"] == MAX_REPLICATES
+    source = (REPO / "src" / "impress_a" / "tools" / "asteer_labels_agents.py").read_text()
+    assert 'params.get("md_replicates") or 1' not in source, (
+        "the agent must not carry a default of its own; the protocol's constant is the one"
+    )
+
+
+def test_the_md_campaign_asks_for_the_baseline_ensemble():
+    """The campaign is where a baseline is chosen, and 3 x 5 ns is the row that was chosen.
+
+    Same 30 ns per design as the 1 x 15 ns it replaces, so the same required sampling rate and
+    the same walltime — and a σ instead of none. Asserted because a campaign that drifted back
+    to one replica would produce labels `acquisition.rank` refuses to rank on, and nothing else
+    would say so.
+    """
+    yaml = pytest.importorskip("yaml")
+    from impress_a.md.ensemble import DEFAULT_REPLICATES
+
+    for name in ("asd-labels-md.yaml", "asd-labels-md-mock.yaml"):
+        spec = yaml.safe_load((REPO / "campaigns" / name).read_text())
+        tool = "md_label" if "mock" not in name else "mock_md_label"
+        params = spec["params"][tool]
+        assert params["md_replicates"] == DEFAULT_REPLICATES, name
+        if tool == "md_label":
+            total = (params["apo_ns"] + params["holo_ns"]) * params["md_replicates"]
+            assert total == pytest.approx(30.0), (
+                f"{name} asks for {total} ns per design; the baseline is 30, which is what the "
+                "single-replica default it replaced also cost"
+            )
+
+
+def test_the_hmr_default_is_spelled_once_too_and_is_the_measured_one():
+    """**4 fs with HMR, on by default, and the default is a measurement.**
+
+    283 s at 2 fs against 154 s at 4 fs + HMR for the same 20 ps of this system -- 1.83x -- and
+    it is free for these three labels in particular, because HMR changes masses rather than the
+    potential: the Boltzmann distribution is untouched and only kinetics shift, while
+    `preorg_rmsd`, `ligand_rmsf` and `rotamer_entropy` are all configurational averages.
+    """
+    import inspect
+
+    yaml = pytest.importorskip("yaml")
+    from impress_a.md.system import DEFAULT_HMR, HMR_TIMESTEP_FS, TIMESTEP_FS
+
+    assert DEFAULT_HMR is True
+    assert (HMR_TIMESTEP_FS, TIMESTEP_FS) == (4.0, 2.0)
+    for path in (SPEC, REPO / "toolkits" / "mock" / "tools" / "mock_md_label" / "spec.yaml"):
+        spec = yaml.safe_load(path.read_text())
+        assert spec["parameters"]["hmr"]["default"] is DEFAULT_HMR, path.name
+    # `None` and not `False` from the agent, so "nothing said" is distinguishable from "2 fs was
+    # asked for" -- otherwise the constant could never be reached through a campaign at all.
+    source = (REPO / "src" / "impress_a" / "tools" / "asteer_labels_agents.py").read_text()
+    assert 'hmr=params.get("hmr")' in source
+    assert inspect.signature(protocol.measure).parameters["hmr"].default is None

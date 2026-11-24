@@ -81,6 +81,18 @@ BAROSTAT_INTERVAL = 25
 
 #: Heating and equilibration lengths in picoseconds. Short, and short on purpose: the production
 #: run is 15 ns per leg and these are the part that is not measured.
+#: Whether a measurement runs at 4 fs with hydrogen-mass repartitioning. **True, and measured:**
+#: the same 20 ps of the ALR holo system took 283 s at 2 fs and 154 s at 4 fs + HMR on eight CPU
+#: threads (2026-11-24), so 1.83x against a theoretical 2x.
+#:
+#: It is free for `md_label`'s three labels specifically. HMR moves mass between a heavy atom and
+#: its hydrogens and does not touch the potential, so the Boltzmann distribution is unchanged and
+#: only kinetics shift -- and `preorg_rmsd`, `ligand_rmsf` and `rotamer_entropy` are all
+#: configurational averages. A label that was a *rate* would have to turn it off; none is.
+#:
+#: The one default. `md_label`'s spec mirrors it and a test asserts the two agree.
+DEFAULT_HMR = True
+
 HEAT_PS = 20.0
 NPT_PS = 100.0
 

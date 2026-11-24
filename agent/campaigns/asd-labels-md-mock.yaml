@@ -58,7 +58,9 @@ params:
     holo_ns: 15.0
     # NOT the campaign's `replicas`. One letter apart, different owners: this is MD seeds behind
     # one measurement, `replicas` is independent design lineages.
-    md_replicates: 1
+    # The baseline ensemble, mirroring the real campaign: three replicas, so the twin
+    # exercises the shape that produces a sigma. The mock does no physics either way.
+    md_replicates: 3
     # The surrogate's own dial, with no MD counterpart. 0.0 equilibrates and the integrity gate
     # passes; above ~0.6 `rmsd_plateau_frac` drops under its 0.5 floor and the PATTERN's trust is
     # demoted rather than the design failed. Turning this up is how a reader watches decision 0013

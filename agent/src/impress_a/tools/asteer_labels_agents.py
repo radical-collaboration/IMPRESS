@@ -211,10 +211,15 @@ class MDLabelAgent(TaskAgent):
             out_dir=str(work),
             apo_ns=float(params.get("apo_ns", 15.0)),
             holo_ns=float(params.get("holo_ns", 15.0)),
-            md_replicates=int(params.get("md_replicates") or 1),
+            # **No `or 1` here.** The one default lives in `md.ensemble.DEFAULT_REPLICATES`
+            # and the spec mirrors it; a fallback written a third time is a third default.
+            md_replicates=int(params.get("md_replicates") or 0),
             # `req.seed` and not a draw: the engine owns the seed, and two replicates are only
             # independent if the per-replica derivation gets a stable base to mix.
             seed=int(params.get("seed") or getattr(req, "seed", None) or 0),
+            # `None` when the campaign said nothing, so `md.system.DEFAULT_HMR` stays the
+            # one default rather than being re-spelled here.
+            hmr=params.get("hmr"),
             mmgbsa=bool(params.get("mmgbsa", True)),
             mmgbsa_stride=int(params.get("mmgbsa_stride") or 1),
             amberhome=str(params.get("amberhome") or ""),
