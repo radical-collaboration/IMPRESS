@@ -256,22 +256,66 @@ SHADOWED = {
 }
 
 
+#: metric -> the parameter that has to be on for its tool to report it. **Excused here and
+#: nowhere else**, because the alternative is a loose comparison that stops catching the gap
+#: this test exists for.
+#:
+#: These metrics do not exist unconditionally: `boltz_predict` loads a second checkpoint and
+#: runs a second sampling pass only when asked (J13), and `md_label` takes MM/GBSA samples only
+#: when asked (K5). A tool reporting them unconditionally would be reporting a number it did not
+#: compute. The converse hazard is real and belongs to preflight rather than here: an objective
+#: on one of these resolves to its tool and then gets nothing if the campaign left the parameter
+#: unset, and the composer cannot see parameters.
+#:
+#: **This set is the fix for a red line J13 left and did not record.** It broke this test on
+#: 2026-11-24 by declaring three metrics behind `predict_affinity`; K5 would have broken it the
+#: same way the moment `md_label` joined a chain, so the excuse is written once, for both.
+PARAMETERISED = {
+    "affinity_pred_value": "predict_affinity",
+    "affinity_probability_binary": "predict_affinity",
+    "affinity_on_reported_sample": "predict_affinity",
+    "dg_mmgbsa": "mmgbsa",
+}
+
+
 def test_each_stage_reports_every_metric_its_own_spec_declares(props):
     """Declared is not reported, and the gap is this project's recurring failure class.
 
     `metrics_reported` is a per-tool QC gate, so a tool omitting one of its own metrics fails
     its gate — but only for the metrics *that gate* names, and no gate checks the full declared
-    list. This does, over all nine specs at once, with the three shadowed names excused
-    explicitly rather than by a loose comparison.
+    list. This does, over all nine specs at once, with the three shadowed names and the
+    parameterised ones excused **by name** rather than by a loose comparison.
     """
     gaps: list[str] = []
     for tool, _ in CHAIN:
         for metric in _declared_metrics(tool):
-            if metric in SHADOWED:
+            if metric in SHADOWED or metric in PARAMETERISED:
                 continue
             if props.get(metric) != tool:
                 gaps.append(f"{tool}.{metric} -> {props.get(metric, 'absent')!r}")
     assert not gaps, f"declared but not reported by their own tool: {gaps}"
+
+
+def test_every_excused_metric_is_really_behind_the_parameter_that_excuses_it():
+    """The guard on the excuse, which is the part that rots.
+
+    An entry in `PARAMETERISED` silences a gap, so the risk is a metric that stops being
+    conditional — or was never conditional — keeping its excuse. Both halves are checked
+    against the specs: the tool declares the metric, and it declares the parameter named here.
+    """
+    registry = Registry().load()
+    by_metric: dict[str, list[str]] = {}
+    for spec in registry.specs.values():
+        for metric in spec.metrics:
+            by_metric.setdefault(metric, []).append(spec.id)
+    for metric, parameter in PARAMETERISED.items():
+        owners = by_metric.get(metric, [])
+        assert owners, f"{metric} is excused and no tool declares it"
+        for tool in owners:
+            assert parameter in registry.get(tool).parameters, (
+                f"{tool} declares {metric} and has no {parameter!r} parameter, so the metric "
+                f"is not conditional and must not be excused here"
+            )
 
 
 def test_three_metric_names_are_produced_twice_and_the_later_stage_wins(props):

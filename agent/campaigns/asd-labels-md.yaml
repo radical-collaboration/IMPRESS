@@ -51,8 +51,24 @@ params:
     # Set per launch by the dispatcher, through `LaunchRequest.context` -- the value here is
     # a placeholder that the agent's own root-input check refuses if it ever survives to a run.
     design_dir: ""
+    # K1's parameter artifact, and the ONE place the single-ligand degeneracy is an advantage:
+    # there is exactly one ligand across every archive, so the campaign can name its
+    # parameterisation once instead of carrying one per design. It is set here rather than
+    # defaulted in the spec because this artifact records the force field -- GAFF2/AM1-BCC, not
+    # CGenFF -- and a force field is part of what a measured number means (K1).
+    md_params_dir: campaigns/data/alr/md
     apo_ns: 15.0
     holo_ns: 15.0
+    # ONE REPLICA MEANS NO SIGMA, and that is a budget decision rather than an oversight.
+    # `md.ensemble.DEFAULT_REPLICATES` is 3, because three is the smallest ensemble whose
+    # spread is a standard deviation rather than a difference, and the spread is the whole
+    # point of the ensemble: it is what `LabelRecord.sigma` carries, what Model B's
+    # heteroscedastic NLL consumes and what Model C's GP takes as `train_Yvar`. Three also
+    # triples the cost per design, which turns the 96 GPU-h above into roughly four designs
+    # rather than eleven. That trade belongs to the label spend
+    # (plans/2026-11-23-surrogate-quality.md, the GATE section) and the spend is the user's,
+    # so this stays at 1 until it is taken -- and a round at 1 reports labels with no sigma,
+    # which `acquisition.rank` then refuses to rank on.
     md_replicates: 1
 
 replicas: 1

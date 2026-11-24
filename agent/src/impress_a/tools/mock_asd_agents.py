@@ -140,6 +140,12 @@ class MockMDLabelAgent(TaskAgent):
     `instability` is the surrogate's own dial. At 0.0 the run equilibrates and the integrity gate
     passes; above ~0.6 `rmsd_plateau_frac` falls under its 0.5 floor, which demotes the pattern's
     trust rather than failing the design. Watching that difference is the point of having a dial.
+
+    **`dg_mmgbsa` is drawn independently of `instability`**, and that is deliberate in the same
+    way `mock_boltz_predict`'s affinity is drawn independently of its pLDDT (J13). Tying the two
+    would teach a watching policy that a poorly equilibrated run binds worse -- which conflates
+    an instrument failure with a design's quality, and separating those two is what decision 0013
+    is for. It is emitted only when `mmgbsa` is on, as the real tool's is.
     """
 
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
@@ -170,6 +176,8 @@ class MockMDLabelAgent(TaskAgent):
                 "ligand_rmsf": round(0.6 + 1.1 * instability + r.uniform(-0.04, 0.04), 3),
                 "rmsd_plateau_frac": round(plateau, 3),
                 "energy_drift_kcal_per_ns": round(0.3 + 5.0 * instability, 3),
+                **({"dg_mmgbsa": round(-32.0 + r.uniform(-6.0, 6.0), 2)}
+                   if bool(params.get("mmgbsa", True)) else {}),
             },
         }
 

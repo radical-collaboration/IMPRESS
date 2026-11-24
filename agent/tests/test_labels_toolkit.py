@@ -193,18 +193,22 @@ def test_md_label_refuses_a_missing_root_input_before_anything_else():
 @pytest.mark.parametrize(
     ("cls", "tool", "params"),
     [
-        (MDLabelAgent, "md_label", {"design_dir": "/runs/d0"}),
         (ABFELabelAgent, "abfe_label", {"structure_path": "holo.cif"}),
     ],
 )
 def test_an_unimplemented_label_adapter_refuses_rather_than_returning_numbers(
     cls, tool, params
 ):
-    """The whole reason these adapters exist as refusals.
+    """The whole reason this adapter exists as a refusal.
 
     A label's output supersedes a prediction and is never recomputed, so an invented number does
     not report a wrong result once — it writes itself into the design tree as measured truth and
     trains a surrogate against itself. The message names the twin to use instead.
+
+    **`md_label` left this list on 2026-11-24 (K6)**, because its body exists: it now runs the
+    protocol in `impress_a.md`. Its own refusals — a missing design dir, a missing parameter
+    artifact, a missing tleap — are in `tests/test_md_label_agent.py`, and `abfe_label` stays
+    here because ATM still is not reachable from anywhere in this project.
     """
     with pytest.raises(LabelAdapterNotImplemented) as exc:
         asyncio.run(cls(spec=_spec_stub(tool)).run(None, params))

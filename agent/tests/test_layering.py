@@ -43,7 +43,12 @@ SRC = pathlib.Path(impress_a.__file__).resolve().parent
 ALLOWED = {
     "core": frozenset(),
     "compose": frozenset({"tools", "core"}),
-    "tools": frozenset({"exec", "core"}),
+    # `tools -> md` was added by K6, when `MDLabelAgent` stopped refusing and started calling
+    # the MD protocol. It is the same shape as an adapter shelling out to a science binary,
+    # with the binary replaced by a module: the adapter owns the parameters, the refusals and
+    # the result shape, and `md` owns the physics. The import is function-local, so importing
+    # the adapter still pulls in no OpenMM -- asserted by `test_md_label_agent`.
+    "tools": frozenset({"exec", "core", "md"}),
     "exec": frozenset({"compose", "tools", "core"}),
     "policy": frozenset({"core"}),
     "runtime": frozenset({"policy", "compose", "exec", "tools", "core"}),
@@ -85,6 +90,19 @@ ALLOWED = {
     # and `tools`; `compare_arms` will use `core` alone, which this row permits without
     # requiring.
     "analysis": frozenset({"runtime", "exec", "compose", "tools", "core"}),
+    # `md` is group K's MD label protocol -- tleap, OpenMM, the replicate ensemble, the
+    # analyses and the MM/GBSA samples. It arrived with K1 on 2026-11-23 and was missing from
+    # this table until K6, which is why `test_every_layer_is_in_the_table` was red for a day:
+    # a new package under `impress_a/` is silently unchecked until it is placed here, which is
+    # the whole reason that test exists.
+    #
+    # **It imports nothing from impress-a**, and that empty row is the interesting part: the
+    # protocol is physics, it takes paths and parameters, and it returns numbers. Its only
+    # internal-looking import is `asteer.features_impl.pocket_geom`, which is a DIFFERENT
+    # distribution and is there so the pocket a label is measured over is resolved by Model
+    # B's own rule -- if the two were different residue sets the label and the prediction
+    # would be about different things.
+    "md": frozenset(),
     "__main__": frozenset({"cli"}),
 }
 

@@ -93,7 +93,30 @@ becomes four times its budget.
 hardcode it and never "clean up" the colon — a verified workaround for RFD3 misresolving the bare
 code, recorded in `IMPRESS/agent/toolkits/rfd3/SKILL.md`.
 
-**Neither adapter is implemented yet, and both refuse rather than pretend.** The `entry:` classes
-exist and raise with a message naming what is missing. That is deliberate: a label tool that
-returned plausible numbers on a laptop would be the most expensive silent failure in this project,
-because its output supersedes a prediction and is never recomputed.
+**`md_label` runs as of 2026-11-24 (group K). `abfe_label` still refuses rather than pretend.**
+
+`MDLabelAgent.run` calls `impress_a.md.protocol.measure`: tleap builds an apo and a holo leg,
+OpenMM equilibrates and runs a seeded replicate ensemble, the three labels come out of the frames
+**each with a σ from the replicate spread**, and MM/GBSA takes `dg_mmgbsa` out of the same frames
+for no extra GPU time.
+
+**Three things it needs, and it refuses each by name before any physics runs.**
+
+* `design_dir`, which nothing upstream checks — it is a root.
+* `md_params_dir`, which is K1's parameter artifact and **not** `ligand_params_path`. The second
+  is a *Rosetta* `.params`; nothing transfers from it to an MD force field. There is no default,
+  because that artifact is what records the force field and a force field is part of what a
+  measured number means. For ALR it is `campaigns/data/alr/md`.
+* **tleap**, which `pip` cannot install. AmberTools is not on PyPI, so it comes from a cluster
+  module (export `AMBERHOME`), a conda-forge `ambertools` environment, or a user build.
+  `delta_env_setup.sh` prints which of the three resolved.
+
+**`dg_mmgbsa` is not a ΔG_bind and is not `dg_abfe`.** It is an interaction enthalpy plus
+solvation with no entropy term, in kcal/mol, and it is deliberately **absent from
+`PROPERTY_FOR_METRIC`**, so the measurement bridge refuses to ingest it. It is a cheap score and
+a candidate prior for Model C's residual, not a measurement that supersedes a prediction.
+
+**`abfe_label`'s `entry:` class raises with a message naming what is missing**, and that is
+deliberate: a label tool that returned plausible numbers on a laptop would be the most expensive
+silent failure in this project, because its output supersedes a prediction and is never
+recomputed.

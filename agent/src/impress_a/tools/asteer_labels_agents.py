@@ -1,14 +1,20 @@
-"""The two physics-label adapters: declared in full, implemented not at all, refusing loudly.
+"""The two physics-label adapters. **`md_label` now runs; `abfe_label` still refuses.**
 
-`toolkits/asteer_labels/` declares `md_label` and `abfe_label` completely — ports, parameters,
-metrics, QC gates, cost models — and `ToolSpec.entry` points here. The protocol bodies do not
-exist yet: they need MD and ATM binaries, a GPU and an allocation, and none of that is reachable
-from a laptop.
+`toolkits/asteer_labels/` declares both tools completely — ports, parameters, metrics, QC gates,
+cost models — and `ToolSpec.entry` points here.
 
-**So these agents refuse, and the refusal is the deliverable.** The alternative shapes are both
-worse:
+**K6 (2026-11-24) gave `md_label` a body.** `impress_a.md` is the protocol: tleap builds an apo
+and a holo leg, OpenMM equilibrates and runs a seeded replicate ensemble, the three labels and
+the convergence telemetry come out of the frames with a σ from the replicate spread, and MM/GBSA
+takes free-energy samples from the same frames. `MDLabelAgent.run` composes those four steps
+through `impress_a.md.protocol.measure` and reports what it measured. **It needs tleap**, which
+is not pip-installable — `delta_env_setup.sh` reports where it resolved from, and the agent
+refuses by name when it is absent rather than part-way through a build.
 
-* **Not declaring the tools until the bodies exist** would leave the chain's types, metric names
+**`abfe_label` still refuses, and the refusal is still the deliverable.** It needs an
+ATM/alchemical engine that nothing here has, and the alternative shapes are both worse:
+
+* **Not declaring the tool until the body exists** would leave the chain's types, metric names
   and gates unsettled through three more episodes — the thing EI.21 was written to stop. A
   `ToolSpec` is checkable without its adapter: the registry loads it, gate 1 types the chain, gate
   2 demands its QC gates, gate 5 reads its cost model. All of that is worth having now.
@@ -41,6 +47,7 @@ of their kind here.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .agent import TaskAgent, TaskRequest
@@ -109,6 +116,56 @@ def _require_structure(spec_id: str, req: Any, params: dict[str, Any]) -> str:
     )
 
 
+def _require_md_params(spec_id: str, params: dict[str, Any]) -> str:
+    """K1's parameter artifact, passed explicitly. **Never defaulted.**
+
+    `ligand_params_path` beside it is a *Rosetta* `.params` — atom types and charges for
+    Rosetta's scoring function, from which nothing transfers to an MD force field. This is the
+    directory holding `ligand_parameters.json`, `ligand.mol2` and `ligand.frcmod`, and it is
+    what says the ligand is GAFF2/AM1-BCC rather than CGenFF. A default here would let a run
+    inherit a force field by accident, and a force field is part of what a measured number
+    means — which is the whole content of K1's determination.
+    """
+    path = str(params.get("md_params_dir") or "").strip()
+    if not path:
+        raise MissingRootInput(
+            f"{spec_id}: no md_params_dir. The MD protocol needs K1's parameter artifact — the "
+            "directory with ligand_parameters.json, ligand.mol2 and ligand.frcmod — and it is "
+            "not defaulted, because that artifact is what records the force field and a force "
+            "field is part of what a measured number means. The committed one for ALR is "
+            "IMPRESS/agent/campaigns/data/alr/md. `ligand_params_path` is NOT it: that is a "
+            "Rosetta .params file and nothing transfers from it"
+        )
+    if not os.path.isdir(path):
+        raise MissingRootInput(f"{spec_id}: md_params_dir {path} is not a directory")
+    return path
+
+
+def _require_tleap(spec_id: str, params: dict[str, Any]) -> str:
+    """tleap, by where it resolved from. The one dependency `pip install` cannot supply.
+
+    Checked here rather than inside the build because tleap's own answer to a problem is
+    `Fatal Error` followed by exiting 0, and a task that has already spent minutes solvating
+    is an expensive place to discover a missing binary.
+    """
+    import shutil  # noqa: PLC0415
+
+    amberhome = str(params.get("amberhome") or os.environ.get("AMBERHOME", ""))
+    if amberhome and os.path.exists(os.path.join(amberhome, "bin", "tleap")):
+        return os.path.join(amberhome, "bin", "tleap")
+    found = shutil.which("tleap")
+    if found:
+        return found
+    raise LabelAdapterNotImplemented(
+        f"{spec_id}: tleap is not on PATH and AMBERHOME does not hold it. The MD protocol "
+        "builds both legs with AmberTools and there is deliberately no second path — a system "
+        "assembled two ways is a ligand whose parameters exist in two formats. AmberTools is "
+        "not installable from PyPI, so it comes from a cluster module, a conda-forge "
+        "`ambertools` environment, or a user build; `delta_env_setup.sh` prints which of those "
+        "resolved. The twin for a laptop run with no AmberTools is `mock_md_label`"
+    )
+
+
 def _refuse(spec_id: str, needs: str, owner: str) -> LabelAdapterNotImplemented:
     return LabelAdapterNotImplemented(
         f"{spec_id}: the ToolSpec is complete but the protocol body is not implemented. "
@@ -120,22 +177,50 @@ def _refuse(spec_id: str, needs: str, owner: str) -> LabelAdapterNotImplemented:
 
 
 class MDLabelAgent(TaskAgent):
-    """Apo + holo MD, 30 ns total → the three quantities Model B predicts.
+    """Apo + holo MD → the three quantities Model B predicts, each with a measured σ.
 
-    Would produce: `preorg_rmsd`, `rotamer_entropy`, `ligand_rmsf`, plus the convergence
-    telemetry the integrity gate reads — and two artifacts, a `Trajectory` and the
-    equilibrated holo frame as a `Complex`, the second of which is what makes
+    Produces `preorg_rmsd`, `rotamer_entropy` and `ligand_rmsf`, the convergence telemetry the
+    integrity gate reads, `dg_mmgbsa` when `mmgbsa` is on, and two artifacts — a `Trajectory`
+    and the equilibrated holo frame as a `Complex`, the second of which is what makes
     `[md_label, abfe_label]` pass gate 1 at all.
+
+    **Three things it refuses by name, before any physics runs.** A missing `design_dir`, which
+    nothing upstream checks; a missing `md_params_dir`, because K1's artifact is what records
+    that this ligand is GAFF2 and not CGenFF and **a force field is part of what a measured
+    number means**; and a missing tleap, which is the one dependency `pip` cannot supply, so it
+    is worth a sentence rather than a stack trace from inside a build.
+
+    **A sigma is reported for every metric that has one**, under `sigmas` rather than as a
+    metric. `LabelRecord.sigma` is where the replicate spread is consumed, and
+    `labels_workflow.POSTERIOR_ONLY` refuses `sigma_*` as a metric name on purpose: a sigma
+    describes a distribution, not a molecule.
     """
 
     async def run(self, req: TaskRequest, params: dict[str, Any]) -> dict[str, Any]:
-        _require_design_dir(self.spec.id, params)
-        raise _refuse(
-            self.spec.id,
-            "an MD engine, a GPU, and the ligand's own .params file (whose resname may be the "
-            "literal `A:R`)",
-            "item 20's remaining half, at M3",
+        from ._subprocess import workdir_for  # noqa: PLC0415
+
+        design_dir = _require_design_dir(self.spec.id, params)
+        params_dir = _require_md_params(self.spec.id, params)
+        _require_tleap(self.spec.id, params)
+        from ..md import protocol  # noqa: PLC0415
+
+        work = workdir_for(req, "md_label")
+        measured = protocol.measure(
+            design_dir=design_dir,
+            params_dir=params_dir,
+            out_dir=str(work),
+            apo_ns=float(params.get("apo_ns", 15.0)),
+            holo_ns=float(params.get("holo_ns", 15.0)),
+            md_replicates=int(params.get("md_replicates") or 1),
+            # `req.seed` and not a draw: the engine owns the seed, and two replicates are only
+            # independent if the per-replica derivation gets a stable base to mix.
+            seed=int(params.get("seed") or getattr(req, "seed", None) or 0),
+            mmgbsa=bool(params.get("mmgbsa", True)),
+            mmgbsa_stride=int(params.get("mmgbsa_stride") or 1),
+            amberhome=str(params.get("amberhome") or ""),
         )
+        measured.save()
+        return protocol.as_task_result(measured)
 
 
 class ABFELabelAgent(TaskAgent):
