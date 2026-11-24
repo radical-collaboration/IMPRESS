@@ -62,6 +62,10 @@ class ReasonerOptions:
     #: default, which is the MOCK chain - so a campaign naming real toolkits would load
     #: them, validate them, and then execute mocks.
     stages: list[str] | None = None
+    #: Ordering-only dependencies, tool id -> the tool ids it must follow. Forwarded to
+    #: whichever planner does the wiring, which is always `ThresholdPlanner` -- every other
+    #: planner composes one for exactly that reason.
+    after: dict[str, list[str]] | None = None
     #: Model C only: how long a half blocks on the control plane, and what it does when
     #: nothing arrives. `hold | fallback | stop`.
     #:
@@ -171,8 +175,8 @@ def _plan_d(o: ReasonerOptions) -> ThresholdPlanner:
     campaign declaring no `replicas` gets.
     """
     if o.replicas:
-        return ThresholdPlanner(stages=o.stages, base_replicas=o.replicas)
-    return ThresholdPlanner(stages=o.stages)
+        return ThresholdPlanner(stages=o.stages, after=o.after, base_replicas=o.replicas)
+    return ThresholdPlanner(stages=o.stages, after=o.after)
 
 
 def _spec_a(o: ReasonerOptions) -> AgenticSpecifier:
@@ -188,7 +192,7 @@ def _spec_a(o: ReasonerOptions) -> AgenticSpecifier:
 
 def _plan_a(o: ReasonerOptions) -> AgenticPlanner:
     """Model A's Planner half: node 2, as `select_tasks -> parameterize`."""
-    return AgenticPlanner(stages=o.stages, reasoner=o.reasoner, sink=o.sink,
+    return AgenticPlanner(stages=o.stages, after=o.after, reasoner=o.reasoner, sink=o.sink,
                           base_replicas=o.replicas)
 
 
@@ -205,7 +209,7 @@ def _plan_c(o: ReasonerOptions) -> ExternalPlanner:
     planner in the object graph of an arm whose whole claim is that it never runs one.
     """
     fallback = (o.fallback or _plan_d(o)) if o.on_timeout == "fallback" else None
-    return ExternalPlanner(stages=o.stages, timeout_s=o.timeout_s,
+    return ExternalPlanner(stages=o.stages, after=o.after, timeout_s=o.timeout_s,
                            on_timeout=o.on_timeout, fallback=fallback, sink=o.sink,
                            base_replicas=o.replicas)
 
@@ -242,7 +246,7 @@ def _spec_b(o: ReasonerOptions) -> OracleSpecifier:
 
 def _plan_b(o: ReasonerOptions) -> OraclePlanner:
     """Model B's Planner half: one `STAGE_SCHEMA` call per planning round."""
-    return OraclePlanner(stages=o.stages, oracle=_oracle(o),
+    return OraclePlanner(stages=o.stages, after=o.after, oracle=_oracle(o),
                          fallback=o.fallback or _plan_d(o), sink=o.sink,
                          base_replicas=o.replicas)
 

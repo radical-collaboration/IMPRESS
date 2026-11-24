@@ -107,6 +107,7 @@ def load_spec(path: str | Path) -> CampaignSpec:
         target_front=int(d.get("target_front", 0)),
         tool_delivery=d.get("tool_delivery", "any"),
         stages=d.get("stages", []) or [],
+        after={k: list(v) for k, v in (d.get("after", {}) or {}).items()},
         params=_resolve_path_params(d.get("params", {}) or {}, Path(path).resolve().parent),
         # 0, not 1: `replicas` is a CAP, and defaulting it to 1 would silently
         # narrow every campaign that never mentioned it.
@@ -264,7 +265,9 @@ def _options_for(spec: CampaignSpec,
     """
     client = _client_for(profile, spec)
     return reasoners.ReasonerOptions(
-        stages=list(spec.stages) or None, records=records,
+        stages=list(spec.stages) or None,
+        after={k: list(v) for k, v in (spec.after or {}).items()} or None,
+        records=records,
         spec_records=spec_records, stage_records=stage_records,
         oracle=client, reasoner=client,
         # The subscriber `ReasonerOptions.sink` never had. Every writer existed - the

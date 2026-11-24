@@ -54,7 +54,8 @@ class ExternalPlanner(BasePlanner):
 
     def __init__(self, stages: list[str] | None = None, timeout_s: float = 5.0,
                  on_timeout: str = "stop", fallback: Any = None, sink: Any = None,
-                 base_replicas: int = 0) -> None:
+                 base_replicas: int = 0,
+                 after: dict[str, list[str]] | None = None) -> None:
         if on_timeout not in ON_TIMEOUT:
             raise ValueError(f"on_timeout must be one of {ON_TIMEOUT}")
         if on_timeout == "fallback" and fallback is None:
@@ -73,7 +74,7 @@ class ExternalPlanner(BasePlanner):
         #: model that does name a width still wins, clamped by `CampaignSpec.replicas` in the
         #: executor as before. 0 keeps the mechanics' own default (backlog G13).
         self._mechanics = ThresholdPlanner(
-            stages=stages,
+            stages=stages, after=after,
             **({"base_replicas": base_replicas} if base_replicas else {}))
 
     @property

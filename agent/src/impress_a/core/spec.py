@@ -317,6 +317,21 @@ class TaskMapping(BaseModel):
     #: composer and - from phase 4 - honoured by the dispatcher rather than re-keyed
     #: positionally.
     inputs: dict[str, str] = Field(default_factory=dict)
+    #: Task ids in this same Stage that this Task must follow, with **no typed port behind
+    #: the edge**. An ordering-only dependency is a real edge: the composer puts it in
+    #: `TaskNode.deps`, so the executor waits for it, and the dispatcher hands its payload
+    #: over as `dep{i}` in `TaskRequest.inputs`.
+    #:
+    #: It exists because a `TaskRequest` reaches only the tasks wired directly to it, and a
+    #: linear chain wires each stage to the one before. A tool that must *read* what an
+    #: earlier stage measured -- Model C's client, which featurises on ten metrics produced
+    #: by six different stages -- had no way to see them at all. Declaring the edge is the
+    #: cheapest of the three ways out, and the only one that needs no change to the shape of
+    #: a `TaskRequest`.
+    #:
+    #: Deliberately not an input: these carry no artifact, so giving them a port would make
+    #: gate 1 type-check an edge that has nothing to type.
+    after: list[str] = Field(default_factory=list)
     lineage: int = 0
     seed: int | None = None
     directive: TaskDirective = TaskDirective.RUN

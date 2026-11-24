@@ -122,6 +122,30 @@ stages: [mock_liganchor_propose, mock_rfd3_steered_design,
          mock_mpnn_design, mock_packmin, mock_fastrelax, mock_filter_shape, mock_boltz_predict,
          mock_preorg_score, mock_affdelta_score]
 
+# ORDERING-ONLY DEPENDENCIES: real edges with no typed port behind them.
+#
+# A `TaskRequest` reaches only the tasks wired directly to it, and the composer wires a linear
+# stage to the one before it. So `mock_affdelta_score` saw `mock_preorg_score`'s metrics and
+# nothing else -- and Model C's featuriser (`chain-metrics-1`) names ten metrics produced by
+# six different stages, so it refused nine of its ten columns by name on every request. That
+# was backlog item 79.
+#
+# These six edges are what the client reads, and nothing else changes: no artifact crosses
+# them, the chain's order is unchanged (every one of these already ran before this stage), and
+# gate 1 type-checks nothing new, because there is nothing here to type. The payload of each
+# arrives as `dep{i}` in `TaskRequest.inputs`, which `AffDeltaScoreAgent._chain_metrics` keys
+# by each payload's own `result` -- the producing tool id -- rather than by the port it came
+# in on.
+#
+# **`mock_preorg_score` is deliberately absent.** It runs immediately before this stage and
+# its four metrics are right there, but a Model C corpus row built from them would depend on
+# which Model B version was promoted when the row was written, so two rows a round apart would
+# not be comparable and nothing in the artifact would say so. C corrects a cheap affinity
+# score; it does not regress on another surrogate's drifting output.
+after:
+  mock_affdelta_score: [mock_rfd3_steered_design, mock_mpnn_design, mock_packmin,
+                        mock_fastrelax, mock_filter_shape, mock_boltz_predict]
+
 params:
   mock_liganchor_propose:
     # KNOB: how many ligand atoms the anchor set may engage. A CEILING, not a target -- a

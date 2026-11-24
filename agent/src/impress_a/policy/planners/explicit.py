@@ -77,7 +77,8 @@ class ThresholdPlanner(BasePlanner):
     name = "threshold-plan"
 
     def __init__(self, stages: list[str] | None = None, base_replicas: int = 2,
-                 escalation_steps: int = ESCALATION_STEPS) -> None:
+                 escalation_steps: int = ESCALATION_STEPS,
+                 after: dict[str, list[str]] | None = None) -> None:
         #: The campaign's enabled tools, in the campaign's order. A Planner may use a SUBSET -
         #: whatever the ready objectives need - but never a tool the campaign did not enable,
         #: which is the mock-chain-on-a-GPU failure in another form.
@@ -91,6 +92,15 @@ class ThresholdPlanner(BasePlanner):
         #: one, and `cli._check_ligand_smiles` plus phase 10's gate 6 are what catch a real
         #: campaign that forgot to declare its stages.
         self.stages = list(stages or SELF_CONSISTENCY)
+        #: Ordering-only edges the campaign declared, tool id -> the tool ids it must follow.
+        #: Resolved to task ids per lineage in `plan`, and narrowed to the tools that actually
+        #: made it into the chain -- an edge to a tool this Stage did not plan is not an edge.
+        #:
+        #: **Here rather than in `_resolve`** because `_resolve` decides typed wiring, which is
+        #: a question about artifact types, and this is a question about what a tool reads off
+        #: the design node. Mixing them would make `_resolve` answer two different questions
+        #: and give an untyped edge somewhere to hide.
+        self.after = {k: list(v) for k, v in (after or {}).items()}
         self.base_replicas = max(1, base_replicas)
         self.escalation_steps = max(1, escalation_steps)
         #: How many refinement Stages this planner has emitted. The escalation index.
@@ -150,6 +160,7 @@ class ThresholdPlanner(BasePlanner):
                     params=self._params(view.tools[tool], refining),
                     inputs={port: f"{ids[src]}.{out}"
                             for port, (src, out) in wiring.get(tool, {}).items()},
+                    after=[ids[t] for t in self.after.get(tool, ()) if t in ids],
                     lineage=lineage))
 
         return Stage(

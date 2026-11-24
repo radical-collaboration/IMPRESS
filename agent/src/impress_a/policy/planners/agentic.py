@@ -110,7 +110,8 @@ class AgenticPlanner(BasePlanner):
 
     def __init__(self, stages: list[str] | None = None, reasoner: Any = None,
                  sink: Any = None, max_lineages: int = 4,
-                 base_replicas: int = 0) -> None:
+                 base_replicas: int = 0,
+                 after: dict[str, list[str]] | None = None) -> None:
         self.reasoner = reasoner
         self.sink = sink
         #: A planner's own ceiling on breadth, beside the campaign's `replicas` cap. The cap
@@ -122,7 +123,7 @@ class AgenticPlanner(BasePlanner):
         #: model that does name a width still wins, clamped by `CampaignSpec.replicas` in the
         #: executor as before. 0 keeps the mechanics' own default (backlog G13).
         self._mechanics = ThresholdPlanner(
-            stages=stages,
+            stages=stages, after=after,
             **({"base_replicas": base_replicas} if base_replicas else {}))
         #: The campaign's declared lineage width, 0 when it declared none. Held here as
         #: well as on the mechanics because this planner chooses a width of its own and has

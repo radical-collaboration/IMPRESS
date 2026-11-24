@@ -739,3 +739,102 @@ async def test_both_replay_halves_refuse_to_be_built_without_records(reg):
     with pytest.raises(ValueError, match="no `initial` event"):
         await ReplaySpecifier([{"event": "revision", "generation": 2}]).initial_spec(
             Goal(text="x"))
+
+
+# ---------------------------------------------------------------------------
+# Ordering-only dependencies (item 79)
+#
+# The edge is declared on `mock_fold` and not on `mock_score`, because `_plan`'s objectives
+# are satisfied by `mock_fold` and the planner narrows the chain to the subset the ready
+# objectives need -- so `mock_score` is never planned at all. That makes it the right tool
+# for the "an edge to a tool nobody planned" case below, and the wrong one for every other.
+
+
+async def test_a_declared_ordering_edge_becomes_a_dep_and_never_an_input(reg):
+    """**The item-79 fix, at the planner.**
+
+    A `TaskRequest` reaches only the tasks wired directly to it, and the composer wires a
+    linear stage to the one before it. So Model C's client saw one stage's metrics and refused
+    the other nine of its ten columns by name. A campaign can now declare the edge, and it is
+    a *dependency* rather than an input: no artifact crosses it, so giving it a port would
+    make gate 1 type-check an edge with nothing to type.
+    """
+    _, _, stage = await _plan(reg, after={"mock_fold": ["mock_generate"]})
+    by_tool = {t.tool: t for t in stage.tasks if t.lineage == 0}
+    fold, generate = by_tool["mock_fold"], by_tool["mock_generate"]
+    assert fold.after == [generate.task_id]
+    assert generate.task_id not in str(fold.inputs), (
+        "an ordering-only edge carries no artifact and must not appear as an input"
+    )
+    assert all(not t.after for t in stage.tasks if t.tool != "mock_fold")
+
+
+async def test_an_ordering_edge_to_a_tool_the_stage_did_not_plan_is_simply_not_an_edge(reg):
+    """A chain that ran a subset of its tools is the ordinary case, not an error.
+
+    `mock_score` is in `CHAIN` and is not planned, because nothing among the ready objectives
+    needs it -- so this is the real case rather than an invented one.
+    """
+    _, _, stage = await _plan(reg, after={"mock_fold": ["mock_score", "mock_generate"]})
+    fold = next(t for t in stage.tasks if t.tool == "mock_fold" and t.lineage == 0)
+    assert len(fold.after) == 1, fold.after
+    assert "mock_score" not in str(fold.after)
+
+
+async def test_an_ordering_edge_is_resolved_per_lineage(reg):
+    """Two independent chains must not be joined by an edge meant to stay inside one."""
+    _, _, stage = await _plan(reg, base_replicas=2, after={"mock_fold": ["mock_generate"]})
+    for lineage in (0, 1):
+        tasks = {t.tool: t for t in stage.tasks if t.lineage == lineage}
+        assert tasks["mock_fold"].after == [tasks["mock_generate"].task_id]
+
+
+async def test_the_composer_turns_a_declared_edge_into_a_graph_dependency(reg):
+    """And the executor waits for it, because `deps` is what `topo_order` reads."""
+    from impress_a.compose.composer import Composer
+
+    _, _, stage = await _plan(reg, after={"mock_fold": ["mock_generate"]})
+    graph = Composer(reg).compose_stage(stage)
+    by_tool = {n.tool: n for n in graph.nodes.values() if n.lineage == 0}
+    fold, generate = by_tool["mock_fold"], by_tool["mock_generate"]
+    assert generate.id in fold.deps
+    assert all(not ref.startswith(f"{generate.id}.") for ref in fold.inputs.values())
+    assert fold.inputs, "declaring an ordering edge must not cost a task its wired input"
+    graph.topo_order()  # raises on a cycle; gate 2 relies on it
+
+
+async def test_a_task_with_only_an_ordering_edge_still_gets_its_artifact_wired(reg):
+    """The linear fallback keys on `inputs`, not on `deps`.
+
+    Keyed on `deps` it would see a task that declared `after` as already wired and give it no
+    artifact at all -- a task running against nothing, with every gate passing.
+    """
+    from impress_a.compose.composer import Composer
+
+    _, _, stage = await _plan(reg, after={"mock_fold": ["mock_generate"]})
+    graph = Composer(reg).compose_stage(stage)
+    by_tool = {n.tool: n for n in graph.nodes.values() if n.lineage == 0}
+    fold, design = by_tool["mock_fold"], by_tool["mock_design"]
+    assert any(ref.startswith(f"{design.id}.") for ref in fold.inputs.values()), (
+        f"mock_fold lost its typed input from mock_design: {fold.inputs}"
+    )
+    assert design.id in fold.deps
+
+
+async def test_the_asd_campaign_declares_the_six_edges_model_c_reads(reg):
+    """The declaration itself, read from the campaign file rather than restated here.
+
+    `mock_preorg_score` is deliberately absent: a Model C corpus row built from Model B's
+    output would depend on which B version was promoted when the row was written.
+    """
+    from pathlib import Path
+
+    from impress_a.cli import load_spec
+
+    spec = load_spec(str(Path(__file__).resolve().parents[1] / "campaigns"
+                        / "asd-smb-mock.yaml"))
+    after = spec.after["mock_affdelta_score"]
+    assert set(after) == {"mock_rfd3_steered_design", "mock_mpnn_design", "mock_packmin",
+                          "mock_fastrelax", "mock_filter_shape", "mock_boltz_predict"}
+    assert "mock_preorg_score" not in after
+    assert all(tool in spec.stages for tool in after)

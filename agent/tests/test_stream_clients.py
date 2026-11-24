@@ -503,23 +503,49 @@ def test_model_bs_features_carry_no_chain_metric():
     assert set(features) == {"structure", "pocket_selection"}
 
 
-def test_the_chain_metrics_the_graph_wires_today_are_one_stages_worth():
-    """**Backlog item 79, asserted rather than described.**
+def test_the_wired_chain_fills_every_column_model_c_names():
+    """**Backlog item 79, closed and asserted end to end.**
 
-    `compose/composer.py` wires a linear stage to the one before it, so `affdelta_score`
-    reaches `preorg_score` and nothing else. Assembling from what arrived is correct and
-    keeps being correct when the campaign declares more; what it cannot do today is fill
-    `chain-metrics-1`, which is why `FEATURISER_FOR_MODEL["aff_delta"]` is still the
-    stand-in. If this test starts failing because more stages arrive, that is the item
-    closing.
+    Until the campaign declared its ordering-only edges, `affdelta_score` reached
+    `preorg_score` and nothing else, and `chain-metrics-1` refused nine of its ten columns by
+    name. The six `dep{i}` payloads are what the declaration buys, and this drives the real
+    featuriser over the real agent's own output rather than asserting the shape twice.
     """
-    from asteer.features import FEATURISER_FOR_MODEL
+    from asteer.features import FEATURISER_FOR_MODEL, embed
 
     features = _features_of(_affdelta(), {
-        "structure": _upstream("preorg_score", {"preorg_rmsd": 1.21, "rotamer_entropy": 2.33}),
+        # The typed edge: `affdelta_score` consumes preorg_score's `structure`.
+        "structure": _upstream("mock_preorg_score",
+                               {"preorg_rmsd": 1.21, "rotamer_entropy": 2.33}),
+        # The six ordering-only edges `asd-smb-mock.yaml` declares.
+        "dep0": _upstream("mock_rfd3_steered_design", {"ss_fraction": 0.63, "num_models": 1.0}),
+        "dep1": _upstream("mock_mpnn_design",
+                          {"overall_confidence": 0.51, "ligand_confidence": 0.47}),
+        "dep2": _upstream("mock_packmin", {"total_score": 145.3}),
+        "dep3": _upstream("mock_fastrelax", {"total_score": -336.0, "fa_rep": 119.1,
+                                             "interaction_energy": -26.4}),
+        "dep4": _upstream("mock_filter_shape", {"shape_complementarity": 0.69}),
+        "dep5": _upstream("mock_boltz_predict", {"complex_plddt": 0.751, "ligand_iptm": 0.42}),
     })
-    assert sorted(features["chain_metrics"]) == ["preorg_score"]
-    assert FEATURISER_FOR_MODEL["aff_delta"] == "standin-1", (
-        "item 79: Model C cannot be switched to chain-metrics-1 until the graph wires the "
-        "stages whose metrics it names"
-    )
+    assert FEATURISER_FOR_MODEL["aff_delta"] == "chain-metrics-1"
+    vector = embed(features, featuriser="chain-metrics-1")
+    assert vector == [-26.4, -336.0, 119.1, 145.3, 0.69, 0.751, 0.42, 0.51, 0.47, 0.63]
+
+
+def test_model_b_s_metrics_reach_the_payload_and_no_column_reads_them():
+    """`preorg_score` is the typed dep, so its metrics arrive whether or not C wants them.
+
+    They are **available and unused**: `chain-metrics-1` names no column from Model B, because
+    a Model C corpus row built from B's output would depend on which B version was promoted
+    when the row was written. The agent does not filter them out -- deciding what is a feature
+    is the featuriser's job, and a second copy of that decision here is a second thing to keep
+    in step.
+    """
+    features = _features_of(_affdelta(), {
+        "structure": _upstream("mock_preorg_score", {"preorg_rmsd": 1.21}),
+    })
+    assert features["chain_metrics"]["mock_preorg_score"] == {"preorg_rmsd": 1.21}
+
+    from asteer.features_impl.chain_metrics import SOURCES
+
+    assert not any(tool.endswith("preorg_score") for tool, _ in SOURCES.values())

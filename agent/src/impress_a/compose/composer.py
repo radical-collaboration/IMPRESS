@@ -117,9 +117,18 @@ class Composer:
                 if dep_id in by_id:
                     deps.append(dep_id)
                     inputs[port] = ref
+            # Ordering-only edges: real dependencies with no typed port behind them, so they
+            # go in `deps` and never in `inputs`. The dispatcher hands each one's payload over
+            # as `dep{i}`, which is how a task reads what a stage it does not consume an
+            # artifact from actually measured. A task id this Stage does not hold is dropped
+            # rather than refused: a chain that ran a subset of its tools is the ordinary
+            # case, and an ordering edge to a tool nobody planned is simply not an edge.
+            deps.extend(t for t in mapping.after if t in by_id and t not in deps)
             # A mapping that named no inputs but follows another task in its own lineage is
-            # the common linear case; wire it the way `compose` does, by type.
-            if not deps:
+            # the common linear case; wire it the way `compose` does, by type. Checked on
+            # `inputs` and not on `deps`, because an ordering-only edge is not a typed
+            # predecessor: a task that declared only `after` still needs its artifact wired.
+            if not inputs:
                 prior = [m for m in runs if m.lineage == mapping.lineage
                          and m.task_id != mapping.task_id
                          and runs.index(m) < runs.index(mapping)]
@@ -131,8 +140,8 @@ class Composer:
                                       if os_.type.unifies_with(ps.type)), None)
                         if match:
                             inputs[port] = f"{prev.task_id}.{match}"
-                    if inputs:
-                        deps = [prev.task_id]
+                    if inputs and prev.task_id not in deps:
+                        deps.append(prev.task_id)
             # A task with no upstream dependency in this graph is a root, and a root in a
             # REFINEMENT stage starts from the parent design rather than from nothing. Matched
             # by declared type, the same unification rule gate 1 uses, so a Complex can

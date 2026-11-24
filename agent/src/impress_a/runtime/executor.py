@@ -250,6 +250,16 @@ class CampaignSpec:
     # the SCIENTIFIC QUESTION rather than the search strategy. Merged beneath whatever
     # a policy asks for, so a policy never has to know a tool's parameter names.
     params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Ordering-only dependencies: tool id -> the tool ids it must run after, with no typed
+    # port between them. A campaign-level declaration because it is a fact about THIS
+    # chain -- which stages exist and what they measure -- rather than about the tool, and a
+    # tool spec naming other toolkits' tool ids would couple them.
+    #
+    # Model C's client is what it exists for: `affdelta_score` featurises on ten metrics
+    # produced by six different stages, and a `TaskRequest` reaches only the tasks wired
+    # directly to it. Without this it saw one stage's metrics and refused the other nine
+    # columns by name.
+    after: dict[str, list[str]] = field(default_factory=dict)
     replicas: int = 0         # cap on lineages per experiment; 0 = policy decides
 
 
