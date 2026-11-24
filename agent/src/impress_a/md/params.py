@@ -15,11 +15,20 @@ on this machine**. Typing needs ParamChem, which is a web service wanting networ
 account: the same operational shape as PLINDER, and not something a protocol body can assume.
 
 So the offline route is taken and **named in the artifact**: GAFF2 via the installed AmberTools,
-with AM1-BCC charges from `sqm`, mixed with a CHARMM36m protein through ParmEd. That is a
-defensible compromise and an indefensible silence -- *a force field is part of what a measured
-number means*, so `force_field` is a required field of the artifact and travels into every
-label's provenance. A `preorg_rmsd` measured under GAFF2 and one measured under CGenFF are two
-measurements, and a corpus that mixed them without saying so would be one number.
+with AM1-BCC charges from `sqm`, **and an ff14SB protein to match it** -- one family, one set of
+combining rules, one nonbonded convention.
+
+**Not "mixed with a CHARMM36m protein through ParmEd", which is what the pre-K1 plan proposed and
+is a nonstarter.** Two families have different combining rules, different 1-4 scaling and
+different nonbonded conventions; no single set of cutoffs is right for both, so the result is not
+a usable measurement however cleanly ParmEd joins the topologies. ParmEd is not in this
+protocol's path at all, `system.nonbonded_for` **refuses a mixed pair by name**, and a test reads
+every tleap script this project writes and refuses a parameter source naming a CHARMM file.
+
+That compromise is defensible and silence about it would not be -- *a force field is part of what
+a measured number means* -- so `force_field` is a required field of the artifact and travels into
+every label's provenance. A `preorg_rmsd` measured under GAFF2 and one measured under CGenFF are
+two measurements, and a corpus that mixed them without saying so would be one number.
 
 ### What the artifact records, and why each line is there
 
@@ -68,6 +77,14 @@ FRCMOD_NAME = "ligand.frcmod"
 #: CGenFF + CHARMM36m run later is a *different measurement* and not a refinement of this one,
 #: and `force_field` plus `protein_force_field` travel into every label's provenance so a
 #: corpus cannot mix them silently.
+#:
+#: **2026-11-24: this is a stopgap against a directive, and the directive is CHARMM.** The
+#: reasoning above answers "what pairs with GAFF2" when the decision was "which family types the
+#: ligand", and that was settled by what happened to be installed. Measured the same day:
+#: CHARMM36m and CHARMM-modified TIP3P build and solvate this protein offline through OpenMM's
+#: bundled `charmm36.xml` with `pdbfixer` repairing the termini, and VMD provides `psfgen`. The
+#: only blocker is CGenFF typing for ALR -- one ParamChem round-trip, by hand, once, because
+#: there is one ligand across every archive. The switch is episode K7.
 PROTEIN_FORCE_FIELD = "ff14sb"
 WATER_MODEL = "tip3p"
 

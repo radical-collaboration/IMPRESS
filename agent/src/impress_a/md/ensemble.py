@@ -38,6 +38,8 @@ from typing import Any, Dict, List, Optional
 
 from .system import (
     CUTOFF_NM,
+    apply_dispersion_correction,
+    nonbonded_for,
     FRICTION_PER_PS,
     HMR_TIMESTEP_FS,
     LegPaths,
@@ -133,16 +135,21 @@ def run_replicate(
     os.makedirs(directory, exist_ok=True)
     seed = seed_for(leg.leg, index, base_seed)
 
+    # The convention this leg was built under. See `system.NONBONDED`: a production run that
+    # used different cutoffs from its own equilibration would be measuring a third system.
+    nonbonded = leg.nonbonded or nonbonded_for(
+        leg.force_fields.get("protein", "ff14sb"), leg.force_fields.get("ligand", "gaff2"))
     prmtop = app.AmberPrmtopFile(leg.prmtop)
     # **No barostat.** See the module docstring: not added and disabled, not added at all.
     system = prmtop.createSystem(
         nonbondedMethod=app.PME,
-        nonbondedCutoff=CUTOFF_NM * unit.nanometer,
-        switchDistance=SWITCH_NM * unit.nanometer,
+        nonbondedCutoff=nonbonded["cutoff_nm"] * unit.nanometer,
+        switchDistance=nonbonded["switch_nm"] * unit.nanometer,
         constraints=app.HBonds,
         rigidWater=True,
         hydrogenMass=(3.0 * unit.amu if hmr else None),
     )
+    apply_dispersion_correction(system, nonbonded)
     femtoseconds = HMR_TIMESTEP_FS if hmr else TIMESTEP_FS
     integrator = openmm.LangevinMiddleIntegrator(
         TEMPERATURE_K * unit.kelvin, FRICTION_PER_PS / unit.picosecond,

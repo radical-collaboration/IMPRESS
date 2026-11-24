@@ -22,6 +22,7 @@ from impress_a.md import analysis, ensemble  # noqa: E402
 from impress_a.md.params import LigandParameters  # noqa: E402
 from impress_a.md.system import (  # noqa: E402
     CUTOFF_NM,
+    nonbonded_for,
     LEGS,
     SWITCH_NM,
     SystemBuildFailed,
@@ -126,11 +127,90 @@ def test_a_holo_build_from_an_apo_structure_is_refused(tmp_path):
                   out_dir=str(tmp_path / "build"))
 
 
-def test_the_cutoff_and_the_switch_are_the_charmm_standard_pairing():
-    """A hard cutoff puts a step in the force at 1.2 nm, and the drift that follows is what
-    `energy_drift_kcal_per_ns` would then report as a broken instrument."""
-    assert (CUTOFF_NM, SWITCH_NM) == (1.2, 1.0)
-    assert SWITCH_NM < CUTOFF_NM
+def test_the_nonbonded_convention_follows_the_force_field_family():
+    """**This test asserted the opposite until 2026-11-24, and that was the defect.**
+
+    It was called `test_the_cutoff_and_the_switch_are_the_charmm_standard_pairing` and pinned
+    1.2/1.0 — CHARMM's convention — on a system whose every parameter comes from Amber. That is
+    not parameter mixing: every tleap script here loads `leaprc.protein.ff14SB`,
+    `leaprc.gaff2` and `leaprc.water.tip3p` and nothing else. But it ran Amber parameters under
+    a nonbonded treatment they were not fitted with, which is its own error.
+
+    The two rows differ in all three columns, which is the point: Amber was fitted with an
+    abrupt 0.8–1.0 nm cutoff **plus** an analytic dispersion correction, CHARMM with 1.2 nm
+    switching from 1.0 and **no** correction.
+    """
+    amber = nonbonded_for("ff14sb", "gaff2")
+    assert (amber["cutoff_nm"], amber["switch_nm"]) == (1.0, 0.0)
+    assert amber["dispersion_correction"] is True, (
+        "Amber's Lennard-Jones parameters assume the long-range correction is on"
+    )
+    charmm = nonbonded_for("charmm36m", "cgenff")
+    assert (charmm["cutoff_nm"], charmm["switch_nm"]) == (1.2, 1.0)
+    assert charmm["dispersion_correction"] is False
+    # The module constants are the row for the family this protocol builds today.
+    assert (CUTOFF_NM, SWITCH_NM) == (amber["cutoff_nm"], amber["switch_nm"])
+
+
+@pytest.mark.parametrize(
+    ("protein", "ligand"),
+    [("charmm36m", "gaff2"), ("ff14sb", "cgenff"), ("charmm36", "gaff")],
+)
+def test_a_mixed_force_field_pair_cannot_even_produce_a_convention(protein, ligand):
+    """**The nonstarter, refused by mechanism rather than by documentation.**
+
+    Two families have different combining rules, different 1-4 scaling and different nonbonded
+    conventions, so no single set of cutoffs is right for both and a system built from them is
+    not a usable measurement. `nonbonded_for` cannot answer the question, so nothing downstream
+    can be built from a mixed pair at all — which is what K1's determination asserts, now as a
+    refusal instead of a paragraph.
+    """
+    with pytest.raises(SystemBuildFailed, match="mixing force-field families is refused"):
+        nonbonded_for(protein, ligand)
+
+
+def test_an_unknown_force_field_is_refused_rather_than_assumed_to_be_amber():
+    with pytest.raises(SystemBuildFailed, match="not a family this protocol knows"):
+        nonbonded_for("ff14sb", "openff-2.0.0")
+
+
+def test_the_committed_artifact_is_a_single_family():
+    """K1's artifact, read as the build reads it. **The verification this file exists for.**"""
+    artifact = LigandParameters.load(str(PARAMS))
+    assert (artifact.protein_force_field, artifact.force_field) == ("ff14sb", "gaff2")
+    assert artifact.water_model == "tip3p"
+    convention = nonbonded_for(artifact.protein_force_field, artifact.force_field)
+    assert convention == nonbonded_for("ff14sb", "gaff2")
+
+
+def test_no_tleap_script_this_project_writes_loads_a_charmm_parameter():
+    """Read off the generated scripts rather than asserted about them.
+
+    The one way CHARMM and Amber parameters could end up in one system is a `loadamberparams`
+    or `source` line pointing at a CHARMM file, so both script writers are checked: K2's build
+    and K5's dry build.
+    """
+    from impress_a.md import freeenergy
+
+    artifact = LigandParameters.load(str(PARAMS))
+    scripts = [
+        _tleap_script(leg="holo", protein_pdb="/x/p.pdb", params_dir=str(PARAMS),
+                      artifact=artifact, out_dir="/y", padding_nm=1.0),
+        _tleap_script(leg="apo", protein_pdb="/x/p.pdb", params_dir=str(PARAMS),
+                      artifact=artifact, out_dir="/y", padding_nm=1.0),
+        freeenergy._dry_tleap_script(protein_pdb="/x/p.pdb", params_dir=str(PARAMS),
+                                     artifact=artifact, out_dir="/y"),
+    ]
+    for script in scripts:
+        sources = [ln for ln in script.splitlines()
+                   if ln.startswith(("source ", "loadamberparams", "loadoff", "loadamberprep"))]
+        assert sources, script
+        for line in sources:
+            lowered = line.lower()
+            assert "charmm" not in lowered and "cgenff" not in lowered, line
+            assert any(k in lowered for k in ("ff14sb", "gaff2", "water.tip3p", ".frcmod")), (
+                f"unrecognised parameter source: {line}"
+            )
 
 
 @needs_amber

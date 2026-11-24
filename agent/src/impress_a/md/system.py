@@ -32,16 +32,28 @@ parameters exist in two places in two formats. One builder, one topology.
 
 ### The numbers, and which of them are declared rather than measured
 
-PME with a **1.2 nm cutoff and a force switch from 1.0 nm** is the CHARMM-standard pairing and is
-kept even on an Amber force field, because the switch is about the *integrator* seeing a
-continuous force rather than about the parameters: a hard cutoff puts a step in the force at 1.2
-nm, and the energy drift that follows is exactly what `energy_drift_kcal_per_ns` would then
-report as a broken instrument.
+**The nonbonded convention follows the force field, and `NONBONDED` is the only place it is
+decided.** PME either way, but Amber parameters get a 1.0 nm cutoff with no switching function
+and an analytic dispersion correction, while CHARMM parameters get 1.2 nm switching from 1.0 and
+no correction. Those are the treatments each family was fitted under, and they are not
+interchangeable. Until 2026-11-24 this module declared the CHARMM row and applied it to an Amber
+system -- see `NONBONDED`, which also says why that was a defect rather than a conservative
+choice.
 
-Hydrogen mass repartitioning is **off by default**. It buys a 4 fs timestep, and it does it by
-moving mass from heavy atoms onto hydrogens -- which changes the dynamics of every rotatable
-bond, and `rotamer_entropy` is an entropy over exactly those. A protocol that measured sidechain
-entropy under HMR without saying so would report a number about a modified molecule.
+**A mixed pair cannot even produce a convention.** `nonbonded_for` refuses a protein and a ligand
+from different families by name, so "CHARMM36m protein + GAFF2 ligand" is not a thing this
+module can be asked to build. That refusal is the mechanism behind K1's determination rather
+than a note beside it.
+
+Hydrogen mass repartitioning is **on by default** since 2026-11-24, and the earlier reasoning for
+leaving it off is worth correcting rather than deleting: it said HMR *"changes the dynamics of
+every rotatable bond, and `rotamer_entropy` is an entropy over exactly those"*. HMR moves mass
+between a heavy atom and its hydrogens; it does not touch the potential, so the **equilibrium**
+distribution over configurations is unchanged and only kinetics shift. `rotamer_entropy` as
+measured here is an entropy over rotamer-bin **occupancy**, which is a configurational average,
+as are `preorg_rmsd` and `ligand_rmsf`. What the old note was right about is finite sampling:
+faster or slower transitions change how quickly those occupancies converge, which is a reason to
+watch the σ rather than a reason to pay 1.83x for every measurement.
 """
 from __future__ import annotations
 
@@ -51,7 +63,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .params import LigandParameters, ParameterisationFailed
+from .params import PROTEIN_FORCE_FIELD, LigandParameters, ParameterisationFailed
 
 #: The two legs, by name. `holo` first because the apo structure is derived from it.
 LEGS = ("holo", "apo")
@@ -62,8 +74,41 @@ LEGS = ("holo", "apo")
 SOLVENT_PADDING_NM = 1.0
 
 #: Non-bonded cutoff and the radius the force switch starts at, nanometres.
-CUTOFF_NM = 1.2
-SWITCH_NM = 1.0
+#: **The nonbonded convention is a property of the force field, not of this module.** Keyed on
+#: the family the parameters actually come from, because the two conventions are not
+#: interchangeable and running one on the other's parameters is a silent error:
+#:
+#: * **Amber** (ff14SB/GAFF2/TIP3P) was parameterised with an abrupt 0.8-1.0 nm direct-space
+#:   cutoff plus an analytic long-range dispersion correction, and with NO Lennard-Jones
+#:   switching function. A longer cutoff with a switch is not "more accurate" here; it is a
+#:   different nonbonded treatment from the one the parameters were fitted under.
+#: * **CHARMM** (CHARMM36m/CGenFF/modified TIP3P) was parameterised with a 1.2 nm cutoff and
+#:   switching from 1.0 nm, and without a dispersion correction, which is why the two rows differ
+#:   in all three columns rather than only in the cutoff.
+#:
+#: Until 2026-11-24 this module declared the CHARMM row as module constants and applied it to an
+#: Amber system. That was not parameter mixing -- every tleap script here loads only Amber -- but
+#: it ran Amber parameters outside the convention they were validated with, which is its own
+#: defect and is the one this table fixes.
+NONBONDED = {
+    "amber": {"cutoff_nm": 1.0, "switch_nm": 0.0, "dispersion_correction": True},
+    "charmm": {"cutoff_nm": 1.2, "switch_nm": 1.0, "dispersion_correction": False},
+}
+
+#: Force-field name -> family. A name absent from here is refused rather than assumed, because
+#: the cost of guessing is a system built under the wrong nonbonded convention.
+FAMILY_OF = {
+    "ff14sb": "amber", "ff19sb": "amber", "ff99sb": "amber",
+    "gaff": "amber", "gaff2": "amber",
+    "charmm36": "charmm", "charmm36m": "charmm", "cgenff": "charmm",
+}
+
+#: The Amber row, as module constants, because that is the family this protocol builds today.
+#: **Read them from `LegPaths.nonbonded` rather than from here** when a built system is in hand:
+#: these are the values for the stack as it stands, and that one is the values for the stack that
+#: was actually built.
+CUTOFF_NM = NONBONDED["amber"]["cutoff_nm"]
+SWITCH_NM = NONBONDED["amber"]["switch_nm"]
 
 #: Production temperature and the timestep at it. 2 fs without hydrogen mass repartitioning; see
 #: the module docstring for why HMR is not the default.
@@ -103,6 +148,58 @@ EQUILIBRATED_NAME = "equilibrated.pdb"
 STATE_NAME = "equilibrated.xml"
 
 
+def apply_dispersion_correction(system: Any, nonbonded: Dict[str, Any]) -> None:
+    """Set the analytic long-range dispersion correction from the convention. **Third column.**
+
+    `createSystem` does not expose it, so it has to be set on the force afterwards -- which is
+    exactly why it was being ignored. Amber's parameters were fitted *with* the correction and
+    an abrupt cutoff; CHARMM's were fitted *without* it and with a switching function, so the
+    two rows differ here as well as in the cutoff and taking OpenMM's default (on) would be
+    right for one family and wrong for the other.
+    """
+    import openmm  # noqa: PLC0415
+
+    want = bool(nonbonded.get("dispersion_correction", True))
+    for index in range(system.getNumForces()):
+        force = system.getForce(index)
+        if isinstance(force, openmm.NonbondedForce):
+            force.setUseDispersionCorrection(want)
+
+
+def nonbonded_for(protein_force_field: str, ligand_force_field: str) -> Dict[str, Any]:
+    """The nonbonded treatment for a pair of force fields. **Refuses a mixed pair by name.**
+
+    This is the mechanism behind K1's determination. A CHARMM36m protein with a GAFF2 ligand is
+    not merely undesirable, it is unusable: the two families have different combining rules,
+    different 1-4 scaling and different nonbonded conventions, and no single set of cutoffs is
+    right for both. Rather than documenting that, this function cannot answer the question --
+    so nothing downstream can be built from a mixed pair at all.
+
+    Returns the row from `NONBONDED` for the family both belong to.
+    """
+    pairs = {}
+    for role, name in (("protein", protein_force_field), ("ligand", ligand_force_field)):
+        key = (name or "").strip().lower()
+        if key not in FAMILY_OF:
+            raise SystemBuildFailed(
+                f"{role} force field {name!r} is not a family this protocol knows. The known "
+                f"names are {sorted(FAMILY_OF)}; a name absent from that map is refused rather "
+                "than assumed, because the cost of guessing is a system built under the wrong "
+                "nonbonded convention and nothing saying so"
+            )
+        pairs[role] = FAMILY_OF[key]
+    if pairs["protein"] != pairs["ligand"]:
+        raise SystemBuildFailed(
+            f"{protein_force_field} is {pairs['protein']} and {ligand_force_field} is "
+            f"{pairs['ligand']}: **mixing force-field families is refused.** The two have "
+            "different combining rules, different 1-4 scaling and different nonbonded "
+            "conventions, so there is no set of cutoffs that is right for both and a system "
+            "built from them is not a usable measurement. Type the ligand in the protein's "
+            "family -- CGenFF for CHARMM36m, GAFF2 for ff14SB -- and rebuild K1's artifact"
+        )
+    return dict(NONBONDED[pairs["protein"]])
+
+
 class SystemBuildFailed(RuntimeError):
     """A system this module will not hand to a production run, with the reason named."""
 
@@ -121,6 +218,11 @@ class LegPaths:
     box_nm: List[float] = field(default_factory=list)
     equilibrated_pdb: str = ""
     state_xml: str = ""
+    #: The nonbonded treatment THIS system was built under, from `nonbonded_for`. It travels
+    #: with the leg rather than being re-derived, because it is a property of the parameters in
+    #: this prmtop and not of whatever the module constants happen to say later.
+    nonbonded: Dict[str, Any] = field(default_factory=dict)
+    force_fields: Dict[str, str] = field(default_factory=dict)
     notes: str = ""
 
     def as_dict(self) -> Dict[str, Any]:
@@ -179,7 +281,16 @@ def build_leg(
                 "field has no template for, which tleap reports and then continues past"
             )
     counts = _census(prmtop, inpcrd)
-    return LegPaths(leg=leg, directory=out_dir, prmtop=prmtop, inpcrd=inpcrd, **counts)
+    # **Decided here, from the artifact, once.** The pair is checked before the convention is
+    # returned, so a mixed-family artifact fails at build time with the two names in the
+    # message rather than producing a system whose cutoffs are wrong for half of it.
+    nonbonded = nonbonded_for(artifact.protein_force_field, artifact.force_field)
+    return LegPaths(leg=leg, directory=out_dir, prmtop=prmtop, inpcrd=inpcrd,
+                    nonbonded=nonbonded,
+                    force_fields={"protein": artifact.protein_force_field,
+                                  "ligand": artifact.force_field,
+                                  "water": artifact.water_model},
+                    **counts)
 
 
 def _split_complex(complex_pdb: str, out_dir: str, resname: str, leg: str) -> tuple:
@@ -342,16 +453,24 @@ def equilibrate(
     import openmm  # noqa: PLC0415
     from openmm import app, unit  # noqa: PLC0415
 
+    # **The convention this system was built under, not the module's current constants.** A leg
+    # built before `nonbonded` existed, or by hand, falls back to the family its own force
+    # fields name -- never to a bare default, because a default is how a CHARMM system would
+    # quietly acquire Amber cutoffs.
+    nonbonded = leg.nonbonded or nonbonded_for(
+        leg.force_fields.get("protein", PROTEIN_FORCE_FIELD),
+        leg.force_fields.get("ligand", "gaff2"))
     prmtop = app.AmberPrmtopFile(leg.prmtop)
     inpcrd = app.AmberInpcrdFile(leg.inpcrd)
     system = prmtop.createSystem(
         nonbondedMethod=app.PME,
-        nonbondedCutoff=CUTOFF_NM * unit.nanometer,
-        switchDistance=SWITCH_NM * unit.nanometer,
+        nonbondedCutoff=nonbonded["cutoff_nm"] * unit.nanometer,
+        switchDistance=nonbonded["switch_nm"] * unit.nanometer,
         constraints=app.HBonds,
         rigidWater=True,
         hydrogenMass=(3.0 * unit.amu if hmr else None),
     )
+    apply_dispersion_correction(system, nonbonded)
     timestep = (HMR_TIMESTEP_FS if hmr else TIMESTEP_FS) * unit.femtosecond
     integrator = openmm.LangevinMiddleIntegrator(
         TEMPERATURE_K * unit.kelvin, FRICTION_PER_PS / unit.picosecond, timestep)
