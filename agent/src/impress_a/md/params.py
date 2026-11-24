@@ -127,10 +127,16 @@ class LigandParameters:
     smiles: str
     force_field: str
     #: The name as it appears in the PDB, **byte for byte**. For this project's ligand that is
-    #: `A:R`, chosen upstream to defeat CCD lookup -- and the two names being different is the
-    #: whole reason this field exists. A build that matched the parameter unit's name against a
-    #: structure would find no ligand, and a holo build that found no ligand would be an apo
-    #: build wearing a holo label.
+    #: `A:R`, and the colon is a workaround rather than a quirk: `foundry.sif` carries an
+    #: internal confound on the label `ALR` from an unrelated data source, so RFD3 inside that
+    #: container misresolves the bare `"ALR"` literal, and a name no such source can hold
+    #: sidesteps it (`toolkits/rfd3/SKILL.md` is the canonical note).
+    #:
+    #: **The two names being different is the whole reason this field exists, and neither is
+    #: wrong.** The design chain's structures say `A:R`; this parameterisation says `ALR`,
+    #: because mol2 and tleap cannot carry a colon in a residue name. A build that matched the
+    #: parameter unit's name against a structure would find no ligand, and a holo build that
+    #: found no ligand would be an apo build wearing a holo label.
     pdb_resname: str = ""
     protein_force_field: str = PROTEIN_FORCE_FIELD
     water_model: str = WATER_MODEL

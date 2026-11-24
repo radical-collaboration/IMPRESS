@@ -70,7 +70,24 @@ later stage that would have consumed them.
   **ligand** form is refused - keyed by the entry's own declared `ligand` value - because only
   atom-level hotspots are dropped; a protein `select_hotspots` keyed by a chain reaches the
   model and still works.
-- The `.params` file's `NAME`/`IO_STRING` record for a ligand may not match its bare
-  3-letter code: ALR's real value is the literal `A:R`, not `ALR` (a deliberate,
-  verified workaround for RFD3 misresolving the bare `"ALR"` literal). Always read this
-  from the `.params` file, never hardcode or "clean up" a colon out of it.
+- **The ligand is called `A:R` because `ALR` collides inside `foundry.sif`, and the colon is the
+  workaround.** The `.params` file's `NAME`/`IO_STRING` record for a ligand may not match its
+  bare 3-letter code: ALR's real value is the literal `A:R`, not `ALR`.
+
+  **The mechanism, recorded here because this is the layer that needs it.** `foundry.sif`
+  carries an **internal confound on the label `ALR` from an unrelated data source**, so RFD3
+  running inside that container misresolves the bare `"ALR"` literal to something that is not
+  this ligand. A name no such source can hold — one containing a colon — sidesteps the
+  collision, and `A:R` is that name. It is **a deliberate, verified workaround for a container
+  this project does not build**, not a style choice and not a typo.
+
+  Two consequences, and both have already cost time:
+
+  * **Always read the name from the `.params` file**, never hardcode it and never "clean up" a
+    colon out of it. A normaliser that strips the colon restores the collision.
+  * **The ligand therefore has two names, and both are real.** `A:R` is what the design chain's
+    structures carry; `ALR` is what the MD parameterisation uses, because mol2 and tleap cannot
+    carry a colon in a residue name. K1's artifact records both (`pdb_resname` and `resname`)
+    for exactly this reason, and `asteer.features_impl.pocket_geom.resolve_pocket` gained an
+    explicit `ligand_resname=` keyword because its colon-based inference could not express the
+    second one at all.
