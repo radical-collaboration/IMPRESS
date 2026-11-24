@@ -184,6 +184,185 @@ def test_boltz_spec_is_valid_yaml():
     assert parsed["sequences"][1]["ligand"]["smiles"].startswith("CC(=O)")
 
 
+# -- the affinity head (J13) --------------------------------------------------------------
+#
+# `boltz` 2.2.1 downloads `boltz2_aff.ckpt` whether or not anything asks for it, and until this
+# episode nothing did: no archived `boltz_input.yaml` carries a `properties:` block and no
+# archived `confidence_*.json` holds an affinity key. These tests pin the request, the refusal,
+# the reader and - first - the promise that a campaign which does not ask is unchanged.
+
+def _affinity_params(reg, **over):
+    """Parameters as the agent would resolve them, so a default that moves in the spec moves
+    here too rather than being restated."""
+    from impress_a.tools.agent import TaskRequest
+
+    agent = reg.agent_for("boltz_predict")(reg.get("boltz_predict"))
+    return agent.parameterize(TaskRequest(
+        tool="boltz_predict",
+        params={"ligand_smiles": "COc1cc(S(=O)(=O)[O-])c(C)cc1/N=N/c1c(O)ccc2cc"
+                                 "(S(=O)(=O)[O-])ccc12", **over}))
+
+
+def test_affinity_off_leaves_the_request_exactly_as_it_was(reg, tmp_path):
+    """The compatibility half of J13, and the one worth having a test for: every run this
+    project has ever done left `predict_affinity` unset, so with it unset the document and the
+    argv must be what they were before the parameter existed - not merely equivalent."""
+    from impress_a.tools.boltz_agents import boltz_command, boltz_input
+
+    params = _affinity_params(reg)
+    assert params["predict_affinity"] is False, "the default is the compatibility contract"
+
+    doc = boltz_input(params, "MKVLAA")
+    assert set(doc) == {"version", "sequences"}, \
+        "an affinity-free input must carry no `properties:` key at all, not an empty one"
+    assert [next(iter(s)) for s in doc["sequences"]] == ["protein", "ligand"]
+
+    cmd = boltz_command(params, input_yaml="in.yaml", out_dir="out", cache="cache")
+    assert not [a for a in cmd if "affinity" in a], \
+        f"affinity flags leaked into an affinity-free command: {cmd}"
+
+
+def test_affinity_on_asks_for_the_ligand_chain_the_document_actually_declares(reg):
+    """`properties: [{affinity: {binder: B}}]`, with `binder` a bare string. Upstream refuses
+    a non-string binder ("Binder must be a single chain.") and a binder naming no ligand chain
+    in the same document, so the id here and the ligand's own `id` have to agree."""
+    from impress_a.tools.boltz_agents import LIGAND_CHAIN, boltz_command, boltz_input
+
+    params = _affinity_params(reg, predict_affinity=True)
+    doc = boltz_input(params, "MKVLAA")
+
+    assert doc["properties"] == [{"affinity": {"binder": LIGAND_CHAIN}}]
+    ligand = next(s["ligand"] for s in doc["sequences"] if "ligand" in s)
+    assert ligand["id"] == [LIGAND_CHAIN], \
+        "the binder must name a ligand chain that exists in this same document"
+    assert isinstance(doc["properties"][0]["affinity"]["binder"], str), \
+        "a one-element list here is refused upstream, not silently unwrapped"
+
+    cmd = boltz_command(params, input_yaml="in.yaml", out_dir="out", cache="cache")
+    assert "--sampling_steps_affinity" in cmd and "--diffusion_samples_affinity" in cmd
+    # `is_flag=True` upstream: present or absent, never `--affinity_mw_correction false`.
+    assert "--affinity_mw_correction" not in cmd
+    assert "--affinity_mw_correction" in boltz_command(
+        _affinity_params(reg, predict_affinity=True, affinity_mw_correction=True),
+        input_yaml="in.yaml", out_dir="out", cache="cache")
+
+
+def test_affinity_without_a_ligand_is_refused_here_not_on_the_gpu(reg):
+    """An empty `ligand_smiles` does not fail, it models no ligand (backlog A2). Asking for the
+    affinity of a ligand that is not in the input is that mistake twice, and `boltz predict`
+    would only find it after the task had been scheduled onto a GPU."""
+    from impress_a.tools.boltz_agents import AffinityWithoutLigand, boltz_input
+
+    params = _affinity_params(reg, predict_affinity=True, ligand_smiles="")
+    with pytest.raises(AffinityWithoutLigand):
+        boltz_input(params, "MKVLAA")
+
+
+def test_the_affinity_reader_omits_what_it_cannot_read(tmp_path):
+    """Same rule as `_boltz_metrics`: absent is omitted, never defaulted. A fabricated 0.0 for
+    `affinity_pred_value` reads as `log10(IC50/1uM) == 0` - a 1 micromolar binder, plausible
+    and entirely invented."""
+    from impress_a.tools.boltz_agents import _affinity_metrics
+
+    assert _affinity_metrics({"affinity_pred_value": -0.5,
+                              "affinity_probability_binary": 0.77}) == \
+        {"affinity_pred_value": -0.5, "affinity_probability_binary": 0.77}
+    assert _affinity_metrics({}) == {}
+    assert _affinity_metrics({"affinity_pred_value": float("nan")}) == {}
+    assert _affinity_metrics({"affinity_pred_value": None}) == {}
+    # The two ensemble heads stay out of the corpus: their mean IS the reported value, and a
+    # residual fitted against one head and served against the mean is the J11 failure again.
+    assert _affinity_metrics({"affinity_pred_value1": -0.5}) == {}
+
+
+def test_the_affinity_value_says_whether_it_describes_the_reported_co_fold():
+    """Boltz scores affinity on ITS rank 0 (`confidence_score`); this adapter carries forward
+    the best `complex_plddt`. Those are different numbers, so with `diffusion_samples > 1` the
+    two can disagree - and a value silently describing another structure is worse than one
+    that says so."""
+    from impress_a.tools.boltz_agents import affinity_on_reported_sample
+
+    assert affinity_on_reported_sample("/w/out/boltz_input_model_0.pdb") == 1.0
+    assert affinity_on_reported_sample("/w/out/boltz_input_model_3.pdb") == 0.0
+
+
+def test_the_affinity_metrics_are_declared_but_not_demanded(reg):
+    """Declared in `metrics:` so a producer can be found; deliberately NOT in the
+    `metrics_reported` integrity gate, because they exist only when `predict_affinity` is set
+    and a gate demanding them would fail every ordinary run - manufacturing exactly the
+    integrity failure the gate exists to catch."""
+    spec = reg.get("boltz_predict")
+    affinity_metrics = {"affinity_pred_value", "affinity_probability_binary",
+                        "affinity_on_reported_sample"}
+    assert affinity_metrics <= set(spec.metrics)
+
+    demanded = {m for g in spec.qc_gates if g.id == "metrics_reported"
+                for m in g.params.get("metrics", [])}
+    assert not (affinity_metrics & demanded), \
+        "a metric produced only under a parameter must not be demanded unconditionally"
+    gated = {g.params.get("metric") for g in spec.qc_gates if g.id == "metric_in_range"}
+    assert not (affinity_metrics & gated), \
+        "nothing may be scored against an affinity threshold before a residual is fitted"
+
+
+def test_the_affinity_unit_is_recorded_in_words(reg):
+    """`affinity_pred_value` is log10(IC50) with the IC50 in micromolar, not a kcal/mol dG. A
+    conversion nobody wrote down is how a residual gets fitted in one space and served in
+    another, so the unit is a field, checked here, and carried into provenance."""
+    units = reg.get("boltz_predict").metric_units
+    value = units["affinity_pred_value"].lower()
+    assert "log10" in value and ("um" in value or "micromolar" in value), units
+    assert "kcal" in value, "the unit must say what it is NOT; readers will assume a dG"
+    assert "probability" in units["affinity_probability_binary"].lower()
+    # The 0-1 vs 0-100 trap next door, which this project has already paid for once (G4).
+    assert "0-1" in units["complex_plddt"]
+
+
+def test_a_unit_declared_for_a_metric_nothing_reports_is_refused():
+    """The likeliest cause is a typo in one of the two names, which would leave the real metric
+    undeclared and the declaration bound to a name nothing produces."""
+    from impress_a.tools.spec import ToolSpec
+
+    base = {"id": "t", "toolkit": "tk", "pattern": "P2", "metrics": ["a"]}
+    assert ToolSpec(**base, metric_units={"a": "widgets"}).metric_units == {"a": "widgets"}
+    with pytest.raises(ValueError, match="metric_units"):
+        ToolSpec(**base, metric_units={"affinty_pred_value": "log10(IC50)"})
+
+
+def test_the_unit_travels_with_the_value_into_provenance(reg):
+    """A corpus outlives the checkout that produced it. A reader who has to find the spec to
+    learn that `affinity_pred_value` is not a kcal/mol dG is a reader who will guess.
+
+    Driven through the executor's own method with a stand-in `self`, in the style of
+    `test_the_failed_gate_list_is_logged_in_the_shape_failed_actually_returns`: the assertion
+    is about what the line carries, and running a whole campaign to see one dict would pin the
+    campaign instead.
+    """
+    from types import SimpleNamespace
+
+    from impress_a.runtime.executor import CampaignExecutor
+
+    written: list[dict[str, Any]] = []
+    fake_self = SimpleNamespace(reg=reg, _log=lambda kind, rec: written.append((kind, rec)))
+    outcome = RunOutcome(run_id="r1", graph_id="g1", tasks=[TaskOutcome(
+        task_id="t1", tool="boltz_predict",
+        metrics={"complex_plddt": 0.51, "affinity_pred_value": -0.42,
+                 "affinity_on_reported_sample": 1.0})])
+    rec = SimpleNamespace(graph=SimpleNamespace(id="g1", nodes={}), turn=0, stage=None)
+
+    CampaignExecutor._log_task_telemetry(fake_self, rec, outcome)
+
+    kind, row = written[0]
+    assert kind == "tasks"
+    units = row["metric_units"]
+    assert "log10" in units["affinity_pred_value"] and "kcal" in units["affinity_pred_value"]
+    assert set(units) == {"complex_plddt", "affinity_pred_value",
+                          "affinity_on_reported_sample"}, \
+        ("only the metrics this task reported - a line must say what it holds, not what the "
+         "tool could hold")
+    assert "affinity_probability_binary" not in units
+
+
 async def test_rosetta_reports_a_missing_worker_result_as_qc_failure(reg, tmp_path):
     """A worker can exit 0 and leave no readable JSON. Reading it unconditionally made
     that a FileNotFoundError escaping run() - recorded as an infrastructure crash rather
@@ -912,8 +1091,10 @@ def test_ligandmpnn_walltime_covers_the_measured_import_cost(reg):
     ("packmin", "cpu_hours", 15.9),
     ("fastrelax", "cpu_hours", 25.9),
     ("filter_shape", "cpu_hours", 10.2),
-    # Job 22692304, the first run in which boltz_predict executed at all.
-    ("boltz_predict", "gpu_hours", 57.8),
+    # Job 24469400 (J13), with the affinity head ON and at the spec's own 8 diffusion samples:
+    # 110.2s, against 86.9s for the same design with it off. It replaces job 22692304's 57.8s,
+    # which measured ONE diffusion sample and so priced a tool this spec no longer describes.
+    ("boltz_predict", "gpu_hours", 110.2),
 ])
 def test_cost_models_are_within_an_order_of_magnitude_of_measurement(
         reg, tool, dim, measured_s):
@@ -2051,12 +2232,24 @@ _NOT_IN_THE_COMMAND = {
 }
 
 
+#: What a tool must be ASKED for before the optional half of its command builder is reachable at
+#: all. `boltz_predict.predict_affinity` gates three parameters and one `properties:` block:
+#: with it false the builder never looks at the affinity sampling sizes, so "declared but not
+#: read" would be true of a build nobody runs when they want affinity and false of every build
+#: that does. The ligand travels with it because an affinity request naming no ligand chain is
+#: refused outright - asserted separately, in
+#: `test_affinity_without_a_ligand_is_refused_here_not_on_the_gpu`.
+_BUILD_ASKING_FOR = {
+    "boltz_predict": {"predict_affinity": True, "ligand_smiles": "CCO"},
+}
+
+
 @pytest.mark.parametrize("tool", CHAIN)
 def test_every_declared_parameter_reaches_its_command(reg, tool):
     """A parameter the spec declares and the adapter never reads validates, is offered to a
     planner, lands in provenance - and changes nothing. `ligandmpnn_design.num_seqs` was
     exactly that, unnoticed, because nothing compared the two lists."""
-    params, _, _ = _build(reg, tool)
+    params, _, _ = _build(reg, tool, **_BUILD_ASKING_FOR.get(tool, {}))
     unread = set(reg.get(tool).parameters) - params.read
     exempt = {k for t, k in _NOT_IN_THE_COMMAND if t == tool}
     assert unread == exempt, (

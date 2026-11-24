@@ -125,6 +125,21 @@ class ToolSpec(BaseModel):
     # `runtime/executor._objectives_without_a_producer` to say when an admitted graph
     # cannot inform an objective it was composed for.
     metrics: list[str] = Field(default_factory=list)
+    #: metric name -> what the number MEANS, in words. Optional, and partial: a metric absent
+    #: from this map is undeclared, not dimensionless.
+    #:
+    #: It exists because `affinity_pred_value` is not a free energy. It is `log10(IC50)` with
+    #: the IC50 in micromolar and smaller meaning tighter - and Model C fits a residual against
+    #: a prior and serves a corrected quantity, so a conversion nobody wrote down is exactly
+    #: how a residual gets fitted in one space and served in another. The same hazard already
+    #: cost this project once, one metric over: `complex_plddt` here is 0-1 while every
+    #: upstream threshold for it is 0-100, and the acceptance gate sat at 0.5 against a
+    #: reference's 75 until backlog G4 noticed.
+    #:
+    #: Declared here rather than in a comment because a comment is not carried anywhere. The
+    #: executor writes these words into every `tasks` provenance line beside the values, so
+    #: the corpus says what its own columns hold without a reader coming back to this file.
+    metric_units: dict[str, str] = Field(default_factory=dict)
     qc_gates: list[GateSpec] = Field(default_factory=list)
     cost_model: CostModel = Field(default_factory=CostModel)
     agent: Literal["deterministic", "llm"] = "deterministic"
@@ -138,6 +153,13 @@ class ToolSpec(BaseModel):
         overlap = set(self.parameters) & set(self.frozen_parameters)
         if overlap:
             raise ValueError(f"{self.id}: {overlap} both varyable and frozen")
+        # A unit for a metric this tool does not report describes nothing, and the likeliest
+        # cause is a typo in one of the two names - which would otherwise leave the real metric
+        # undeclared and the declaration attached to a name nothing produces.
+        if stray := sorted(set(self.metric_units) - set(self.metrics)):
+            raise ValueError(
+                f"{self.id}: metric_units declares {stray} which this tool does not report; "
+                f"it reports {sorted(self.metrics)}")
         for dim, cap in self.cost_model.max_commitment.items():
             declared = self.cost_model.cost.get(dim)
             if declared is not None and cap < declared:

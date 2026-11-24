@@ -3,7 +3,14 @@ toolkit: boltz
 version: "0.1"
 pattern: P1
 entry: impress_a.tools.boltz_agents.BoltzPredictAgent
-resources: {gpus: 1, cores: 4, walltime_s: 600}
+# 600s covered the structure pass alone, which is all this tool used to do; both passes
+# together measured 110.2s on job 24469400 (A100, 1 GPU, at this spec's own 8 diffusion
+# samples). `walltime_s` is the adapter's subprocess timeout, and a bound below the work kills
+# the task and reports a hang - naming a budget rather than a cause (job 22675512's packmin).
+# 900 is ~8x the measurement, the same headroom 600 carried over the 57.8s it was set against,
+# which leaves room for an A40, a cold cache, and the 3.2x run-to-run spread this project has
+# measured on its own GPU stages.
+resources: {gpus: 1, cores: 4, walltime_s: 900}
 gpu_portability: {cuda: proven, hip: unproven, sycl_xpu: unproven}
 inputs:
   structure: {type: Complex}
@@ -24,10 +31,71 @@ parameters:
   ligand_smiles: {type: str, default: ""}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
+  # THE AFFINITY HEAD. `boltz` here is 2.2.1 and `main.py:243-252` downloads
+  # `boltz2_aff.ckpt` whether or not anything asks for it, so the weights have always been on
+  # disk and the capability has always been paid for. Nothing requested it: every
+  # `boltz_input.yaml` in every archive of this project carries no `properties:` block, and
+  # none of 1,074 `confidence_*.json` holds an affinity key. Enabling it recovers NOTHING
+  # retrospectively - the affinity pass reads the structure it just predicted, so there is no
+  # way to run it over a finished archive. It starts the clock.
+  #
+  # Default FALSE, and the default is the compatibility contract: with it unset
+  # `boltz_input()` emits the same two-entity document and `boltz_command()` the same argv as
+  # before this parameter existed, byte for byte.
+  predict_affinity: {type: bool, default: false,
+                     trades: "Model C's cheap input, at the cost of a second model load and a
+                              second sampling pass over the predicted complex"}
+  # The affinity pass's own sampling, separate from `diffusion_samples` above: Boltz runs the
+  # structure pass first and then re-samples the predicted complex through the affinity
+  # checkpoint. Upstream's defaults, named here rather than inherited, because a default that
+  # moves upstream would silently re-price this tool.
+  sampling_steps_affinity: {type: int, default: 200, min: 10, max: 1000,
+                            trades: "affinity denoising steps; upstream's default is 200"}
+  diffusion_samples_affinity: {type: int, default: 5, min: 1, max: 25,
+                               trades: "affinity samples, averaged by the two-head ensemble;
+                                        upstream's default is 5"}
+  # Boltz's `--affinity_mw_correction` adds a molecular-weight term to the value head. OFF,
+  # and off deliberately: it changes what the number MEANS, and `affinity_pred_value` is
+  # already a quantity Model C will fit a residual against. A correction switched on halfway
+  # through a corpus is two targets under one name.
+  affinity_mw_correction: {type: bool, default: false,
+                           trades: "upstream's MW term; changes the quantity, not its quality"}
 # `ensemble_size`/`ensemble_paired`: see the note in ligandmpnn_design's spec. Boltz writes
 # `confidence_<name>_model_<n>.json` beside `<name>_model_<n>.pdb`, so the pairing is by member
 # number rather than by position - two independently sorted globs agree only by luck.
-metrics: [complex_plddt, ligand_iptm, ensemble_size, ensemble_paired]
+#
+# `affinity_pred_value`/`affinity_probability_binary` are declared here and NOT in the
+# `metrics_reported` gate below. They are produced only when `predict_affinity` is true, and a
+# metric this file promises unconditionally while an integrity gate demands it would fail every
+# ordinary run - manufacturing exactly the integrity failure the gate exists to catch. They are
+# listed so `ToolkitView.reporting()` can find a producer at all; the cost of that is the
+# converse hazard, that an objective on an affinity metric resolves to this tool and then gets
+# nothing because the campaign left the parameter unset. The composer cannot see parameters, so
+# nothing here can close that; a campaign asking for affinity must set the parameter, and
+# `impress-a preflight` is where that check belongs.
+metrics: [complex_plddt, ligand_iptm, ensemble_size, ensemble_paired,
+          affinity_pred_value, affinity_probability_binary, affinity_on_reported_sample]
+# WHAT THE AFFINITY NUMBERS ARE, IN WORDS, because neither is a free energy and a conversion
+# nobody wrote down is how a residual gets fitted in one space and served in another. Upstream's
+# own README is the source (boltz 2.2.1 METADATA, "Boltz-2 affinity prediction"):
+#
+#   affinity_pred_value         log10(IC50), the IC50 in micromolar. NOT kcal/mol, NOT a dG, and
+#                               NOT sign-flipped: a SMALLER value is a tighter binder. Trained
+#                               for ligand optimisation - comparing congeneric modifications -
+#                               not for separating binders from decoys.
+#   affinity_probability_binary P(binder), 0 to 1, from a different dataset and a different
+#                               supervision. Upstream's hit-discovery number, not an affinity.
+#
+# Carried into every `tasks` provenance line beside the value (`runtime/executor.py`), so a
+# reader of the corpus never has to come back to this file to find out what the column holds.
+metric_units:
+  affinity_pred_value: "log10(IC50 / 1 uM); lower is tighter; not kcal/mol and not a dG"
+  affinity_probability_binary: "probability that the ligand is a binder, 0-1, dimensionless"
+  affinity_on_reported_sample: "1 if the affinity was scored on the same co-fold whose
+                                complex_plddt is reported here, 0 if Boltz's confidence_score
+                                rank 0 and this adapter's complex_plddt pick disagreed"
+  complex_plddt: "pLDDT on a 0-1 scale, NOT the 0-100 scale upstream's thresholds use"
+  ligand_iptm: "interface pTM for the ligand chain, 0-1, dimensionless"
 # Integrity gates say the tool worked; acceptance gates say the design is good enough.
 # Only integrity failures reset trust (docs/impress-a/decisions/0013-trust-counts-integrity-not-acceptance.md). Each acceptance threshold is
 # backed by `metrics_reported`, so a value the adapter could not read is an integrity
@@ -48,14 +116,28 @@ qc_gates:
   # would clear one more bar than a design the reference calls passing.
   - {id: metric_in_range, role: acceptance,
      params: {metric: ligand_iptm, min: 0.4, max: 1.0}}
-# Measured on job 22692304 - the first run in which this tool executed at all: 57.8s
-# = 0.0160 h. Declared 0.15 was 9.3x that, the same literature guess the other five
-# carried, and it was left alone in 77a0363 precisely because there was nothing to
-# correct it against.
+# RE-DERIVED on job 24469400, which is what J13 owed item 21. Two arms, one A100, one GPU, one
+# real design (job 22692304's own `fastrelax.pdb`), one seed, at this spec's own
+# `diffusion_samples: 8`:
 #
-# 0.05 is ~3x measured, NOT the measured figure. One run is one sample: rfd3_design
-# took 145.7s in job 22684607 and 45.0s in 22692304 - same campaign, same allocation
-# shape, same parameters, 3.2x apart. These numbers feed gate 5 and the untrusted-
-# pattern cap, which REFUSE graphs, so a cost model tuned to a fast observation starts
-# rejecting work the first time a slow one arrives.
-cost_model: {unit: invocation, cost: {gpu_hours: 0.05}}
+#   predict_affinity off   86.9s = 0.0241 h
+#   predict_affinity on   110.2s = 0.0306 h
+#   the affinity head      23.3s, +27% -- a second 2.0 GB checkpoint load and a second
+#                                 sampling pass, for about a quarter again of the structure
+#                                 pass. It is much cheaper than the two-model shape suggests.
+#
+# 0.069 is 2.25x the WORSE arm, which is the margin item 21 requires and the one md_label's
+# 8.1 was built from. Not the measurement: one run is one sample, and rfd3_design took 145.7s
+# in job 22684607 and 45.0s in 22692304 - same campaign, same allocation shape, same
+# parameters, 3.2x apart. These figures feed gate 5 and the untrusted-pattern cap, which
+# REFUSE graphs, so a model tuned to a fast observation starts rejecting work that fits.
+#
+# ONE FIGURE FOR BOTH ARMS, and it is the expensive one. `cost_model` cannot condition on a
+# parameter, so this over-reserves by ~2.9x for a campaign that never asks for affinity -
+# which is the same posture the previous 0.05 held against 0.0160, and the right direction to
+# be wrong in: a declared figure BELOW the real cost makes gate 5 refuse work that would have
+# fit, and above it only makes a budget conservative.
+#
+# The 57.8s this file used to cite is still a true measurement, of a different thing: job
+# 22692304 ran ONE diffusion sample, and the 8 the spec now defaults to cost 86.9s.
+cost_model: {unit: invocation, cost: {gpu_hours: 0.069}}

@@ -438,7 +438,10 @@ def test_the_cost_figure_charges_the_real_rates_not_the_surrogate_s():
     from impress_a.analysis.mock_figures import _real_cost_models
     costs = _real_cost_models()
     assert costs["mock_rfd3_design"]["gpu_hours"] == 0.1
-    assert costs["mock_boltz_predict"]["gpu_hours"] == 0.05
+    # 0.069 since J13 re-derived it from job 24469400: 110.2s with the affinity head on, 86.9s
+    # with it off, x2.25. It was 0.05, from a 57.8s run that took ONE diffusion sample where
+    # the spec now defaults to eight.
+    assert costs["mock_boltz_predict"]["gpu_hours"] == 0.069
     assert costs["mock_fastrelax"]["cpu_hours"] == 0.25
     # The one stage whose mock id is not `mock_` + the real id.
     assert costs["mock_mpnn_design"] == costs["mock_ligandmpnn_design"]

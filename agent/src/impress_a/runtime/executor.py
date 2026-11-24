@@ -1487,9 +1487,22 @@ class CampaignExecutor:
         Both cost figures are written. The ratio is what closes backlog G8, and above 1.0 it
         says a declared figure has fallen below measurement - at which point gate 5 starts
         refusing work that would in fact fit.
+
+        `metric_units` travels WITH the values, every line, rather than being looked up in the
+        toolkit afterwards. A corpus outlives the checkout that produced it, and a reader who
+        has to go and find the spec to learn that `affinity_pred_value` is `log10(IC50/1uM)`
+        and not a kcal/mol dG is a reader who will guess. Only the units for metrics this task
+        actually reported, so the line says what it holds rather than what the tool could hold.
         """
         for task in outcome.tasks:
             usage = task.usage or {}
+            try:
+                declared_units = self.reg.get(task.tool).metric_units
+            except KeyError:
+                # A tool that has since left the registry. The measurement is still the record;
+                # only its gloss is missing.
+                declared_units = {}
+            units = {m: declared_units[m] for m in task.metrics if m in declared_units}
             self._log("tasks", {
                 "run": outcome.run_id, "graph": rec.graph.id, "cycle": rec.turn,
                 "stage": getattr(rec.stage, "id", ""), "task": task.task_id,
@@ -1498,6 +1511,9 @@ class CampaignExecutor:
                 "seed": rec.graph.nodes[task.task_id].seed
                 if task.task_id in rec.graph.nodes else None,
                 "metrics": task.metrics,
+                # What those numbers mean, in the spec's own words. Absent keys are metrics
+                # whose unit nobody has declared - which is a gap, not a dimensionless value.
+                "metric_units": units,
                 "qc": task.qc.verdict.value,
                 # `QCReport.failed()` returns provenance-shaped DICTS, not gate objects - its
                 # docstring says so, and the other caller (line ~506) records them whole. This

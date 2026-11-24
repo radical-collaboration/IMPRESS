@@ -18,7 +18,34 @@ parameters:
   ligand_smiles: {type: str, default: ""}
   seed: {type: int, default: null, min: 0, max: 2147483647,
          trades: "per-lineage draw; replicas are only independent if this is honoured"}
-metrics: [complex_plddt, ligand_iptm, ensemble_size, ensemble_paired]
+  # Mirrored from the real spec, defaults included: the mirror test compares parameter NAMES,
+  # and `mock_smb_agents` honours this one - the twin emits affinity metrics only when it is
+  # set, which is the behaviour a campaign rehearsing against the mock needs to see.
+  predict_affinity: {type: bool, default: false,
+                     trades: "Model C's cheap input, at the cost of a second model load and a
+                              second sampling pass over the predicted complex"}
+  sampling_steps_affinity: {type: int, default: 200, min: 10, max: 1000,
+                            trades: "affinity denoising steps; upstream's default is 200"}
+  diffusion_samples_affinity: {type: int, default: 5, min: 1, max: 25,
+                               trades: "affinity samples, averaged by the two-head ensemble;
+                                        upstream's default is 5"}
+  affinity_mw_correction: {type: bool, default: false,
+                           trades: "upstream's MW term; changes the quantity, not its quality"}
+# The affinity three are declared and NOT gated, exactly as in the real spec: they exist only
+# when `predict_affinity` is set, so a gate demanding them would fail every ordinary run.
+metrics: [complex_plddt, ligand_iptm, ensemble_size, ensemble_paired,
+          affinity_pred_value, affinity_probability_binary, affinity_on_reported_sample]
+# Copied from the real spec in words as well as in names. The twin's VALUES are invented; what
+# they MEAN is not, and a surrogate corpus whose columns say nothing about themselves is how an
+# invented number gets read later as a free energy.
+metric_units:
+  affinity_pred_value: "log10(IC50 / 1 uM); lower is tighter; not kcal/mol and not a dG"
+  affinity_probability_binary: "probability that the ligand is a binder, 0-1, dimensionless"
+  affinity_on_reported_sample: "1 if the affinity was scored on the same co-fold whose
+                                complex_plddt is reported here, 0 if Boltz's confidence_score
+                                rank 0 and this adapter's complex_plddt pick disagreed"
+  complex_plddt: "pLDDT on a 0-1 scale, NOT the 0-100 scale upstream's thresholds use"
+  ligand_iptm: "interface pTM for the ligand chain, 0-1, dimensionless"
 qc_gates:
   - {id: output_present, params: {key: result}}
   - {id: metrics_reported, params: {metrics: [complex_plddt, ligand_iptm]}}

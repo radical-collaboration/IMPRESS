@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -90,9 +91,29 @@ def _claim_cache(cache: Path) -> int | None:
     return fd
 
 
+#: The chain id `boltz_input` gives the ligand, and therefore the only id an affinity
+#: `binder` may name. One constant rather than two string literals in two functions: upstream
+#: refuses a binder that is not a ligand chain in the same document ("Could not find binder
+#: with name ... in the input!", `boltz/data/parse/schema.py:1061-1063`), so the two have to
+#: agree, and until this existed they agreed only by eye.
+LIGAND_CHAIN = "B"
+
+
+class AffinityWithoutLigand(RuntimeError):
+    """`predict_affinity` with no `ligand_smiles`.
+
+    Refused here rather than left to `boltz predict`, which would parse a one-entity document,
+    find no chain named `B`, and abort with a parse error after the task has already been
+    scheduled onto a GPU. It is also the exact shape of backlog A2's silent wrong answer: an
+    empty `ligand_smiles` does not fail, it models no ligand - and asking for the affinity of a
+    ligand that is not in the input is that mistake made twice.
+    """
+
+
 def boltz_input(params: dict[str, Any], sequence: str) -> dict[str, Any]:
-    """The body of `boltz_input.yaml` - where `ligand_smiles` and (half of) `use_msa_server`
-    reach `boltz predict`, which takes them from this file rather than from flags."""
+    """The body of `boltz_input.yaml` - where `ligand_smiles`, (half of) `use_msa_server` and
+    the affinity request reach `boltz predict`, which takes them from this file rather than
+    from flags."""
     # Built as data and dumped, never assembled as text. The hand-indented version
     # this replaces put `msa:` one level too deep, under the `sequence:` scalar, so
     # `boltz predict` aborted on spec parse before any model loaded.
@@ -104,9 +125,24 @@ def boltz_input(params: dict[str, Any], sequence: str) -> dict[str, Any]:
         }
     }]
     if params["ligand_smiles"]:
-        sequences.append({"ligand": {"id": ["B"],
+        sequences.append({"ligand": {"id": [LIGAND_CHAIN],
                                      "smiles": params["ligand_smiles"]}})
-    return {"version": 1, "sequences": sequences}
+    doc: dict[str, Any] = {"version": 1, "sequences": sequences}
+    if params.get("predict_affinity"):
+        if not params["ligand_smiles"]:
+            raise AffinityWithoutLigand(
+                "boltz_predict: predict_affinity is set but ligand_smiles is empty, so there "
+                f"is no chain {LIGAND_CHAIN!r} for the affinity head to score")
+        # A LIST of property blocks, one key each, and `binder` a bare string rather than the
+        # one-element list the ligand's own `id` takes - upstream refuses a non-string binder
+        # outright ("Binder must be a single chain.", schema.py:1056-1059). Only one affinity ligand
+        # is supported per input, which costs this project nothing: there has been exactly one
+        # ligand across its whole campaign history (ALR, 30 heavy atoms, identical SMILES in
+        # 267/267, 112/112, 182/182 and 423/423 archived inputs). 30 is comfortably inside
+        # upstream's 128-atom refusal and its 56-atom accuracy warning, both of which fire in
+        # `schema.py:1217-1224` rather than silently.
+        doc["properties"] = [{"affinity": {"binder": LIGAND_CHAIN}}]
+    return doc
 
 
 def boltz_command(params: dict[str, Any], *, input_yaml: Any, out_dir: Any,
@@ -137,7 +173,70 @@ def boltz_command(params: dict[str, Any], *, input_yaml: Any, out_dir: Any,
         cmd += ["--seed", str(params["seed"])]
     if params["use_msa_server"]:
         cmd.append("--use_msa_server")
+    # The affinity pass is requested by the INPUT DOCUMENT, not by a flag: `main.py:1336`
+    # runs it when `any(r.affinity for r in manifest.records)`, which comes from
+    # `properties:`. These flags only size it, so they are appended only when the document
+    # asked, and an argv carrying them with no `properties:` block would be a lie about what
+    # ran. `--affinity_mw_correction` is `is_flag=True` upstream, so it is present or absent
+    # and never `--affinity_mw_correction false`.
+    if params.get("predict_affinity"):
+        cmd += ["--sampling_steps_affinity", str(params["sampling_steps_affinity"]),
+                "--diffusion_samples_affinity", str(params["diffusion_samples_affinity"])]
+        if params.get("affinity_mw_correction"):
+            cmd.append("--affinity_mw_correction")
     return cmd
+
+
+def _affinity_metrics(payload: dict[str, Any]) -> dict[str, float]:
+    """The two numbers `affinity_<id>.json` reports, and nothing filled in.
+
+    Same rule as `_boltz_metrics`: a key that is absent is omitted rather than defaulted. A
+    fabricated 0.0 here would read as `log10(IC50/1uM) == 0`, i.e. a 1 micromolar binder -
+    a plausible, publishable, entirely invented number. The ensemble members
+    (`affinity_pred_value1/2`) are deliberately not reported: they are the two heads whose mean
+    is the value above, and a corpus carrying all three invites a residual fitted against one
+    head and served against the mean.
+    """
+    return {k: float(payload[k])
+            for k in ("affinity_pred_value", "affinity_probability_binary")
+            if k in payload and isinstance(payload[k], (int, float))
+            and math.isfinite(float(payload[k]))}
+
+
+def affinity_on_reported_sample(structure: Any) -> float:
+    """1.0 if the structure being carried forward is the one the affinity head actually scored.
+
+    **The two selections do not use the same key, and that is a defect of this adapter, not of
+    Boltz.** Boltz ranks its diffusion samples by `confidence_score` and writes
+    `pre_affinity_<id>.npz` - the single input to the whole affinity pass - from rank 0 only
+    (`data/write/writer.py:177-180`, `idx_to_rank[model_idx] == 0`). This adapter selects what
+    to carry forward by `complex_plddt`, which is a different number: `confidence_score` is a
+    weighted blend of iptm and ptm, and on job 22692304's own output it was 0.556 where
+    `complex_plddt` was 0.507. So with `diffusion_samples > 1` the affinity value can describe
+    a *different* co-fold than the pLDDT reported beside it and the pdb handed downstream.
+
+    Reported as a metric rather than fixed, and reported rather than ignored, because both of
+    the fixes are worse at this stage: re-ranking by `confidence_score` would silently change
+    which design every existing campaign carries forward, and dropping the affinity when the
+    ranks disagree would throw away the measurement this episode exists to produce. A flag
+    beside the value lets J14's fit take `affinity_on_reported_sample == 1` rows and lets a
+    reader of the corpus see how often they disagree - which nobody can currently predict,
+    because this is the first run in which the two rankings have both existed.
+    """
+    return 1.0 if "_model_0." in Path(structure).name else 0.0
+
+
+def _qualified(affinity: dict[str, float], structure: Any) -> dict[str, float]:
+    """The affinity metrics plus the flag that says which co-fold they describe, or nothing.
+
+    Nothing when no affinity value was read, so that with `predict_affinity` unset the reported
+    metric set is exactly what it was before this parameter existed - and so that the flag never
+    appears without a value for it to qualify.
+    """
+    if not affinity:
+        return {}
+    return {**affinity,
+            "affinity_on_reported_sample": affinity_on_reported_sample(structure)}
 
 
 class BoltzPredictAgent(TaskAgent):
@@ -174,10 +273,27 @@ class BoltzPredictAgent(TaskAgent):
             if cache_lock is not None:
                 os.close(cache_lock)  # releases the flock
 
+        # ONE PER RECORD, not one per diffusion sample. Boltz writes
+        # `predictions/<id>/affinity_<id>.json` once, from the affinity pass that re-samples
+        # the structure the first pass predicted (`data/write/writer.py:331`), so there is
+        # nothing here to select between and nothing to pair with a pdb. Read before the
+        # confidence files and merged into whichever result this call returns: the affinity
+        # pass can succeed while the structure selection finds nothing to report, and a
+        # measurement that exists on disk must not be dropped because a different one is
+        # missing.
+        affinity: dict[str, float] = {}
+        for path in sorted((work / "out").glob("**/affinity_*.json")):
+            try:
+                affinity.update(_affinity_metrics(json.loads(path.read_text())))
+            except (OSError, ValueError):
+                # Unreadable or truncated. Omitted, like every other unreadable metric here;
+                # `metrics_reported` is what notices a value that should have been there.
+                continue
+
         confidence_files = sorted((work / "out").glob("**/confidence_*.json"))
         pdb_files = sorted((work / "out").glob("**/*.pdb"))
         if not confidence_files or not pdb_files:
-            return {"result": None, "count": 0, "outputs": {}, "metrics": {}}
+            return {"result": None, "count": 0, "outputs": {}, "metrics": dict(affinity)}
 
         # The best sample, not the first. `diffusion_samples` asks Boltz for N co-folds and
         # this adapter kept `[0]`, so N were computed, N were paid for, and one was reported -
@@ -191,7 +307,8 @@ class BoltzPredictAgent(TaskAgent):
             return {"result": "complex", "count": len(pdb_files),
                     "outputs": {"complex": pdb_files[0]},
                     "metrics": {"ensemble_size": float(len(confidence_files)),
-                                "ensemble_paired": 0.0}}
+                                "ensemble_paired": 0.0,
+                                **_qualified(affinity, pdb_files[0])}}
 
         idx, (conf_path, metrics) = choice
         metrics = dict(metrics)
@@ -209,6 +326,8 @@ class BoltzPredictAgent(TaskAgent):
         else:
             structure = pdb_files[idx] if idx < len(pdb_files) else pdb_files[0]
             metrics["ensemble_paired"] = 1.0 if len(pdb_files) == 1 else 0.0
+
+        metrics.update(_qualified(affinity, structure))
 
         return {
             "result": "complex",

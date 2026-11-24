@@ -237,15 +237,34 @@ class MockBoltzPredictAgent(TaskAgent):
         # two bars fail together rather than the chain's head failing alone.
         plddt = _clamp(_soft_cap(0.20 + 0.80 * sc + pick + r.uniform(-0.015, 0.015),
                                  0.98, 0.85), 0.0, 0.98)
+        metrics = {
+            "complex_plddt": round(plddt, 3),
+            "ligand_iptm": round(_clamp(plddt - r.uniform(0.0, 0.08), 0.0, 0.98), 3),
+            "ensemble_size": float(samples),
+            "ensemble_paired": 1.0,
+        }
+        # The affinity head, mirrored: produced only when asked for, exactly as the real
+        # adapter produces it only when `predict_affinity` is set.
+        #
+        # DRAWN INDEPENDENTLY OF `plddt`, deliberately. Tying the two would teach that a
+        # confident co-fold is a tighter binder, and nothing has measured that relationship -
+        # the adjacent workflow measured rho = 0.027 for the analogous one (backlog item 70).
+        # A surrogate that invents a correlation is worse than one that invents a number,
+        # because a policy can learn the correlation.
+        #
+        # `log10(IC50/1uM)` over roughly 100 nM to 100 uM, which is where this class of ligand
+        # lands; the unit is the spec's to declare, not this function's to redefine.
+        if params.get("predict_affinity"):
+            metrics["affinity_pred_value"] = round(r.uniform(-1.0, 2.0), 3)
+            metrics["affinity_probability_binary"] = round(r.uniform(0.0, 1.0), 3)
+            # The mock produces ONE co-fold, so the real adapter's two rankings cannot
+            # disagree here and 1.0 is honest. It is not evidence about how often they
+            # disagree on real output; only a real run can say that.
+            metrics["affinity_on_reported_sample"] = 1.0
         return {
             "result": "complex", "count": 1,
             "outputs": {"complex": "complex"},
-            "metrics": {
-                "complex_plddt": round(plddt, 3),
-                "ligand_iptm": round(_clamp(plddt - r.uniform(0.0, 0.08), 0.0, 0.98), 3),
-                "ensemble_size": float(samples),
-                "ensemble_paired": 1.0,
-            },
+            "metrics": metrics,
         }
 
 
