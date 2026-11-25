@@ -37,13 +37,18 @@ to *work on* it: commands, invariants that must not be broken, and behaviours th
 ```bash
 ./scripts/dev_setup.sh           # once: creates .venv and installs BOTH projects editable
 source .venv/bin/activate        # do NOT use system Python - see "Environment" below
+# ...BUT this .venv is Python 3.10 and `impress_a.core.artifacts` imports `datetime.UTC`, so the
+# suite fails AT COLLECTION under it. Measured 2026-11-24: the sibling `asteer` project's 3.13
+# venv runs it, 927 tests collected, exit 0, in ~13 min -- group K's MD tests load DCD
+# trajectories through OpenMM, which is where the time goes. The "~19s" this file used to claim
+# predates group K.
 
 ruff check src tests                                 # reports; never rewrites. Ceiling: ZERO
 
 # From the REPOSITORY ROOT, shared with IMPRESS (see "What is shared" above):
 #   tox -e lint     ruff over BOTH packages, each under its own table; must leave the tree clean
 #   tox -e docs     build the site and fail on a broken link or a missing nav target
-pytest tests -q                                      # the whole local tier, no allocation (~19s local, ~2min on a login node)
+pytest tests -q                                      # the whole local tier, no allocation (~13 min: see below)
 pytest tests/test_validation.py -q                   # one file
 pytest tests -q -k interlock                         # by name
 pytest tests/test_campaign.py::test_lying_tool_is_caught_by_qc -q
