@@ -312,6 +312,8 @@ def _split_complex(complex_pdb: str, out_dir: str, resname: str, leg: str) -> tu
                 continue
             if line[17:20].strip() in _SOLVENT_RESNAMES:
                 continue
+            if _is_protein_hydrogen(line):
+                continue
             protein.append(line)
     protein_path = os.path.join(out_dir, "protein.pdb")
     with open(protein_path, "w") as handle:
@@ -323,6 +325,43 @@ def _split_complex(complex_pdb: str, out_dir: str, resname: str, leg: str) -> tu
 
 
 _SOLVENT_RESNAMES = frozenset({"HOH", "WAT", "DOD", "SOL", "NA", "CL", "K", "MG"})
+
+
+def _is_protein_hydrogen(line: str) -> bool:
+    """Protein hydrogens are dropped, and tleap's `loadpdb` puts them back with its own names.
+
+    **Measured, Delta job `24533268`.** Every design this protocol will ever be handed comes out
+    of `fastrelax`, and PyRosetta writes hydrogens in the PDB v2 style -- `1HD1`, `2HB`, with the
+    numeral leading -- while ff14SB's library names them `HD11`, `HB2`. tleap does not translate
+    between the two: it reports `Atom .R<CLEU 107>.A<HB1 21> does not have a type`, four fatals
+    per design, and **exits 0 while doing it**, which is why the caller checks for the files.
+    The pilot's four designs failed this way at the first build; the committed
+    `scaffold-with-ALR.pdb` did not, because it carries no hydrogens at all -- so the CPU smoke
+    that cleared K2 could not have caught it.
+
+    Dropping them is the repair, not a workaround: `loadpdb` adds hydrogens to a residue that is
+    missing them, and the ones it adds carry ff14SB's own names and geometry. Nothing is lost
+    that the force field does not immediately replace, because a hydrogen position out of
+    `fastrelax` is not evidence -- minimisation and 120 ps of equilibration follow it.
+
+    **Heavy atoms are never dropped**, which is the line between repair and damage: tleap refuses
+    a residue with a missing heavy atom rather than guessing it, and that refusal is wanted.
+
+    The ligand is not touched. Its coordinates come from K1's committed `mol2` through tleap's
+    parameterised unit, and its hydrogens with them.
+    """
+    # Column 77-78 is the element symbol; `.strip()` because it is right-justified in a
+    # two-character field. Falling back to the atom name matters for the files that leave the
+    # element blank, and the name needs stripping before the first character means anything:
+    # a four-character name is written `1HD1` with no padding, a shorter one as ` HB2` with it.
+    # PDB v2 puts the numeral first, so a leading digit means the element is the next character.
+    element = line[76:78].strip().upper()
+    if element:
+        return element == "H"
+    name = line[12:16].strip()
+    if not name:
+        return False
+    return (name[1:2] if name[0].isdigit() else name[0]).upper() == "H"
 
 
 def _tleap_script(*, leg: str, protein_pdb: str, params_dir: str,

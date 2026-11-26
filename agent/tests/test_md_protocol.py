@@ -84,6 +84,42 @@ def test_the_ligand_is_matched_by_its_pdb_name_and_not_its_parameter_name(tmp_pa
     assert by_unit_name is False, "which is exactly the failure the two fields prevent"
 
 
+def test_rosetta_hydrogens_are_dropped_so_tleap_can_name_them_itself(tmp_path):
+    """**Delta job `24533268`: this is what stopped the first four real designs.**
+
+    `fastrelax.pdb` carries PyRosetta's hydrogens in the PDB v2 style, numeral first -- `1HD1`,
+    not `HD11` -- and ff14SB's library knows only its own spelling, so tleap answers
+    `Atom .R<CLEU 107>.A<HB1 21> does not have a type` and exits 0 having written nothing.
+    The committed `scaffold-with-ALR.pdb` has no hydrogens at all, so the CPU smoke that cleared
+    K2 could not have found this; every design out of the real chain has 700-odd of them.
+
+    Heavy atoms must survive untouched: tleap refuses a residue with a missing heavy atom rather
+    than guessing one, and that refusal is the protocol's, not a bug to route around.
+    """
+    rosetta = tmp_path / "complex.pdb"
+    rosetta.write_text(
+        # Two heavy atoms, then the three hydrogen spellings that reach us: element column set,
+        # element column blank with a leading numeral, and element column blank without one.
+        "ATOM      1  N   LEU A   3       0.000   0.000   0.000  1.00  0.00           N  \n"
+        "ATOM      2  CB  LEU A   3       1.000   0.000   0.000  1.00  0.00           C  \n"
+        "ATOM      3 1HD1 LEU A   3       2.000   0.000   0.000  1.00  0.00           H  \n"
+        "ATOM      4 2HD1 LEU A   3       3.000   0.000   0.000  1.00  0.00              \n"
+        "ATOM      5  HB2 LEU A   3       4.000   0.000   0.000  1.00  0.00              \n"
+        "HETATM    6  C1  A:R B 386       5.000   0.000   0.000  1.00  0.00           C  \n"
+        "HETATM    7  H1  A:R B 386       6.000   0.000   0.000  1.00  0.00           H  \n"
+    )
+    protein_path, found = _split_complex(str(rosetta), str(tmp_path), "A:R", "holo")
+    kept = [l[12:16].strip() for l in open(protein_path) if l.startswith(("ATOM  ", "HETATM"))]
+    assert kept == ["N", "CB"], "every protein hydrogen goes, whatever its spelling"
+
+    # The ligand keeps its own hydrogen: those coordinates come from K1's committed mol2 through
+    # tleap's parameterised unit, and nothing here is entitled to edit them.
+    assert found is True
+    ligand = [l[12:16].strip() for l in open(os.path.join(str(tmp_path), "ligand_pose.pdb"))
+              if l.startswith(("ATOM  ", "HETATM"))]
+    assert ligand == ["C1", "H1"]
+
+
 def test_the_tleap_script_uses_absolute_paths_for_everything_it_reads(tmp_path):
     """tleap runs with `cwd=out_dir` so its scratch lands there, and its answer to a file it
     cannot open is `Fatal Error` followed by carrying on to `saveamberparm` -- which writes
